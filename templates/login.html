@@ -15,7 +15,7 @@
             justify-content: center;
         }
         .login-container {
-            max-width: 400px;
+            max-width: 420px;
             width: 100%;
             padding: 2rem;
         }
@@ -46,10 +46,31 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
-        .no-sso-message {
+        .divider {
+            display: flex;
+            align-items: center;
             text-align: center;
-            padding: 2rem;
+            margin: 1.5rem 0;
+        }
+        .divider::before,
+        .divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .divider span {
+            padding: 0 1rem;
             color: #6c757d;
+            font-size: 0.85rem;
+        }
+        .admin-login-toggle {
+            color: #6c757d;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .admin-login-toggle:hover {
+            color: #0d6efd;
         }
     </style>
 </head>
@@ -62,23 +83,61 @@
                 <p class="text-muted">Sign in to continue</p>
             </div>
             <div class="card-body px-4 pb-4">
+                {% if error %}
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i> {{ error }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                {% endif %}
+
+                <!-- SSO Login Section -->
                 {% if sso_configs %}
-                    <p class="text-center text-muted mb-3">Choose your organization:</p>
-                    <div class="d-grid gap-2">
-                        {% for config in sso_configs %}
-                        <a href="{{ url_for('sso_login', config_id=config.id) }}" class="btn btn-outline-primary sso-btn">
-                            <i class="bi bi-building"></i>
-                            Sign in with {{ config.provider_name }}
-                            <small class="text-muted">({{ config.domain }})</small>
-                        </a>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <div class="no-sso-message">
-                        <i class="bi bi-gear display-4 d-block mb-3"></i>
-                        <h5>No SSO Configured</h5>
-                        <p class="small">Please contact your administrator to configure Single Sign-On for your organization.</p>
-                    </div>
+                <p class="text-center text-muted mb-3">Sign in with your organization:</p>
+                <div class="d-grid gap-2">
+                    {% for config in sso_configs %}
+                    <a href="{{ url_for('sso_login', config_id=config.id) }}" class="btn btn-outline-primary sso-btn">
+                        <i class="bi bi-building"></i>
+                        {{ config.provider_name }}
+                        <small class="text-muted">({{ config.domain }})</small>
+                    </a>
+                    {% endfor %}
+                </div>
+                <div class="divider"><span>or</span></div>
+                {% endif %}
+
+                <!-- Administrator Login Section -->
+                <div id="adminLoginSection">
+                    <p class="text-center text-muted mb-3">
+                        <i class="bi bi-shield-lock"></i> Administrator Login
+                    </p>
+                    <form action="{{ url_for('local_login') }}" method="POST">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">Username</label>
+                            <input type="text" class="form-control" id="username" name="username" required autofocus>
+                        </div>
+                        <div class="mb-3">
+                            <label for="password" class="form-label">Password</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        <div class="d-grid">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-box-arrow-in-right"></i> Sign In
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                {% if not sso_configs %}
+                <div class="mt-4 p-3 bg-light rounded">
+                    <p class="text-muted small mb-0">
+                        <i class="bi bi-info-circle"></i>
+                        <strong>First time?</strong> Log in with the admin account to configure SSO for your organization.
+                        <br><br>
+                        Default credentials:<br>
+                        Username: <code>admin</code><br>
+                        Password: <code>changeme</code>
+                    </p>
+                </div>
                 {% endif %}
             </div>
         </div>
@@ -86,5 +145,6 @@
             Architecture Decision Records based on <a href="https://docs.arc42.org/section-9/" target="_blank">arc42</a>
         </p>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

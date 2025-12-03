@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Master Account Settings - Architecture Decisions{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">
+                        <i class="bi bi-shield-lock"></i> Master Account Settings
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <!-- Account Info -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-person-badge"></i> Account Information</h5>
+                        <div class="bg-light p-3 rounded">
+                            <p class="mb-1"><strong>Username:</strong> <span id="master-username">{{ current_user.username }}</span></p>
+                            <p class="mb-1"><strong>Name:</strong> <span id="master-name">{{ current_user.name }}</span></p>
+                            <p class="mb-0"><strong>Last Login:</strong> <span id="master-last-login">{{ current_user.last_login.strftime('%Y-%m-%d %H:%M UTC') if current_user.last_login else 'Never' }}</span></p>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <!-- Change Password -->
+                    <div class="mb-4">
+                        <h5><i class="bi bi-key"></i> Change Password</h5>
+                        <div id="password-alert" class="alert d-none" role="alert"></div>
+                        <form id="password-form">
+                            <div class="mb-3">
+                                <label for="current-password" class="form-label">Current Password</label>
+                                <input type="password" class="form-control" id="current-password" required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="new-password" class="form-label">New Password</label>
+                                <input type="password" class="form-control" id="new-password" required minlength="8">
+                                <div class="form-text">Password must be at least 8 characters long.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="confirm-password" class="form-label">Confirm New Password</label>
+                                <input type="password" class="form-control" id="confirm-password" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="bi bi-check-lg"></i> Change Password
+                            </button>
+                        </form>
+                    </div>
+
+                    <hr>
+
+                    <!-- Important Notes -->
+                    <div class="alert alert-info">
+                        <h6><i class="bi bi-info-circle"></i> Important Notes</h6>
+                        <ul class="mb-0">
+                            <li>The master account is used for system administration only.</li>
+                            <li>You can configure SSO providers and email settings in <a href="/settings">System Settings</a>.</li>
+                            <li>Master accounts can view all decisions across all domains but cannot create, edit, or delete them.</li>
+                            <li>For full functionality, log in with an SSO account after configuring your organization's SSO.</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('password-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    const alertEl = document.getElementById('password-alert');
+
+    // Reset alert
+    alertEl.classList.add('d-none');
+    alertEl.classList.remove('alert-success', 'alert-danger');
+
+    // Validate passwords match
+    if (newPassword !== confirmPassword) {
+        alertEl.textContent = 'New passwords do not match.';
+        alertEl.classList.remove('d-none');
+        alertEl.classList.add('alert-danger');
+        return;
+    }
+
+    // Validate password length
+    if (newPassword.length < 8) {
+        alertEl.textContent = 'New password must be at least 8 characters long.';
+        alertEl.classList.remove('d-none');
+        alertEl.classList.add('alert-danger');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/master/password', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            alertEl.textContent = 'Password changed successfully!';
+            alertEl.classList.remove('d-none');
+            alertEl.classList.add('alert-success');
+            document.getElementById('password-form').reset();
+        } else {
+            alertEl.textContent = data.error || 'Failed to change password.';
+            alertEl.classList.remove('d-none');
+            alertEl.classList.add('alert-danger');
+        }
+    } catch (error) {
+        alertEl.textContent = 'An error occurred. Please try again.';
+        alertEl.classList.remove('d-none');
+        alertEl.classList.add('alert-danger');
+    }
+});
+</script>
+{% endblock %}

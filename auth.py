@@ -9,8 +9,16 @@ logger = logging.getLogger(__name__)
 
 def get_current_user():
     """Get the current logged-in user from the session."""
-    from models import db, User
+    from models import db, User, MasterAccount
 
+    # Check if it's a master account session
+    if session.get('is_master'):
+        master_id = session.get('master_id')
+        if master_id:
+            return MasterAccount.query.get(master_id)
+        return None
+
+    # Regular user session
     user_id = session.get('user_id')
     if not user_id:
         return None
@@ -18,14 +26,28 @@ def get_current_user():
     return User.query.get(user_id)
 
 
+def is_master_account():
+    """Check if the current session is a master account."""
+    return session.get('is_master', False)
+
+
 def login_required(f):
     """Decorator to require authentication for a route."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Check for master account session
+        if session.get('is_master') and session.get('master_id'):
+            from models import MasterAccount
+            g.current_user = MasterAccount.query.get(session.get('master_id'))
+            if g.current_user:
+                return f(*args, **kwargs)
+
+        # Check for regular user session
         if 'user_id' not in session:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect(url_for('login'))
+
         g.current_user = get_current_user()
         if not g.current_user:
             session.clear()
@@ -41,12 +63,41 @@ def admin_required(f):
     @wraps(f)
     @login_required
     def decorated_function(*args, **kwargs):
+        # Master accounts always have admin access
+        if is_master_account():
+            return f(*args, **kwargs)
+
         if not g.current_user.is_admin:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin access required'}), 403
             return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def master_required(f):
+    """Decorator to require master account for a route."""
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        if not is_master_account():
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Master account access required'}), 403
+            return redirect(url_for('index'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def authenticate_master(username, password):
+    """Authenticate a master account with username and password."""
+    from models import db, MasterAccount
+
+    master = MasterAccount.query.filter_by(username=username).first()
+    if master and master.check_password(password):
+        master.last_login = datetime.utcnow()
+        db.session.commit()
+        return master
+    return None
 
 
 def get_or_create_user(email, name, sso_subject, sso_domain):

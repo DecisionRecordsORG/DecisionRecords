@@ -1,7 +1,59 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+# Default master account credentials
+DEFAULT_MASTER_USERNAME = 'admin'
+DEFAULT_MASTER_PASSWORD = 'changeme'
+
+
+class MasterAccount(db.Model):
+    """Master account for system administration with local authentication."""
+
+    __tablename__ = 'master_accounts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(100), nullable=False, unique=True)
+    password_hash = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(255), nullable=True, default='System Administrator')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime, nullable=True)
+
+    def set_password(self, password):
+        """Hash and set the password."""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """Check if the provided password matches."""
+        return check_password_hash(self.password_hash, password)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'username': self.username,
+            'name': self.name,
+            'is_master': True,
+            'is_admin': True,
+            'created_at': self.created_at.isoformat(),
+            'last_login': self.last_login.isoformat() if self.last_login else None,
+        }
+
+    @staticmethod
+    def create_default_master(db_session):
+        """Create the default master account if it doesn't exist."""
+        existing = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
+        if not existing:
+            master = MasterAccount(
+                username=DEFAULT_MASTER_USERNAME,
+                name='System Administrator'
+            )
+            master.set_password(DEFAULT_MASTER_PASSWORD)
+            db_session.add(master)
+            db_session.commit()
+            return master
+        return existing
 
 
 class User(db.Model):

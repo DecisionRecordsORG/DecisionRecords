@@ -2,8 +2,8 @@ import os
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, save_history
-from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, save_history
+from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from datetime import datetime
 
@@ -17,9 +17,11 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 # Initialize database
 db.init_app(app)
 
-# Create tables on startup
+# Create tables and master account on startup
 with app.app_context():
     db.create_all()
+    # Create default master account
+    MasterAccount.create_default_master(db.session)
 
 
 # ==================== Context Processor ====================
@@ -27,18 +29,44 @@ with app.app_context():
 @app.context_processor
 def inject_user():
     """Make current user available in all templates."""
-    return {'current_user': get_current_user()}
+    return {
+        'current_user': get_current_user(),
+        'is_master': is_master_account()
+    }
 
 
 # ==================== Auth Routes ====================
 
 @app.route('/login')
 def login():
-    """Login page - shows available SSO providers."""
-    if 'user_id' in session:
+    """Login page - shows available SSO providers and local login."""
+    if 'user_id' in session or session.get('is_master'):
         return redirect(url_for('index'))
     sso_configs = SSOConfig.query.filter_by(enabled=True).all()
     return render_template('login.html', sso_configs=sso_configs)
+
+
+@app.route('/auth/local', methods=['POST'])
+def local_login():
+    """Handle local master account login."""
+    username = request.form.get('username')
+    password = request.form.get('password')
+
+    if not username or not password:
+        return render_template('login.html',
+                             sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
+                             error='Username and password are required')
+
+    master = authenticate_master(username, password)
+    if master:
+        session['master_id'] = master.id
+        session['is_master'] = True
+        session.permanent = True
+        return redirect(url_for('index'))
+    else:
+        return render_template('login.html',
+                             sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
+                             error='Invalid username or password')
 
 
 @app.route('/auth/sso/<int:config_id>')
@@ -177,7 +205,16 @@ def settings():
 @login_required
 def profile():
     """User profile and subscription settings."""
+    if is_master_account():
+        return redirect(url_for('master_profile'))
     return render_template('profile.html')
+
+
+@app.route('/master/profile')
+@master_required
+def master_profile():
+    """Master account profile page."""
+    return render_template('master_profile.html')
 
 
 # ==================== API Routes - Decisions ====================
@@ -186,10 +223,16 @@ def profile():
 @login_required
 def api_list_decisions():
     """List all architecture decisions for the user's domain."""
-    decisions = ArchitectureDecision.query.filter_by(
-        domain=g.current_user.sso_domain,
-        deleted_at=None
-    ).order_by(ArchitectureDecision.id.desc()).all()
+    if is_master_account():
+        # Master accounts can see all decisions across all domains
+        decisions = ArchitectureDecision.query.filter_by(
+            deleted_at=None
+        ).order_by(ArchitectureDecision.id.desc()).all()
+    else:
+        decisions = ArchitectureDecision.query.filter_by(
+            domain=g.current_user.sso_domain,
+            deleted_at=None
+        ).order_by(ArchitectureDecision.id.desc()).all()
     return jsonify([d.to_dict() for d in decisions])
 
 
@@ -197,6 +240,10 @@ def api_list_decisions():
 @login_required
 def api_create_decision():
     """Create a new architecture decision."""
+    # Master accounts cannot create decisions (they don't belong to any domain)
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot create decisions. Please log in with an SSO account.'}), 403
+
     data = request.get_json()
 
     if not data:
@@ -238,11 +285,18 @@ def api_create_decision():
 @login_required
 def api_get_decision(decision_id):
     """Get a single architecture decision with its history."""
-    decision = ArchitectureDecision.query.filter_by(
-        id=decision_id,
-        domain=g.current_user.sso_domain,
-        deleted_at=None
-    ).first_or_404()
+    if is_master_account():
+        # Master accounts can see any decision
+        decision = ArchitectureDecision.query.filter_by(
+            id=decision_id,
+            deleted_at=None
+        ).first_or_404()
+    else:
+        decision = ArchitectureDecision.query.filter_by(
+            id=decision_id,
+            domain=g.current_user.sso_domain,
+            deleted_at=None
+        ).first_or_404()
     return jsonify(decision.to_dict_with_history())
 
 
@@ -250,6 +304,10 @@ def api_get_decision(decision_id):
 @login_required
 def api_update_decision(decision_id):
     """Update an architecture decision."""
+    # Master accounts cannot update decisions
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot modify decisions. Please log in with an SSO account.'}), 403
+
     decision = ArchitectureDecision.query.filter_by(
         id=decision_id,
         domain=g.current_user.sso_domain,
@@ -311,6 +369,10 @@ def api_update_decision(decision_id):
 @login_required
 def api_delete_decision(decision_id):
     """Soft delete an architecture decision."""
+    # Master accounts cannot delete decisions
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot delete decisions. Please log in with an SSO account.'}), 403
+
     decision = ArchitectureDecision.query.filter_by(
         id=decision_id,
         domain=g.current_user.sso_domain,
@@ -330,10 +392,16 @@ def api_delete_decision(decision_id):
 @login_required
 def api_get_decision_history(decision_id):
     """Get the update history for a decision."""
-    decision = ArchitectureDecision.query.filter_by(
-        id=decision_id,
-        domain=g.current_user.sso_domain
-    ).first_or_404()
+    if is_master_account():
+        # Master accounts can view any decision history
+        decision = ArchitectureDecision.query.filter_by(
+            id=decision_id
+        ).first_or_404()
+    else:
+        decision = ArchitectureDecision.query.filter_by(
+            id=decision_id,
+            domain=g.current_user.sso_domain
+        ).first_or_404()
 
     history = DecisionHistory.query.filter_by(decision_id=decision_id).order_by(DecisionHistory.changed_at.desc()).all()
     return jsonify([h.to_dict() for h in history])
@@ -352,6 +420,10 @@ def api_get_current_user():
 @login_required
 def api_get_subscription():
     """Get current user's subscription settings."""
+    # Master accounts don't have subscriptions
+    if is_master_account():
+        return jsonify({'error': 'Master accounts do not support subscriptions'}), 400
+
     subscription = Subscription.query.filter_by(user_id=g.current_user.id).first()
     if not subscription:
         return jsonify({
@@ -366,6 +438,10 @@ def api_get_subscription():
 @login_required
 def api_update_subscription():
     """Update current user's subscription settings."""
+    # Master accounts don't have subscriptions
+    if is_master_account():
+        return jsonify({'error': 'Master accounts do not support subscriptions'}), 400
+
     data = request.get_json()
 
     subscription = Subscription.query.filter_by(user_id=g.current_user.id).first()
@@ -532,13 +608,24 @@ def api_test_email():
     """Send a test email (admin only)."""
     from notifications import send_email
 
-    config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).first()
+    # Master accounts need to specify domain
+    if is_master_account():
+        data = request.get_json() or {}
+        domain = data.get('domain')
+        if not domain:
+            return jsonify({'error': 'Domain is required for master account'}), 400
+        config = EmailConfig.query.filter_by(domain=domain).first()
+        test_email = data.get('email', 'admin@localhost')
+    else:
+        config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).first()
+        test_email = g.current_user.email
+
     if not config:
         return jsonify({'error': 'Email configuration not found'}), 404
 
     success = send_email(
         config,
-        g.current_user.email,
+        test_email,
         'Architecture Decisions - Test Email',
         '<h1>Test Email</h1><p>This is a test email from Architecture Decisions.</p>',
         'Test Email\n\nThis is a test email from Architecture Decisions.'
@@ -555,8 +642,12 @@ def api_test_email():
 @app.route('/api/admin/users', methods=['GET'])
 @admin_required
 def api_list_users():
-    """List all users in the admin's domain."""
-    users = User.query.filter_by(sso_domain=g.current_user.sso_domain).all()
+    """List all users in the admin's domain (or all users for master)."""
+    if is_master_account():
+        # Master can see all users
+        users = User.query.all()
+    else:
+        users = User.query.filter_by(sso_domain=g.current_user.sso_domain).all()
     return jsonify([u.to_dict() for u in users])
 
 
@@ -564,10 +655,13 @@ def api_list_users():
 @admin_required
 def api_toggle_user_admin(user_id):
     """Toggle admin status for a user (admin only)."""
-    if user_id == g.current_user.id:
+    if not is_master_account() and user_id == g.current_user.id:
         return jsonify({'error': 'Cannot modify your own admin status'}), 400
 
-    user = User.query.filter_by(id=user_id, sso_domain=g.current_user.sso_domain).first_or_404()
+    if is_master_account():
+        user = User.query.get_or_404(user_id)
+    else:
+        user = User.query.filter_by(id=user_id, sso_domain=g.current_user.sso_domain).first_or_404()
 
     data = request.get_json()
     user.is_admin = bool(data.get('is_admin', False))
@@ -575,6 +669,50 @@ def api_toggle_user_admin(user_id):
     db.session.commit()
 
     return jsonify(user.to_dict())
+
+
+# ==================== API Routes - Master Account ====================
+
+@app.route('/api/master/password', methods=['PUT'])
+@master_required
+def api_change_master_password():
+    """Change master account password."""
+    data = request.get_json()
+
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    if not current_password or not new_password:
+        return jsonify({'error': 'Current and new password are required'}), 400
+
+    if len(new_password) < 8:
+        return jsonify({'error': 'New password must be at least 8 characters'}), 400
+
+    if not g.current_user.check_password(current_password):
+        return jsonify({'error': 'Current password is incorrect'}), 400
+
+    g.current_user.set_password(new_password)
+    db.session.commit()
+
+    return jsonify({'message': 'Password changed successfully'})
+
+
+@app.route('/api/master/info', methods=['GET'])
+@master_required
+def api_get_master_info():
+    """Get master account info."""
+    return jsonify(g.current_user.to_dict())
+
+
+@app.route('/api/admin/email/domains', methods=['GET'])
+@admin_required
+def api_list_email_configs():
+    """List all email configurations (master only can see all)."""
+    if is_master_account():
+        configs = EmailConfig.query.all()
+    else:
+        configs = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).all()
+    return jsonify([c.to_dict() for c in configs])
 
 
 if __name__ == '__main__':
