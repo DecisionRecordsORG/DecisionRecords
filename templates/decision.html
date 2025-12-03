@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+
+{% block title %}{% if decision_id %}ADR-{{ decision_id }}{% else %}New Decision{% endif %} - Architecture Decisions{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <nav aria-label="breadcrumb" class="mb-3">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/">All Decisions</a></li>
+                <li class="breadcrumb-item active" id="breadcrumbTitle">
+                    {% if decision_id %}ADR-{{ decision_id }}{% else %}New Decision{% endif %}
+                </li>
+            </ol>
+        </nav>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h4 class="mb-0" id="pageTitle">
+                    {% if decision_id %}
+                    <span class="badge bg-secondary me-2">ADR-{{ decision_id }}</span>
+                    <span id="decisionTitleDisplay">Loading...</span>
+                    {% else %}
+                    <i class="bi bi-plus-circle"></i> New Architecture Decision
+                    {% endif %}
+                </h4>
+                {% if decision_id %}
+                <div class="btn-group">
+                    <button class="btn btn-outline-primary btn-sm" id="editBtn">
+                        <i class="bi bi-pencil"></i> Edit
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm" id="deleteBtn">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <!-- View Mode -->
+                <div id="viewMode" {% if not decision_id %}style="display: none;"{% endif %}>
+                    <div class="mb-4">
+                        <span class="badge decision-status-badge mb-2" id="statusBadge">Loading...</span>
+                        <div class="row text-muted small">
+                            <div class="col-auto">
+                                <i class="bi bi-calendar"></i> Created: <span id="createdAt">-</span>
+                            </div>
+                            <div class="col-auto">
+                                <i class="bi bi-pencil"></i> Updated: <span id="updatedAt">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h5><i class="bi bi-chat-left-text"></i> Context</h5>
+                    <div class="content-block mb-4" id="contextDisplay">Loading...</div>
+
+                    <h5><i class="bi bi-check-circle"></i> Decision</h5>
+                    <div class="content-block mb-4" id="decisionDisplay">Loading...</div>
+
+                    <h5><i class="bi bi-arrow-right-circle"></i> Consequences</h5>
+                    <div class="content-block" id="consequencesDisplay">Loading...</div>
+                </div>
+
+                <!-- Edit Mode -->
+                <div id="editMode" {% if decision_id %}style="display: none;"{% endif %}>
+                    <form id="decisionForm">
+                        <div class="mb-3">
+                            <label for="title" class="form-label">Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="title" required
+                                   placeholder="e.g., ADR 1: Use PostgreSQL for persistent storage">
+                            <div class="form-text">Short noun phrase describing the decision.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="status" class="form-label">Status <span class="text-danger">*</span></label>
+                            <select class="form-select" id="status" required>
+                                <option value="proposed">Proposed</option>
+                                <option value="accepted">Accepted</option>
+                                <option value="deprecated">Deprecated</option>
+                                <option value="superseded">Superseded</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="context" class="form-label">Context <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="context" rows="4" required
+                                      placeholder="Describe the forces at play, including technological, political, social, and project local factors..."></textarea>
+                            <div class="form-text">Describe the situation and forces that influenced this decision.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="decision" class="form-label">Decision <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="decision" rows="4" required
+                                      placeholder="We will use... We decided to..."></textarea>
+                            <div class="form-text">State the decision in full sentences with active voice (e.g., "We will...").</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="consequences" class="form-label">Consequences <span class="text-danger">*</span></label>
+                            <textarea class="form-control" id="consequences" rows="4" required
+                                      placeholder="List all consequences: positive, negative, and neutral..."></textarea>
+                            <div class="form-text">Describe all resulting consequences after applying the decision.</div>
+                        </div>
+
+                        {% if decision_id %}
+                        <div class="mb-3">
+                            <label for="changeReason" class="form-label">Change Reason</label>
+                            <input type="text" class="form-control" id="changeReason"
+                                   placeholder="Optional: Briefly describe why this change was made">
+                            <div class="form-text">This will be recorded in the change history.</div>
+                        </div>
+                        {% endif %}
+
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary" id="saveBtn">
+                                <i class="bi bi-check-lg"></i> {% if decision_id %}Save Changes{% else %}Create Decision{% endif %}
+                            </button>
+                            {% if decision_id %}
+                            <button type="button" class="btn btn-outline-secondary" id="cancelBtn">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </button>
+                            {% else %}
+                            <a href="/" class="btn btn-outline-secondary">
+                                <i class="bi bi-x-lg"></i> Cancel
+                            </a>
+                            {% endif %}
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Sidebar -->
+    {% if decision_id %}
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-clock-history"></i> Change History</h5>
+            </div>
+            <div class="card-body" id="historyContainer">
+                <div class="text-center py-3">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this architecture decision? This action cannot be undone.</p>
+                <p class="text-danger"><strong>All history will also be deleted.</strong></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- History Detail Modal -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Historical Version</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="historyModalBody">
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const decisionId = {{ decision_id|default('null')|tojson }};
+    let currentDecision = null;
+
+    function getStatusClass(status) {
+        const classes = {
+            'proposed': 'bg-warning',
+            'accepted': 'bg-success',
+            'deprecated': 'bg-secondary',
+            'superseded': 'bg-info'
+        };
+        return classes[status] || 'bg-secondary';
+    }
+
+    function formatDate(isoString) {
+        return new Date(isoString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    }
+
+    function formatDateShort(isoString) {
+        return new Date(isoString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    }
+
+    async function loadDecision() {
+        if (!decisionId) return;
+
+        try {
+            const response = await fetch(`/api/decisions/${decisionId}`);
+            if (!response.ok) {
+                if (response.status === 404) {
+                    window.location.href = '/';
+                    return;
+                }
+                throw new Error('Failed to load decision');
+            }
+
+            currentDecision = await response.json();
+            renderDecision(currentDecision);
+            renderHistory(currentDecision.history || []);
+        } catch (error) {
+            console.error('Error loading decision:', error);
+            alert('Failed to load decision. Redirecting to home page.');
+            window.location.href = '/';
+        }
+    }
+
+    function renderDecision(decision) {
+        document.getElementById('decisionTitleDisplay').textContent = decision.title;
+        document.getElementById('breadcrumbTitle').textContent = `ADR-${decision.id}: ${decision.title}`;
+
+        const statusBadge = document.getElementById('statusBadge');
+        statusBadge.textContent = decision.status.charAt(0).toUpperCase() + decision.status.slice(1);
+        statusBadge.className = 'badge decision-status-badge mb-2 ' + getStatusClass(decision.status);
+
+        document.getElementById('createdAt').textContent = formatDate(decision.created_at);
+        document.getElementById('updatedAt').textContent = formatDate(decision.updated_at);
+
+        document.getElementById('contextDisplay').textContent = decision.context;
+        document.getElementById('decisionDisplay').textContent = decision.decision;
+        document.getElementById('consequencesDisplay').textContent = decision.consequences;
+
+        // Populate form fields
+        document.getElementById('title').value = decision.title;
+        document.getElementById('status').value = decision.status;
+        document.getElementById('context').value = decision.context;
+        document.getElementById('decision').value = decision.decision;
+        document.getElementById('consequences').value = decision.consequences;
+    }
+
+    function renderHistory(history) {
+        const container = document.getElementById('historyContainer');
+
+        if (history.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-3">
+                    <i class="bi bi-clock"></i>
+                    <p class="mb-0 small">No changes yet</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '<div class="timeline">';
+        history.forEach((entry, index) => {
+            html += `
+                <div class="timeline-item">
+                    <div class="timeline-marker ${index === 0 ? 'bg-primary' : 'bg-secondary'}"></div>
+                    <div class="timeline-content">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <small class="text-muted">${formatDateShort(entry.changed_at)}</small>
+                            <button class="btn btn-link btn-sm p-0" onclick="showHistoryDetail(${entry.id})">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
+                        <div class="small">
+                            <span class="badge ${getStatusClass(entry.status)} badge-sm">${entry.status}</span>
+                        </div>
+                        ${entry.change_reason ? `<small class="text-muted d-block mt-1">${entry.change_reason}</small>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    window.showHistoryDetail = function(historyId) {
+        const entry = currentDecision.history.find(h => h.id === historyId);
+        if (!entry) return;
+
+        const modal = document.getElementById('historyModalBody');
+        modal.innerHTML = `
+            <div class="mb-3">
+                <span class="badge ${getStatusClass(entry.status)}">${entry.status}</span>
+                <small class="text-muted ms-2">Recorded: ${formatDate(entry.changed_at)}</small>
+            </div>
+            ${entry.change_reason ? `<div class="alert alert-info"><strong>Change reason:</strong> ${entry.change_reason}</div>` : ''}
+            <h6>Title</h6>
+            <p>${entry.title}</p>
+            <h6>Context</h6>
+            <div class="content-block mb-3">${entry.context}</div>
+            <h6>Decision</h6>
+            <div class="content-block mb-3">${entry.decision}</div>
+            <h6>Consequences</h6>
+            <div class="content-block">${entry.consequences}</div>
+        `;
+
+        new bootstrap.Modal(document.getElementById('historyModal')).show();
+    };
+
+    // Edit mode toggle
+    if (decisionId) {
+        document.getElementById('editBtn').addEventListener('click', function() {
+            document.getElementById('viewMode').style.display = 'none';
+            document.getElementById('editMode').style.display = 'block';
+        });
+
+        document.getElementById('cancelBtn').addEventListener('click', function() {
+            document.getElementById('viewMode').style.display = 'block';
+            document.getElementById('editMode').style.display = 'none';
+            // Reset form to current values
+            if (currentDecision) {
+                document.getElementById('title').value = currentDecision.title;
+                document.getElementById('status').value = currentDecision.status;
+                document.getElementById('context').value = currentDecision.context;
+                document.getElementById('decision').value = currentDecision.decision;
+                document.getElementById('consequences').value = currentDecision.consequences;
+                document.getElementById('changeReason').value = '';
+            }
+        });
+
+        document.getElementById('deleteBtn').addEventListener('click', function() {
+            new bootstrap.Modal(document.getElementById('deleteModal')).show();
+        });
+
+        document.getElementById('confirmDeleteBtn').addEventListener('click', async function() {
+            try {
+                const response = await fetch(`/api/decisions/${decisionId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    throw new Error('Failed to delete');
+                }
+            } catch (error) {
+                alert('Failed to delete decision. Please try again.');
+            }
+        });
+    }
+
+    // Form submission
+    document.getElementById('decisionForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const data = {
+            title: document.getElementById('title').value,
+            status: document.getElementById('status').value,
+            context: document.getElementById('context').value,
+            decision: document.getElementById('decision').value,
+            consequences: document.getElementById('consequences').value
+        };
+
+        const changeReasonEl = document.getElementById('changeReason');
+        if (changeReasonEl && changeReasonEl.value) {
+            data.change_reason = changeReasonEl.value;
+        }
+
+        try {
+            const url = decisionId ? `/api/decisions/${decisionId}` : '/api/decisions';
+            const method = decisionId ? 'PUT' : 'POST';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to save');
+            }
+
+            const result = await response.json();
+
+            if (decisionId) {
+                currentDecision = result;
+                renderDecision(result);
+                renderHistory(result.history || []);
+                document.getElementById('viewMode').style.display = 'block';
+                document.getElementById('editMode').style.display = 'none';
+                if (changeReasonEl) changeReasonEl.value = '';
+            } else {
+                window.location.href = `/decision/${result.id}`;
+            }
+        } catch (error) {
+            alert('Failed to save: ' + error.message);
+        }
+    });
+
+    loadDecision();
+});
+</script>
+{% endblock %}

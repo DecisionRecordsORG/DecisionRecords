@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+
+{% block title %}Architecture Decisions - Home{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-diagram-3"></i> Architecture Decisions</h1>
+    <a href="/decision/new" class="btn btn-primary">
+        <i class="bi bi-plus-circle"></i> New Decision
+    </a>
+</div>
+
+<div class="row mb-3">
+    <div class="col-md-6">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="searchInput" placeholder="Search decisions...">
+        </div>
+    </div>
+    <div class="col-md-3">
+        <select class="form-select" id="statusFilter">
+            <option value="">All Statuses</option>
+            <option value="proposed">Proposed</option>
+            <option value="accepted">Accepted</option>
+            <option value="deprecated">Deprecated</option>
+            <option value="superseded">Superseded</option>
+        </select>
+    </div>
+</div>
+
+<div id="decisionsContainer">
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">Loading decisions...</p>
+    </div>
+</div>
+
+<template id="decisionCardTemplate">
+    <div class="card decision-card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h5 class="card-title">
+                        <span class="badge bg-secondary me-2 decision-id"></span>
+                        <a href="#" class="decision-link text-decoration-none"></a>
+                    </h5>
+                    <p class="card-text text-muted decision-context"></p>
+                </div>
+                <span class="badge decision-status"></span>
+            </div>
+            <div class="mt-2">
+                <small class="text-muted">
+                    <i class="bi bi-calendar"></i> Created: <span class="decision-created"></span>
+                    <span class="ms-3"><i class="bi bi-pencil"></i> Updated: <span class="decision-updated"></span></span>
+                </small>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template id="emptyStateTemplate">
+    <div class="text-center py-5">
+        <i class="bi bi-inbox display-1 text-muted"></i>
+        <h3 class="mt-3">No Architecture Decisions Yet</h3>
+        <p class="text-muted">Get started by creating your first architecture decision record.</p>
+        <a href="/decision/new" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Create First Decision
+        </a>
+    </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let allDecisions = [];
+
+    async function loadDecisions() {
+        try {
+            const response = await fetch('/api/decisions');
+            allDecisions = await response.json();
+            renderDecisions(allDecisions);
+        } catch (error) {
+            console.error('Error loading decisions:', error);
+            document.getElementById('decisionsContainer').innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle"></i> Failed to load decisions. Please try again.
+                </div>
+            `;
+        }
+    }
+
+    function renderDecisions(decisions) {
+        const container = document.getElementById('decisionsContainer');
+
+        if (decisions.length === 0) {
+            const template = document.getElementById('emptyStateTemplate');
+            container.innerHTML = '';
+            container.appendChild(template.content.cloneNode(true));
+            return;
+        }
+
+        container.innerHTML = '';
+        const template = document.getElementById('decisionCardTemplate');
+
+        decisions.forEach(decision => {
+            const card = template.content.cloneNode(true);
+
+            card.querySelector('.decision-id').textContent = `ADR-${decision.id}`;
+            card.querySelector('.decision-link').textContent = decision.title;
+            card.querySelector('.decision-link').href = `/decision/${decision.id}`;
+
+            // Truncate context for display
+            const contextText = decision.context.length > 150
+                ? decision.context.substring(0, 150) + '...'
+                : decision.context;
+            card.querySelector('.decision-context').textContent = contextText;
+
+            // Set status badge
+            const statusBadge = card.querySelector('.decision-status');
+            statusBadge.textContent = decision.status.charAt(0).toUpperCase() + decision.status.slice(1);
+            statusBadge.classList.add(getStatusClass(decision.status));
+
+            // Format dates
+            card.querySelector('.decision-created').textContent = formatDate(decision.created_at);
+            card.querySelector('.decision-updated').textContent = formatDate(decision.updated_at);
+
+            // Store status for filtering
+            card.querySelector('.decision-card').dataset.status = decision.status;
+            card.querySelector('.decision-card').dataset.title = decision.title.toLowerCase();
+            card.querySelector('.decision-card').dataset.context = decision.context.toLowerCase();
+
+            container.appendChild(card);
+        });
+    }
+
+    function getStatusClass(status) {
+        const classes = {
+            'proposed': 'bg-warning',
+            'accepted': 'bg-success',
+            'deprecated': 'bg-secondary',
+            'superseded': 'bg-info'
+        };
+        return classes[status] || 'bg-secondary';
+    }
+
+    function formatDate(isoString) {
+        return new Date(isoString).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        });
+    }
+
+    function filterDecisions() {
+        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+        const statusFilter = document.getElementById('statusFilter').value;
+
+        const filtered = allDecisions.filter(decision => {
+            const matchesSearch = !searchTerm ||
+                decision.title.toLowerCase().includes(searchTerm) ||
+                decision.context.toLowerCase().includes(searchTerm) ||
+                decision.decision.toLowerCase().includes(searchTerm);
+
+            const matchesStatus = !statusFilter || decision.status === statusFilter;
+
+            return matchesSearch && matchesStatus;
+        });
+
+        renderDecisions(filtered);
+    }
+
+    document.getElementById('searchInput').addEventListener('input', filterDecisions);
+    document.getElementById('statusFilter').addEventListener('change', filterDecisions);
+
+    loadDecisions();
+});
+</script>
+{% endblock %}
