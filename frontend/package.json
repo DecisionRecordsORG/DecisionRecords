@@ -1,6 +1,9 @@
 {
-  "name": "frontend",
-  "version": "0.0.0",
+  "name": "architecture-decisions-frontend",
+  "version": "1.0.0",
+  "description": "Angular frontend for Architecture Decisions - an ADR management application",
+  "author": "Lawrance Nyakiso",
+  "license": "MIT",
   "scripts": {
     "ng": "ng",
     "start": "ng serve",

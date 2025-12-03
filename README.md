@@ -312,6 +312,12 @@ python -m pytest tests/
 - **Authentication**: OpenID Connect (OIDC)
 - **Containerization**: Docker with multi-stage builds
 
+## Author
+
+**Lawrance Nyakiso**
+
 ## License
 
-MIT License
+MIT License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2024 Lawrance Nyakiso

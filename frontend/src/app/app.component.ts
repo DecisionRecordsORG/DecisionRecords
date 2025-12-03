@@ -19,6 +19,8 @@ import { AuthService } from './services/auth.service';
       <small>
         Architecture Decision Records - Based on
         <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
+        <span class="separator">|</span>
+        Created by Lawrance Nyakiso
       </small>
     </footer>
   `,
@@ -44,6 +46,11 @@ import { AuthService } from './services/auth.service';
 
     .app-footer a {
       color: #3f51b5;
+    }
+
+    .app-footer .separator {
+      margin: 0 8px;
+      color: #ccc;
     }
   `]
 })
