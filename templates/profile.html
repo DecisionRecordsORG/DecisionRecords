@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - Architecture Decisions{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <h1 class="mb-4"><i class="bi bi-person-circle"></i> Profile</h1>
+
+        <!-- User Info -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-person"></i> Account Information</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-1 text-muted small">Name</p>
+                        <p class="mb-3" id="userName">-</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-1 text-muted small">Email</p>
+                        <p class="mb-3" id="userEmail">-</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-1 text-muted small">Organization</p>
+                        <p class="mb-3" id="userDomain">-</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p class="mb-1 text-muted small">Role</p>
+                        <p class="mb-0" id="userRole">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Email Notifications -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-bell"></i> Email Notifications</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-4">Choose which notifications you'd like to receive via email.</p>
+
+                <form id="subscriptionForm">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notifyOnCreate">
+                        <label class="form-check-label" for="notifyOnCreate">
+                            <strong>New Decisions</strong>
+                            <span class="d-block text-muted small">Get notified when a new architecture decision is created</span>
+                        </label>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="notifyOnStatusChange">
+                        <label class="form-check-label" for="notifyOnStatusChange">
+                            <strong>Status Changes</strong>
+                            <span class="d-block text-muted small">Get notified when a decision's status changes (e.g., proposed to accepted)</span>
+                        </label>
+                    </div>
+
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input" type="checkbox" id="notifyOnUpdate">
+                        <label class="form-check-label" for="notifyOnUpdate">
+                            <strong>All Updates</strong>
+                            <span class="d-block text-muted small">Get notified on any update to a decision (may result in more emails)</span>
+                        </label>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary" id="saveSubscriptionBtn">
+                        <i class="bi bi-save"></i> Save Preferences
+                    </button>
+                    <span class="ms-2 text-success d-none" id="saveSuccess">
+                        <i class="bi bi-check-circle"></i> Saved!
+                    </span>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Load user info
+    async function loadUserInfo() {
+        try {
+            const response = await fetch('/api/user/me');
+            const user = await response.json();
+
+            document.getElementById('userName').textContent = user.name || '-';
+            document.getElementById('userEmail').textContent = user.email;
+            document.getElementById('userDomain').textContent = user.sso_domain;
+            document.getElementById('userRole').innerHTML = user.is_admin
+                ? '<span class="badge bg-primary">Administrator</span>'
+                : '<span class="badge bg-secondary">User</span>';
+        } catch (error) {
+            console.error('Error loading user info:', error);
+        }
+    }
+
+    // Load subscription settings
+    async function loadSubscription() {
+        try {
+            const response = await fetch('/api/user/subscription');
+            const subscription = await response.json();
+
+            document.getElementById('notifyOnCreate').checked = subscription.notify_on_create || false;
+            document.getElementById('notifyOnUpdate').checked = subscription.notify_on_update || false;
+            document.getElementById('notifyOnStatusChange').checked = subscription.notify_on_status_change || false;
+        } catch (error) {
+            console.error('Error loading subscription:', error);
+        }
+    }
+
+    // Save subscription settings
+    document.getElementById('subscriptionForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const data = {
+            notify_on_create: document.getElementById('notifyOnCreate').checked,
+            notify_on_update: document.getElementById('notifyOnUpdate').checked,
+            notify_on_status_change: document.getElementById('notifyOnStatusChange').checked
+        };
+
+        try {
+            const response = await fetch('/api/user/subscription', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                const successEl = document.getElementById('saveSuccess');
+                successEl.classList.remove('d-none');
+                setTimeout(() => successEl.classList.add('d-none'), 3000);
+            } else {
+                alert('Failed to save preferences');
+            }
+        } catch (error) {
+            alert('Error saving preferences');
+        }
+    });
+
+    loadUserInfo();
+    loadSubscription();
+});
+</script>
+{% endblock %}

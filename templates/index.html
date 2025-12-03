@@ -52,8 +52,9 @@
             </div>
             <div class="mt-2">
                 <small class="text-muted">
-                    <i class="bi bi-calendar"></i> Created: <span class="decision-created"></span>
-                    <span class="ms-3"><i class="bi bi-pencil"></i> Updated: <span class="decision-updated"></span></span>
+                    <i class="bi bi-person"></i> <span class="decision-created-by"></span>
+                    <span class="ms-3"><i class="bi bi-calendar"></i> <span class="decision-created"></span></span>
+                    <span class="ms-3"><i class="bi bi-pencil"></i> <span class="decision-updated"></span></span>
                 </small>
             </div>
         </div>
@@ -123,7 +124,9 @@ document.addEventListener('DOMContentLoaded', function() {
             statusBadge.textContent = decision.status.charAt(0).toUpperCase() + decision.status.slice(1);
             statusBadge.classList.add(getStatusClass(decision.status));
 
-            // Format dates
+            // Format dates and user info
+            const createdBy = decision.created_by ? decision.created_by.name || decision.created_by.email : 'Unknown';
+            card.querySelector('.decision-created-by').textContent = createdBy;
             card.querySelector('.decision-created').textContent = formatDate(decision.created_at);
             card.querySelector('.decision-updated').textContent = formatDate(decision.updated_at);
 

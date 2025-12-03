@@ -42,10 +42,18 @@
                         <span class="badge decision-status-badge mb-2" id="statusBadge">Loading...</span>
                         <div class="row text-muted small">
                             <div class="col-auto">
-                                <i class="bi bi-calendar"></i> Created: <span id="createdAt">-</span>
+                                <i class="bi bi-person"></i> Created by: <span id="createdBy">-</span>
                             </div>
                             <div class="col-auto">
-                                <i class="bi bi-pencil"></i> Updated: <span id="updatedAt">-</span>
+                                <i class="bi bi-calendar"></i> <span id="createdAt">-</span>
+                            </div>
+                        </div>
+                        <div class="row text-muted small mt-1">
+                            <div class="col-auto">
+                                <i class="bi bi-pencil"></i> Last updated by: <span id="updatedBy">-</span>
+                            </div>
+                            <div class="col-auto">
+                                <i class="bi bi-clock"></i> <span id="updatedAt">-</span>
                             </div>
                         </div>
                     </div>
@@ -254,6 +262,10 @@ document.addEventListener('DOMContentLoaded', function() {
         statusBadge.textContent = decision.status.charAt(0).toUpperCase() + decision.status.slice(1);
         statusBadge.className = 'badge decision-status-badge mb-2 ' + getStatusClass(decision.status);
 
+        const createdBy = decision.created_by ? decision.created_by.name || decision.created_by.email : 'Unknown';
+        const updatedBy = decision.updated_by ? decision.updated_by.name || decision.updated_by.email : 'Unknown';
+        document.getElementById('createdBy').textContent = createdBy;
+        document.getElementById('updatedBy').textContent = updatedBy;
         document.getElementById('createdAt').textContent = formatDate(decision.created_at);
         document.getElementById('updatedAt').textContent = formatDate(decision.updated_at);
 
@@ -284,6 +296,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         let html = '<div class="timeline">';
         history.forEach((entry, index) => {
+            const changedBy = entry.changed_by ? entry.changed_by.name || entry.changed_by.email : 'Unknown';
             html += `
                 <div class="timeline-item">
                     <div class="timeline-marker ${index === 0 ? 'bg-primary' : 'bg-secondary'}"></div>
@@ -297,6 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <div class="small">
                             <span class="badge ${getStatusClass(entry.status)} badge-sm">${entry.status}</span>
                         </div>
+                        <small class="text-muted d-block">by ${changedBy}</small>
                         ${entry.change_reason ? `<small class="text-muted d-block mt-1">${entry.change_reason}</small>` : ''}
                     </div>
                 </div>
@@ -311,11 +325,12 @@ document.addEventListener('DOMContentLoaded', function() {
         const entry = currentDecision.history.find(h => h.id === historyId);
         if (!entry) return;
 
+        const changedBy = entry.changed_by ? entry.changed_by.name || entry.changed_by.email : 'Unknown';
         const modal = document.getElementById('historyModalBody');
         modal.innerHTML = `
             <div class="mb-3">
                 <span class="badge ${getStatusClass(entry.status)}">${entry.status}</span>
-                <small class="text-muted ms-2">Recorded: ${formatDate(entry.changed_at)}</small>
+                <small class="text-muted ms-2">Changed by ${changedBy} on ${formatDate(entry.changed_at)}</small>
             </div>
             ${entry.change_reason ? `<div class="alert alert-info"><strong>Change reason:</strong> ${entry.change_reason}</div>` : ''}
             <h6>Title</h6>

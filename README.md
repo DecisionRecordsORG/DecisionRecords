@@ -1,15 +1,17 @@
 # Architecture Decisions
 
-A simple, self-hosted web application for managing Architecture Decision Records (ADRs) based on the [arc42 Section 9](https://docs.arc42.org/section-9/) format.
+A self-hosted web application for managing Architecture Decision Records (ADRs) based on the [arc42 Section 9](https://docs.arc42.org/section-9/) format with enterprise features.
 
 ## Features
 
-- Create, view, update, and delete architecture decisions
-- Track complete update history for each decision
-- Search and filter decisions by status
-- Clean, responsive web interface
-- SQLite database for easy self-hosting
-- RESTful API for programmatic access
+- **ADR Management**: Create, view, update, and delete architecture decisions
+- **Complete History**: Track full update history for each decision with user attribution
+- **SSO Authentication**: OpenID Connect (OIDC) integration for enterprise Single Sign-On
+- **Multi-Tenancy**: Domain-based isolation ensures organizations only see their own decisions
+- **User Tracking**: Know who created, modified, or deleted each decision
+- **Email Notifications**: Subscribe to receive email alerts for new or updated decisions
+- **Search & Filter**: Find decisions by keyword or status
+- **Self-Hosted**: SQLite database for easy deployment with no external dependencies
 
 ## ADR Format
 
@@ -86,7 +88,7 @@ The application can be configured using environment variables:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | SQLite database path | `sqlite:///architecture_decisions.db` |
-| `SECRET_KEY` | Flask secret key | `dev-secret-key-change-in-production` |
+| `SECRET_KEY` | Flask secret key | Auto-generated |
 
 Example:
 ```bash
@@ -95,31 +97,85 @@ export SECRET_KEY="your-secure-secret-key"
 python app.py
 ```
 
+## SSO Configuration
+
+The application supports OpenID Connect (OIDC) for authentication. Configure SSO through the admin settings page (`/settings`).
+
+### Setting Up SSO
+
+1. Register your application with your identity provider (Google, Okta, Azure AD, etc.)
+2. Set the callback URL to: `https://your-domain.com/auth/callback`
+3. Log in as the first user (becomes admin automatically)
+4. Navigate to Settings > SSO Configuration
+5. Add your provider details:
+   - **Domain**: Email domain for your organization (e.g., `company.com`)
+   - **Provider Name**: Display name (e.g., "Google Workspace")
+   - **Client ID**: From your identity provider
+   - **Client Secret**: From your identity provider
+   - **Discovery URL**: OIDC discovery endpoint
+
+### Common Discovery URLs
+
+| Provider | Discovery URL |
+|----------|---------------|
+| Google | `https://accounts.google.com/.well-known/openid-configuration` |
+| Azure AD | `https://login.microsoftonline.com/{tenant}/v2.0/.well-known/openid-configuration` |
+| Okta | `https://{domain}.okta.com/.well-known/openid-configuration` |
+
+## Multi-Tenancy
+
+The application provides domain-based multi-tenancy:
+
+- Users can only see decisions from their own organization (SSO domain)
+- Each organization has independent data isolation
+- The first user from a domain becomes an administrator
+- Administrators can manage SSO and email settings for their domain
+
+## Email Notifications
+
+Users can subscribe to receive email notifications for:
+
+- **New Decisions**: When a new ADR is created
+- **Status Changes**: When a decision's status changes
+- **All Updates**: Any modification to a decision
+
+Configure SMTP settings in the admin Settings page to enable email notifications.
+
 ## API Endpoints
+
+All API endpoints require authentication via session cookie.
+
+### Decisions
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/decisions` | List all decisions |
+| `GET` | `/api/decisions` | List all decisions (filtered by domain) |
 | `POST` | `/api/decisions` | Create a new decision |
 | `GET` | `/api/decisions/<id>` | Get a decision with history |
 | `PUT` | `/api/decisions/<id>` | Update a decision |
-| `DELETE` | `/api/decisions/<id>` | Delete a decision |
+| `DELETE` | `/api/decisions/<id>` | Soft-delete a decision |
 | `GET` | `/api/decisions/<id>/history` | Get decision history |
 
-### Example API Usage
+### User
 
-Create a new decision:
-```bash
-curl -X POST http://localhost:5000/api/decisions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "Use PostgreSQL for persistent storage",
-    "status": "proposed",
-    "context": "We need a reliable database for storing user data...",
-    "decision": "We will use PostgreSQL as our primary database.",
-    "consequences": "Positive: ACID compliance, rich features. Negative: Additional operational overhead."
-  }'
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/user/me` | Get current user info |
+| `GET` | `/api/user/subscription` | Get notification preferences |
+| `PUT` | `/api/user/subscription` | Update notification preferences |
+
+### Admin (requires admin role)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/admin/sso` | List SSO configurations |
+| `POST` | `/api/admin/sso` | Create SSO configuration |
+| `PUT` | `/api/admin/sso/<id>` | Update SSO configuration |
+| `DELETE` | `/api/admin/sso/<id>` | Delete SSO configuration |
+| `GET` | `/api/admin/email` | Get email configuration |
+| `POST` | `/api/admin/email` | Create/update email configuration |
+| `POST` | `/api/admin/email/test` | Send test email |
+| `GET` | `/api/admin/users` | List users in domain |
 
 ## Project Structure
 
@@ -127,14 +183,20 @@ curl -X POST http://localhost:5000/api/decisions \
 architecture-decisions/
 ├── app.py              # Flask application and routes
 ├── models.py           # SQLAlchemy database models
+├── auth.py             # Authentication helpers
+├── notifications.py    # Email notification service
 ├── requirements.txt    # Python dependencies
 ├── Dockerfile          # Docker image definition
 ├── docker-compose.yml  # Docker Compose configuration
 ├── README.md           # This file
 ├── templates/          # HTML templates
-│   ├── base.html       # Base template
+│   ├── base.html       # Base template with navigation
+│   ├── login.html      # SSO login page
 │   ├── index.html      # Decision list page
-│   └── decision.html   # Decision view/edit page
+│   ├── decision.html   # Decision view/edit page
+│   ├── settings.html   # Admin settings page
+│   ├── profile.html    # User profile/subscriptions
+│   └── error.html      # Error page
 └── static/             # Static assets
     ├── css/
     │   └── style.css   # Custom styles

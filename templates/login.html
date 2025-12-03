@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Architecture Decisions</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            max-width: 400px;
+            width: 100%;
+            padding: 2rem;
+        }
+        .login-card {
+            border: none;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            border-radius: 1rem;
+        }
+        .login-header {
+            text-align: center;
+            padding: 2rem 2rem 1rem;
+        }
+        .login-header i {
+            font-size: 3rem;
+            color: #0d6efd;
+        }
+        .sso-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .sso-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .no-sso-message {
+            text-align: center;
+            padding: 2rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="card login-card">
+            <div class="login-header">
+                <i class="bi bi-diagram-3"></i>
+                <h2 class="mt-3 mb-1">Architecture Decisions</h2>
+                <p class="text-muted">Sign in to continue</p>
+            </div>
+            <div class="card-body px-4 pb-4">
+                {% if sso_configs %}
+                    <p class="text-center text-muted mb-3">Choose your organization:</p>
+                    <div class="d-grid gap-2">
+                        {% for config in sso_configs %}
+                        <a href="{{ url_for('sso_login', config_id=config.id) }}" class="btn btn-outline-primary sso-btn">
+                            <i class="bi bi-building"></i>
+                            Sign in with {{ config.provider_name }}
+                            <small class="text-muted">({{ config.domain }})</small>
+                        </a>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="no-sso-message">
+                        <i class="bi bi-gear display-4 d-block mb-3"></i>
+                        <h5>No SSO Configured</h5>
+                        <p class="small">Please contact your administrator to configure Single Sign-On for your organization.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        <p class="text-center text-muted mt-4 small">
+            Architecture Decision Records based on <a href="https://docs.arc42.org/section-9/" target="_blank">arc42</a>
+        </p>
+    </div>
+</body>
+</html>

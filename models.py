@@ -4,6 +4,129 @@ from datetime import datetime
 db = SQLAlchemy()
 
 
+class User(db.Model):
+    """User model for authenticated users via SSO."""
+
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, unique=True)
+    name = db.Column(db.String(255), nullable=True)
+    sso_subject = db.Column(db.String(255), nullable=False)  # Subject ID from SSO provider
+    sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
+    is_admin = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_login = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    decisions_created = db.relationship('ArchitectureDecision', backref='creator', lazy=True, foreign_keys='ArchitectureDecision.created_by_id')
+    subscriptions = db.relationship('Subscription', backref='user', lazy=True, uselist=False)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'name': self.name,
+            'sso_domain': self.sso_domain,
+            'is_admin': self.is_admin,
+            'created_at': self.created_at.isoformat(),
+            'last_login': self.last_login.isoformat() if self.last_login else None,
+        }
+
+
+class SSOConfig(db.Model):
+    """SSO configuration for OpenID Connect providers."""
+
+    __tablename__ = 'sso_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(255), nullable=False, unique=True)  # e.g., "company.com"
+    provider_name = db.Column(db.String(100), nullable=False)  # e.g., "Google", "Okta", "Azure AD"
+    client_id = db.Column(db.String(255), nullable=False)
+    client_secret = db.Column(db.String(255), nullable=False)
+    discovery_url = db.Column(db.String(500), nullable=False)  # OpenID Connect discovery URL
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self, include_secret=False):
+        data = {
+            'id': self.id,
+            'domain': self.domain,
+            'provider_name': self.provider_name,
+            'client_id': self.client_id,
+            'discovery_url': self.discovery_url,
+            'enabled': self.enabled,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+        if include_secret:
+            data['client_secret'] = self.client_secret
+        return data
+
+
+class EmailConfig(db.Model):
+    """Email configuration for notifications."""
+
+    __tablename__ = 'email_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(255), nullable=False, unique=True)  # Associated SSO domain
+    smtp_server = db.Column(db.String(255), nullable=False)
+    smtp_port = db.Column(db.Integer, nullable=False, default=587)
+    smtp_username = db.Column(db.String(255), nullable=False)
+    smtp_password = db.Column(db.String(255), nullable=False)
+    from_email = db.Column(db.String(255), nullable=False)
+    from_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')
+    use_tls = db.Column(db.Boolean, default=True)
+    enabled = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self, include_password=False):
+        data = {
+            'id': self.id,
+            'domain': self.domain,
+            'smtp_server': self.smtp_server,
+            'smtp_port': self.smtp_port,
+            'smtp_username': self.smtp_username,
+            'from_email': self.from_email,
+            'from_name': self.from_name,
+            'use_tls': self.use_tls,
+            'enabled': self.enabled,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+        if include_password:
+            data['smtp_password'] = self.smtp_password
+        return data
+
+
+class Subscription(db.Model):
+    """User subscriptions for email notifications."""
+
+    __tablename__ = 'subscriptions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, unique=True)
+    notify_on_create = db.Column(db.Boolean, default=True)
+    notify_on_update = db.Column(db.Boolean, default=False)
+    notify_on_status_change = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'notify_on_create': self.notify_on_create,
+            'notify_on_update': self.notify_on_update,
+            'notify_on_status_change': self.notify_on_status_change,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+
+
 class ArchitectureDecision(db.Model):
     """Main table for Architecture Decision Records (ADRs)."""
 
@@ -18,8 +141,19 @@ class ArchitectureDecision(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship to history
-    history = db.relationship('DecisionHistory', backref='decision', lazy=True, order_by='DecisionHistory.changed_at.desc()')
+    # Multi-tenancy
+    domain = db.Column(db.String(255), nullable=False, index=True)
+
+    # User tracking
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    deleted_at = db.Column(db.DateTime, nullable=True)  # Soft delete
+    deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    updated_by = db.relationship('User', foreign_keys=[updated_by_id])
+    deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
+    history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
 
     # Valid status values
     VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
@@ -34,6 +168,9 @@ class ArchitectureDecision(db.Model):
             'consequences': self.consequences,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
+            'domain': self.domain,
+            'created_by': self.creator.to_dict() if self.creator else None,
+            'updated_by': self.updated_by.to_dict() if self.updated_by else None,
         }
 
     def to_dict_with_history(self):
@@ -60,6 +197,10 @@ class DecisionHistory(db.Model):
     # Metadata about the change
     changed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     change_reason = db.Column(db.String(500), nullable=True)
+    changed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    changed_by = db.relationship('User', foreign_keys=[changed_by_id])
 
     def to_dict(self):
         return {
@@ -72,10 +213,11 @@ class DecisionHistory(db.Model):
             'consequences': self.consequences,
             'changed_at': self.changed_at.isoformat(),
             'change_reason': self.change_reason,
+            'changed_by': self.changed_by.to_dict() if self.changed_by else None,
         }
 
 
-def save_history(decision, change_reason=None):
+def save_history(decision, change_reason=None, changed_by=None):
     """Save the current state of a decision to history before updating."""
     history_entry = DecisionHistory(
         decision_id=decision.id,
@@ -84,7 +226,8 @@ def save_history(decision, change_reason=None):
         decision_text=decision.decision,
         status=decision.status,
         consequences=decision.consequences,
-        change_reason=change_reason
+        change_reason=change_reason,
+        changed_by_id=changed_by.id if changed_by else None
     )
     db.session.add(history_entry)
     return history_entry
