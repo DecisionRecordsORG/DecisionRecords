@@ -23,12 +23,37 @@ Each Architecture Decision Record follows the Michael Nygard format:
 
 ## Installation
 
-### Requirements
+### Option 1: Docker (Recommended)
 
+The easiest way to run the application:
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd architecture-decisions
+
+# Run with Docker Compose
+docker compose up -d
+
+# Or build and run with Docker directly
+docker build -t architecture-decisions .
+docker run -d -p 5000:5000 -v adr-data:/data architecture-decisions
+```
+
+Open your browser and navigate to `http://localhost:5000`
+
+To stop the container:
+```bash
+docker compose down
+```
+
+### Option 2: Python
+
+Requirements:
 - Python 3.8+
 - pip
 
-### Setup
+Setup:
 
 1. Clone the repository:
    ```bash
@@ -103,6 +128,8 @@ architecture-decisions/
 ├── app.py              # Flask application and routes
 ├── models.py           # SQLAlchemy database models
 ├── requirements.txt    # Python dependencies
+├── Dockerfile          # Docker image definition
+├── docker-compose.yml  # Docker Compose configuration
 ├── README.md           # This file
 ├── templates/          # HTML templates
 │   ├── base.html       # Base template
