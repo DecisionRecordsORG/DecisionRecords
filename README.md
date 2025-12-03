@@ -4,13 +4,15 @@ A self-hosted web application for managing Architecture Decision Records (ADRs) 
 
 ## Features
 
+- **Modern Angular UI**: Built with Angular 18 and Angular Material for a responsive, professional interface
 - **ADR Management**: Create, view, update, and delete architecture decisions
 - **Complete History**: Track full update history for each decision with user attribution
 - **SSO Authentication**: OpenID Connect (OIDC) integration for enterprise Single Sign-On
 - **Multi-Tenancy**: Domain-based isolation ensures organizations only see their own decisions
 - **User Tracking**: Know who created, modified, or deleted each decision
 - **Email Notifications**: Subscribe to receive email alerts for new or updated decisions
-- **Search & Filter**: Find decisions by keyword or status
+- **Search & Filter**: Find decisions by keyword or status with real-time filtering
+- **Master Account**: Local admin account for initial setup and system configuration
 - **Self-Hosted**: SQLite database for easy deployment with no external dependencies
 
 ## ADR Format
@@ -44,18 +46,23 @@ docker run -d -p 5000:5000 -v adr-data:/data architecture-decisions
 
 Open your browser and navigate to `http://localhost:5000`
 
+Default master account credentials:
+- **Username**: `admin`
+- **Password**: `changeme`
+
 To stop the container:
 ```bash
 docker compose down
 ```
 
-### Option 2: Python
+### Option 2: Local Development
 
 Requirements:
 - Python 3.8+
-- pip
+- Node.js 18+ (for frontend development)
+- npm
 
-Setup:
+#### Backend Setup
 
 1. Clone the repository:
    ```bash
@@ -69,17 +76,50 @@ Setup:
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. Install Python dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Run the application:
+#### Frontend Setup
+
+4. Install Angular CLI and dependencies:
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+5. Build the Angular frontend:
+   ```bash
+   npm run build
+   ```
+
+6. Run the application:
+   ```bash
+   cd ..
+   python app.py
+   ```
+
+7. Open your browser and navigate to `http://localhost:5000`
+
+### Frontend Development Mode
+
+For active frontend development with hot reload:
+
+1. Start the Flask backend:
    ```bash
    python app.py
    ```
 
-5. Open your browser and navigate to `http://localhost:5000`
+2. In a separate terminal, start the Angular dev server:
+   ```bash
+   cd frontend
+   npm start
+   ```
+
+3. Access the Angular dev server at `http://localhost:4200`
+
+Note: Configure a proxy in `frontend/proxy.conf.json` to forward API calls to the Flask backend.
 
 ## Configuration
 
@@ -97,6 +137,21 @@ export SECRET_KEY="your-secure-secret-key"
 python app.py
 ```
 
+## Master Account
+
+The application includes a built-in master account for system administration:
+
+- **Default Username**: `admin`
+- **Default Password**: `changeme`
+
+The master account can:
+- Configure SSO providers for any domain
+- Configure email settings for any domain
+- View all decisions across all domains (read-only)
+- Manage user admin privileges
+
+**Important**: Change the default password immediately after first login!
+
 ## SSO Configuration
 
 The application supports OpenID Connect (OIDC) for authentication. Configure SSO through the admin settings page (`/settings`).
@@ -105,8 +160,8 @@ The application supports OpenID Connect (OIDC) for authentication. Configure SSO
 
 1. Register your application with your identity provider (Google, Okta, Azure AD, etc.)
 2. Set the callback URL to: `https://your-domain.com/auth/callback`
-3. Log in as the first user (becomes admin automatically)
-4. Navigate to Settings > SSO Configuration
+3. Log in with the master account
+4. Navigate to Settings > SSO Providers
 5. Add your provider details:
    - **Domain**: Email domain for your organization (e.g., `company.com`)
    - **Provider Name**: Display name (e.g., "Google Workspace")
@@ -130,6 +185,7 @@ The application provides domain-based multi-tenancy:
 - Each organization has independent data isolation
 - The first user from a domain becomes an administrator
 - Administrators can manage SSO and email settings for their domain
+- Master account can view all domains but cannot create/modify decisions
 
 ## Email Notifications
 
@@ -144,6 +200,15 @@ Configure SMTP settings in the admin Settings page to enable email notifications
 ## API Endpoints
 
 All API endpoints require authentication via session cookie.
+
+### Authentication
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/auth/sso-configs` | List available SSO providers |
+| `POST` | `/auth/local` | Local master account login |
+| `GET` | `/auth/sso/<id>` | Initiate SSO login flow |
+| `GET` | `/logout` | Log out current session |
 
 ### Decisions
 
@@ -164,6 +229,13 @@ All API endpoints require authentication via session cookie.
 | `GET` | `/api/user/subscription` | Get notification preferences |
 | `PUT` | `/api/user/subscription` | Update notification preferences |
 
+### Master Account
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `PUT` | `/api/master/password` | Change master account password |
+| `GET` | `/api/master/info` | Get master account info |
+
 ### Admin (requires admin role)
 
 | Method | Endpoint | Description |
@@ -176,33 +248,69 @@ All API endpoints require authentication via session cookie.
 | `POST` | `/api/admin/email` | Create/update email configuration |
 | `POST` | `/api/admin/email/test` | Send test email |
 | `GET` | `/api/admin/users` | List users in domain |
+| `PUT` | `/api/admin/users/<id>/admin` | Toggle user admin status |
 
 ## Project Structure
 
 ```
 architecture-decisions/
-├── app.py              # Flask application and routes
-├── models.py           # SQLAlchemy database models
-├── auth.py             # Authentication helpers
-├── notifications.py    # Email notification service
-├── requirements.txt    # Python dependencies
-├── Dockerfile          # Docker image definition
-├── docker-compose.yml  # Docker Compose configuration
-├── README.md           # This file
-├── templates/          # HTML templates
-│   ├── base.html       # Base template with navigation
-│   ├── login.html      # SSO login page
-│   ├── index.html      # Decision list page
-│   ├── decision.html   # Decision view/edit page
-│   ├── settings.html   # Admin settings page
-│   ├── profile.html    # User profile/subscriptions
-│   └── error.html      # Error page
-└── static/             # Static assets
-    ├── css/
-    │   └── style.css   # Custom styles
-    └── js/
-        └── app.js      # JavaScript utilities
+├── app.py                  # Flask application and API routes
+├── models.py               # SQLAlchemy database models
+├── auth.py                 # Authentication helpers and decorators
+├── notifications.py        # Email notification service
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Multi-stage Docker build
+├── docker-compose.yml      # Docker Compose configuration
+├── README.md               # This file
+├── templates/              # Legacy HTML templates (fallback)
+├── static/                 # Legacy static assets (fallback)
+└── frontend/               # Angular frontend application
+    ├── src/
+    │   ├── app/
+    │   │   ├── components/     # Angular components
+    │   │   │   ├── login/
+    │   │   │   ├── decision-list/
+    │   │   │   ├── decision-detail/
+    │   │   │   ├── settings/
+    │   │   │   ├── profile/
+    │   │   │   ├── master-profile/
+    │   │   │   └── shared/
+    │   │   ├── services/       # API services
+    │   │   │   ├── auth.service.ts
+    │   │   │   ├── decision.service.ts
+    │   │   │   └── admin.service.ts
+    │   │   ├── guards/         # Route guards
+    │   │   ├── models/         # TypeScript interfaces
+    │   │   ├── app.routes.ts   # Application routing
+    │   │   └── app.config.ts   # App configuration
+    │   └── styles.scss         # Global styles
+    ├── angular.json            # Angular CLI configuration
+    ├── package.json            # Node.js dependencies
+    └── tsconfig.json           # TypeScript configuration
 ```
+
+## Running Tests
+
+### Frontend Unit Tests
+
+```bash
+cd frontend
+npm test
+```
+
+### Backend Tests
+
+```bash
+python -m pytest tests/
+```
+
+## Technology Stack
+
+- **Backend**: Python 3.11, Flask, SQLAlchemy, Authlib
+- **Frontend**: Angular 18, Angular Material, TypeScript
+- **Database**: SQLite
+- **Authentication**: OpenID Connect (OIDC)
+- **Containerization**: Docker with multi-stage builds
 
 ## License
 
