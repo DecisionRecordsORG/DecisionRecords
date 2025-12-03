@@ -1,13 +1,17 @@
 import os
 import secrets
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, save_history
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from datetime import datetime
 
-app = Flask(__name__)
+# Determine if we're serving Angular frontend
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist', 'frontend', 'browser')
+SERVE_ANGULAR = os.path.exists(FRONTEND_DIR)
+
+app = Flask(__name__, static_folder=FRONTEND_DIR if SERVE_ANGULAR else 'static')
 
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///architecture_decisions.db')
@@ -49,10 +53,18 @@ def login():
 @app.route('/auth/local', methods=['POST'])
 def local_login():
     """Handle local master account login."""
-    username = request.form.get('username')
-    password = request.form.get('password')
+    # Support both form data and JSON
+    if request.is_json:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+    else:
+        username = request.form.get('username')
+        password = request.form.get('password')
 
     if not username or not password:
+        if request.is_json:
+            return jsonify({'error': 'Username and password are required'}), 400
         return render_template('login.html',
                              sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
                              error='Username and password are required')
@@ -62,11 +74,27 @@ def local_login():
         session['master_id'] = master.id
         session['is_master'] = True
         session.permanent = True
+        if request.is_json:
+            return jsonify({'message': 'Login successful'}), 200
         return redirect(url_for('index'))
     else:
+        if request.is_json:
+            return jsonify({'error': 'Invalid username or password'}), 401
         return render_template('login.html',
                              sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
                              error='Invalid username or password')
+
+
+@app.route('/api/auth/sso-configs', methods=['GET'])
+def api_get_sso_configs():
+    """Get available SSO configurations for login page."""
+    configs = SSOConfig.query.filter_by(enabled=True).all()
+    return jsonify([{
+        'id': c.id,
+        'domain': c.domain,
+        'provider_name': c.provider_name,
+        'enabled': c.enabled
+    } for c in configs])
 
 
 @app.route('/auth/sso/<int:config_id>')
@@ -713,6 +741,25 @@ def api_list_email_configs():
     else:
         configs = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).all()
     return jsonify([c.to_dict() for c in configs])
+
+
+# ==================== Angular Frontend Serving ====================
+
+if SERVE_ANGULAR:
+    @app.route('/', defaults={'path': ''})
+    @app.route('/<path:path>')
+    def serve_angular(path):
+        """Serve Angular frontend or fallback to index.html for SPA routing."""
+        # Exclude API routes and auth routes
+        if path.startswith('api/') or path.startswith('auth/') or path in ['login', 'logout']:
+            return app.send_static_file('index.html')
+
+        # Try to serve static files
+        if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
+            return send_from_directory(FRONTEND_DIR, path)
+
+        # Fallback to index.html for SPA routing
+        return send_from_directory(FRONTEND_DIR, 'index.html')
 
 
 if __name__ == '__main__':

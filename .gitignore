@@ -12,6 +12,12 @@ venv/
 ENV/
 env/
 
+# Node.js / Angular
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/.sass-cache/
+
 # IDE
 .idea/
 .vscode/
