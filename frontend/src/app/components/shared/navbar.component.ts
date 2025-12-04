@@ -287,9 +287,11 @@ export class NavbarComponent {
   }
 
   logout(): void {
+    // Capture master status before logout clears user state
+    const wasMaster = this.authService.isMasterAccount;
     this.authService.logout().subscribe({
       next: () => {
-        if (this.authService.isMasterAccount) {
+        if (wasMaster) {
           this.router.navigate(['/superadmin']);
         } else {
           this.router.navigate(['/']);

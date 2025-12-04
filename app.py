@@ -49,11 +49,8 @@ def inject_user():
 
 @app.route('/login')
 def login():
-    """Login page - shows available SSO providers and local login."""
-    if 'user_id' in session or session.get('is_master'):
-        return redirect(url_for('index'))
-    sso_configs = SSOConfig.query.filter_by(enabled=True).all()
-    return render_template('login.html', sso_configs=sso_configs)
+    """Legacy login route - redirect to Angular landing page."""
+    return redirect('/')
 
 
 @app.route('/auth/local', methods=['POST'])
@@ -109,7 +106,7 @@ def sso_login(config_id):
     sso_config = SSOConfig.query.get_or_404(config_id)
 
     if not sso_config.enabled:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     # Get OIDC configuration
     oidc_config = get_oidc_config(sso_config.discovery_url)
@@ -143,11 +140,11 @@ def sso_callback():
     stored_state = session.pop('oauth_state', None)
 
     if not config_id:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     sso_config = SSOConfig.query.get(config_id)
     if not sso_config:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     # Get OIDC configuration
     oidc_config = get_oidc_config(sso_config.discovery_url)
@@ -202,7 +199,7 @@ def sso_callback():
 def logout():
     """Log out the current user."""
     session.clear()
-    return redirect(url_for('login'))
+    return redirect('/')
 
 
 # ==================== Web Routes ====================
@@ -997,6 +994,75 @@ def api_send_verification():
             'purpose': purpose,
             'token': token if app.debug else None  # Only expose token in debug mode
         })
+
+
+@app.route('/api/auth/direct-signup', methods=['POST'])
+def api_direct_signup():
+    """Direct signup without email verification (when verification is disabled)."""
+    # Check if email verification is disabled
+    verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
+    if verification_required:
+        return jsonify({'error': 'Email verification is required. Please use the standard signup flow.'}), 403
+
+    data = request.get_json()
+    email = data.get('email', '').lower().strip()
+    name = data.get('name', '').strip()
+
+    if not email or not name:
+        return jsonify({'error': 'Email and name are required'}), 400
+
+    if '@' not in email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    domain = email.split('@')[1].lower()
+
+    # Check if user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        return jsonify({
+            'error': 'This email is already registered. Please login instead.',
+            'redirect': f'/{domain}/login'
+        }), 400
+
+    # Check tenant status - this should only be used for new tenants
+    has_users = User.query.filter_by(sso_domain=domain).count() > 0
+    if has_users:
+        return jsonify({
+            'error': 'This organization already has users. Please use the login page.',
+            'redirect': f'/{domain}/login'
+        }), 400
+
+    # Create user account directly (first user becomes admin)
+    user = User(
+        email=email,
+        name=name,
+        sso_domain=domain,
+        auth_type='webauthn',
+        is_admin=True,  # First user becomes admin
+        email_verified=True  # Mark as verified since verification is disabled
+    )
+    db.session.add(user)
+
+    # Create default auth config for new tenant
+    auth_config = AuthConfig.query.filter_by(domain=domain).first()
+    if not auth_config:
+        auth_config = AuthConfig(
+            domain=domain,
+            auth_method='webauthn',
+            allow_registration=True,
+            require_approval=True,
+            rp_name='Architecture Decisions'
+        )
+        db.session.add(auth_config)
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Account created successfully',
+        'email': email,
+        'domain': domain,
+        'redirect': f'/{domain}/login?verified=1'
+    })
 
 
 @app.route('/api/auth/verify-email/<token>', methods=['GET', 'POST'])

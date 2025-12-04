@@ -119,7 +119,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                 <mat-icon>info</mat-icon>
                 <span>
                   You'll be the first user and administrator for <strong>{{ tenantDomain }}</strong>.
-                  We'll send a verification email to confirm your identity.
+                  @if (tenantStatus?.email_verification_required === false) {
+                    Your account will be created immediately.
+                  } @else {
+                    We'll send a verification email to confirm your identity.
+                  }
                 </span>
               </p>
 
@@ -127,6 +131,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                       [disabled]="signupForm.invalid || isLoading" class="full-width">
                 @if (isLoading) {
                   <mat-spinner diameter="20"></mat-spinner>
+                } @else if (tenantStatus?.email_verification_required === false) {
+                  <mat-icon>person_add</mat-icon>
+                  Create Account
                 } @else {
                   <mat-icon>mail</mat-icon>
                   Send Verification Email
@@ -551,16 +558,17 @@ export class LandingComponent implements OnInit {
         this.tenantStatus = status;
         this.isLoading = false;
 
-        // If email verification is disabled, redirect directly to tenant login
-        if (!status.email_verification_required) {
-          this.router.navigate([`/${domain}/login`], {
-            queryParams: { email }
-          });
-          return;
-        }
-
         if (status.has_users) {
-          // Tenant exists - check if approval is required
+          // Tenant exists with users
+          if (!status.email_verification_required) {
+            // Verification disabled, redirect directly to tenant login
+            this.router.navigate([`/${domain}/login`], {
+              queryParams: { email }
+            });
+            return;
+          }
+
+          // Verification enabled - check if approval is required
           if (status.require_approval) {
             // Show access request form
             this.currentView = 'access_request';
@@ -572,7 +580,7 @@ export class LandingComponent implements OnInit {
             });
           }
         } else {
-          // New tenant, show signup form
+          // New tenant, show signup form (works for both verification enabled and disabled)
           this.currentView = 'signup';
           this.signupForm.patchValue({ email });
         }
@@ -592,6 +600,32 @@ export class LandingComponent implements OnInit {
 
     const { email, name } = this.signupForm.value;
 
+    // Check if email verification is disabled - use direct signup
+    if (this.tenantStatus && !this.tenantStatus.email_verification_required) {
+      this.http.post<{ message: string; redirect: string }>('/api/auth/direct-signup', {
+        email,
+        name
+      }).subscribe({
+        next: (response) => {
+          this.isLoading = false;
+          // Redirect to tenant login
+          this.router.navigate([response.redirect || `/${this.tenantDomain}/login`], {
+            queryParams: { verified: '1', email }
+          });
+        },
+        error: (err) => {
+          this.isLoading = false;
+          if (err.error?.redirect) {
+            this.router.navigate([err.error.redirect]);
+          } else {
+            this.error = err.error?.error || 'Failed to create account';
+          }
+        }
+      });
+      return;
+    }
+
+    // Email verification is enabled - send verification email
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email,
       name,
