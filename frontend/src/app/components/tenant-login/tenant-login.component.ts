@@ -10,21 +10,28 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatTabsModule } from '@angular/material/tabs';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { AuthService } from '../../services/auth.service';
 
-interface TenantStatus {
+interface TenantAuthConfig {
   domain: string;
-  has_users: boolean;
-  user_count: number;
-  auth_method: 'sso' | 'webauthn';
+  auth_method: string;
+  allow_password: boolean;
+  allow_passkey: boolean;
   allow_registration: boolean;
   has_sso: boolean;
   sso_provider: string | null;
   sso_id: number | null;
 }
 
-type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
+interface UserStatus {
+  exists: boolean;
+  has_passkey: boolean;
+  has_password: boolean;
+}
+
+type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
 
 @Component({
   selector: 'app-tenant-login',
@@ -39,7 +46,8 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatDividerModule
+    MatDividerModule,
+    MatTabsModule
   ],
   template: `
     <div class="login-container">
@@ -52,8 +60,8 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
           <mat-card-subtitle>
             @if (currentView === 'initial') {
               Sign in to your organization
-            } @else if (currentView === 'passkey') {
-              Sign in with your passkey
+            } @else if (currentView === 'login') {
+              Welcome back, {{ currentEmail }}
             } @else if (currentView === 'request-access') {
               Request access to join
             } @else {
@@ -73,14 +81,14 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
 
           <!-- Initial View: Email Entry -->
           @if (currentView === 'initial') {
-            @if (tenantStatus?.has_sso && tenantStatus?.sso_id) {
+            @if (authConfig?.has_sso && authConfig?.sso_id) {
               <div class="sso-section">
-                <a [href]="'/auth/sso/' + tenantStatus!.sso_id" mat-raised-button color="primary" class="full-width">
+                <a [href]="'/auth/sso/' + authConfig!.sso_id" mat-raised-button color="primary" class="full-width">
                   <mat-icon>login</mat-icon>
-                  Sign in with {{ tenantStatus!.sso_provider }}
+                  Sign in with {{ authConfig!.sso_provider }}
                 </a>
                 <mat-divider></mat-divider>
-                <p class="or-text">or use passkey</p>
+                <p class="or-text">or continue with email</p>
               </div>
             }
 
@@ -102,7 +110,7 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
               </button>
             </form>
 
-            @if (webAuthnSupported) {
+            @if (webAuthnSupported && authConfig?.allow_passkey) {
               <button mat-stroked-button class="full-width quick-login" (click)="quickPasskeyLogin()"
                       [disabled]="isLoading">
                 <mat-icon>key</mat-icon>
@@ -111,24 +119,63 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
             }
           }
 
-          <!-- Passkey Login View -->
-          @if (currentView === 'passkey') {
-            <div class="passkey-section">
+          <!-- Login View: Password and/or Passkey -->
+          @if (currentView === 'login') {
+            <div class="login-section">
               <p class="user-email">{{ currentEmail }}</p>
 
-              <button mat-raised-button color="primary" class="full-width passkey-button"
-                      (click)="signInWithPasskey()" [disabled]="isLoading">
-                @if (isLoading) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  <mat-icon>fingerprint</mat-icon>
-                  Use passkey to sign in
+              <!-- Password Login -->
+              @if (authConfig?.allow_password && userStatus?.has_password) {
+                <form [formGroup]="loginForm" (ngSubmit)="loginWithPassword()">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Password</mat-label>
+                    <input matInput formControlName="password" type="password">
+                    <mat-icon matPrefix>lock</mat-icon>
+                  </mat-form-field>
+
+                  <button mat-raised-button color="primary" type="submit"
+                          [disabled]="loginForm.invalid || isLoading" class="full-width">
+                    @if (isLoading) {
+                      <mat-spinner diameter="20"></mat-spinner>
+                    } @else {
+                      <mat-icon>login</mat-icon>
+                      Sign In
+                    }
+                  </button>
+                </form>
+              }
+
+              <!-- Passkey Login -->
+              @if (authConfig?.allow_passkey && userStatus?.has_passkey) {
+                @if (authConfig?.allow_password && userStatus?.has_password) {
+                  <mat-divider class="login-divider"></mat-divider>
+                  <p class="or-text">or</p>
                 }
-              </button>
+                <button mat-stroked-button color="primary" class="full-width passkey-button"
+                        (click)="signInWithPasskey()" [disabled]="isLoading">
+                  @if (isLoading) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>fingerprint</mat-icon>
+                    Use passkey to sign in
+                  }
+                </button>
+              }
+
+              <!-- No credentials set up -->
+              @if (!userStatus?.has_password && !userStatus?.has_passkey) {
+                <div class="info-text warning">
+                  <mat-icon>warning</mat-icon>
+                  <span>
+                    Your account doesn't have any login credentials set up yet.
+                    Please contact your administrator.
+                  </span>
+                </div>
+              }
 
               <button mat-button class="back-button" (click)="goBack()">
                 <mat-icon>arrow_back</mat-icon>
-                Back
+                Use different email
               </button>
             </div>
           }
@@ -274,8 +321,12 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
       margin-top: 12px;
     }
 
-    .passkey-section, .request-section, .request-sent-section {
+    .login-section, .request-section, .request-sent-section {
       text-align: center;
+    }
+
+    .login-section form {
+      text-align: left;
     }
 
     .user-email {
@@ -292,6 +343,10 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
       font-size: 16px;
     }
 
+    .login-divider {
+      margin: 16px 0;
+    }
+
     .back-button {
       margin-top: 16px;
     }
@@ -304,16 +359,24 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
       color: #666;
       margin-bottom: 20px;
       padding: 12px;
-      background: #fff3e0;
+      background: #e3f2fd;
       border-radius: 4px;
       text-align: left;
+    }
+
+    .info-text.warning {
+      background: #fff3e0;
+    }
+
+    .info-text.warning mat-icon {
+      color: #f57c00;
     }
 
     .info-text mat-icon {
       font-size: 20px;
       width: 20px;
       height: 20px;
-      color: #f57c00;
+      color: #1976d2;
     }
 
     .request-sent-section {
@@ -347,10 +410,12 @@ type LoginView = 'initial' | 'passkey' | 'request-access' | 'request-sent';
 })
 export class TenantLoginComponent implements OnInit {
   emailForm: FormGroup;
+  loginForm: FormGroup;
   requestForm: FormGroup;
 
   tenant = '';
-  tenantStatus: TenantStatus | null = null;
+  authConfig: TenantAuthConfig | null = null;
+  userStatus: UserStatus | null = null;
   currentEmail = '';
   currentView: LoginView = 'initial';
 
@@ -372,6 +437,10 @@ export class TenantLoginComponent implements OnInit {
       email: ['', [Validators.required, Validators.email]]
     });
 
+    this.loginForm = this.fb.group({
+      password: ['', Validators.required]
+    });
+
     this.requestForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       name: ['', Validators.required],
@@ -383,30 +452,38 @@ export class TenantLoginComponent implements OnInit {
     this.webAuthnSupported = this.webAuthnService.isWebAuthnSupported();
     this.tenant = this.route.snapshot.paramMap.get('tenant') || '';
 
-    // Load tenant status
-    this.loadTenantStatus();
+    // Load tenant auth config
+    this.loadAuthConfig();
 
     // Pre-fill email from query params
     const email = this.route.snapshot.queryParamMap.get('email');
     if (email) {
       this.emailForm.patchValue({ email });
     }
+
+    // Check for verified param - show success message
+    if (this.route.snapshot.queryParamMap.get('verified') === '1') {
+      this.success = 'Email verified! You can now sign in.';
+    }
   }
 
-  loadTenantStatus(): void {
-    this.http.get<TenantStatus>(`/api/auth/tenant/${this.tenant}`).subscribe({
-      next: (status) => {
-        this.tenantStatus = status;
-        // If no users exist for this tenant, redirect to landing for signup
-        if (!status.has_users) {
-          this.router.navigate(['/'], {
-            queryParams: { domain: this.tenant }
-          });
-        }
+  loadAuthConfig(): void {
+    this.http.get<TenantAuthConfig>(`/api/tenant/${this.tenant}/auth-config`).subscribe({
+      next: (config) => {
+        this.authConfig = config;
       },
       error: () => {
-        // Error loading tenant, redirect to landing
-        this.router.navigate(['/']);
+        // Use defaults
+        this.authConfig = {
+          domain: this.tenant,
+          auth_method: 'local',
+          allow_password: true,
+          allow_passkey: true,
+          allow_registration: true,
+          has_sso: false,
+          sso_provider: null,
+          sso_id: null
+        };
       }
     });
   }
@@ -417,7 +494,7 @@ export class TenantLoginComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const email = this.emailForm.value.email;
+    const email = this.emailForm.value.email.toLowerCase();
     const emailDomain = email.split('@')[1];
 
     // Validate email domain matches tenant
@@ -430,12 +507,13 @@ export class TenantLoginComponent implements OnInit {
     this.currentEmail = email;
 
     // Check if user exists
-    this.http.get<{ exists: boolean; has_passkey: boolean }>(`/api/auth/user-exists/${email}`).subscribe({
+    this.http.get<UserStatus>(`/api/auth/user-exists/${email}`).subscribe({
       next: (result) => {
         this.isLoading = false;
+        this.userStatus = result;
         if (result.exists) {
-          // User exists, show passkey login
-          this.currentView = 'passkey';
+          // User exists, show login options
+          this.currentView = 'login';
         } else {
           // User doesn't exist, show request access form
           this.currentView = 'request-access';
@@ -449,12 +527,34 @@ export class TenantLoginComponent implements OnInit {
     });
   }
 
+  loginWithPassword(): void {
+    if (this.loginForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+
+    this.http.post<{ message: string; user: any; redirect: string }>('/api/auth/login', {
+      email: this.currentEmail,
+      password: this.loginForm.value.password
+    }).subscribe({
+      next: (response) => {
+        this.authService.loadCurrentUser();
+        this.router.navigate([response.redirect || `/${this.tenant}`]);
+      },
+      error: (err) => {
+        this.isLoading = false;
+        this.error = err.error?.error || 'Login failed. Please try again.';
+      }
+    });
+  }
+
   signInWithPasskey(): void {
     this.isLoading = true;
     this.error = '';
 
     this.webAuthnService.authenticate(this.currentEmail).subscribe({
       next: () => {
+        this.authService.loadCurrentUser();
         this.router.navigate([`/${this.tenant}`]);
       },
       error: (err) => {
@@ -470,6 +570,7 @@ export class TenantLoginComponent implements OnInit {
 
     this.webAuthnService.authenticate().subscribe({
       next: () => {
+        this.authService.loadCurrentUser();
         this.router.navigate([`/${this.tenant}`]);
       },
       error: (err) => {
@@ -507,5 +608,7 @@ export class TenantLoginComponent implements OnInit {
   goBack(): void {
     this.currentView = 'initial';
     this.error = '';
+    this.userStatus = null;
+    this.loginForm.reset();
   }
 }

@@ -3,7 +3,7 @@ import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -98,6 +98,69 @@ def api_get_sso_configs():
         'provider_name': c.provider_name,
         'enabled': c.enabled
     } for c in configs])
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def api_tenant_login():
+    """Handle tenant user password login."""
+    data = request.get_json()
+    email = data.get('email', '').lower().strip()
+    password = data.get('password', '')
+
+    if not email or not password:
+        return jsonify({'error': 'Email and password are required'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    if not user.has_password():
+        return jsonify({
+            'error': 'No password set for this account',
+            'has_passkey': len(user.webauthn_credentials) > 0
+        }), 401
+
+    if not user.check_password(password):
+        return jsonify({'error': 'Invalid email or password'}), 401
+
+    # Login successful
+    session['user_id'] = user.id
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Login successful',
+        'user': user.to_dict(),
+        'redirect': f'/{user.sso_domain}'
+    })
+
+
+@app.route('/api/auth/set-password', methods=['POST'])
+@login_required
+def api_set_password():
+    """Set or update password for current user."""
+    data = request.get_json()
+    password = data.get('password', '')
+    current_password = data.get('current_password', '')
+
+    if not password or len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    user = g.current_user
+    if isinstance(user, MasterAccount):
+        return jsonify({'error': 'Use the master password change endpoint'}), 400
+
+    # If user already has a password, require current password
+    if user.has_password():
+        if not current_password:
+            return jsonify({'error': 'Current password is required'}), 400
+        if not user.check_password(current_password):
+            return jsonify({'error': 'Current password is incorrect'}), 401
+
+    user.set_password(password)
+    db.session.commit()
+
+    return jsonify({'message': 'Password updated successfully'})
 
 
 @app.route('/auth/sso/<int:config_id>')
@@ -202,50 +265,51 @@ def logout():
     return redirect('/')
 
 
-# ==================== Web Routes ====================
+# ==================== Web Routes (Legacy - only when not serving Angular) ====================
 
-@app.route('/')
-@login_required
-def index():
-    """Home page - list all architecture decisions."""
-    return render_template('index.html')
-
-
-@app.route('/decision/<int:decision_id>')
-@login_required
-def view_decision(decision_id):
-    """View a single architecture decision."""
-    return render_template('decision.html', decision_id=decision_id)
+if not SERVE_ANGULAR:
+    @app.route('/')
+    @login_required
+    def index():
+        """Home page - list all architecture decisions."""
+        return render_template('index.html')
 
 
-@app.route('/decision/new')
-@login_required
-def new_decision():
-    """Create a new architecture decision."""
-    return render_template('decision.html', decision_id=None)
+    @app.route('/decision/<int:decision_id>')
+    @login_required
+    def view_decision(decision_id):
+        """View a single architecture decision."""
+        return render_template('decision.html', decision_id=decision_id)
 
 
-@app.route('/settings')
-@admin_required
-def settings():
-    """Settings page for SSO and email configuration."""
-    return render_template('settings.html')
+    @app.route('/decision/new')
+    @login_required
+    def new_decision():
+        """Create a new architecture decision."""
+        return render_template('decision.html', decision_id=None)
 
 
-@app.route('/profile')
-@login_required
-def profile():
-    """User profile and subscription settings."""
-    if is_master_account():
-        return redirect(url_for('master_profile'))
-    return render_template('profile.html')
+    @app.route('/settings')
+    @admin_required
+    def settings():
+        """Settings page for SSO and email configuration."""
+        return render_template('settings.html')
 
 
-@app.route('/master/profile')
-@master_required
-def master_profile():
-    """Master account profile page."""
-    return render_template('master_profile.html')
+    @app.route('/profile')
+    @login_required
+    def profile():
+        """User profile and subscription settings."""
+        if is_master_account():
+            return redirect(url_for('master_profile'))
+        return render_template('profile.html')
+
+
+    @app.route('/master/profile')
+    @master_required
+    def master_profile():
+        """Master account profile page."""
+        return render_template('master_profile.html')
 
 
 # ==================== API Routes - Decisions ====================
@@ -830,6 +894,7 @@ def api_check_user_exists(email):
         return jsonify({
             'exists': True,
             'has_passkey': len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False,
+            'has_password': user.has_password(),
             'auth_type': user.auth_type,
             'email_verified': user.email_verified
         })
@@ -837,6 +902,7 @@ def api_check_user_exists(email):
         return jsonify({
             'exists': False,
             'has_passkey': False,
+            'has_password': False,
             'auth_type': None,
             'email_verified': False
         })
@@ -998,7 +1064,7 @@ def api_send_verification():
 
 @app.route('/api/auth/direct-signup', methods=['POST'])
 def api_direct_signup():
-    """Direct signup without email verification (when verification is disabled)."""
+    """Direct signup with password (when email verification is disabled)."""
     # Check if email verification is disabled
     verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
     if verification_required:
@@ -1007,14 +1073,58 @@ def api_direct_signup():
     data = request.get_json()
     email = data.get('email', '').lower().strip()
     name = data.get('name', '').strip()
+    password = data.get('password', '').strip()
 
     if not email or not name:
         return jsonify({'error': 'Email and name are required'}), 400
+
+    if not password or len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
 
     if '@' not in email:
         return jsonify({'error': 'Invalid email address'}), 400
 
     domain = email.split('@')[1].lower()
+
+    # Check if this is a public email domain
+    if DomainApproval.is_public_domain(domain):
+        return jsonify({
+            'error': f'{domain} is a public email provider. Please use your work email address.',
+            'is_public_domain': True
+        }), 400
+
+    # Check if domain is approved
+    domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+    if not domain_approval:
+        # New domain - create approval request
+        domain_approval = DomainApproval(
+            domain=domain,
+            status='pending',
+            requested_by_email=email,
+            requested_by_name=name
+        )
+        db.session.add(domain_approval)
+        db.session.commit()
+        # TODO: Send notification to super admin about new domain
+        return jsonify({
+            'error': 'Your organization domain needs approval before you can sign up.',
+            'domain_pending': True,
+            'message': 'The super admin has been notified and will review your domain shortly.'
+        }), 403
+
+    if domain_approval.status == 'pending':
+        return jsonify({
+            'error': 'Your organization domain is pending approval.',
+            'domain_pending': True,
+            'message': 'Please wait for the super admin to approve your domain.'
+        }), 403
+
+    if domain_approval.status == 'rejected':
+        return jsonify({
+            'error': 'Your organization domain has been rejected.',
+            'domain_rejected': True,
+            'reason': domain_approval.rejection_reason
+        }), 403
 
     # Check if user already exists
     existing_user = User.query.filter_by(email=email).first()
@@ -1037,10 +1147,11 @@ def api_direct_signup():
         email=email,
         name=name,
         sso_domain=domain,
-        auth_type='webauthn',
+        auth_type='local',
         is_admin=True,  # First user becomes admin
         email_verified=True  # Mark as verified since verification is disabled
     )
+    user.set_password(password)
     db.session.add(user)
 
     # Create default auth config for new tenant
@@ -1048,7 +1159,9 @@ def api_direct_signup():
     if not auth_config:
         auth_config = AuthConfig(
             domain=domain,
-            auth_method='webauthn',
+            auth_method='local',
+            allow_password=True,
+            allow_passkey=True,
             allow_registration=True,
             require_approval=True,
             rp_name='Architecture Decisions'
@@ -1057,11 +1170,17 @@ def api_direct_signup():
 
     db.session.commit()
 
+    # Log the user in
+    session['user_id'] = user.id
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
     return jsonify({
         'message': 'Account created successfully',
         'email': email,
         'domain': domain,
-        'redirect': f'/{domain}/login?verified=1'
+        'user': user.to_dict(),
+        'redirect': f'/{domain}'
     })
 
 
@@ -1684,6 +1803,169 @@ def api_set_email_verification():
     })
 
 
+# ==================== API Routes - Domain Approval ====================
+
+@app.route('/api/domains/pending', methods=['GET'])
+@master_required
+def api_list_pending_domains():
+    """List all pending domain approvals (super admin only)."""
+    approvals = DomainApproval.query.filter_by(status='pending').order_by(DomainApproval.created_at.desc()).all()
+    return jsonify([a.to_dict() for a in approvals])
+
+
+@app.route('/api/domains', methods=['GET'])
+@master_required
+def api_list_all_domains():
+    """List all domain approvals (super admin only)."""
+    approvals = DomainApproval.query.order_by(DomainApproval.created_at.desc()).all()
+    return jsonify([a.to_dict() for a in approvals])
+
+
+@app.route('/api/domains/<int:domain_id>/approve', methods=['POST'])
+@master_required
+def api_approve_domain(domain_id):
+    """Approve a domain for signup (super admin only)."""
+    approval = DomainApproval.query.get_or_404(domain_id)
+
+    if approval.status != 'pending':
+        return jsonify({'error': f'Domain is already {approval.status}'}), 400
+
+    approval.status = 'approved'
+    approval.approved_by_id = g.current_user.id
+    db.session.commit()
+
+    # TODO: Send notification email to the user who requested
+
+    return jsonify({
+        'message': f'Domain {approval.domain} has been approved',
+        'domain': approval.to_dict()
+    })
+
+
+@app.route('/api/domains/<int:domain_id>/reject', methods=['POST'])
+@master_required
+def api_reject_domain(domain_id):
+    """Reject a domain for signup (super admin only)."""
+    approval = DomainApproval.query.get_or_404(domain_id)
+    data = request.get_json() or {}
+
+    if approval.status != 'pending':
+        return jsonify({'error': f'Domain is already {approval.status}'}), 400
+
+    approval.status = 'rejected'
+    approval.rejection_reason = data.get('reason', 'Domain not allowed')
+    db.session.commit()
+
+    # TODO: Send notification email to the user who requested
+
+    return jsonify({
+        'message': f'Domain {approval.domain} has been rejected',
+        'domain': approval.to_dict()
+    })
+
+
+@app.route('/api/domains/check/<domain>', methods=['GET'])
+def api_check_domain_status(domain):
+    """Check if a domain is approved for signup (public endpoint)."""
+    domain = domain.lower()
+
+    if DomainApproval.is_public_domain(domain):
+        return jsonify({
+            'domain': domain,
+            'status': 'rejected',
+            'is_public_domain': True,
+            'message': 'Public email domains are not allowed'
+        })
+
+    approval = DomainApproval.query.filter_by(domain=domain).first()
+    if not approval:
+        return jsonify({
+            'domain': domain,
+            'status': 'unknown',
+            'message': 'Domain not yet registered'
+        })
+
+    return jsonify({
+        'domain': domain,
+        'status': approval.status,
+        'message': 'Domain is approved' if approval.status == 'approved' else f'Domain is {approval.status}'
+    })
+
+
+# ==================== API Routes - Tenant Auth Config ====================
+
+@app.route('/api/tenant/<domain>/auth-config', methods=['GET'])
+def api_get_tenant_auth_config(domain):
+    """Get authentication configuration for a tenant (public endpoint)."""
+    auth_config = AuthConfig.query.filter_by(domain=domain.lower()).first()
+
+    if not auth_config:
+        # Return defaults
+        return jsonify({
+            'domain': domain.lower(),
+            'auth_method': 'local',
+            'allow_password': True,
+            'allow_passkey': True,
+            'allow_registration': True,
+            'has_sso': False,
+            'sso_provider': None
+        })
+
+    # Check if tenant has SSO configured
+    sso_config = SSOConfig.query.filter_by(domain=domain.lower(), enabled=True).first()
+
+    return jsonify({
+        'domain': auth_config.domain,
+        'auth_method': auth_config.auth_method,
+        'allow_password': auth_config.allow_password,
+        'allow_passkey': auth_config.allow_passkey,
+        'allow_registration': auth_config.allow_registration,
+        'has_sso': sso_config is not None,
+        'sso_provider': sso_config.provider_name if sso_config else None,
+        'sso_id': sso_config.id if sso_config else None
+    })
+
+
+@app.route('/api/tenant/auth-config', methods=['PUT'])
+@admin_required
+def api_update_tenant_auth_config():
+    """Update authentication configuration for tenant (admin only)."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot modify tenant auth configs'}), 403
+
+    domain = g.current_user.sso_domain
+    data = request.get_json()
+
+    auth_config = AuthConfig.query.filter_by(domain=domain).first()
+    if not auth_config:
+        auth_config = AuthConfig(domain=domain)
+        db.session.add(auth_config)
+
+    if 'auth_method' in data:
+        if data['auth_method'] not in ['local', 'sso', 'webauthn']:
+            return jsonify({'error': 'Invalid auth method'}), 400
+        auth_config.auth_method = data['auth_method']
+
+    if 'allow_password' in data:
+        auth_config.allow_password = bool(data['allow_password'])
+
+    if 'allow_passkey' in data:
+        auth_config.allow_passkey = bool(data['allow_passkey'])
+
+    if 'allow_registration' in data:
+        auth_config.allow_registration = bool(data['allow_registration'])
+
+    if 'require_approval' in data:
+        auth_config.require_approval = bool(data['require_approval'])
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Auth configuration updated',
+        'config': auth_config.to_dict()
+    })
+
+
 # ==================== API Routes - IT Infrastructure ====================
 
 @app.route('/api/infrastructure', methods=['GET'])
@@ -1836,15 +2118,17 @@ if SERVE_ANGULAR:
     @app.route('/<path:path>')
     def serve_angular(path):
         """Serve Angular frontend or fallback to index.html for SPA routing."""
-        # Exclude API routes and auth routes
-        if path.startswith('api/') or path.startswith('auth/') or path in ['login', 'logout']:
-            return app.send_static_file('index.html')
+        # API and auth routes should be handled by Flask, not Angular
+        # If we reach here for these paths, it means there's no handler - return 404
+        if path.startswith('api/'):
+            return jsonify({'error': 'Not found'}), 404
 
-        # Try to serve static files
+        # Try to serve static files (JS, CSS, images, etc.)
         if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
             return send_from_directory(FRONTEND_DIR, path)
 
-        # Fallback to index.html for SPA routing
+        # Fallback to index.html for Angular SPA routing
+        # This handles all frontend routes like /, /superadmin, /{tenant}/login, etc.
         return send_from_directory(FRONTEND_DIR, 'index.html')
 
 

@@ -115,6 +115,15 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                 <mat-icon matPrefix>person</mat-icon>
               </mat-form-field>
 
+              @if (tenantStatus?.email_verification_required === false) {
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Password</mat-label>
+                  <input matInput formControlName="password" type="password" placeholder="Min 8 characters">
+                  <mat-icon matPrefix>lock</mat-icon>
+                  <mat-hint>You'll use this password to log in</mat-hint>
+                </mat-form-field>
+              }
+
               <p class="info-text">
                 <mat-icon>info</mat-icon>
                 <span>
@@ -128,7 +137,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
               </p>
 
               <button mat-raised-button color="primary" type="submit"
-                      [disabled]="signupForm.invalid || isLoading" class="full-width">
+                      [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && signupForm.get('password')?.value?.length < 8)" class="full-width">
                 @if (isLoading) {
                   <mat-spinner diameter="20"></mat-spinner>
                 } @else if (tenantStatus?.email_verification_required === false) {
@@ -514,7 +523,8 @@ export class LandingComponent implements OnInit {
 
     this.signupForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required]
+      name: ['', Validators.required],
+      password: ['', [Validators.minLength(8)]]
     });
 
     this.accessRequestForm = this.fb.group({
@@ -598,25 +608,28 @@ export class LandingComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name } = this.signupForm.value;
+    const { email, name, password } = this.signupForm.value;
 
     // Check if email verification is disabled - use direct signup
     if (this.tenantStatus && !this.tenantStatus.email_verification_required) {
-      this.http.post<{ message: string; redirect: string }>('/api/auth/direct-signup', {
+      this.http.post<{ message: string; redirect: string; user?: any }>('/api/auth/direct-signup', {
         email,
-        name
+        name,
+        password
       }).subscribe({
         next: (response) => {
           this.isLoading = false;
-          // Redirect to tenant login
-          this.router.navigate([response.redirect || `/${this.tenantDomain}/login`], {
-            queryParams: { verified: '1', email }
-          });
+          // User is now logged in, redirect to dashboard
+          this.router.navigate([response.redirect || `/${this.tenantDomain}`]);
         },
         error: (err) => {
           this.isLoading = false;
           if (err.error?.redirect) {
             this.router.navigate([err.error.redirect]);
+          } else if (err.error?.domain_pending) {
+            this.error = err.error.message || 'Your organization domain needs approval.';
+          } else if (err.error?.is_public_domain) {
+            this.error = err.error.error || 'Public email domains are not allowed.';
           } else {
             this.error = err.error?.error || 'Failed to create account';
           }
