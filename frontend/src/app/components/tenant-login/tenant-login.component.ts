@@ -119,47 +119,59 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
             }
           }
 
-          <!-- Login View: Password and/or Passkey -->
+          <!-- Login View: Passkey first (default), Password as alternative -->
           @if (currentView === 'login') {
             <div class="login-section">
               <p class="user-email">{{ currentEmail }}</p>
 
-              <!-- Password Login -->
-              @if (authConfig?.allow_password && userStatus?.has_password) {
-                <form [formGroup]="loginForm" (ngSubmit)="loginWithPassword()">
-                  <mat-form-field appearance="outline" class="full-width">
-                    <mat-label>Password</mat-label>
-                    <input matInput formControlName="password" type="password">
-                    <mat-icon matPrefix>lock</mat-icon>
-                  </mat-form-field>
-
-                  <button mat-raised-button color="primary" type="submit"
-                          [disabled]="loginForm.invalid || isLoading" class="full-width">
-                    @if (isLoading) {
-                      <mat-spinner diameter="20"></mat-spinner>
-                    } @else {
-                      <mat-icon>login</mat-icon>
-                      Sign In
-                    }
-                  </button>
-                </form>
-              }
-
-              <!-- Passkey Login -->
-              @if (authConfig?.allow_passkey && userStatus?.has_passkey) {
-                @if (authConfig?.allow_password && userStatus?.has_password) {
-                  <mat-divider class="login-divider"></mat-divider>
-                  <p class="or-text">or</p>
-                }
-                <button mat-stroked-button color="primary" class="full-width passkey-button"
+              <!-- Passkey Login (Primary) -->
+              @if (authConfig?.allow_passkey && userStatus?.has_passkey && !showPasswordLogin) {
+                <button mat-raised-button color="primary" class="full-width passkey-button"
                         (click)="signInWithPasskey()" [disabled]="isLoading">
                   @if (isLoading) {
                     <mat-spinner diameter="20"></mat-spinner>
                   } @else {
                     <mat-icon>fingerprint</mat-icon>
-                    Use passkey to sign in
+                    Sign in with passkey
                   }
                 </button>
+
+                @if (authConfig?.allow_password && userStatus?.has_password) {
+                  <button mat-button class="alt-login-button" (click)="showPasswordLogin = true">
+                    <mat-icon>password</mat-icon>
+                    Use password instead
+                  </button>
+                }
+              }
+
+              <!-- Password Login (Secondary) -->
+              @if (showPasswordLogin || (!userStatus?.has_passkey && userStatus?.has_password)) {
+                @if (authConfig?.allow_password && userStatus?.has_password) {
+                  <form [formGroup]="loginForm" (ngSubmit)="loginWithPassword()">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Password</mat-label>
+                      <input matInput formControlName="password" type="password">
+                      <mat-icon matPrefix>lock</mat-icon>
+                    </mat-form-field>
+
+                    <button mat-raised-button color="primary" type="submit"
+                            [disabled]="loginForm.invalid || isLoading" class="full-width">
+                      @if (isLoading) {
+                        <mat-spinner diameter="20"></mat-spinner>
+                      } @else {
+                        <mat-icon>login</mat-icon>
+                        Sign In
+                      }
+                    </button>
+                  </form>
+
+                  @if (authConfig?.allow_passkey && userStatus?.has_passkey) {
+                    <button mat-button class="alt-login-button" (click)="showPasswordLogin = false">
+                      <mat-icon>fingerprint</mat-icon>
+                      Use passkey instead (recommended)
+                    </button>
+                  }
+                }
               }
 
               <!-- No credentials set up -->
@@ -351,6 +363,11 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
       margin-top: 16px;
     }
 
+    .alt-login-button {
+      margin-top: 12px;
+      color: #666;
+    }
+
     .info-text {
       display: flex;
       align-items: flex-start;
@@ -422,6 +439,7 @@ export class TenantLoginComponent implements OnInit {
   isLoading = false;
   error = '';
   success = '';
+  showPasswordLogin = false;  // Default to showing passkey
 
   webAuthnSupported = false;
 
@@ -609,6 +627,7 @@ export class TenantLoginComponent implements OnInit {
     this.currentView = 'initial';
     this.error = '';
     this.userStatus = null;
+    this.showPasswordLogin = false;
     this.loginForm.reset();
   }
 }

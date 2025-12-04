@@ -1064,7 +1064,7 @@ def api_send_verification():
 
 @app.route('/api/auth/direct-signup', methods=['POST'])
 def api_direct_signup():
-    """Direct signup with password (when email verification is disabled)."""
+    """Direct signup (when email verification is disabled)."""
     # Check if email verification is disabled
     verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
     if verification_required:
@@ -1073,13 +1073,16 @@ def api_direct_signup():
     data = request.get_json()
     email = data.get('email', '').lower().strip()
     name = data.get('name', '').strip()
-    password = data.get('password', '').strip()
+    password = data.get('password', '').strip() if data.get('password') else None
+    auth_preference = data.get('auth_preference', 'passkey')  # 'passkey' or 'password'
 
     if not email or not name:
         return jsonify({'error': 'Email and name are required'}), 400
 
-    if not password or len(password) < 8:
-        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+    # Only require password if user chose password auth
+    if auth_preference == 'password':
+        if not password or len(password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters'}), 400
 
     if '@' not in email:
         return jsonify({'error': 'Invalid email address'}), 400
@@ -1147,11 +1150,12 @@ def api_direct_signup():
         email=email,
         name=name,
         sso_domain=domain,
-        auth_type='local',
+        auth_type='webauthn' if auth_preference == 'passkey' else 'local',
         is_admin=True,  # First user becomes admin
         email_verified=True  # Mark as verified since verification is disabled
     )
-    user.set_password(password)
+    if auth_preference == 'password' and password:
+        user.set_password(password)
     db.session.add(user)
 
     # Create default auth config for new tenant
@@ -1175,12 +1179,21 @@ def api_direct_signup():
     user.last_login = datetime.utcnow()
     db.session.commit()
 
+    # Redirect to passkey setup if user chose passkey, otherwise to dashboard
+    if auth_preference == 'passkey':
+        redirect_url = f'/{domain}/profile?setup=passkey'
+        setup_passkey = True
+    else:
+        redirect_url = f'/{domain}'
+        setup_passkey = False
+
     return jsonify({
         'message': 'Account created successfully',
         'email': email,
         'domain': domain,
         'user': user.to_dict(),
-        'redirect': f'/{domain}'
+        'redirect': redirect_url,
+        'setup_passkey': setup_passkey
     })
 
 

@@ -115,7 +115,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                 <mat-icon matPrefix>person</mat-icon>
               </mat-form-field>
 
-              @if (tenantStatus?.email_verification_required === false) {
+              @if (tenantStatus?.email_verification_required === false && usePasswordSignup) {
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Password</mat-label>
                   <input matInput formControlName="password" type="password" placeholder="Min 8 characters">
@@ -129,7 +129,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                 <span>
                   You'll be the first user and administrator for <strong>{{ tenantDomain }}</strong>.
                   @if (tenantStatus?.email_verification_required === false) {
-                    Your account will be created immediately.
+                    @if (!usePasswordSignup) {
+                      After creating your account, you'll set up a passkey for secure passwordless login.
+                    } @else {
+                      Your account will be created with password login.
+                    }
                   } @else {
                     We'll send a verification email to confirm your identity.
                   }
@@ -137,7 +141,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
               </p>
 
               <button mat-raised-button color="primary" type="submit"
-                      [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && signupForm.get('password')?.value?.length < 8)" class="full-width">
+                      [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && usePasswordSignup && signupForm.get('password')?.value?.length < 8)" class="full-width">
                 @if (isLoading) {
                   <mat-spinner diameter="20"></mat-spinner>
                 } @else if (tenantStatus?.email_verification_required === false) {
@@ -148,6 +152,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
                   Send Verification Email
                 }
               </button>
+
+              @if (tenantStatus?.email_verification_required === false) {
+                <button mat-button type="button" class="password-toggle" (click)="togglePasswordSignup()">
+                  @if (!usePasswordSignup) {
+                    <mat-icon>password</mat-icon>
+                    I prefer to use a password
+                  } @else {
+                    <mat-icon>fingerprint</mat-icon>
+                    Use passkey instead (recommended)
+                  }
+                </button>
+              }
             </form>
 
             <button mat-button class="back-button" (click)="goBack()">
@@ -400,6 +416,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
       margin-top: 16px;
     }
 
+    .password-toggle {
+      margin-top: 12px;
+      color: #666;
+    }
+
     .verification-sent {
       text-align: center;
       padding: 16px 0;
@@ -508,6 +529,7 @@ export class LandingComponent implements OnInit {
   error = '';
   success = '';
   resendCooldown = 0;
+  usePasswordSignup = false;  // Default to passkey signup
 
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -612,14 +634,15 @@ export class LandingComponent implements OnInit {
 
     // Check if email verification is disabled - use direct signup
     if (this.tenantStatus && !this.tenantStatus.email_verification_required) {
-      this.http.post<{ message: string; redirect: string; user?: any }>('/api/auth/direct-signup', {
+      this.http.post<{ message: string; redirect: string; user?: any; setup_passkey?: boolean }>('/api/auth/direct-signup', {
         email,
         name,
-        password
+        password: this.usePasswordSignup ? password : null,
+        auth_preference: this.usePasswordSignup ? 'password' : 'passkey'
       }).subscribe({
         next: (response) => {
           this.isLoading = false;
-          // User is now logged in, redirect to dashboard
+          // Redirect - if passkey, go to passkey setup, otherwise dashboard
           this.router.navigate([response.redirect || `/${this.tenantDomain}`]);
         },
         error: (err) => {
@@ -736,11 +759,19 @@ export class LandingComponent implements OnInit {
     }, 1000);
   }
 
+  togglePasswordSignup(): void {
+    this.usePasswordSignup = !this.usePasswordSignup;
+    if (!this.usePasswordSignup) {
+      this.signupForm.patchValue({ password: '' });
+    }
+  }
+
   goBack(): void {
     this.currentView = 'email';
     this.error = '';
     this.success = '';
     this.tenantStatus = null;
     this.verificationEmail = '';
+    this.usePasswordSignup = false;
   }
 }
