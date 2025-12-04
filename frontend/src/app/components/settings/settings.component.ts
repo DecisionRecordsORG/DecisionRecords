@@ -360,6 +360,14 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                         When disabled, only existing users can sign in.
                       </p>
 
+                      <mat-slide-toggle formControlName="require_approval">
+                        Require admin approval for new users
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, new users from your domain must be approved by an admin before they can access the system.
+                        When disabled, users with verified email addresses from your domain can sign up automatically.
+                      </p>
+
                       <mat-form-field appearance="outline" class="full-width">
                         <mat-label>Application Name (shown during passkey setup)</mat-label>
                         <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
@@ -802,6 +810,7 @@ export class SettingsComponent implements OnInit {
     this.authConfigForm = this.fb.group({
       auth_method: ['webauthn', Validators.required],
       allow_registration: [true],
+      require_approval: [true],
       rp_name: ['Architecture Decisions']
     });
   }
@@ -1016,6 +1025,7 @@ export class SettingsComponent implements OnInit {
           this.authConfigForm.patchValue({
             auth_method: this.authConfig.auth_method,
             allow_registration: this.authConfig.allow_registration,
+            require_approval: this.authConfig.require_approval,
             rp_name: this.authConfig.rp_name
           });
         }
@@ -1023,6 +1033,7 @@ export class SettingsComponent implements OnInit {
       error: () => {
         // Use defaults if no config exists
         this.authConfigForm.patchValue({
+          require_approval: true,
           auth_method: 'webauthn',
           allow_registration: true,
           rp_name: 'Architecture Decisions'
@@ -1040,6 +1051,7 @@ export class SettingsComponent implements OnInit {
     const config: AuthConfigRequest = {
       auth_method: formValue.auth_method,
       allow_registration: formValue.allow_registration,
+      require_approval: formValue.require_approval,
       rp_name: formValue.rp_name
     };
 

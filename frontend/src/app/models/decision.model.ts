@@ -6,6 +6,7 @@ export interface User {
   auth_type: 'sso' | 'webauthn';
   is_admin: boolean;
   has_passkey: boolean;
+  email_verified: boolean;
   created_at: string;
   last_login: string;
 }
@@ -86,6 +87,7 @@ export interface AuthConfig {
   domain: string;
   auth_method: 'sso' | 'webauthn';
   allow_registration: boolean;
+  require_approval: boolean;
   rp_name: string;
   id?: number;
   created_at?: string;
@@ -153,4 +155,33 @@ export interface AccessRequest {
   processed_by: User | null;
   processed_at: string | null;
   rejection_reason: string | null;
+}
+
+export interface TenantStatus {
+  domain: string;
+  has_users: boolean;
+  user_count: number;
+  auth_method: 'sso' | 'webauthn';
+  allow_registration: boolean;
+  require_approval: boolean;
+  has_sso: boolean;
+  sso_provider: string | null;
+  sso_id: number | null;
+}
+
+export interface EmailVerificationResponse {
+  message: string;
+  email: string;
+  purpose: 'signup' | 'access_request' | 'login';
+  token?: string;  // Only in debug mode
+}
+
+export interface VerificationStatus {
+  valid: boolean;
+  email?: string;
+  domain?: string;
+  purpose?: 'signup' | 'access_request' | 'login';
+  expired?: boolean;
+  verified?: boolean;
+  error?: string;
 }

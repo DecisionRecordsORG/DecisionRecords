@@ -68,6 +68,7 @@ class User(db.Model):
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
     auth_type = db.Column(db.String(20), nullable=False, default='sso')  # 'sso' or 'webauthn'
     is_admin = db.Column(db.Boolean, default=False)
+    email_verified = db.Column(db.Boolean, default=False)  # Email verification status
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, nullable=True)
 
@@ -84,6 +85,7 @@ class User(db.Model):
             'sso_domain': self.sso_domain,
             'auth_type': self.auth_type,
             'is_admin': self.is_admin,
+            'email_verified': self.email_verified,
             'created_at': self.created_at.isoformat(),
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'has_passkey': len(self.webauthn_credentials) > 0 if self.webauthn_credentials else False,
@@ -167,6 +169,7 @@ class AuthConfig(db.Model):
     domain = db.Column(db.String(255), nullable=False, unique=True)
     auth_method = db.Column(db.String(20), nullable=False, default='webauthn')  # 'sso' or 'webauthn'
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration for webauthn
+    require_approval = db.Column(db.Boolean, default=True)  # Require admin approval for new users to join tenant
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -177,6 +180,7 @@ class AuthConfig(db.Model):
             'domain': self.domain,
             'auth_method': self.auth_method,
             'allow_registration': self.allow_registration,
+            'require_approval': self.require_approval,
             'rp_name': self.rp_name,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
@@ -362,6 +366,43 @@ class AccessRequest(db.Model):
             'processed_by': self.processed_by.to_dict() if self.processed_by else None,
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
             'rejection_reason': self.rejection_reason,
+        }
+
+
+class EmailVerification(db.Model):
+    """Email verification tokens for validating user email addresses."""
+
+    __tablename__ = 'email_verifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=True)  # Store name for new signups
+    token = db.Column(db.String(255), nullable=False, unique=True)
+    purpose = db.Column(db.String(50), nullable=False, default='signup')  # 'signup', 'login', 'access_request'
+    domain = db.Column(db.String(255), nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    verified_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # For access requests, store the reason
+    access_request_reason = db.Column(db.Text, nullable=True)
+
+    def is_expired(self):
+        return datetime.utcnow() > self.expires_at
+
+    def is_verified(self):
+        return self.verified_at is not None
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'name': self.name,
+            'purpose': self.purpose,
+            'domain': self.domain,
+            'expires_at': self.expires_at.isoformat(),
+            'verified_at': self.verified_at.isoformat() if self.verified_at else None,
+            'created_at': self.created_at.isoformat(),
         }
 
 

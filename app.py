@@ -3,7 +3,8 @@ import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, save_history
+from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
@@ -11,7 +12,6 @@ from webauthn_auth import (
     create_authentication_options, verify_authentication,
     get_user_credentials, delete_credential, get_auth_config
 )
-from datetime import datetime
 
 # Determine if we're serving Angular frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist', 'frontend', 'browser')
@@ -792,6 +792,7 @@ def api_get_tenant_status(domain):
         'user_count': user_count,
         'auth_method': auth_config.auth_method if auth_config else 'webauthn',
         'allow_registration': auth_config.allow_registration if auth_config else True,
+        'require_approval': auth_config.require_approval if auth_config else True,
         'has_sso': sso_config is not None,
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
@@ -807,14 +808,304 @@ def api_check_user_exists(email):
         return jsonify({
             'exists': True,
             'has_passkey': len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False,
-            'auth_type': user.auth_type
+            'auth_type': user.auth_type,
+            'email_verified': user.email_verified
         })
     else:
         return jsonify({
             'exists': False,
             'has_passkey': False,
-            'auth_type': None
+            'auth_type': None,
+            'email_verified': False
         })
+
+
+# ==================== Email Verification ====================
+
+def generate_verification_token():
+    """Generate a secure random token for email verification."""
+    return secrets.token_urlsafe(32)
+
+
+def send_verification_email(email, token, purpose, domain):
+    """Send email verification message."""
+    from notifications import send_email
+
+    # Get email config for this domain or a global one
+    email_config = EmailConfig.query.filter_by(domain=domain, enabled=True).first()
+    if not email_config:
+        # Try to find any enabled email config (for new tenants)
+        email_config = EmailConfig.query.filter_by(enabled=True).first()
+
+    if not email_config:
+        app.logger.warning(f"No email config available for verification to {email}")
+        return False
+
+    base_url = request.host_url.rstrip('/')
+    verify_url = f"{base_url}/verify-email/{token}"
+
+    if purpose == 'signup':
+        subject = 'Verify your email - Architecture Decisions'
+        html_body = f"""
+        <h1>Welcome to Architecture Decisions</h1>
+        <p>Please verify your email address by clicking the button below:</p>
+        <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Email</a></p>
+        <p>Or copy and paste this link into your browser:</p>
+        <p>{verify_url}</p>
+        <p>This link will expire in 24 hours.</p>
+        <p>If you didn't request this, you can safely ignore this email.</p>
+        """
+        text_body = f"Welcome to Architecture Decisions\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
+    elif purpose == 'access_request':
+        subject = 'Verify your email to request access - Architecture Decisions'
+        html_body = f"""
+        <h1>Request Access to Architecture Decisions</h1>
+        <p>Please verify your email address to submit your access request:</p>
+        <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify and Submit Request</a></p>
+        <p>Or copy and paste this link into your browser:</p>
+        <p>{verify_url}</p>
+        <p>This link will expire in 24 hours.</p>
+        <p>If you didn't request this, you can safely ignore this email.</p>
+        """
+        text_body = f"Request Access\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
+    else:
+        subject = 'Verify your email - Architecture Decisions'
+        html_body = f"""
+        <h1>Email Verification</h1>
+        <p>Please verify your email address by clicking the link below:</p>
+        <p><a href="{verify_url}">{verify_url}</a></p>
+        <p>This link will expire in 24 hours.</p>
+        """
+        text_body = f"Verify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
+
+    return send_email(email_config, email, subject, html_body, text_body)
+
+
+@app.route('/api/auth/send-verification', methods=['POST'])
+def api_send_verification():
+    """Send email verification link."""
+    data = request.get_json()
+
+    email = data.get('email', '').lower().strip()
+    name = data.get('name', '').strip()
+    purpose = data.get('purpose', 'signup')  # signup, access_request, login
+    reason = data.get('reason', '')  # For access requests
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    if '@' not in email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    domain = email.split('@')[1].lower()
+
+    # Check if user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        if existing_user.email_verified:
+            return jsonify({
+                'error': 'This email is already registered. Please login instead.',
+                'redirect': f'/{domain}/login'
+            }), 400
+        else:
+            # User exists but not verified, allow re-sending verification
+            pass
+
+    # Check tenant status
+    has_users = User.query.filter_by(sso_domain=domain).count() > 0
+    auth_config = get_auth_config(domain)
+
+    # Determine purpose based on context
+    if has_users and not existing_user:
+        # Existing tenant, new user - must request access unless auto-signup is enabled
+        require_approval = auth_config.require_approval if auth_config else True
+        if require_approval:
+            purpose = 'access_request'
+        else:
+            purpose = 'signup'
+
+    # Rate limiting: Check for recent verification emails
+    recent_verification = EmailVerification.query.filter(
+        EmailVerification.email == email,
+        EmailVerification.created_at > datetime.utcnow() - timedelta(minutes=2)
+    ).first()
+
+    if recent_verification:
+        return jsonify({'error': 'Please wait before requesting another verification email'}), 429
+
+    # Invalidate any existing pending verifications for this email
+    EmailVerification.query.filter(
+        EmailVerification.email == email,
+        EmailVerification.verified_at.is_(None)
+    ).delete()
+    db.session.commit()
+
+    # Create new verification token
+    token = generate_verification_token()
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+
+    verification = EmailVerification(
+        email=email,
+        name=name,
+        token=token,
+        purpose=purpose,
+        domain=domain,
+        expires_at=expires_at,
+        access_request_reason=reason if purpose == 'access_request' else None
+    )
+    db.session.add(verification)
+    db.session.commit()
+
+    # Send verification email
+    email_sent = send_verification_email(email, token, purpose, domain)
+
+    if email_sent:
+        return jsonify({
+            'message': 'Verification email sent',
+            'email': email,
+            'purpose': purpose
+        })
+    else:
+        return jsonify({
+            'message': 'Verification created but email could not be sent. Please contact an administrator.',
+            'email': email,
+            'purpose': purpose,
+            'token': token if app.debug else None  # Only expose token in debug mode
+        })
+
+
+@app.route('/api/auth/verify-email/<token>', methods=['GET', 'POST'])
+def api_verify_email(token):
+    """Verify email token and proceed with signup/access request."""
+    verification = EmailVerification.query.filter_by(token=token).first()
+
+    if not verification:
+        if request.method == 'POST':
+            return jsonify({'error': 'Invalid or expired verification link'}), 400
+        return redirect('/?error=invalid_token')
+
+    if verification.is_expired():
+        if request.method == 'POST':
+            return jsonify({'error': 'Verification link has expired. Please request a new one.'}), 400
+        return redirect('/?error=expired_token')
+
+    if verification.is_verified():
+        # Already verified, redirect to appropriate page
+        if request.method == 'POST':
+            return jsonify({
+                'message': 'Email already verified',
+                'email': verification.email,
+                'domain': verification.domain,
+                'purpose': verification.purpose,
+                'redirect': f'/{verification.domain}/login'
+            })
+        return redirect(f'/{verification.domain}/login')
+
+    # Mark as verified
+    verification.verified_at = datetime.utcnow()
+
+    # Process based on purpose
+    if verification.purpose == 'signup':
+        # Create user account (if doesn't exist)
+        user = User.query.filter_by(email=verification.email).first()
+        if not user:
+            # Determine if this is the first user for the domain
+            is_first_user = User.query.filter_by(sso_domain=verification.domain).count() == 0
+
+            user = User(
+                email=verification.email,
+                name=verification.name,
+                sso_domain=verification.domain,
+                auth_type='webauthn',
+                is_admin=is_first_user,  # First user becomes admin
+                email_verified=True
+            )
+            db.session.add(user)
+
+            # Create default auth config if this is a new tenant
+            if is_first_user:
+                auth_config = AuthConfig.query.filter_by(domain=verification.domain).first()
+                if not auth_config:
+                    auth_config = AuthConfig(
+                        domain=verification.domain,
+                        auth_method='webauthn',
+                        allow_registration=True,
+                        require_approval=True,
+                        rp_name='Architecture Decisions'
+                    )
+                    db.session.add(auth_config)
+        else:
+            user.email_verified = True
+            if verification.name:
+                user.name = verification.name
+
+        db.session.commit()
+
+        if request.method == 'POST':
+            return jsonify({
+                'message': 'Email verified successfully',
+                'email': verification.email,
+                'domain': verification.domain,
+                'purpose': 'signup',
+                'redirect': f'/{verification.domain}/login?verified=1'
+            })
+        return redirect(f'/{verification.domain}/login?verified=1&email={verification.email}')
+
+    elif verification.purpose == 'access_request':
+        # Create access request
+        existing_request = AccessRequest.query.filter_by(
+            email=verification.email,
+            status='pending'
+        ).first()
+
+        if not existing_request:
+            access_request = AccessRequest(
+                email=verification.email,
+                name=verification.name or verification.email.split('@')[0],
+                domain=verification.domain,
+                reason=verification.access_request_reason
+            )
+            db.session.add(access_request)
+
+        db.session.commit()
+
+        if request.method == 'POST':
+            return jsonify({
+                'message': 'Access request submitted successfully',
+                'email': verification.email,
+                'domain': verification.domain,
+                'purpose': 'access_request'
+            })
+        return redirect(f'/{verification.domain}/login?access_requested=1')
+
+    db.session.commit()
+
+    if request.method == 'POST':
+        return jsonify({
+            'message': 'Email verified',
+            'email': verification.email,
+            'domain': verification.domain,
+            'redirect': f'/{verification.domain}/login'
+        })
+    return redirect(f'/{verification.domain}/login')
+
+
+@app.route('/api/auth/verification-status/<token>', methods=['GET'])
+def api_verification_status(token):
+    """Check verification token status."""
+    verification = EmailVerification.query.filter_by(token=token).first()
+
+    if not verification:
+        return jsonify({'valid': False, 'error': 'Token not found'}), 404
+
+    return jsonify({
+        'valid': True,
+        'email': verification.email,
+        'domain': verification.domain,
+        'purpose': verification.purpose,
+        'expired': verification.is_expired(),
+        'verified': verification.is_verified()
+    })
 
 
 @app.route('/api/auth/access-request', methods=['POST'])
@@ -1181,6 +1472,7 @@ def api_get_auth_config():
             'domain': g.current_user.sso_domain,
             'auth_method': 'webauthn',
             'allow_registration': True,
+            'require_approval': True,
             'rp_name': 'Architecture Decisions',
         })
     return jsonify(config.to_dict())
@@ -1217,6 +1509,7 @@ def api_save_auth_config():
             domain=domain,
             auth_method=auth_method,
             allow_registration=data.get('allow_registration', True),
+            require_approval=data.get('require_approval', True),
             rp_name=data.get('rp_name', 'Architecture Decisions'),
         )
         db.session.add(config)
@@ -1224,6 +1517,8 @@ def api_save_auth_config():
         config.auth_method = auth_method
         if 'allow_registration' in data:
             config.allow_registration = bool(data['allow_registration'])
+        if 'require_approval' in data:
+            config.require_approval = bool(data['require_approval'])
         if 'rp_name' in data:
             config.rp_name = data['rp_name']
 

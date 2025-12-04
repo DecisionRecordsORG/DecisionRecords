@@ -35,6 +35,7 @@ export interface AuthConfigRequest {
   domain?: string;  // Only required for master account
   auth_method: 'sso' | 'webauthn';
   allow_registration?: boolean;
+  require_approval?: boolean;
   rp_name?: string;
 }
 

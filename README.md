@@ -198,10 +198,11 @@ Enterprise authentication via OpenID Connect:
 
 1. **New User (First from Domain)**:
    - Visit `/` (landing page)
-   - Enter email address
-   - System creates new tenant based on email domain
-   - User registers passkey (or uses SSO if configured)
-   - User becomes tenant administrator
+   - Enter email address and name
+   - Receive verification email with secure link
+   - Click verification link to confirm email ownership
+   - User account is created and user becomes tenant administrator
+   - Redirect to `/{domain}/login` to register passkey
 
 2. **Existing Tenant User**:
    - Visit `/{domain}/login`
@@ -209,9 +210,28 @@ Enterprise authentication via OpenID Connect:
 
 3. **New User Joining Existing Tenant**:
    - Visit `/` and enter email
-   - If domain already has users, user is redirected to request access
-   - Tenant admin reviews and approves/rejects access request
-   - Upon approval, user can login via `/{domain}/login`
+   - If admin approval is required:
+     - User fills in name and optional reason
+     - Verification email is sent
+     - After email verification, access request is submitted
+     - Tenant admin reviews and approves/rejects request
+     - Upon approval, user can login via `/{domain}/login`
+   - If auto-signup is enabled (admin approval not required):
+     - User is redirected to `/{domain}/login` to sign up directly
+
+### Email Verification Security
+
+All new user signups require email verification before access is granted:
+
+- **24-hour expiration**: Verification links expire after 24 hours
+- **Rate limiting**: Users must wait 2 minutes between verification email requests
+- **Single-use tokens**: Each verification link can only be used once
+- **Tenant URL protection**: Tenant login URLs are not revealed until email is verified
+
+This ensures that:
+- Only legitimate email owners can join a tenant
+- Tenant URLs remain private from unauthorized users
+- Spam and abuse are prevented through rate limiting
 
 ## Access Requests
 
@@ -232,6 +252,18 @@ When a user tries to sign up with an email domain that already has an existing t
    - Reason for requesting access
    - Request date
 4. Click ✓ to approve or ✗ to reject each request
+
+### Auto-Signup Configuration
+
+Tenant admins can control whether new users need approval:
+
+1. Navigate to `/{domain}/admin`
+2. Go to the "Authentication" tab
+3. Toggle "Require admin approval for new users":
+   - **Enabled (default)**: New users must request access and wait for admin approval
+   - **Disabled**: Users with verified emails from your domain can sign up automatically
+
+This setting only affects users from the same email domain as the tenant.
 
 ## SSO Configuration
 
@@ -290,6 +322,9 @@ All API endpoints require authentication via session cookie.
 | `POST` | `/auth/local` | Local master account login |
 | `GET` | `/auth/sso/<id>` | Initiate SSO login flow |
 | `GET` | `/logout` | Log out current session |
+| `POST` | `/api/auth/send-verification` | Send email verification link |
+| `GET/POST` | `/api/auth/verify-email/<token>` | Verify email token |
+| `GET` | `/api/auth/verification-status/<token>` | Check verification status |
 
 ### Decisions
 
