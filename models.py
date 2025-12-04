@@ -111,16 +111,17 @@ class MasterAccount(db.Model):
 
 
 class User(db.Model):
-    """User model for authenticated users via SSO or WebAuthn."""
+    """User model for authenticated users via SSO, WebAuthn, or local password."""
 
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), nullable=False, unique=True)
     name = db.Column(db.String(255), nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)  # For local/password authentication
     sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
-    auth_type = db.Column(db.String(20), nullable=False, default='sso')  # 'sso' or 'webauthn'
+    auth_type = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
     is_admin = db.Column(db.Boolean, default=False)
     email_verified = db.Column(db.Boolean, default=False)  # Email verification status
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -130,6 +131,20 @@ class User(db.Model):
     decisions_created = db.relationship('ArchitectureDecision', backref='creator', lazy=True, foreign_keys='ArchitectureDecision.created_by_id')
     subscriptions = db.relationship('Subscription', backref='user', lazy=True, uselist=False)
     webauthn_credentials = db.relationship('WebAuthnCredential', backref='user', lazy=True, cascade='all, delete-orphan')
+
+    def set_password(self, password):
+        """Hash and set the password."""
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        """Check if the provided password matches."""
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, password)
+
+    def has_password(self):
+        """Check if user has a password set."""
+        return self.password_hash is not None
 
     def to_dict(self):
         return {
@@ -143,6 +158,7 @@ class User(db.Model):
             'created_at': self.created_at.isoformat(),
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'has_passkey': len(self.webauthn_credentials) > 0 if self.webauthn_credentials else False,
+            'has_password': self.has_password(),
         }
 
 
@@ -221,8 +237,10 @@ class AuthConfig(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     domain = db.Column(db.String(255), nullable=False, unique=True)
-    auth_method = db.Column(db.String(20), nullable=False, default='webauthn')  # 'sso' or 'webauthn'
-    allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration for webauthn
+    auth_method = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
+    allow_password = db.Column(db.Boolean, default=True)  # Allow password login
+    allow_passkey = db.Column(db.Boolean, default=True)  # Allow passkey/WebAuthn login
+    allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=True)  # Require admin approval for new users to join tenant
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -233,9 +251,68 @@ class AuthConfig(db.Model):
             'id': self.id,
             'domain': self.domain,
             'auth_method': self.auth_method,
+            'allow_password': self.allow_password,
+            'allow_passkey': self.allow_passkey,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+
+
+class DomainApproval(db.Model):
+    """Domain approval for preventing public email domains (gmail, etc)."""
+
+    __tablename__ = 'domain_approvals'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(255), nullable=False, unique=True)
+    status = db.Column(db.String(20), nullable=False, default='pending')  # 'pending', 'approved', 'rejected'
+    requested_by_email = db.Column(db.String(255), nullable=True)  # Email of first user who tried to signup
+    requested_by_name = db.Column(db.String(255), nullable=True)
+    approved_by_id = db.Column(db.Integer, db.ForeignKey('master_accounts.id'), nullable=True)
+    rejection_reason = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Common public email domains that should be auto-rejected or require careful review
+    PUBLIC_DOMAINS = [
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+        'aol.com', 'icloud.com', 'mail.com', 'protonmail.com', 'proton.me',
+        'ymail.com', 'gmx.com', 'zoho.com', 'tutanota.com', 'fastmail.com',
+        'msn.com', 'me.com', 'mac.com', 'inbox.com', 'mail.ru'
+    ]
+
+    @staticmethod
+    def is_public_domain(domain):
+        """Check if domain is a common public email provider."""
+        return domain.lower() in DomainApproval.PUBLIC_DOMAINS
+
+    @staticmethod
+    def is_approved(domain):
+        """Check if domain is approved for signup."""
+        approval = DomainApproval.query.filter_by(domain=domain.lower()).first()
+        return approval and approval.status == 'approved'
+
+    @staticmethod
+    def needs_approval(domain):
+        """Check if domain needs approval (not yet approved)."""
+        domain = domain.lower()
+        approval = DomainApproval.query.filter_by(domain=domain).first()
+        if not approval:
+            return True  # New domain needs approval
+        return approval.status == 'pending'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'domain': self.domain,
+            'status': self.status,
+            'requested_by_email': self.requested_by_email,
+            'requested_by_name': self.requested_by_name,
+            'is_public_domain': self.is_public_domain(self.domain),
+            'rejection_reason': self.rejection_reason,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }

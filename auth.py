@@ -46,14 +46,14 @@ def login_required(f):
         if 'user_id' not in session:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
-            return redirect(url_for('login'))
+            return redirect('/')
 
         g.current_user = get_current_user()
         if not g.current_user:
             session.clear()
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
-            return redirect(url_for('login'))
+            return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
