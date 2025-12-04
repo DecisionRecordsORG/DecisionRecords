@@ -49,11 +49,8 @@ def inject_user():
 
 @app.route('/login')
 def login():
-    """Login page - shows available SSO providers and local login."""
-    if 'user_id' in session or session.get('is_master'):
-        return redirect(url_for('index'))
-    sso_configs = SSOConfig.query.filter_by(enabled=True).all()
-    return render_template('login.html', sso_configs=sso_configs)
+    """Legacy login route - redirect to Angular landing page."""
+    return redirect('/')
 
 
 @app.route('/auth/local', methods=['POST'])
@@ -109,7 +106,7 @@ def sso_login(config_id):
     sso_config = SSOConfig.query.get_or_404(config_id)
 
     if not sso_config.enabled:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     # Get OIDC configuration
     oidc_config = get_oidc_config(sso_config.discovery_url)
@@ -143,11 +140,11 @@ def sso_callback():
     stored_state = session.pop('oauth_state', None)
 
     if not config_id:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     sso_config = SSOConfig.query.get(config_id)
     if not sso_config:
-        return redirect(url_for('login'))
+        return redirect('/')
 
     # Get OIDC configuration
     oidc_config = get_oidc_config(sso_config.discovery_url)
@@ -202,7 +199,7 @@ def sso_callback():
 def logout():
     """Log out the current user."""
     session.clear()
-    return redirect(url_for('login'))
+    return redirect('/')
 
 
 # ==================== Web Routes ====================
