@@ -13,10 +13,12 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest } from '../../services/admin.service';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
-import { SSOConfig, EmailConfig, User } from '../../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { MatSelectModule } from '@angular/material/select';
+import { MatRadioModule } from '@angular/material/radio';
 
 @Component({
   selector: 'app-settings',
@@ -36,6 +38,8 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     MatSnackBarModule,
     MatDialogModule,
     MatChipsModule,
+    MatSelectModule,
+    MatRadioModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -260,6 +264,17 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
                       <td mat-cell *matCellDef="let user">{{ user.sso_domain }}</td>
                     </ng-container>
 
+                    <ng-container matColumnDef="auth_type">
+                      <th mat-header-cell *matHeaderCellDef>Auth Type</th>
+                      <td mat-cell *matCellDef="let user">
+                        @if (user.auth_type === 'webauthn') {
+                          <mat-icon class="auth-type-icon">fingerprint</mat-icon> Passkey
+                        } @else {
+                          <mat-icon class="auth-type-icon">login</mat-icon> SSO
+                        }
+                      </td>
+                    </ng-container>
+
                     <ng-container matColumnDef="is_admin">
                       <th mat-header-cell *matHeaderCellDef>Admin</th>
                       <td mat-cell *matCellDef="let user">
@@ -280,6 +295,114 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
                     <tr mat-row *matRowDef="let row; columns: userColumns;"></tr>
                   </table>
                 }
+              </mat-card-content>
+            </mat-card>
+          </div>
+        </mat-tab>
+
+        <!-- Authentication Configuration Tab -->
+        <mat-tab label="Authentication">
+          <div class="tab-content">
+            <mat-card class="form-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>security</mat-icon>
+                  Authentication Method
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p class="section-description">
+                  Configure how users in your domain authenticate. You can choose between SSO (Single Sign-On)
+                  or Passkeys (WebAuthn) for passwordless authentication.
+                </p>
+
+                <form [formGroup]="authConfigForm" (ngSubmit)="saveAuthConfig()">
+                  <div class="auth-method-options">
+                    <mat-radio-group formControlName="auth_method" class="auth-method-group">
+                      <mat-radio-button value="webauthn" class="auth-method-option">
+                        <div class="option-content">
+                          <mat-icon>fingerprint</mat-icon>
+                          <div class="option-text">
+                            <strong>Passkeys (WebAuthn)</strong>
+                            <span>Passwordless authentication using device biometrics or security keys</span>
+                          </div>
+                        </div>
+                      </mat-radio-button>
+
+                      <mat-radio-button value="sso" class="auth-method-option"
+                                        [disabled]="!hasSSOConfigForDomain">
+                        <div class="option-content">
+                          <mat-icon>login</mat-icon>
+                          <div class="option-text">
+                            <strong>Single Sign-On (SSO)</strong>
+                            <span>
+                              @if (hasSSOConfigForDomain) {
+                                Use your organization's identity provider
+                              } @else {
+                                Configure an SSO provider first to enable this option
+                              }
+                            </span>
+                          </div>
+                        </div>
+                      </mat-radio-button>
+                    </mat-radio-group>
+                  </div>
+
+                  @if (authConfigForm.value.auth_method === 'webauthn') {
+                    <div class="webauthn-options">
+                      <mat-slide-toggle formControlName="allow_registration">
+                        Allow new user registration
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, new users can create accounts with their email and a passkey.
+                        When disabled, only existing users can sign in.
+                      </p>
+
+                      <mat-form-field appearance="outline" class="full-width">
+                        <mat-label>Application Name (shown during passkey setup)</mat-label>
+                        <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
+                      </mat-form-field>
+                    </div>
+                  }
+
+                  <div class="form-actions">
+                    <button mat-raised-button color="primary" type="submit"
+                            [disabled]="authConfigForm.invalid || savingAuthConfig">
+                      @if (savingAuthConfig) {
+                        <mat-spinner diameter="20"></mat-spinner>
+                      } @else {
+                        <mat-icon>save</mat-icon>
+                        Save Configuration
+                      }
+                    </button>
+                  </div>
+                </form>
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Authentication Methods
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <h4>Passkeys (WebAuthn)</h4>
+                <ul>
+                  <li>No passwords to remember or manage</li>
+                  <li>Uses device biometrics (fingerprint, face) or security keys</li>
+                  <li>Resistant to phishing attacks</li>
+                  <li>Users can register multiple devices for backup access</li>
+                </ul>
+
+                <h4>Single Sign-On (SSO)</h4>
+                <ul>
+                  <li>Users authenticate with your organization's identity provider</li>
+                  <li>Centralized user management</li>
+                  <li>Supports Google, Microsoft, Okta, and other OIDC providers</li>
+                  <li>Requires SSO provider configuration in the SSO Providers tab</li>
+                </ul>
               </mat-card-content>
             </mat-card>
           </div>
@@ -361,20 +484,115 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
       background-color: #ffebee !important;
       color: #c62828 !important;
     }
+
+    .auth-type-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    .section-description {
+      color: #666;
+      margin-bottom: 24px;
+    }
+
+    .auth-method-group {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .auth-method-option {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 0;
+    }
+
+    .auth-method-option.mat-mdc-radio-checked {
+      border-color: #3f51b5;
+      background-color: #f5f7ff;
+    }
+
+    .option-content {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .option-content mat-icon {
+      color: #3f51b5;
+      margin-top: 2px;
+    }
+
+    .option-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .option-text strong {
+      font-size: 16px;
+    }
+
+    .option-text span {
+      font-size: 14px;
+      color: #666;
+    }
+
+    .webauthn-options {
+      margin-top: 24px;
+      padding: 16px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    .option-hint {
+      font-size: 13px;
+      color: #666;
+      margin: 8px 0 16px 0;
+    }
+
+    .info-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .info-card h4 {
+      margin: 16px 0 8px 0;
+      color: #333;
+    }
+
+    .info-card ul {
+      margin: 0;
+      padding-left: 20px;
+      color: #666;
+    }
+
+    .info-card li {
+      margin-bottom: 4px;
+    }
   `]
 })
 export class SettingsComponent implements OnInit {
   ssoForm: FormGroup;
   emailForm: FormGroup;
+  authConfigForm: FormGroup;
   ssoConfigs: SSOConfig[] = [];
   users: User[] = [];
+  authConfig: AuthConfig | null = null;
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
-  userColumns = ['name', 'email', 'domain', 'is_admin', 'last_login'];
+  userColumns = ['name', 'email', 'domain', 'auth_type', 'is_admin', 'last_login'];
 
   editingSSOId: number | null = null;
   hasExistingEmailConfig = false;
+  hasSSOConfigForDomain = false;
   savingSSOConfig = false;
   savingEmailConfig = false;
+  savingAuthConfig = false;
   testingEmail = false;
 
   constructor(
@@ -403,17 +621,31 @@ export class SettingsComponent implements OnInit {
       use_tls: [true],
       enabled: [true]
     });
+
+    this.authConfigForm = this.fb.group({
+      auth_method: ['webauthn', Validators.required],
+      allow_registration: [true],
+      rp_name: ['Architecture Decisions']
+    });
   }
 
   ngOnInit(): void {
     this.loadSSOConfigs();
     this.loadEmailConfig();
     this.loadUsers();
+    this.loadAuthConfig();
   }
 
   loadSSOConfigs(): void {
     this.adminService.getSSOConfigs().subscribe({
-      next: (configs) => this.ssoConfigs = configs,
+      next: (configs) => {
+        this.ssoConfigs = configs;
+        // Check if there's an SSO config for the current user's domain
+        if (!this.authService.isMasterAccount && this.authService.currentUser) {
+          const user = this.authService.currentUser.user as User;
+          this.hasSSOConfigForDomain = configs.some(c => c.domain === user.sso_domain && c.enabled);
+        }
+      },
       error: () => this.snackBar.open('Failed to load SSO configs', 'Close', { duration: 3000 })
     });
   }
@@ -583,6 +815,63 @@ export class SettingsComponent implements OnInit {
       },
       error: (err) => {
         this.snackBar.open(err.error?.error || 'Failed to update', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  loadAuthConfig(): void {
+    this.adminService.getAuthConfig().subscribe({
+      next: (config) => {
+        // Master account gets array, regular admin gets single config
+        if (Array.isArray(config)) {
+          // For master account, just use first config or defaults
+          if (config.length > 0) {
+            this.authConfig = config[0];
+          }
+        } else {
+          this.authConfig = config;
+        }
+
+        if (this.authConfig) {
+          this.authConfigForm.patchValue({
+            auth_method: this.authConfig.auth_method,
+            allow_registration: this.authConfig.allow_registration,
+            rp_name: this.authConfig.rp_name
+          });
+        }
+      },
+      error: () => {
+        // Use defaults if no config exists
+        this.authConfigForm.patchValue({
+          auth_method: 'webauthn',
+          allow_registration: true,
+          rp_name: 'Architecture Decisions'
+        });
+      }
+    });
+  }
+
+  saveAuthConfig(): void {
+    if (this.authConfigForm.invalid) return;
+
+    this.savingAuthConfig = true;
+    const formValue = this.authConfigForm.value;
+
+    const config: AuthConfigRequest = {
+      auth_method: formValue.auth_method,
+      allow_registration: formValue.allow_registration,
+      rp_name: formValue.rp_name
+    };
+
+    this.adminService.saveAuthConfig(config).subscribe({
+      next: (savedConfig) => {
+        this.authConfig = savedConfig;
+        this.savingAuthConfig = false;
+        this.snackBar.open('Authentication configuration saved', 'Close', { duration: 3000 });
+      },
+      error: (err) => {
+        this.savingAuthConfig = false;
+        this.snackBar.open(err.error?.error || 'Failed to save configuration', 'Close', { duration: 3000 });
       }
     });
   }

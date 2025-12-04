@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { SSOConfig, EmailConfig, User } from '../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig } from '../models/decision.model';
 
 export interface CreateSSOConfigRequest {
   domain: string;
@@ -29,6 +29,13 @@ export interface EmailConfigRequest {
   from_name?: string;
   use_tls?: boolean;
   enabled?: boolean;
+}
+
+export interface AuthConfigRequest {
+  domain?: string;  // Only required for master account
+  auth_method: 'sso' | 'webauthn';
+  allow_registration?: boolean;
+  rp_name?: string;
 }
 
 @Injectable({
@@ -80,5 +87,14 @@ export class AdminService {
 
   toggleUserAdmin(userId: number, isAdmin: boolean): Observable<User> {
     return this.http.put<User>(`${this.apiUrl}/users/${userId}/admin`, { is_admin: isAdmin });
+  }
+
+  // Auth Configuration
+  getAuthConfig(): Observable<AuthConfig | AuthConfig[]> {
+    return this.http.get<AuthConfig | AuthConfig[]>(`${this.apiUrl}/auth-config`);
+  }
+
+  saveAuthConfig(config: AuthConfigRequest): Observable<AuthConfig> {
+    return this.http.post<AuthConfig>(`${this.apiUrl}/auth-config`, config);
   }
 }

@@ -9,9 +9,13 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatDividerModule } from '@angular/material/divider';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTabsModule } from '@angular/material/tabs';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../../services/auth.service';
-import { SSOConfig } from '../../models/decision.model';
+import { WebAuthnService } from '../../services/webauthn.service';
+import { SSOConfig, AuthConfig } from '../../models/decision.model';
+
+type LoginView = 'initial' | 'webauthn' | 'register';
 
 @Component({
   selector: 'app-login',
@@ -25,7 +29,8 @@ import { SSOConfig } from '../../models/decision.model';
     MatButtonModule,
     MatIconModule,
     MatDividerModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatTabsModule
   ],
   template: `
     <div class="login-container">
@@ -35,7 +40,15 @@ import { SSOConfig } from '../../models/decision.model';
             <mat-icon>architecture</mat-icon>
             Architecture Decisions
           </mat-card-title>
-          <mat-card-subtitle>Sign in to continue</mat-card-subtitle>
+          <mat-card-subtitle>
+            @if (currentView === 'initial') {
+              Sign in to continue
+            } @else if (currentView === 'webauthn') {
+              Sign in with passkey
+            } @else {
+              Create your account
+            }
+          </mat-card-subtitle>
         </mat-card-header>
 
         <mat-card-content>
@@ -43,59 +56,178 @@ import { SSOConfig } from '../../models/decision.model';
             <div class="error-message">{{ error }}</div>
           }
 
-          <!-- SSO Login Options -->
-          @if (ssoConfigs.length > 0) {
-            <div class="sso-section">
-              <p class="section-title">Sign in with SSO</p>
-              @for (config of ssoConfigs; track config.id) {
-                <a [href]="'/auth/sso/' + config.id" mat-raised-button color="primary" class="sso-button">
-                  <mat-icon>login</mat-icon>
-                  {{ config.provider_name }}
-                </a>
-              }
-            </div>
-            <mat-divider></mat-divider>
+          @if (success) {
+            <div class="success-message">{{ success }}</div>
           }
 
-          <!-- Local Admin Login -->
-          <div class="admin-section">
-            <p class="section-title">
-              <mat-icon>admin_panel_settings</mat-icon>
-              Administrator Login
-            </p>
-            <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Username</mat-label>
-                <input matInput formControlName="username" placeholder="admin">
-                <mat-icon matPrefix>person</mat-icon>
-              </mat-form-field>
+          <!-- Initial View: Email Entry / SSO Options -->
+          @if (currentView === 'initial') {
+            <!-- WebAuthn Check Not Supported Notice -->
+            @if (!webAuthnSupported) {
+              <div class="warning-message">
+                <mat-icon>warning</mat-icon>
+                Passkey login is not supported in this browser.
+              </div>
+            }
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Password</mat-label>
-                <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password">
-                <mat-icon matPrefix>lock</mat-icon>
-                <button mat-icon-button matSuffix type="button" (click)="hidePassword = !hidePassword">
-                  <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+            <!-- SSO Login Options -->
+            @if (ssoConfigs.length > 0) {
+              <div class="sso-section">
+                <p class="section-title">Sign in with SSO</p>
+                @for (config of ssoConfigs; track config.id) {
+                  <a [href]="'/auth/sso/' + config.id" mat-raised-button color="primary" class="sso-button">
+                    <mat-icon>login</mat-icon>
+                    {{ config.provider_name }}
+                  </a>
+                }
+              </div>
+              <mat-divider></mat-divider>
+            }
+
+            <!-- Email Entry for WebAuthn -->
+            @if (webAuthnSupported) {
+              <div class="webauthn-section">
+                <p class="section-title">
+                  <mat-icon>fingerprint</mat-icon>
+                  Sign in with Passkey
+                </p>
+
+                <form [formGroup]="emailForm" (ngSubmit)="checkEmail()">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Email</mat-label>
+                    <input matInput formControlName="email" type="email" placeholder="you@example.com">
+                    <mat-icon matPrefix>email</mat-icon>
+                  </mat-form-field>
+
+                  <button mat-raised-button color="primary" type="submit"
+                          [disabled]="emailForm.invalid || isLoading" class="full-width">
+                    @if (isLoading) {
+                      <mat-spinner diameter="20"></mat-spinner>
+                    } @else {
+                      Continue
+                      <mat-icon>arrow_forward</mat-icon>
+                    }
+                  </button>
+                </form>
+
+                <!-- Quick Passkey Login (for discoverable credentials) -->
+                <button mat-stroked-button class="full-width passkey-quick-login" (click)="quickPasskeyLogin()"
+                        [disabled]="isLoading">
+                  <mat-icon>key</mat-icon>
+                  Sign in with saved passkey
                 </button>
-              </mat-form-field>
+              </div>
+              <mat-divider></mat-divider>
+            }
 
-              <button mat-raised-button color="primary" type="submit"
-                      [disabled]="loginForm.invalid || isLoading" class="full-width">
+            <!-- Local Admin Login -->
+            <div class="admin-section">
+              <p class="section-title">
+                <mat-icon>admin_panel_settings</mat-icon>
+                Administrator Login
+              </p>
+              <form [formGroup]="adminForm" (ngSubmit)="adminLogin()">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Username</mat-label>
+                  <input matInput formControlName="username" placeholder="admin">
+                  <mat-icon matPrefix>person</mat-icon>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Password</mat-label>
+                  <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password">
+                  <mat-icon matPrefix>lock</mat-icon>
+                  <button mat-icon-button matSuffix type="button" (click)="hidePassword = !hidePassword">
+                    <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+                  </button>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="adminForm.invalid || isLoading" class="full-width">
+                  @if (isLoading) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>login</mat-icon>
+                    Sign In
+                  }
+                </button>
+              </form>
+
+              @if (ssoConfigs.length === 0) {
+                <p class="hint-text">
+                  Default credentials: admin / changeme
+                </p>
+              }
+            </div>
+          }
+
+          <!-- WebAuthn Sign In View -->
+          @if (currentView === 'webauthn') {
+            <div class="webauthn-auth-section">
+              <p class="user-email">{{ currentEmail }}</p>
+
+              <button mat-raised-button color="primary" class="full-width passkey-button"
+                      (click)="signInWithPasskey()" [disabled]="isLoading">
                 @if (isLoading) {
                   <mat-spinner diameter="20"></mat-spinner>
                 } @else {
-                  <mat-icon>login</mat-icon>
-                  Sign In
+                  <mat-icon>fingerprint</mat-icon>
+                  Use passkey to sign in
                 }
               </button>
-            </form>
 
-            @if (ssoConfigs.length === 0) {
-              <p class="hint-text">
-                Default credentials: admin / changeme
+              @if (authConfig?.allow_registration) {
+                <p class="alt-action">
+                  Don't have a passkey?
+                  <button mat-button color="primary" (click)="showRegister()">Create account</button>
+                </p>
+              }
+
+              <button mat-button class="back-button" (click)="goBack()">
+                <mat-icon>arrow_back</mat-icon>
+                Back
+              </button>
+            </div>
+          }
+
+          <!-- Registration View -->
+          @if (currentView === 'register') {
+            <div class="register-section">
+              <form [formGroup]="registerForm" (ngSubmit)="registerWithPasskey()">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Email</mat-label>
+                  <input matInput formControlName="email" type="email" readonly>
+                  <mat-icon matPrefix>email</mat-icon>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Full Name</mat-label>
+                  <input matInput formControlName="name" placeholder="Your name">
+                  <mat-icon matPrefix>person</mat-icon>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="registerForm.invalid || isLoading" class="full-width">
+                  @if (isLoading) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>fingerprint</mat-icon>
+                    Create account with passkey
+                  }
+                </button>
+              </form>
+
+              <p class="alt-action">
+                Already have an account?
+                <button mat-button color="primary" (click)="showWebAuthn()">Sign in</button>
               </p>
-            }
-          </div>
+
+              <button mat-button class="back-button" (click)="goBack()">
+                <mat-icon>arrow_back</mat-icon>
+                Back
+              </button>
+            </div>
+          }
         </mat-card-content>
       </mat-card>
     </div>
@@ -135,6 +267,26 @@ import { SSOConfig } from '../../models/decision.model';
       margin-bottom: 16px;
     }
 
+    .success-message {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+    }
+
+    .warning-message {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background-color: #fff3e0;
+      color: #e65100;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
     .section-title {
       display: flex;
       align-items: center;
@@ -151,6 +303,10 @@ import { SSOConfig } from '../../models/decision.model';
     .sso-button {
       width: 100%;
       margin-bottom: 8px;
+    }
+
+    .webauthn-section {
+      margin-bottom: 20px;
     }
 
     .admin-section {
@@ -175,28 +331,81 @@ import { SSOConfig } from '../../models/decision.model';
     mat-divider {
       margin: 20px 0;
     }
+
+    .passkey-quick-login {
+      margin-top: 12px;
+    }
+
+    .webauthn-auth-section, .register-section {
+      text-align: center;
+    }
+
+    .user-email {
+      font-size: 16px;
+      color: #333;
+      margin-bottom: 24px;
+      padding: 12px;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+
+    .passkey-button {
+      padding: 12px 24px;
+      font-size: 16px;
+    }
+
+    .alt-action {
+      margin-top: 24px;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .back-button {
+      margin-top: 16px;
+    }
   `]
 })
 export class LoginComponent implements OnInit {
-  loginForm: FormGroup;
+  emailForm: FormGroup;
+  adminForm: FormGroup;
+  registerForm: FormGroup;
+
   ssoConfigs: SSOConfig[] = [];
+  authConfig: AuthConfig | null = null;
+  currentEmail = '';
+  currentView: LoginView = 'initial';
+
   hidePassword = true;
   isLoading = false;
   error = '';
+  success = '';
+
+  webAuthnSupported = false;
 
   constructor(
     private fb: FormBuilder,
     private http: HttpClient,
     private router: Router,
-    private authService: AuthService
+    private authService: AuthService,
+    private webAuthnService: WebAuthnService
   ) {
-    this.loginForm = this.fb.group({
+    this.emailForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]]
+    });
+
+    this.adminForm = this.fb.group({
       username: ['', Validators.required],
       password: ['', Validators.required]
+    });
+
+    this.registerForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]],
+      name: ['', Validators.required]
     });
   }
 
   ngOnInit(): void {
+    this.webAuthnSupported = this.webAuthnService.isWebAuthnSupported();
     this.loadSSOConfigs();
   }
 
@@ -207,13 +416,125 @@ export class LoginComponent implements OnInit {
     });
   }
 
-  onSubmit(): void {
-    if (this.loginForm.invalid) return;
+  checkEmail(): void {
+    if (this.emailForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.currentEmail = this.emailForm.value.email;
+
+    // Extract domain from email
+    const domain = this.currentEmail.split('@')[1];
+    if (!domain) {
+      this.error = 'Invalid email address';
+      this.isLoading = false;
+      return;
+    }
+
+    // Check auth config for this domain
+    this.webAuthnService.getAuthConfig(domain).subscribe({
+      next: (config) => {
+        this.authConfig = config;
+        this.isLoading = false;
+
+        if (config.auth_method === 'sso') {
+          // Check if there's an SSO config for this domain
+          const ssoConfig = this.ssoConfigs.find(c => c.domain === domain);
+          if (ssoConfig) {
+            // Redirect to SSO
+            window.location.href = `/auth/sso/${ssoConfig.id}`;
+          } else {
+            this.error = 'SSO is configured for this domain but no provider is set up. Contact your administrator.';
+          }
+        } else {
+          // WebAuthn - show sign in view
+          this.currentView = 'webauthn';
+          this.registerForm.patchValue({ email: this.currentEmail });
+        }
+      },
+      error: () => {
+        this.isLoading = false;
+        // Default to WebAuthn if can't get config
+        this.authConfig = {
+          domain,
+          auth_method: 'webauthn',
+          allow_registration: true,
+          rp_name: 'Architecture Decisions'
+        };
+        this.currentView = 'webauthn';
+        this.registerForm.patchValue({ email: this.currentEmail });
+      }
+    });
+  }
+
+  signInWithPasskey(): void {
+    this.isLoading = true;
+    this.error = '';
+
+    this.webAuthnService.authenticate(this.currentEmail).subscribe({
+      next: () => {
+        this.router.navigate(['/']);
+      },
+      error: (err) => {
+        this.isLoading = false;
+        if (err.error?.error === 'No passkeys registered for this account') {
+          this.error = 'No passkey found for this account. Would you like to create one?';
+          if (this.authConfig?.allow_registration) {
+            this.showRegister();
+          }
+        } else if (err.error?.error === 'User not found') {
+          this.error = 'No account found with this email.';
+          if (this.authConfig?.allow_registration) {
+            this.showRegister();
+          }
+        } else {
+          this.error = err.error?.error || 'Authentication failed. Please try again.';
+        }
+      }
+    });
+  }
+
+  quickPasskeyLogin(): void {
+    this.isLoading = true;
+    this.error = '';
+
+    this.webAuthnService.authenticate().subscribe({
+      next: () => {
+        this.router.navigate(['/']);
+      },
+      error: (err) => {
+        this.isLoading = false;
+        this.error = err.error?.error || 'Authentication failed. Please try again.';
+      }
+    });
+  }
+
+  registerWithPasskey(): void {
+    if (this.registerForm.invalid) return;
 
     this.isLoading = true;
     this.error = '';
 
-    const { username, password } = this.loginForm.value;
+    const { email, name } = this.registerForm.value;
+
+    this.webAuthnService.register(email, name).subscribe({
+      next: () => {
+        this.router.navigate(['/']);
+      },
+      error: (err) => {
+        this.isLoading = false;
+        this.error = err.error?.error || 'Registration failed. Please try again.';
+      }
+    });
+  }
+
+  adminLogin(): void {
+    if (this.adminForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+
+    const { username, password } = this.adminForm.value;
 
     this.http.post('/auth/local', { username, password }, { responseType: 'text' }).subscribe({
       next: () => {
@@ -225,5 +546,22 @@ export class LoginComponent implements OnInit {
         this.error = err.error?.error || 'Invalid username or password';
       }
     });
+  }
+
+  showRegister(): void {
+    this.currentView = 'register';
+    this.error = '';
+  }
+
+  showWebAuthn(): void {
+    this.currentView = 'webauthn';
+    this.error = '';
+  }
+
+  goBack(): void {
+    this.currentView = 'initial';
+    this.error = '';
+    this.authConfig = null;
+    this.currentEmail = '';
   }
 }

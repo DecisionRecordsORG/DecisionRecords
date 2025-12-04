@@ -8,8 +8,14 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatListModule } from '@angular/material/list';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatDialog, MatDialogModule } from '@angular/material/dialog';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { AuthService } from '../../services/auth.service';
-import { Subscription, User } from '../../models/decision.model';
+import { WebAuthnService } from '../../services/webauthn.service';
+import { Subscription, User, WebAuthnCredential } from '../../models/decision.model';
+import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 
 @Component({
   selector: 'app-profile',
@@ -23,7 +29,11 @@ import { Subscription, User } from '../../models/decision.model';
     MatIconModule,
     MatProgressSpinnerModule,
     MatSnackBarModule,
-    MatDividerModule
+    MatDividerModule,
+    MatListModule,
+    MatChipsModule,
+    MatDialogModule,
+    MatTooltipModule
   ],
   template: `
     <div class="profile-container">
@@ -52,12 +62,90 @@ import { Subscription, User } from '../../models/decision.model';
                 <span class="value">{{ user?.sso_domain }}</span>
               </div>
               <div class="info-item">
+                <span class="label">Authentication</span>
+                <span class="value">
+                  @if (user?.auth_type === 'webauthn') {
+                    <mat-icon class="auth-icon">fingerprint</mat-icon> Passkey
+                  } @else {
+                    <mat-icon class="auth-icon">login</mat-icon> SSO
+                  }
+                </span>
+              </div>
+              <div class="info-item">
                 <span class="label">Last Login</span>
                 <span class="value">{{ user?.last_login ? (user?.last_login | date:'medium') : 'Never' }}</span>
+              </div>
+              <div class="info-item">
+                <span class="label">Role</span>
+                <span class="value">
+                  @if (user?.is_admin) {
+                    <mat-chip class="admin-chip" highlighted>Administrator</mat-chip>
+                  } @else {
+                    User
+                  }
+                </span>
               </div>
             </div>
           </mat-card-content>
         </mat-card>
+
+        <!-- Passkeys Section (only for WebAuthn users) -->
+        @if (user?.auth_type === 'webauthn') {
+          <mat-card class="passkeys-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>key</mat-icon>
+                Passkeys
+              </mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="section-description">
+                Passkeys are secure credentials stored on your devices. You can add multiple passkeys for backup access.
+              </p>
+
+              @if (isLoadingCredentials) {
+                <div class="loading">
+                  <mat-spinner diameter="40"></mat-spinner>
+                </div>
+              } @else {
+                <mat-list class="credentials-list">
+                  @for (credential of credentials; track credential.id) {
+                    <mat-list-item>
+                      <mat-icon matListItemIcon>fingerprint</mat-icon>
+                      <div matListItemTitle>{{ credential.device_name }}</div>
+                      <div matListItemLine>
+                        Created: {{ credential.created_at | date:'mediumDate' }}
+                        @if (credential.last_used_at) {
+                          &middot; Last used: {{ credential.last_used_at | date:'mediumDate' }}
+                        }
+                      </div>
+                      <button mat-icon-button matListItemMeta
+                              [disabled]="credentials.length <= 1"
+                              (click)="deleteCredential(credential)"
+                              [matTooltip]="credentials.length <= 1 ? 'Cannot delete your only passkey' : 'Delete passkey'">
+                        <mat-icon>delete</mat-icon>
+                      </button>
+                    </mat-list-item>
+                  }
+                </mat-list>
+
+                @if (credentials.length === 0) {
+                  <p class="no-credentials">No passkeys registered. This shouldn't happen - please contact support.</p>
+                }
+
+                <button mat-raised-button color="primary" class="add-passkey-button"
+                        (click)="addPasskey()" [disabled]="isAddingPasskey">
+                  @if (isAddingPasskey) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>add</mat-icon>
+                    Add new passkey
+                  }
+                </button>
+              }
+            </mat-card-content>
+          </mat-card>
+        }
 
         <mat-card class="subscription-card">
           <mat-card-header>
@@ -134,7 +222,7 @@ import { Subscription, User } from '../../models/decision.model';
       margin-bottom: 24px;
     }
 
-    .profile-card, .subscription-card {
+    .profile-card, .subscription-card, .passkeys-card {
       margin-bottom: 24px;
     }
 
@@ -156,18 +244,52 @@ import { Subscription, User } from '../../models/decision.model';
     .info-item .value {
       font-size: 16px;
       font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 4px;
     }
 
-    .subscription-card mat-card-title {
+    .auth-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .admin-chip {
+      font-size: 12px;
+    }
+
+    .subscription-card mat-card-title,
+    .passkeys-card mat-card-title {
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .section-description {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 16px;
     }
 
     .loading {
       display: flex;
       justify-content: center;
       padding: 24px;
+    }
+
+    .credentials-list {
+      margin-bottom: 16px;
+    }
+
+    .no-credentials {
+      text-align: center;
+      color: #999;
+      padding: 24px;
+    }
+
+    .add-passkey-button {
+      width: 100%;
     }
 
     .notification-options {
@@ -212,19 +334,29 @@ export class ProfileComponent implements OnInit {
     notify_on_update: false,
     notify_on_status_change: false
   };
+  credentials: WebAuthnCredential[] = [];
   isLoading = true;
+  isLoadingCredentials = true;
   isSaving = false;
+  isAddingPasskey = false;
   user: User | null = null;
 
   constructor(
     public authService: AuthService,
-    private snackBar: MatSnackBar
+    private webAuthnService: WebAuthnService,
+    private snackBar: MatSnackBar,
+    private dialog: MatDialog
   ) {}
 
   ngOnInit(): void {
     if (this.authService.currentUser && !this.authService.isMasterAccount) {
       this.user = this.authService.currentUser.user as User;
       this.loadSubscription();
+      if (this.user.auth_type === 'webauthn') {
+        this.loadCredentials();
+      } else {
+        this.isLoadingCredentials = false;
+      }
     }
   }
 
@@ -240,6 +372,18 @@ export class ProfileComponent implements OnInit {
     });
   }
 
+  loadCredentials(): void {
+    this.webAuthnService.getCredentials().subscribe({
+      next: (credentials) => {
+        this.credentials = credentials;
+        this.isLoadingCredentials = false;
+      },
+      error: () => {
+        this.isLoadingCredentials = false;
+      }
+    });
+  }
+
   saveSubscription(): void {
     this.isSaving = true;
     this.authService.updateSubscription(this.subscription).subscribe({
@@ -251,6 +395,49 @@ export class ProfileComponent implements OnInit {
       error: () => {
         this.isSaving = false;
         this.snackBar.open('Failed to save preferences', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  addPasskey(): void {
+    if (!this.user) return;
+
+    this.isAddingPasskey = true;
+
+    this.webAuthnService.register(this.user.email, this.user.name).subscribe({
+      next: () => {
+        this.isAddingPasskey = false;
+        this.snackBar.open('Passkey added successfully', 'Close', { duration: 2000 });
+        this.loadCredentials();
+      },
+      error: (err) => {
+        this.isAddingPasskey = false;
+        this.snackBar.open(err.error?.error || 'Failed to add passkey', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  deleteCredential(credential: WebAuthnCredential): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Passkey',
+        message: `Are you sure you want to delete the passkey "${credential.device_name}"? You won't be able to use this device to sign in anymore.`,
+        confirmText: 'Delete',
+        cancelText: 'Cancel'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(confirmed => {
+      if (confirmed) {
+        this.webAuthnService.deleteCredential(credential.credential_id).subscribe({
+          next: () => {
+            this.snackBar.open('Passkey deleted', 'Close', { duration: 2000 });
+            this.loadCredentials();
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to delete passkey', 'Close', { duration: 3000 });
+          }
+        });
       }
     });
   }

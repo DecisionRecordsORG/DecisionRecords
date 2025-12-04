@@ -3,7 +3,9 @@ export interface User {
   email: string;
   name: string;
   sso_domain: string;
+  auth_type: 'sso' | 'webauthn';
   is_admin: boolean;
+  has_passkey: boolean;
   created_at: string;
   last_login: string;
 }
@@ -78,4 +80,63 @@ export interface Subscription {
 
 export interface ApiError {
   error: string;
+}
+
+export interface AuthConfig {
+  domain: string;
+  auth_method: 'sso' | 'webauthn';
+  allow_registration: boolean;
+  rp_name: string;
+  id?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WebAuthnCredential {
+  id: number;
+  credential_id: string;
+  device_name: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface WebAuthnRegistrationOptions {
+  rp: {
+    name: string;
+    id: string;
+  };
+  user: {
+    id: string;
+    name: string;
+    displayName: string;
+  };
+  challenge: string;
+  pubKeyCredParams: Array<{
+    type: string;
+    alg: number;
+  }>;
+  timeout?: number;
+  excludeCredentials?: Array<{
+    type: string;
+    id: string;
+    transports?: string[];
+  }>;
+  authenticatorSelection?: {
+    residentKey?: string;
+    userVerification?: string;
+    authenticatorAttachment?: string;
+  };
+  attestation?: string;
+}
+
+export interface WebAuthnAuthenticationOptions {
+  challenge: string;
+  timeout?: number;
+  rpId: string;
+  allowCredentials?: Array<{
+    type: string;
+    id: string;
+    transports?: string[];
+  }>;
+  userVerification?: string;
 }

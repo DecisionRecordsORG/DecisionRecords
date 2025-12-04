@@ -1,10 +1,16 @@
 import os
+import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, save_history
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
+from webauthn_auth import (
+    create_registration_options, verify_registration,
+    create_authentication_options, verify_authentication,
+    get_user_credentials, delete_credential, get_auth_config
+)
 from datetime import datetime
 
 # Determine if we're serving Angular frontend
@@ -741,6 +747,272 @@ def api_list_email_configs():
     else:
         configs = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).all()
     return jsonify([c.to_dict() for c in configs])
+
+
+# ==================== API Routes - WebAuthn ====================
+
+@app.route('/api/auth/auth-config/<domain>', methods=['GET'])
+def api_get_auth_config_public(domain):
+    """Get authentication method for a domain (public endpoint for login page)."""
+    auth_config = get_auth_config(domain.lower())
+    if auth_config:
+        return jsonify({
+            'domain': auth_config.domain,
+            'auth_method': auth_config.auth_method,
+            'allow_registration': auth_config.allow_registration,
+            'rp_name': auth_config.rp_name,
+        })
+    # Default to WebAuthn if no config exists
+    return jsonify({
+        'domain': domain.lower(),
+        'auth_method': 'webauthn',
+        'allow_registration': True,
+        'rp_name': 'Architecture Decisions',
+    })
+
+
+@app.route('/api/webauthn/register/options', methods=['POST'])
+def api_webauthn_register_options():
+    """Generate WebAuthn registration options."""
+    data = request.get_json()
+
+    email = data.get('email')
+    name = data.get('name')
+    domain = data.get('domain')
+
+    if not email:
+        return jsonify({'error': 'Email is required'}), 400
+
+    # Extract domain from email if not provided
+    if not domain:
+        from auth import extract_domain_from_email
+        domain = extract_domain_from_email(email)
+
+    if not domain:
+        return jsonify({'error': 'Could not determine domain from email'}), 400
+
+    # Check auth config for this domain
+    auth_config = get_auth_config(domain)
+
+    # Check if SSO is configured and required for this domain
+    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
+    if sso_config and (not auth_config or auth_config.auth_method == 'sso'):
+        return jsonify({'error': 'This domain requires SSO authentication'}), 400
+
+    # Check if user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user and existing_user.auth_type == 'sso':
+        return jsonify({'error': 'This email is registered with SSO. Please use SSO to log in.'}), 400
+
+    # Check if registration is allowed for new users
+    if not existing_user:
+        if auth_config and not auth_config.allow_registration:
+            return jsonify({'error': 'Registration is not allowed for this domain'}), 400
+
+    try:
+        options = create_registration_options(email, name, domain)
+        return jsonify(json.loads(options))
+    except Exception as e:
+        app.logger.error(f"WebAuthn registration options error: {e}")
+        return jsonify({'error': 'Failed to generate registration options'}), 500
+
+
+@app.route('/api/webauthn/register/verify', methods=['POST'])
+def api_webauthn_register_verify():
+    """Verify WebAuthn registration and create/login user."""
+    data = request.get_json()
+
+    credential = data.get('credential')
+    device_name = data.get('device_name')
+
+    if not credential:
+        return jsonify({'error': 'Credential is required'}), 400
+
+    user, error = verify_registration(credential, device_name)
+
+    if error:
+        return jsonify({'error': error}), 400
+
+    # Log the user in
+    session['user_id'] = user.id
+    session.permanent = True
+
+    return jsonify({
+        'message': 'Registration successful',
+        'user': user.to_dict()
+    })
+
+
+@app.route('/api/webauthn/authenticate/options', methods=['POST'])
+def api_webauthn_auth_options():
+    """Generate WebAuthn authentication options."""
+    data = request.get_json() or {}
+
+    email = data.get('email')
+
+    # If email provided, check if user exists and uses WebAuthn
+    if email:
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        if user.auth_type == 'sso':
+            return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
+        if not user.webauthn_credentials:
+            return jsonify({'error': 'No passkeys registered for this account'}), 400
+
+    try:
+        options = create_authentication_options(email)
+        return jsonify(json.loads(options))
+    except Exception as e:
+        app.logger.error(f"WebAuthn authentication options error: {e}")
+        return jsonify({'error': 'Failed to generate authentication options'}), 500
+
+
+@app.route('/api/webauthn/authenticate/verify', methods=['POST'])
+def api_webauthn_auth_verify():
+    """Verify WebAuthn authentication and log in user."""
+    data = request.get_json()
+
+    credential = data.get('credential')
+
+    if not credential:
+        return jsonify({'error': 'Credential is required'}), 400
+
+    user, error = verify_authentication(credential)
+
+    if error:
+        return jsonify({'error': error}), 400
+
+    # Log the user in
+    session['user_id'] = user.id
+    session.permanent = True
+
+    return jsonify({
+        'message': 'Authentication successful',
+        'user': user.to_dict()
+    })
+
+
+# ==================== API Routes - User Credentials ====================
+
+@app.route('/api/user/credentials', methods=['GET'])
+@login_required
+def api_get_user_credentials():
+    """Get all WebAuthn credentials for the current user."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts do not have WebAuthn credentials'}), 400
+
+    credentials = get_user_credentials(g.current_user.id)
+    return jsonify(credentials)
+
+
+@app.route('/api/user/credentials/<credential_id>', methods=['DELETE'])
+@login_required
+def api_delete_user_credential(credential_id):
+    """Delete a WebAuthn credential for the current user."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts do not have WebAuthn credentials'}), 400
+
+    success, error = delete_credential(g.current_user.id, credential_id)
+
+    if not success:
+        return jsonify({'error': error}), 400
+
+    return jsonify({'message': 'Credential deleted successfully'})
+
+
+@app.route('/api/user/credentials', methods=['POST'])
+@login_required
+def api_add_user_credential():
+    """Add a new WebAuthn credential for the current user."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts do not have WebAuthn credentials'}), 400
+
+    if g.current_user.auth_type != 'webauthn':
+        return jsonify({'error': 'Your account uses SSO authentication'}), 400
+
+    data = request.get_json()
+    name = data.get('name')
+
+    try:
+        options = create_registration_options(
+            g.current_user.email,
+            g.current_user.name,
+            g.current_user.sso_domain
+        )
+        return jsonify(json.loads(options))
+    except Exception as e:
+        app.logger.error(f"WebAuthn add credential options error: {e}")
+        return jsonify({'error': 'Failed to generate registration options'}), 500
+
+
+# ==================== API Routes - Admin (Auth Config) ====================
+
+@app.route('/api/admin/auth-config', methods=['GET'])
+@admin_required
+def api_get_auth_config():
+    """Get authentication configuration for user's domain."""
+    if is_master_account():
+        # Master can see all auth configs
+        configs = AuthConfig.query.all()
+        return jsonify([c.to_dict() for c in configs])
+
+    config = AuthConfig.query.filter_by(domain=g.current_user.sso_domain).first()
+    if not config:
+        # Return default config
+        return jsonify({
+            'domain': g.current_user.sso_domain,
+            'auth_method': 'webauthn',
+            'allow_registration': True,
+            'rp_name': 'Architecture Decisions',
+        })
+    return jsonify(config.to_dict())
+
+
+@app.route('/api/admin/auth-config', methods=['POST', 'PUT'])
+@admin_required
+def api_save_auth_config():
+    """Create or update authentication configuration."""
+    data = request.get_json()
+
+    # Master can specify domain, regular admins use their own domain
+    if is_master_account():
+        domain = data.get('domain')
+        if not domain:
+            return jsonify({'error': 'Domain is required for master account'}), 400
+    else:
+        domain = g.current_user.sso_domain
+
+    auth_method = data.get('auth_method', 'webauthn')
+    if auth_method not in ['sso', 'webauthn']:
+        return jsonify({'error': 'auth_method must be "sso" or "webauthn"'}), 400
+
+    # If setting to SSO, check if SSO config exists for this domain
+    if auth_method == 'sso':
+        sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
+        if not sso_config:
+            return jsonify({'error': 'Cannot set auth method to SSO without a valid SSO configuration'}), 400
+
+    config = AuthConfig.query.filter_by(domain=domain).first()
+
+    if not config:
+        config = AuthConfig(
+            domain=domain,
+            auth_method=auth_method,
+            allow_registration=data.get('allow_registration', True),
+            rp_name=data.get('rp_name', 'Architecture Decisions'),
+        )
+        db.session.add(config)
+    else:
+        config.auth_method = auth_method
+        if 'allow_registration' in data:
+            config.allow_registration = bool(data['allow_registration'])
+        if 'rp_name' in data:
+            config.rp_name = data['rp_name']
+
+    db.session.commit()
+
+    return jsonify(config.to_dict())
 
 
 # ==================== Angular Frontend Serving ====================

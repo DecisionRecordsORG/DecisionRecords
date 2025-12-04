@@ -57,15 +57,16 @@ class MasterAccount(db.Model):
 
 
 class User(db.Model):
-    """User model for authenticated users via SSO."""
+    """User model for authenticated users via SSO or WebAuthn."""
 
     __tablename__ = 'users'
 
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), nullable=False, unique=True)
     name = db.Column(db.String(255), nullable=True)
-    sso_subject = db.Column(db.String(255), nullable=False)  # Subject ID from SSO provider
+    sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
+    auth_type = db.Column(db.String(20), nullable=False, default='sso')  # 'sso' or 'webauthn'
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, nullable=True)
@@ -73,6 +74,7 @@ class User(db.Model):
     # Relationships
     decisions_created = db.relationship('ArchitectureDecision', backref='creator', lazy=True, foreign_keys='ArchitectureDecision.created_by_id')
     subscriptions = db.relationship('Subscription', backref='user', lazy=True, uselist=False)
+    webauthn_credentials = db.relationship('WebAuthnCredential', backref='user', lazy=True, cascade='all, delete-orphan')
 
     def to_dict(self):
         return {
@@ -80,9 +82,11 @@ class User(db.Model):
             'email': self.email,
             'name': self.name,
             'sso_domain': self.sso_domain,
+            'auth_type': self.auth_type,
             'is_admin': self.is_admin,
             'created_at': self.created_at.isoformat(),
             'last_login': self.last_login.isoformat() if self.last_login else None,
+            'has_passkey': len(self.webauthn_credentials) > 0 if self.webauthn_credentials else False,
         }
 
 
@@ -152,6 +156,57 @@ class EmailConfig(db.Model):
         if include_password:
             data['smtp_password'] = self.smtp_password
         return data
+
+
+class AuthConfig(db.Model):
+    """Authentication configuration for a domain."""
+
+    __tablename__ = 'auth_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(255), nullable=False, unique=True)
+    auth_method = db.Column(db.String(20), nullable=False, default='webauthn')  # 'sso' or 'webauthn'
+    allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration for webauthn
+    rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'domain': self.domain,
+            'auth_method': self.auth_method,
+            'allow_registration': self.allow_registration,
+            'rp_name': self.rp_name,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+
+
+class WebAuthnCredential(db.Model):
+    """WebAuthn credentials for passwordless authentication."""
+
+    __tablename__ = 'webauthn_credentials'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    credential_id = db.Column(db.LargeBinary, nullable=False, unique=True)  # Raw credential ID bytes
+    public_key = db.Column(db.LargeBinary, nullable=False)  # COSE public key
+    sign_count = db.Column(db.Integer, nullable=False, default=0)
+    device_name = db.Column(db.String(255), nullable=True)  # User-friendly name for the device
+    transports = db.Column(db.String(255), nullable=True)  # JSON array of transports
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self):
+        import base64
+        return {
+            'id': self.id,
+            'credential_id': base64.urlsafe_b64encode(self.credential_id).decode('utf-8').rstrip('='),
+            'device_name': self.device_name or 'Security Key',
+            'created_at': self.created_at.isoformat(),
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+        }
 
 
 class Subscription(db.Model):
