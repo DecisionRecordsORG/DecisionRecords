@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -8,6 +9,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { RouterModule } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { MasterAccount } from '../../models/decision.model';
@@ -25,7 +27,8 @@ import { MasterAccount } from '../../models/decision.model';
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    MatSlideToggleModule
   ],
   template: `
     <div class="master-profile-container">
@@ -117,6 +120,33 @@ import { MasterAccount } from '../../models/decision.model';
                 }
               </button>
             </form>
+          </mat-card-content>
+        </mat-card>
+
+        <mat-card class="system-settings-card">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>settings</mat-icon>
+              System Settings
+            </mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="setting-item">
+              <div class="setting-info">
+                <h4>Email Verification</h4>
+                <p>Require users to verify their email address before accessing tenant login pages.</p>
+              </div>
+              <mat-slide-toggle
+                [checked]="emailVerificationRequired"
+                (change)="toggleEmailVerification($event.checked)"
+                [disabled]="isTogglingEmailVerification">
+              </mat-slide-toggle>
+            </div>
+            @if (emailVerificationMessage) {
+              <div class="setting-message" [class.success]="emailVerificationSuccess">
+                {{ emailVerificationMessage }}
+              </div>
+            }
           </mat-card-content>
         </mat-card>
 
@@ -238,6 +268,52 @@ import { MasterAccount } from '../../models/decision.model';
     .notice-content a {
       color: #3f51b5;
     }
+
+    .system-settings-card {
+      margin-bottom: 24px;
+    }
+
+    .system-settings-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .setting-item:last-child {
+      border-bottom: none;
+    }
+
+    .setting-info h4 {
+      margin: 0 0 4px 0;
+      font-size: 16px;
+    }
+
+    .setting-info p {
+      margin: 0;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .setting-message {
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 4px;
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .setting-message.success {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
   `]
 })
 export class MasterProfileComponent implements OnInit {
@@ -247,10 +323,17 @@ export class MasterProfileComponent implements OnInit {
   successMessage = '';
   errorMessage = '';
 
+  // Email verification settings
+  emailVerificationRequired = true;
+  isTogglingEmailVerification = false;
+  emailVerificationMessage = '';
+  emailVerificationSuccess = false;
+
   constructor(
     private fb: FormBuilder,
     public authService: AuthService,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    private http: HttpClient
   ) {
     this.passwordForm = this.fb.group({
       currentPassword: ['', Validators.required],
@@ -263,6 +346,41 @@ export class MasterProfileComponent implements OnInit {
     if (this.authService.currentUser?.isMaster) {
       this.master = this.authService.currentUser.user as MasterAccount;
     }
+    this.loadEmailVerificationSetting();
+  }
+
+  loadEmailVerificationSetting(): void {
+    this.http.get<{ required: boolean }>('/api/system/email-verification').subscribe({
+      next: (response) => {
+        this.emailVerificationRequired = response.required;
+      },
+      error: () => {
+        // Default to true if we can't load the setting
+        this.emailVerificationRequired = true;
+      }
+    });
+  }
+
+  toggleEmailVerification(required: boolean): void {
+    this.isTogglingEmailVerification = true;
+    this.emailVerificationMessage = '';
+
+    this.http.put<{ required: boolean; message: string }>('/api/system/email-verification', { required }).subscribe({
+      next: (response) => {
+        this.emailVerificationRequired = response.required;
+        this.emailVerificationMessage = response.message;
+        this.emailVerificationSuccess = true;
+        this.isTogglingEmailVerification = false;
+        setTimeout(() => this.emailVerificationMessage = '', 3000);
+      },
+      error: (err) => {
+        this.emailVerificationMessage = err.error?.error || 'Failed to update setting';
+        this.emailVerificationSuccess = false;
+        this.isTogglingEmailVerification = false;
+        // Revert the toggle
+        this.emailVerificationRequired = !required;
+      }
+    });
   }
 
   passwordMatchValidator(form: FormGroup) {

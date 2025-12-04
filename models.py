@@ -9,6 +9,60 @@ DEFAULT_MASTER_USERNAME = 'admin'
 DEFAULT_MASTER_PASSWORD = 'changeme'
 
 
+class SystemConfig(db.Model):
+    """Global system configuration managed by super admin."""
+
+    __tablename__ = 'system_config'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(100), nullable=False, unique=True)
+    value = db.Column(db.String(500), nullable=True)
+    description = db.Column(db.String(500), nullable=True)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Default configuration keys
+    KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
+
+    @staticmethod
+    def get(key, default=None):
+        """Get a configuration value."""
+        config = SystemConfig.query.filter_by(key=key).first()
+        if config:
+            return config.value
+        return default
+
+    @staticmethod
+    def get_bool(key, default=False):
+        """Get a configuration value as boolean."""
+        value = SystemConfig.get(key)
+        if value is None:
+            return default
+        return value.lower() in ('true', '1', 'yes', 'on')
+
+    @staticmethod
+    def set(key, value, description=None):
+        """Set a configuration value."""
+        config = SystemConfig.query.filter_by(key=key).first()
+        if config:
+            config.value = str(value)
+            if description:
+                config.description = description
+        else:
+            config = SystemConfig(key=key, value=str(value), description=description)
+            db.session.add(config)
+        db.session.commit()
+        return config
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'key': self.key,
+            'value': self.value,
+            'description': self.description,
+            'updated_at': self.updated_at.isoformat()
+        }
+
+
 class MasterAccount(db.Model):
     """Master account for system administration with local authentication."""
 

@@ -181,6 +181,7 @@ export interface TenantStatus {
   has_sso: boolean;
   sso_provider: string | null;
   sso_id: number | null;
+  email_verification_required: boolean;
 }
 
 export interface EmailVerificationResponse {
