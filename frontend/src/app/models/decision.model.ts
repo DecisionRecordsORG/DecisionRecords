@@ -140,3 +140,17 @@ export interface WebAuthnAuthenticationOptions {
   }>;
   userVerification?: string;
 }
+
+export interface AccessRequest {
+  id: number;
+  email: string;
+  name: string;
+  domain: string;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  updated_at: string;
+  processed_by: User | null;
+  processed_at: string | null;
+  rejection_reason: string | null;
+}

@@ -13,7 +13,9 @@ describe('AuthService', () => {
     email: 'test@example.com',
     name: 'Test User',
     sso_domain: 'example.com',
+    auth_type: 'webauthn',
     is_admin: false,
+    has_passkey: true,
     created_at: '2024-01-01T00:00:00Z',
     last_login: '2024-01-01T00:00:00Z'
   };

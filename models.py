@@ -324,6 +324,47 @@ class DecisionHistory(db.Model):
         }
 
 
+class AccessRequest(db.Model):
+    """Access requests for users wanting to join an existing tenant."""
+
+    __tablename__ = 'access_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    domain = db.Column(db.String(255), nullable=False, index=True)
+    reason = db.Column(db.Text, nullable=True)  # Optional reason for requesting access
+    status = db.Column(db.String(20), nullable=False, default='pending')  # pending, approved, rejected
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Admin who processed the request
+    processed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+    rejection_reason = db.Column(db.Text, nullable=True)
+
+    # Relationships
+    processed_by = db.relationship('User', foreign_keys=[processed_by_id])
+
+    # Valid statuses
+    VALID_STATUSES = ['pending', 'approved', 'rejected']
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'email': self.email,
+            'name': self.name,
+            'domain': self.domain,
+            'reason': self.reason,
+            'status': self.status,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'processed_by': self.processed_by.to_dict() if self.processed_by else None,
+            'processed_at': self.processed_at.isoformat() if self.processed_at else None,
+            'rejection_reason': self.rejection_reason,
+        }
+
+
 def save_history(decision, change_reason=None, changed_by=None):
     """Save the current state of a decision to history before updating."""
     history_entry = DecisionHistory(

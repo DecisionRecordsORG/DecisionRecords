@@ -7,12 +7,14 @@ A self-hosted web application for managing Architecture Decision Records (ADRs) 
 - **Modern Angular UI**: Built with Angular 18 and Angular Material for a responsive, professional interface
 - **ADR Management**: Create, view, update, and delete architecture decisions
 - **Complete History**: Track full update history for each decision with user attribution
-- **SSO Authentication**: OpenID Connect (OIDC) integration for enterprise Single Sign-On
-- **Multi-Tenancy**: Domain-based isolation ensures organizations only see their own decisions
+- **Dual Authentication**: Support for both SSO (OpenID Connect) and WebAuthn (Passkeys)
+- **Passwordless Login**: Secure passkey-based authentication using device biometrics or security keys
+- **Multi-Tenancy**: Domain-based isolation with tenant-specific URLs (e.g., `/{domain}/`)
+- **Access Requests**: Users can request access to existing tenants with admin approval workflow
 - **User Tracking**: Know who created, modified, or deleted each decision
 - **Email Notifications**: Subscribe to receive email alerts for new or updated decisions
 - **Search & Filter**: Find decisions by keyword or status with real-time filtering
-- **Master Account**: Local admin account for initial setup and system configuration
+- **Super Admin Account**: System-wide admin for configuration and oversight
 - **Self-Hosted**: SQLite database for easy deployment with no external dependencies
 
 ## ADR Format
@@ -137,31 +139,110 @@ export SECRET_KEY="your-secure-secret-key"
 python app.py
 ```
 
-## Master Account
+## Super Admin Account
 
-The application includes a built-in master account for system administration:
+The application includes a built-in super admin account for system administration:
 
 - **Default Username**: `admin`
 - **Default Password**: `changeme`
+- **Login URL**: `/superadmin`
 
-The master account can:
+The super admin can:
 - Configure SSO providers for any domain
 - Configure email settings for any domain
+- Configure authentication methods for any domain
 - View all decisions across all domains (read-only)
 - Manage user admin privileges
 
 **Important**: Change the default password immediately after first login!
 
+## URL Structure
+
+The application uses tenant-aware URLs for multi-tenant isolation:
+
+| URL Pattern | Description |
+|-------------|-------------|
+| `/` | Main landing page (signup for new tenants) |
+| `/superadmin` | Super admin login page |
+| `/superadmin/dashboard` | Super admin dashboard |
+| `/superadmin/settings` | System-wide settings |
+| `/{domain}/login` | Tenant-specific login page |
+| `/{domain}/` | Decision list for tenant |
+| `/{domain}/decision/new` | Create new decision |
+| `/{domain}/decision/{id}` | View/edit decision |
+| `/{domain}/profile` | User profile and passkey management |
+| `/{domain}/admin` | Tenant admin settings |
+
+## Authentication
+
+### Authentication Methods
+
+The application supports two authentication methods per tenant:
+
+#### 1. Passkeys (WebAuthn) - Default
+
+Passwordless authentication using device biometrics or security keys:
+- Uses device fingerprint, Face ID, Touch ID, or hardware security keys
+- Resistant to phishing attacks
+- No passwords to remember or manage
+- Users can register multiple devices for backup
+
+#### 2. Single Sign-On (SSO)
+
+Enterprise authentication via OpenID Connect:
+- Integration with Google, Microsoft, Okta, and other OIDC providers
+- Centralized user management through your identity provider
+- Requires SSO configuration (see SSO Configuration section)
+
+### Authentication Flow
+
+1. **New User (First from Domain)**:
+   - Visit `/` (landing page)
+   - Enter email address
+   - System creates new tenant based on email domain
+   - User registers passkey (or uses SSO if configured)
+   - User becomes tenant administrator
+
+2. **Existing Tenant User**:
+   - Visit `/{domain}/login`
+   - Authenticate with passkey or SSO (depending on tenant configuration)
+
+3. **New User Joining Existing Tenant**:
+   - Visit `/` and enter email
+   - If domain already has users, user is redirected to request access
+   - Tenant admin reviews and approves/rejects access request
+   - Upon approval, user can login via `/{domain}/login`
+
+## Access Requests
+
+When a user tries to sign up with an email domain that already has an existing tenant:
+
+1. **Request Access**: User is prompted to request access from their tenant admin
+2. **Provide Reason**: User can optionally explain why they need access
+3. **Admin Notification**: Tenant admins see pending requests in their settings
+4. **Approval/Rejection**: Admin can approve (creates user account) or reject the request
+5. **User Login**: Approved users can sign in using the tenant's configured authentication method
+
+### Managing Access Requests (Admins)
+
+1. Navigate to `/{domain}/admin`
+2. Go to the "Access Requests" tab
+3. Review pending requests showing:
+   - User name and email
+   - Reason for requesting access
+   - Request date
+4. Click ✓ to approve or ✗ to reject each request
+
 ## SSO Configuration
 
-The application supports OpenID Connect (OIDC) for authentication. Configure SSO through the admin settings page (`/settings`).
+The application supports OpenID Connect (OIDC) for authentication. Configure SSO through the admin settings.
 
 ### Setting Up SSO
 
 1. Register your application with your identity provider (Google, Okta, Azure AD, etc.)
 2. Set the callback URL to: `https://your-domain.com/auth/callback`
-3. Log in with the master account
-4. Navigate to Settings > SSO Providers
+3. Log in as super admin (`/superadmin`) or tenant admin (`/{domain}/admin`)
+4. Navigate to SSO Providers tab
 5. Add your provider details:
    - **Domain**: Email domain for your organization (e.g., `company.com`)
    - **Provider Name**: Display name (e.g., "Google Workspace")
@@ -249,6 +330,31 @@ All API endpoints require authentication via session cookie.
 | `POST` | `/api/admin/email/test` | Send test email |
 | `GET` | `/api/admin/users` | List users in domain |
 | `PUT` | `/api/admin/users/<id>/admin` | Toggle user admin status |
+| `GET` | `/api/admin/auth-config` | Get authentication configuration |
+| `POST` | `/api/admin/auth-config` | Create/update auth configuration |
+| `GET` | `/api/admin/access-requests` | List all access requests |
+| `GET` | `/api/admin/access-requests/pending` | List pending access requests |
+| `POST` | `/api/admin/access-requests/<id>/approve` | Approve an access request |
+| `POST` | `/api/admin/access-requests/<id>/reject` | Reject an access request |
+
+### WebAuthn (Passkey Authentication)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/webauthn/register/begin` | Start passkey registration |
+| `POST` | `/api/webauthn/register/complete` | Complete passkey registration |
+| `POST` | `/api/webauthn/authenticate/begin` | Start passkey authentication |
+| `POST` | `/api/webauthn/authenticate/complete` | Complete passkey authentication |
+| `GET` | `/api/webauthn/credentials` | List user's registered passkeys |
+| `DELETE` | `/api/webauthn/credentials/<id>` | Delete a passkey |
+
+### Tenant Status
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/auth/tenant/<domain>` | Get tenant status (has users, auth method) |
+| `GET` | `/api/auth/user-exists/<email>` | Check if user exists |
+| `POST` | `/api/auth/access-request` | Submit access request to join tenant |
 
 ## Project Structure
 
@@ -268,20 +374,22 @@ architecture-decisions/
     ├── src/
     │   ├── app/
     │   │   ├── components/     # Angular components
-    │   │   │   ├── login/
+    │   │   │   ├── landing/           # Main signup page
+    │   │   │   ├── tenant-login/      # Tenant-specific login
+    │   │   │   ├── superadmin-login/  # Super admin login
     │   │   │   ├── decision-list/
     │   │   │   ├── decision-detail/
-    │   │   │   ├── settings/
+    │   │   │   ├── settings/          # Admin settings with access requests
     │   │   │   ├── profile/
     │   │   │   ├── master-profile/
-    │   │   │   └── shared/
+    │   │   │   └── shared/            # Navbar, dialogs, etc.
     │   │   ├── services/       # API services
     │   │   │   ├── auth.service.ts
     │   │   │   ├── decision.service.ts
     │   │   │   └── admin.service.ts
-    │   │   ├── guards/         # Route guards
+    │   │   ├── guards/         # Route guards (auth, admin, master, tenant)
     │   │   ├── models/         # TypeScript interfaces
-    │   │   ├── app.routes.ts   # Application routing
+    │   │   ├── app.routes.ts   # Tenant-aware routing
     │   │   └── app.config.ts   # App configuration
     │   └── styles.scss         # Global styles
     ├── angular.json            # Angular CLI configuration
@@ -309,7 +417,7 @@ python -m pytest tests/
 - **Backend**: Python 3.11, Flask, SQLAlchemy, Authlib
 - **Frontend**: Angular 18, Angular Material, TypeScript
 - **Database**: SQLite
-- **Authentication**: OpenID Connect (OIDC)
+- **Authentication**: OpenID Connect (OIDC), WebAuthn/FIDO2 (Passkeys)
 - **Containerization**: Docker with multi-stage builds
 
 ## Author

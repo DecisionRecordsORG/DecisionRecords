@@ -15,10 +15,11 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
 import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
-import { SSOConfig, EmailConfig, User, AuthConfig } from '../../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
+import { MatTooltipModule } from '@angular/material/tooltip';
 
 @Component({
   selector: 'app-settings',
@@ -40,6 +41,7 @@ import { MatRadioModule } from '@angular/material/radio';
     MatChipsModule,
     MatSelectModule,
     MatRadioModule,
+    MatTooltipModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -407,6 +409,125 @@ import { MatRadioModule } from '@angular/material/radio';
             </mat-card>
           </div>
         </mat-tab>
+
+        <!-- Access Requests Tab (for non-master admins only) -->
+        @if (!authService.isMasterAccount) {
+          <mat-tab>
+            <ng-template mat-tab-label>
+              Access Requests
+              @if (pendingRequestsCount > 0) {
+                <span class="tab-badge">{{ pendingRequestsCount }}</span>
+              }
+            </ng-template>
+            <div class="tab-content">
+              <mat-card class="list-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>person_add</mat-icon>
+                    Pending Access Requests
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  @if (loadingRequests) {
+                    <div class="loading-container">
+                      <mat-spinner diameter="40"></mat-spinner>
+                    </div>
+                  } @else if (accessRequests.length === 0) {
+                    <p class="empty-message">No pending access requests</p>
+                  } @else {
+                    <table mat-table [dataSource]="accessRequests" class="full-width">
+                      <ng-container matColumnDef="name">
+                        <th mat-header-cell *matHeaderCellDef>Name</th>
+                        <td mat-cell *matCellDef="let request">{{ request.name }}</td>
+                      </ng-container>
+
+                      <ng-container matColumnDef="email">
+                        <th mat-header-cell *matHeaderCellDef>Email</th>
+                        <td mat-cell *matCellDef="let request">{{ request.email }}</td>
+                      </ng-container>
+
+                      <ng-container matColumnDef="reason">
+                        <th mat-header-cell *matHeaderCellDef>Reason</th>
+                        <td mat-cell *matCellDef="let request">
+                          {{ request.reason || 'No reason provided' }}
+                        </td>
+                      </ng-container>
+
+                      <ng-container matColumnDef="created_at">
+                        <th mat-header-cell *matHeaderCellDef>Requested</th>
+                        <td mat-cell *matCellDef="let request">
+                          {{ request.created_at | date:'short' }}
+                        </td>
+                      </ng-container>
+
+                      <ng-container matColumnDef="status">
+                        <th mat-header-cell *matHeaderCellDef>Status</th>
+                        <td mat-cell *matCellDef="let request">
+                          <mat-chip [class]="'status-' + request.status">
+                            {{ request.status | titlecase }}
+                          </mat-chip>
+                        </td>
+                      </ng-container>
+
+                      <ng-container matColumnDef="actions">
+                        <th mat-header-cell *matHeaderCellDef>Actions</th>
+                        <td mat-cell *matCellDef="let request">
+                          @if (request.status === 'pending') {
+                            <button mat-icon-button color="primary"
+                                    (click)="approveRequest(request)"
+                                    [disabled]="processingRequest === request.id"
+                                    matTooltip="Approve">
+                              @if (processingRequest === request.id) {
+                                <mat-spinner diameter="20"></mat-spinner>
+                              } @else {
+                                <mat-icon>check_circle</mat-icon>
+                              }
+                            </button>
+                            <button mat-icon-button color="warn"
+                                    (click)="rejectRequest(request)"
+                                    [disabled]="processingRequest === request.id"
+                                    matTooltip="Reject">
+                              <mat-icon>cancel</mat-icon>
+                            </button>
+                          } @else if (request.status === 'approved') {
+                            <span class="status-text approved">
+                              <mat-icon>check</mat-icon> Approved
+                            </span>
+                          } @else {
+                            <span class="status-text rejected">
+                              <mat-icon>close</mat-icon> Rejected
+                            </span>
+                          }
+                        </td>
+                      </ng-container>
+
+                      <tr mat-header-row *matHeaderRowDef="accessRequestColumns"></tr>
+                      <tr mat-row *matRowDef="let row; columns: accessRequestColumns;"></tr>
+                    </table>
+                  }
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card class="info-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>info</mat-icon>
+                    About Access Requests
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>When users try to sign up with an email domain that already has an existing tenant,
+                  they can request access instead of creating a new account.</p>
+                  <ul>
+                    <li><strong>Approve:</strong> Creates a new user account with the requested email</li>
+                    <li><strong>Reject:</strong> Denies access (you can provide a reason)</li>
+                  </ul>
+                  <p>Approved users will be able to sign in using the authentication method configured for your domain.</p>
+                </mat-card-content>
+              </mat-card>
+            </div>
+          </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -575,6 +696,57 @@ import { MatRadioModule } from '@angular/material/radio';
     .info-card li {
       margin-bottom: 4px;
     }
+
+    .tab-badge {
+      background: #ff4081;
+      color: white;
+      border-radius: 50%;
+      padding: 2px 6px;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+
+    .loading-container {
+      display: flex;
+      justify-content: center;
+      padding: 48px;
+    }
+
+    .status-pending {
+      background-color: #fff3e0 !important;
+      color: #e65100 !important;
+    }
+
+    .status-approved {
+      background-color: #e8f5e9 !important;
+      color: #2e7d32 !important;
+    }
+
+    .status-rejected {
+      background-color: #ffebee !important;
+      color: #c62828 !important;
+    }
+
+    .status-text {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+    }
+
+    .status-text.approved {
+      color: #2e7d32;
+    }
+
+    .status-text.rejected {
+      color: #c62828;
+    }
+
+    .status-text mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
   `]
 })
 export class SettingsComponent implements OnInit {
@@ -584,8 +756,10 @@ export class SettingsComponent implements OnInit {
   ssoConfigs: SSOConfig[] = [];
   users: User[] = [];
   authConfig: AuthConfig | null = null;
+  accessRequests: AccessRequest[] = [];
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
   userColumns = ['name', 'email', 'domain', 'auth_type', 'is_admin', 'last_login'];
+  accessRequestColumns = ['name', 'email', 'reason', 'created_at', 'status', 'actions'];
 
   editingSSOId: number | null = null;
   hasExistingEmailConfig = false;
@@ -594,6 +768,9 @@ export class SettingsComponent implements OnInit {
   savingEmailConfig = false;
   savingAuthConfig = false;
   testingEmail = false;
+  loadingRequests = false;
+  processingRequest: number | null = null;
+  pendingRequestsCount = 0;
 
   constructor(
     private fb: FormBuilder,
@@ -634,6 +811,9 @@ export class SettingsComponent implements OnInit {
     this.loadEmailConfig();
     this.loadUsers();
     this.loadAuthConfig();
+    if (!this.authService.isMasterAccount) {
+      this.loadAccessRequests();
+    }
   }
 
   loadSSOConfigs(): void {
@@ -872,6 +1052,77 @@ export class SettingsComponent implements OnInit {
       error: (err) => {
         this.savingAuthConfig = false;
         this.snackBar.open(err.error?.error || 'Failed to save configuration', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  loadAccessRequests(): void {
+    this.loadingRequests = true;
+    this.adminService.getAccessRequests().subscribe({
+      next: (requests) => {
+        this.accessRequests = requests;
+        this.pendingRequestsCount = requests.filter(r => r.status === 'pending').length;
+        this.loadingRequests = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load access requests', 'Close', { duration: 3000 });
+        this.loadingRequests = false;
+      }
+    });
+  }
+
+  approveRequest(request: AccessRequest): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Approve Access Request',
+        message: `Are you sure you want to approve access for ${request.name} (${request.email})? This will create a new user account.`,
+        confirmText: 'Approve'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.processingRequest = request.id;
+        this.adminService.approveAccessRequest(request.id).subscribe({
+          next: (response) => {
+            this.snackBar.open(`Access approved for ${request.email}`, 'Close', { duration: 3000 });
+            this.loadAccessRequests();
+            this.loadUsers();
+            this.processingRequest = null;
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            this.processingRequest = null;
+          }
+        });
+      }
+    });
+  }
+
+  rejectRequest(request: AccessRequest): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Reject Access Request',
+        message: `Are you sure you want to reject access for ${request.name} (${request.email})?`,
+        confirmText: 'Reject',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.processingRequest = request.id;
+        this.adminService.rejectAccessRequest(request.id).subscribe({
+          next: () => {
+            this.snackBar.open(`Access request rejected`, 'Close', { duration: 3000 });
+            this.loadAccessRequests();
+            this.processingRequest = null;
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to reject request', 'Close', { duration: 3000 });
+            this.processingRequest = null;
+          }
+        });
       }
     });
   }

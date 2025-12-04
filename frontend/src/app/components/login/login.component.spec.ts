@@ -5,6 +5,7 @@ import { provideRouter } from '@angular/router';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { LoginComponent } from './login.component';
 import { AuthService } from '../../services/auth.service';
+import { WebAuthnService } from '../../services/webauthn.service';
 
 describe('LoginComponent', () => {
   let component: LoginComponent;
@@ -18,7 +19,8 @@ describe('LoginComponent', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         provideRouter([]),
-        AuthService
+        AuthService,
+        WebAuthnService
       ]
     }).compileComponents();
 
@@ -43,37 +45,38 @@ describe('LoginComponent', () => {
     expect(component).toBeTruthy();
   });
 
-  it('should have empty login form initially', fakeAsync(() => {
+  it('should have empty forms initially', fakeAsync(() => {
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
     fixture.detectChanges();
     httpMock.expectOne('/api/auth/sso-configs').flush([]);
     tick();
 
-    expect(component.loginForm.get('username')?.value).toBe('');
-    expect(component.loginForm.get('password')?.value).toBe('');
+    expect(component.emailForm.get('email')?.value).toBe('');
+    expect(component.adminForm.get('username')?.value).toBe('');
+    expect(component.adminForm.get('password')?.value).toBe('');
   }));
 
-  it('should show validation errors for empty form', fakeAsync(() => {
+  it('should show validation errors for empty admin form', fakeAsync(() => {
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
     fixture.detectChanges();
     httpMock.expectOne('/api/auth/sso-configs').flush([]);
     tick();
 
-    expect(component.loginForm.valid).toBeFalse();
+    expect(component.adminForm.valid).toBeFalse();
   }));
 
-  it('should be valid when form is filled', fakeAsync(() => {
+  it('should be valid when admin form is filled', fakeAsync(() => {
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
     fixture.detectChanges();
     httpMock.expectOne('/api/auth/sso-configs').flush([]);
     tick();
 
-    component.loginForm.setValue({
+    component.adminForm.setValue({
       username: 'admin',
       password: 'changeme'
     });
 
-    expect(component.loginForm.valid).toBeTrue();
+    expect(component.adminForm.valid).toBeTrue();
   }));
 
   it('should load SSO configs on init', fakeAsync(() => {
@@ -101,18 +104,18 @@ describe('LoginComponent', () => {
     expect(component.hidePassword).toBeFalse();
   }));
 
-  it('should set error message on login failure', fakeAsync(() => {
+  it('should set error message on admin login failure', fakeAsync(() => {
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
     fixture.detectChanges();
     httpMock.expectOne('/api/auth/sso-configs').flush([]);
     tick();
 
-    component.loginForm.setValue({
+    component.adminForm.setValue({
       username: 'admin',
       password: 'wrongpassword'
     });
 
-    component.onSubmit();
+    component.adminLogin();
 
     const loginReq = httpMock.expectOne('/auth/local');
     loginReq.flush({ error: 'Invalid username or password' }, { status: 401, statusText: 'Unauthorized' });
@@ -122,16 +125,52 @@ describe('LoginComponent', () => {
     expect(component.isLoading).toBeFalse();
   }));
 
-  it('should not submit if form is invalid', fakeAsync(() => {
+  it('should not submit admin login if form is invalid', fakeAsync(() => {
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
     fixture.detectChanges();
     httpMock.expectOne('/api/auth/sso-configs').flush([]);
     tick();
 
-    component.onSubmit();
+    component.adminLogin();
 
     // No HTTP request should be made
     httpMock.expectNone('/auth/local');
     expect(component.isLoading).toBeFalse();
+  }));
+
+  it('should start in initial view', fakeAsync(() => {
+    httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
+    fixture.detectChanges();
+    httpMock.expectOne('/api/auth/sso-configs').flush([]);
+    tick();
+
+    expect(component.currentView).toBe('initial');
+  }));
+
+  it('should check WebAuthn support on init', fakeAsync(() => {
+    httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
+    fixture.detectChanges();
+    httpMock.expectOne('/api/auth/sso-configs').flush([]);
+    tick();
+
+    // webAuthnSupported should be defined (true or false depending on browser)
+    expect(component.webAuthnSupported).toBeDefined();
+  }));
+
+  it('should have goBack method that resets to initial view', fakeAsync(() => {
+    httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
+    fixture.detectChanges();
+    httpMock.expectOne('/api/auth/sso-configs').flush([]);
+    tick();
+
+    component.currentView = 'webauthn';
+    component.currentEmail = 'test@example.com';
+    component.error = 'Some error';
+
+    component.goBack();
+
+    expect(component.currentView).toBe('initial');
+    expect(component.currentEmail).toBe('');
+    expect(component.error).toBe('');
   }));
 });

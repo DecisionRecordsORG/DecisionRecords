@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { SSOConfig, EmailConfig, User, AuthConfig } from '../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest } from '../models/decision.model';
 
 export interface CreateSSOConfigRequest {
   domain: string;
@@ -96,5 +96,22 @@ export class AdminService {
 
   saveAuthConfig(config: AuthConfigRequest): Observable<AuthConfig> {
     return this.http.post<AuthConfig>(`${this.apiUrl}/auth-config`, config);
+  }
+
+  // Access Requests
+  getAccessRequests(): Observable<AccessRequest[]> {
+    return this.http.get<AccessRequest[]>(`${this.apiUrl}/access-requests`);
+  }
+
+  getPendingAccessRequests(): Observable<AccessRequest[]> {
+    return this.http.get<AccessRequest[]>(`${this.apiUrl}/access-requests/pending`);
+  }
+
+  approveAccessRequest(requestId: number): Observable<{ message: string; user: User }> {
+    return this.http.post<{ message: string; user: User }>(`${this.apiUrl}/access-requests/${requestId}/approve`, {});
+  }
+
+  rejectAccessRequest(requestId: number, reason?: string): Observable<{ message: string; request: AccessRequest }> {
+    return this.http.post<{ message: string; request: AccessRequest }>(`${this.apiUrl}/access-requests/${requestId}/reject`, { reason });
   }
 }

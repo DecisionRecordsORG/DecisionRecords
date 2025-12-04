@@ -6,7 +6,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatDividerModule } from '@angular/material/divider';
+import { MatBadgeModule } from '@angular/material/badge';
 import { AuthService } from '../../services/auth.service';
+import { AdminService } from '../../services/admin.service';
 import { User, MasterAccount } from '../../models/decision.model';
 
 @Component({
@@ -19,25 +21,29 @@ import { User, MasterAccount } from '../../models/decision.model';
     MatButtonModule,
     MatIconModule,
     MatMenuModule,
-    MatDividerModule
+    MatDividerModule,
+    MatBadgeModule
   ],
   template: `
     <mat-toolbar color="primary" class="navbar">
-      <a routerLink="/" class="brand">
+      <a [routerLink]="homeLink" class="brand">
         <mat-icon>architecture</mat-icon>
-        <span>Architecture Decisions</span>
+        <span class="brand-text">Architecture Decisions</span>
+        @if (!authService.isMasterAccount && userDomain) {
+          <span class="tenant-badge">{{ userDomain }}</span>
+        }
       </a>
 
       <span class="spacer"></span>
 
       @if (authService.isAuthenticated) {
         <nav class="nav-links">
-          <a mat-button routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
+          <a mat-button [routerLink]="decisionsLink" routerLinkActive="active" [routerLinkActiveOptions]="{exact: true}">
             <mat-icon>list</mat-icon>
             Decisions
           </a>
           @if (!authService.isMasterAccount) {
-            <a mat-button routerLink="/decision/new" routerLinkActive="active">
+            <a mat-button [routerLink]="newDecisionLink" routerLinkActive="active">
               <mat-icon>add</mat-icon>
               New
             </a>
@@ -51,6 +57,9 @@ import { User, MasterAccount } from '../../models/decision.model';
             <mat-icon>person</mat-icon>
           }
           <span class="user-name">{{ displayName }}</span>
+          @if (pendingRequestsCount > 0 && authService.isAdmin) {
+            <span class="badge">{{ pendingRequestsCount }}</span>
+          }
           <mat-icon>arrow_drop_down</mat-icon>
         </button>
 
@@ -58,31 +67,39 @@ import { User, MasterAccount } from '../../models/decision.model';
           <div class="menu-header">
             @if (authService.isMasterAccount) {
               <mat-icon>shield</mat-icon>
-              <span>Master Account</span>
+              <span>Super Admin</span>
             } @else {
+              <mat-icon>business</mat-icon>
               <span>{{ userDomain }}</span>
             }
           </div>
           <mat-divider></mat-divider>
 
           @if (authService.isMasterAccount) {
-            <a mat-menu-item routerLink="/master/profile">
-              <mat-icon>settings</mat-icon>
-              Account Settings
+            <a mat-menu-item routerLink="/superadmin/dashboard">
+              <mat-icon>dashboard</mat-icon>
+              Dashboard
             </a>
-            <a mat-menu-item routerLink="/settings">
-              <mat-icon>admin_panel_settings</mat-icon>
+            <a mat-menu-item routerLink="/superadmin/settings">
+              <mat-icon>settings</mat-icon>
               System Settings
             </a>
           } @else {
-            <a mat-menu-item routerLink="/profile">
+            <a mat-menu-item [routerLink]="profileLink">
+              <mat-icon>person</mat-icon>
+              Profile
+            </a>
+            <a mat-menu-item [routerLink]="profileLink">
               <mat-icon>notifications</mat-icon>
               Notifications
             </a>
             @if (authService.isAdmin) {
-              <a mat-menu-item routerLink="/settings">
+              <a mat-menu-item [routerLink]="adminLink">
                 <mat-icon>settings</mat-icon>
-                Settings
+                Admin Settings
+                @if (pendingRequestsCount > 0) {
+                  <span class="menu-badge">{{ pendingRequestsCount }}</span>
+                }
               </a>
             }
           }
@@ -111,6 +128,14 @@ import { User, MasterAccount } from '../../models/decision.model';
       text-decoration: none;
       font-size: 18px;
       font-weight: 500;
+    }
+
+    .tenant-badge {
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-left: 8px;
     }
 
     .spacer {
@@ -143,13 +168,37 @@ import { User, MasterAccount } from '../../models/decision.model';
       white-space: nowrap;
     }
 
+    .badge {
+      background: #ff4081;
+      color: white;
+      border-radius: 50%;
+      padding: 2px 6px;
+      font-size: 11px;
+      margin-left: 4px;
+    }
+
+    .menu-badge {
+      background: #ff4081;
+      color: white;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+
     .menu-header {
       display: flex;
       align-items: center;
       gap: 8px;
       padding: 8px 16px;
-      color: #888;
-      font-size: 12px;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .menu-header mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
     }
 
     @media (max-width: 600px) {
@@ -160,14 +209,37 @@ import { User, MasterAccount } from '../../models/decision.model';
       .user-name {
         display: none;
       }
+
+      .brand-text {
+        display: none;
+      }
+
+      .tenant-badge {
+        margin-left: 0;
+      }
     }
   `]
 })
 export class NavbarComponent {
+  pendingRequestsCount = 0;
+
   constructor(
     public authService: AuthService,
+    private adminService: AdminService,
     private router: Router
-  ) {}
+  ) {
+    // Load pending requests count for admins
+    if (this.authService.isAdmin) {
+      this.loadPendingRequestsCount();
+    }
+  }
+
+  loadPendingRequestsCount(): void {
+    this.adminService.getPendingAccessRequests().subscribe({
+      next: (requests) => this.pendingRequestsCount = requests.length,
+      error: () => this.pendingRequestsCount = 0
+    });
+  }
 
   get displayName(): string {
     const user = this.authService.currentUser?.user;
@@ -183,15 +255,47 @@ export class NavbarComponent {
   }
 
   get userDomain(): string {
-    if (this.authService.isMasterAccount) return 'Master Account';
+    if (this.authService.isMasterAccount) return '';
     const user = this.authService.currentUser?.user as User;
     return user?.sso_domain || '';
   }
 
+  get homeLink(): string {
+    if (this.authService.isMasterAccount) {
+      return '/superadmin/dashboard';
+    }
+    return `/${this.userDomain}`;
+  }
+
+  get decisionsLink(): string {
+    if (this.authService.isMasterAccount) {
+      return '/superadmin/dashboard';
+    }
+    return `/${this.userDomain}`;
+  }
+
+  get newDecisionLink(): string {
+    return `/${this.userDomain}/decision/new`;
+  }
+
+  get profileLink(): string {
+    return `/${this.userDomain}/profile`;
+  }
+
+  get adminLink(): string {
+    return `/${this.userDomain}/admin`;
+  }
+
   logout(): void {
     this.authService.logout().subscribe({
-      next: () => this.router.navigate(['/login']),
-      error: () => this.router.navigate(['/login'])
+      next: () => {
+        if (this.authService.isMasterAccount) {
+          this.router.navigate(['/superadmin']);
+        } else {
+          this.router.navigate(['/']);
+        }
+      },
+      error: () => this.router.navigate(['/'])
     });
   }
 }

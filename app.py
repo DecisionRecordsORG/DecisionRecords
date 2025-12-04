@@ -3,7 +3,7 @@ import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, save_history
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
@@ -768,6 +768,223 @@ def api_get_auth_config_public(domain):
         'auth_method': 'webauthn',
         'allow_registration': True,
         'rp_name': 'Architecture Decisions',
+    })
+
+
+@app.route('/api/auth/tenant/<domain>', methods=['GET'])
+def api_get_tenant_status(domain):
+    """Get tenant status - whether users exist and auth configuration."""
+    domain = domain.lower()
+
+    # Check if any users exist for this domain
+    user_count = User.query.filter_by(sso_domain=domain).count()
+    has_users = user_count > 0
+
+    # Get auth config
+    auth_config = get_auth_config(domain)
+
+    # Check if SSO is configured for this domain
+    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
+
+    return jsonify({
+        'domain': domain,
+        'has_users': has_users,
+        'user_count': user_count,
+        'auth_method': auth_config.auth_method if auth_config else 'webauthn',
+        'allow_registration': auth_config.allow_registration if auth_config else True,
+        'has_sso': sso_config is not None,
+        'sso_provider': sso_config.provider_name if sso_config else None,
+        'sso_id': sso_config.id if sso_config else None,
+    })
+
+
+@app.route('/api/auth/user-exists/<email>', methods=['GET'])
+def api_check_user_exists(email):
+    """Check if a user exists by email."""
+    user = User.query.filter_by(email=email.lower()).first()
+
+    if user:
+        return jsonify({
+            'exists': True,
+            'has_passkey': len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False,
+            'auth_type': user.auth_type
+        })
+    else:
+        return jsonify({
+            'exists': False,
+            'has_passkey': False,
+            'auth_type': None
+        })
+
+
+@app.route('/api/auth/access-request', methods=['POST'])
+def api_submit_access_request():
+    """Submit an access request to join a tenant."""
+    data = request.get_json()
+
+    email = data.get('email', '').lower()
+    name = data.get('name')
+    reason = data.get('reason', '')
+    domain = data.get('domain', '').lower()
+
+    if not email or not name:
+        return jsonify({'error': 'Email and name are required'}), 400
+
+    # Extract and validate domain from email
+    email_domain = email.split('@')[1] if '@' in email else ''
+    if not domain:
+        domain = email_domain
+    elif domain != email_domain:
+        return jsonify({'error': 'Email domain does not match requested tenant'}), 400
+
+    # Check if user already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        return jsonify({'error': 'An account with this email already exists'}), 400
+
+    # Check if there's already a pending request for this email
+    existing_request = AccessRequest.query.filter_by(email=email, status='pending').first()
+    if existing_request:
+        return jsonify({'error': 'You already have a pending access request'}), 400
+
+    # Check if tenant exists (has users)
+    if User.query.filter_by(sso_domain=domain).count() == 0:
+        return jsonify({'error': 'This organization does not exist yet. Please sign up instead.'}), 400
+
+    # Create access request
+    access_request = AccessRequest(
+        email=email,
+        name=name,
+        domain=domain,
+        reason=reason
+    )
+    db.session.add(access_request)
+    db.session.commit()
+
+    # TODO: Send email notification to admins of this domain
+    # notify_admins_access_request(domain, access_request)
+
+    return jsonify({
+        'message': 'Access request submitted successfully',
+        'request': access_request.to_dict()
+    })
+
+
+# ==================== API Routes - Admin (Access Requests) ====================
+
+@app.route('/api/admin/access-requests', methods=['GET'])
+@admin_required
+def api_list_access_requests():
+    """List access requests for admin's domain."""
+    if is_master_account():
+        # Master can see all requests
+        requests = AccessRequest.query.order_by(AccessRequest.created_at.desc()).all()
+    else:
+        # Regular admin sees only their domain's requests
+        requests = AccessRequest.query.filter_by(
+            domain=g.current_user.sso_domain
+        ).order_by(AccessRequest.created_at.desc()).all()
+
+    return jsonify([r.to_dict() for r in requests])
+
+
+@app.route('/api/admin/access-requests/pending', methods=['GET'])
+@admin_required
+def api_list_pending_requests():
+    """List pending access requests for admin's domain."""
+    if is_master_account():
+        requests = AccessRequest.query.filter_by(status='pending').order_by(AccessRequest.created_at.desc()).all()
+    else:
+        requests = AccessRequest.query.filter_by(
+            domain=g.current_user.sso_domain,
+            status='pending'
+        ).order_by(AccessRequest.created_at.desc()).all()
+
+    return jsonify([r.to_dict() for r in requests])
+
+
+@app.route('/api/admin/access-requests/<int:request_id>/approve', methods=['POST'])
+@admin_required
+def api_approve_access_request(request_id):
+    """Approve an access request and create the user account."""
+    from datetime import datetime
+
+    access_request = AccessRequest.query.get_or_404(request_id)
+
+    # Check permission
+    if not is_master_account() and access_request.domain != g.current_user.sso_domain:
+        return jsonify({'error': 'Not authorized to approve this request'}), 403
+
+    if access_request.status != 'pending':
+        return jsonify({'error': f'Request is already {access_request.status}'}), 400
+
+    # Check if user already exists (could have been created via another path)
+    existing_user = User.query.filter_by(email=access_request.email).first()
+    if existing_user:
+        access_request.status = 'approved'
+        access_request.processed_by_id = g.current_user.id if not is_master_account() else None
+        access_request.processed_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'message': 'User already exists, request marked as approved', 'user': existing_user.to_dict()})
+
+    # Create the user account
+    new_user = User(
+        email=access_request.email,
+        name=access_request.name,
+        sso_domain=access_request.domain,
+        auth_type='webauthn',
+        is_admin=False
+    )
+    db.session.add(new_user)
+
+    # Update request status
+    access_request.status = 'approved'
+    access_request.processed_by_id = g.current_user.id if not is_master_account() else None
+    access_request.processed_at = datetime.utcnow()
+
+    db.session.commit()
+
+    # TODO: Send email to user informing them they've been approved
+    # notify_user_access_approved(access_request, new_user)
+
+    return jsonify({
+        'message': 'Access request approved',
+        'user': new_user.to_dict()
+    })
+
+
+@app.route('/api/admin/access-requests/<int:request_id>/reject', methods=['POST'])
+@admin_required
+def api_reject_access_request(request_id):
+    """Reject an access request."""
+    from datetime import datetime
+
+    data = request.get_json() or {}
+    rejection_reason = data.get('reason', '')
+
+    access_request = AccessRequest.query.get_or_404(request_id)
+
+    # Check permission
+    if not is_master_account() and access_request.domain != g.current_user.sso_domain:
+        return jsonify({'error': 'Not authorized to reject this request'}), 403
+
+    if access_request.status != 'pending':
+        return jsonify({'error': f'Request is already {access_request.status}'}), 400
+
+    # Update request status
+    access_request.status = 'rejected'
+    access_request.rejection_reason = rejection_reason
+    access_request.processed_by_id = g.current_user.id if not is_master_account() else None
+    access_request.processed_at = datetime.utcnow()
+
+    db.session.commit()
+
+    # TODO: Send email to user informing them they've been rejected
+    # notify_user_access_rejected(access_request)
+
+    return jsonify({
+        'message': 'Access request rejected',
+        'request': access_request.to_dict()
     })
 
 
