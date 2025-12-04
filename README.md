@@ -6,6 +6,7 @@ A self-hosted web application for managing Architecture Decision Records (ADRs) 
 
 - **Modern Angular UI**: Built with Angular 18 and Angular Material for a responsive, professional interface
 - **ADR Management**: Create, view, update, and delete architecture decisions
+- **IT Infrastructure Mapping**: Link decisions to applications, servers, databases, networks, and other infrastructure
 - **Complete History**: Track full update history for each decision with user attribution
 - **Dual Authentication**: Support for both SSO (OpenID Connect) and WebAuthn (Passkeys)
 - **Passwordless Login**: Secure passkey-based authentication using device biometrics or security keys
@@ -16,6 +17,26 @@ A self-hosted web application for managing Architecture Decision Records (ADRs) 
 - **Search & Filter**: Find decisions by keyword or status with real-time filtering
 - **Super Admin Account**: System-wide admin for configuration and oversight
 - **Self-Hosted**: SQLite database for easy deployment with no external dependencies
+
+## IT Infrastructure Mapping
+
+Architecture Decisions can be linked to IT infrastructure items to track which systems, applications, or components are affected by each decision. Supported infrastructure types include:
+
+- **Application**: Software applications and systems
+- **Network**: Network components and configurations
+- **Database**: Databases and data stores
+- **Server**: Physical or virtual servers
+- **Service**: Backend services and microservices
+- **API**: API endpoints and integrations
+- **Storage**: File storage and object storage systems
+- **Cloud**: Cloud resources and services
+- **Container**: Container platforms and orchestration
+- **Other**: Any other infrastructure type
+
+When creating or editing a decision, users can:
+- Search and select existing infrastructure items
+- Create new infrastructure items on the fly
+- Associate multiple infrastructure items with a single decision
 
 ## ADR Format
 
@@ -382,6 +403,17 @@ All API endpoints require authentication via session cookie.
 | `POST` | `/api/webauthn/authenticate/complete` | Complete passkey authentication |
 | `GET` | `/api/webauthn/credentials` | List user's registered passkeys |
 | `DELETE` | `/api/webauthn/credentials/<id>` | Delete a passkey |
+
+### IT Infrastructure
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/infrastructure` | List all infrastructure items (filtered by domain) |
+| `POST` | `/api/infrastructure` | Create a new infrastructure item |
+| `GET` | `/api/infrastructure/<id>` | Get a single infrastructure item |
+| `PUT` | `/api/infrastructure/<id>` | Update an infrastructure item |
+| `DELETE` | `/api/infrastructure/<id>` | Delete an infrastructure item |
+| `GET` | `/api/infrastructure/types` | Get available infrastructure types |
 
 ### Tenant Status
 

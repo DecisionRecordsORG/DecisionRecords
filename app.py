@@ -3,7 +3,7 @@ import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, save_history
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -305,6 +305,15 @@ def api_create_decision():
         updated_by_id=g.current_user.id
     )
 
+    # Handle infrastructure associations
+    infrastructure_ids = data.get('infrastructure_ids', [])
+    if infrastructure_ids:
+        infrastructure_items = ITInfrastructure.query.filter(
+            ITInfrastructure.id.in_(infrastructure_ids),
+            ITInfrastructure.domain == g.current_user.sso_domain
+        ).all()
+        decision.infrastructure = infrastructure_items
+
     db.session.add(decision)
     db.session.commit()
 
@@ -387,6 +396,18 @@ def api_update_decision(decision_id):
         decision.status = data['status']
     if 'consequences' in data:
         decision.consequences = data['consequences']
+
+    # Handle infrastructure associations
+    if 'infrastructure_ids' in data:
+        infrastructure_ids = data['infrastructure_ids']
+        if infrastructure_ids:
+            infrastructure_items = ITInfrastructure.query.filter(
+                ITInfrastructure.id.in_(infrastructure_ids),
+                ITInfrastructure.domain == g.current_user.sso_domain
+            ).all()
+            decision.infrastructure = infrastructure_items
+        else:
+            decision.infrastructure = []
 
     decision.updated_by_id = g.current_user.id
 
@@ -1525,6 +1546,151 @@ def api_save_auth_config():
     db.session.commit()
 
     return jsonify(config.to_dict())
+
+
+# ==================== API Routes - IT Infrastructure ====================
+
+@app.route('/api/infrastructure', methods=['GET'])
+@login_required
+def api_list_infrastructure():
+    """List all IT infrastructure items for the user's domain."""
+    if is_master_account():
+        # Master accounts can see all infrastructure across all domains
+        items = ITInfrastructure.query.order_by(ITInfrastructure.name).all()
+    else:
+        items = ITInfrastructure.query.filter_by(
+            domain=g.current_user.sso_domain
+        ).order_by(ITInfrastructure.name).all()
+    return jsonify([item.to_dict() for item in items])
+
+
+@app.route('/api/infrastructure', methods=['POST'])
+@login_required
+def api_create_infrastructure():
+    """Create a new IT infrastructure item."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot create infrastructure items'}), 403
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate required fields
+    if not data.get('name'):
+        return jsonify({'error': 'Name is required'}), 400
+
+    if not data.get('type'):
+        return jsonify({'error': 'Type is required'}), 400
+
+    # Validate type
+    infra_type = data['type'].lower()
+    if infra_type not in ITInfrastructure.VALID_TYPES:
+        return jsonify({'error': f'Invalid type. Must be one of: {", ".join(ITInfrastructure.VALID_TYPES)}'}), 400
+
+    # Check for duplicate name in same domain
+    existing = ITInfrastructure.query.filter_by(
+        name=data['name'],
+        domain=g.current_user.sso_domain
+    ).first()
+    if existing:
+        return jsonify({'error': 'An infrastructure item with this name already exists'}), 400
+
+    item = ITInfrastructure(
+        name=data['name'],
+        type=infra_type,
+        description=data.get('description', ''),
+        domain=g.current_user.sso_domain,
+        created_by_id=g.current_user.id
+    )
+
+    db.session.add(item)
+    db.session.commit()
+
+    return jsonify(item.to_dict()), 201
+
+
+@app.route('/api/infrastructure/<int:item_id>', methods=['GET'])
+@login_required
+def api_get_infrastructure(item_id):
+    """Get a single IT infrastructure item."""
+    if is_master_account():
+        item = ITInfrastructure.query.get_or_404(item_id)
+    else:
+        item = ITInfrastructure.query.filter_by(
+            id=item_id,
+            domain=g.current_user.sso_domain
+        ).first_or_404()
+    return jsonify(item.to_dict())
+
+
+@app.route('/api/infrastructure/<int:item_id>', methods=['PUT'])
+@login_required
+def api_update_infrastructure(item_id):
+    """Update an IT infrastructure item."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot modify infrastructure items'}), 403
+
+    item = ITInfrastructure.query.filter_by(
+        id=item_id,
+        domain=g.current_user.sso_domain
+    ).first_or_404()
+
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate type if provided
+    if 'type' in data:
+        infra_type = data['type'].lower()
+        if infra_type not in ITInfrastructure.VALID_TYPES:
+            return jsonify({'error': f'Invalid type. Must be one of: {", ".join(ITInfrastructure.VALID_TYPES)}'}), 400
+        item.type = infra_type
+
+    # Check for duplicate name if name is being changed
+    if 'name' in data and data['name'] != item.name:
+        existing = ITInfrastructure.query.filter_by(
+            name=data['name'],
+            domain=g.current_user.sso_domain
+        ).first()
+        if existing:
+            return jsonify({'error': 'An infrastructure item with this name already exists'}), 400
+        item.name = data['name']
+
+    if 'description' in data:
+        item.description = data['description']
+
+    db.session.commit()
+
+    return jsonify(item.to_dict())
+
+
+@app.route('/api/infrastructure/<int:item_id>', methods=['DELETE'])
+@login_required
+def api_delete_infrastructure(item_id):
+    """Delete an IT infrastructure item."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot delete infrastructure items'}), 403
+
+    item = ITInfrastructure.query.filter_by(
+        id=item_id,
+        domain=g.current_user.sso_domain
+    ).first_or_404()
+
+    # Remove associations with decisions first
+    item.decisions.filter().all()  # Force load to avoid issues
+
+    db.session.delete(item)
+    db.session.commit()
+
+    return jsonify({'message': 'Infrastructure item deleted successfully'})
+
+
+@app.route('/api/infrastructure/types', methods=['GET'])
+def api_get_infrastructure_types():
+    """Get available infrastructure types."""
+    return jsonify(ITInfrastructure.VALID_TYPES)
 
 
 # ==================== Angular Frontend Serving ====================

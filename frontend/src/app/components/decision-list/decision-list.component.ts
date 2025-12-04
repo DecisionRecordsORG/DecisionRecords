@@ -110,6 +110,19 @@ import { Decision } from '../../models/decision.model';
               </mat-card-header>
               <mat-card-content>
                 <p class="context-preview">{{ decision.context | slice:0:150 }}{{ decision.context.length > 150 ? '...' : '' }}</p>
+                @if (decision.infrastructure && decision.infrastructure.length > 0) {
+                  <div class="infrastructure-tags">
+                    @for (infra of decision.infrastructure.slice(0, 3); track infra.id) {
+                      <span class="infra-tag" [attr.data-type]="infra.type">
+                        <mat-icon class="infra-icon">{{ getInfraIcon(infra.type) }}</mat-icon>
+                        {{ infra.name }}
+                      </span>
+                    }
+                    @if (decision.infrastructure.length > 3) {
+                      <span class="infra-more">+{{ decision.infrastructure.length - 3 }} more</span>
+                    }
+                  </div>
+                }
                 <div class="card-footer">
                   <mat-chip [ngClass]="'status-' + decision.status">
                     {{ decision.status }}
@@ -238,6 +251,36 @@ import { Decision } from '../../models/decision.model';
       padding: 4px 8px;
       border-radius: 4px;
     }
+
+    .infrastructure-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 12px 0;
+    }
+
+    .infra-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .infra-tag .infra-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+    }
+
+    .infra-more {
+      font-size: 11px;
+      color: #888;
+      padding: 2px 8px;
+    }
   `]
 })
 export class DecisionListComponent implements OnInit {
@@ -286,5 +329,21 @@ export class DecisionListComponent implements OnInit {
   filterByStatus(status: string): void {
     this.statusFilter = status;
     this.filterDecisions();
+  }
+
+  getInfraIcon(type: string): string {
+    const icons: Record<string, string> = {
+      'application': 'apps',
+      'network': 'router',
+      'database': 'storage',
+      'server': 'dns',
+      'service': 'settings_ethernet',
+      'api': 'api',
+      'storage': 'cloud_queue',
+      'cloud': 'cloud',
+      'container': 'view_in_ar',
+      'other': 'category'
+    };
+    return icons[type] || 'category';
   }
 }

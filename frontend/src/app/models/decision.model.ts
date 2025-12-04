@@ -19,6 +19,19 @@ export interface MasterAccount {
   last_login: string;
 }
 
+export interface ITInfrastructure {
+  id: number;
+  name: string;
+  type: InfrastructureType;
+  description: string | null;
+  domain: string;
+  created_at: string;
+  updated_at: string;
+  created_by: User | null;
+}
+
+export type InfrastructureType = 'application' | 'network' | 'database' | 'server' | 'service' | 'api' | 'storage' | 'cloud' | 'container' | 'other';
+
 export interface Decision {
   id: number;
   title: string;
@@ -34,6 +47,7 @@ export interface Decision {
   deleted_at?: string;
   deleted_by?: User;
   history?: DecisionHistory[];
+  infrastructure?: ITInfrastructure[];
 }
 
 export interface DecisionHistory {

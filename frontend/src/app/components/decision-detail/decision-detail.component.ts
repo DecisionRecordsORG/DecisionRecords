@@ -1,7 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, FormControl, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -14,10 +14,14 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatAutocompleteModule } from '@angular/material/autocomplete';
+import { MatListModule } from '@angular/material/list';
 import { DecisionService, UpdateDecisionRequest } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
-import { Decision, DecisionHistory, DecisionStatus } from '../../models/decision.model';
+import { InfrastructureService } from '../../services/infrastructure.service';
+import { Decision, DecisionHistory, DecisionStatus, ITInfrastructure, InfrastructureType } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { Observable, map, startWith } from 'rxjs';
 
 @Component({
   selector: 'app-decision-detail',
@@ -26,6 +30,7 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     CommonModule,
     RouterModule,
     ReactiveFormsModule,
+    FormsModule,
     MatCardModule,
     MatFormFieldModule,
     MatInputModule,
@@ -38,6 +43,8 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     MatSnackBarModule,
     MatDialogModule,
     MatTooltipModule,
+    MatAutocompleteModule,
+    MatListModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -111,6 +118,100 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
                     <mat-error>Consequences is required</mat-error>
                   }
                 </mat-form-field>
+
+                <!-- Infrastructure Section -->
+                <div class="infrastructure-section">
+                  <h3>
+                    <mat-icon>dns</mat-icon>
+                    Related IT Infrastructure
+                  </h3>
+
+                  @if (selectedInfrastructure.length > 0) {
+                    <div class="selected-infrastructure">
+                      @for (infra of selectedInfrastructure; track infra.id) {
+                        <mat-chip [removable]="!authService.isMasterAccount" (removed)="removeInfrastructure(infra)">
+                          <mat-icon class="infra-icon">{{ getInfraIcon(infra.type) }}</mat-icon>
+                          {{ infra.name }}
+                          <span class="infra-type">({{ infra.type }})</span>
+                          @if (!authService.isMasterAccount) {
+                            <mat-icon matChipRemove>cancel</mat-icon>
+                          }
+                        </mat-chip>
+                      }
+                    </div>
+                  }
+
+                  @if (!authService.isMasterAccount) {
+                    <div class="infrastructure-input">
+                      <mat-form-field appearance="outline" class="full-width">
+                        <mat-label>Search or add infrastructure</mat-label>
+                        <input matInput
+                               [formControl]="infraSearchControl"
+                               [matAutocomplete]="autoInfra"
+                               placeholder="Type to search...">
+                        <mat-autocomplete #autoInfra="matAutocomplete"
+                                          (optionSelected)="selectInfrastructure($event.option.value)">
+                          @for (infra of filteredInfrastructure$ | async; track infra.id) {
+                            <mat-option [value]="infra">
+                              <mat-icon>{{ getInfraIcon(infra.type) }}</mat-icon>
+                              {{ infra.name }}
+                              <span class="option-type">({{ infra.type }})</span>
+                            </mat-option>
+                          }
+                          @if ((filteredInfrastructure$ | async)?.length === 0 && infraSearchControl.value) {
+                            <mat-option disabled>
+                              No matches found
+                            </mat-option>
+                          }
+                        </mat-autocomplete>
+                      </mat-form-field>
+
+                      <button mat-stroked-button type="button" (click)="showCreateInfraForm = !showCreateInfraForm">
+                        <mat-icon>add</mat-icon>
+                        New Infrastructure
+                      </button>
+                    </div>
+
+                    @if (showCreateInfraForm) {
+                      <mat-card class="new-infra-card">
+                        <mat-card-content>
+                          <h4>Create New Infrastructure</h4>
+                          <div class="new-infra-form">
+                            <mat-form-field appearance="outline">
+                              <mat-label>Name</mat-label>
+                              <input matInput [(ngModel)]="newInfra.name" [ngModelOptions]="{standalone: true}">
+                            </mat-form-field>
+
+                            <mat-form-field appearance="outline">
+                              <mat-label>Type</mat-label>
+                              <mat-select [(ngModel)]="newInfra.type" [ngModelOptions]="{standalone: true}">
+                                @for (type of infrastructureTypes; track type) {
+                                  <mat-option [value]="type">
+                                    <mat-icon>{{ getInfraIcon(type) }}</mat-icon>
+                                    {{ type | titlecase }}
+                                  </mat-option>
+                                }
+                              </mat-select>
+                            </mat-form-field>
+
+                            <mat-form-field appearance="outline" class="full-width">
+                              <mat-label>Description (optional)</mat-label>
+                              <textarea matInput [(ngModel)]="newInfra.description" [ngModelOptions]="{standalone: true}" rows="2"></textarea>
+                            </mat-form-field>
+
+                            <div class="new-infra-actions">
+                              <button mat-raised-button color="primary" type="button"
+                                      (click)="createInfrastructure()" [disabled]="!newInfra.name || !newInfra.type">
+                                Create & Add
+                              </button>
+                              <button mat-button type="button" (click)="showCreateInfraForm = false">Cancel</button>
+                            </div>
+                          </div>
+                        </mat-card-content>
+                      </mat-card>
+                    }
+                  }
+                </div>
 
                 @if (!isNew) {
                   <mat-form-field appearance="outline" class="full-width">
@@ -353,6 +454,93 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     .status-accepted { background-color: #e8f5e9 !important; color: #2e7d32 !important; }
     .status-deprecated { background-color: #ffebee !important; color: #c62828 !important; }
     .status-superseded { background-color: #e3f2fd !important; color: #1565c0 !important; }
+
+    /* Infrastructure Section Styles */
+    .infrastructure-section {
+      margin: 24px 0;
+      padding: 16px;
+      background: #fafafa;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .infrastructure-section h3 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 16px 0;
+      color: #424242;
+      font-size: 16px;
+    }
+
+    .selected-infrastructure {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .selected-infrastructure mat-chip {
+      background: #e3f2fd;
+    }
+
+    .selected-infrastructure .infra-icon {
+      font-size: 18px;
+      margin-right: 4px;
+    }
+
+    .selected-infrastructure .infra-type {
+      font-size: 11px;
+      color: #666;
+      margin-left: 4px;
+    }
+
+    .infrastructure-input {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .infrastructure-input mat-form-field {
+      flex: 1;
+    }
+
+    .infrastructure-input button {
+      margin-top: 4px;
+    }
+
+    .option-type {
+      font-size: 12px;
+      color: #888;
+      margin-left: 8px;
+    }
+
+    .new-infra-card {
+      margin-top: 16px;
+      background: white;
+    }
+
+    .new-infra-card h4 {
+      margin: 0 0 16px 0;
+      color: #424242;
+    }
+
+    .new-infra-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .new-infra-form mat-form-field {
+      min-width: 200px;
+    }
+
+    .new-infra-actions {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      margin-top: 8px;
+    }
   `]
 })
 export class DecisionDetailComponent implements OnInit {
@@ -362,12 +550,22 @@ export class DecisionDetailComponent implements OnInit {
   isLoading = true;
   isSaving = false;
 
+  // Infrastructure
+  allInfrastructure: ITInfrastructure[] = [];
+  selectedInfrastructure: ITInfrastructure[] = [];
+  infraSearchControl = new FormControl('');
+  filteredInfrastructure$!: Observable<ITInfrastructure[]>;
+  showCreateInfraForm = false;
+  newInfra = { name: '', type: '' as InfrastructureType, description: '' };
+  infrastructureTypes: InfrastructureType[] = ['application', 'network', 'database', 'server', 'service', 'api', 'storage', 'cloud', 'container', 'other'];
+
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private fb: FormBuilder,
     private decisionService: DecisionService,
     public authService: AuthService,
+    private infrastructureService: InfrastructureService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
@@ -382,6 +580,15 @@ export class DecisionDetailComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    // Load infrastructure items
+    this.loadInfrastructure();
+
+    // Set up infrastructure filter
+    this.filteredInfrastructure$ = this.infraSearchControl.valueChanges.pipe(
+      startWith(''),
+      map(value => this.filterInfrastructure(value || ''))
+    );
+
     const id = this.route.snapshot.params['id'];
     if (id === 'new') {
       this.isNew = true;
@@ -392,6 +599,73 @@ export class DecisionDetailComponent implements OnInit {
     } else {
       this.loadDecision(+id);
     }
+  }
+
+  loadInfrastructure(): void {
+    this.infrastructureService.getInfrastructure().subscribe({
+      next: (items) => {
+        this.allInfrastructure = items;
+      },
+      error: (err) => {
+        console.error('Failed to load infrastructure', err);
+      }
+    });
+  }
+
+  filterInfrastructure(value: string | ITInfrastructure): ITInfrastructure[] {
+    const filterValue = typeof value === 'string' ? value.toLowerCase() : value.name.toLowerCase();
+    return this.allInfrastructure.filter(infra =>
+      !this.selectedInfrastructure.some(s => s.id === infra.id) &&
+      (infra.name.toLowerCase().includes(filterValue) || infra.type.toLowerCase().includes(filterValue))
+    );
+  }
+
+  selectInfrastructure(infra: ITInfrastructure): void {
+    if (!this.selectedInfrastructure.some(s => s.id === infra.id)) {
+      this.selectedInfrastructure.push(infra);
+    }
+    this.infraSearchControl.setValue('');
+  }
+
+  removeInfrastructure(infra: ITInfrastructure): void {
+    this.selectedInfrastructure = this.selectedInfrastructure.filter(s => s.id !== infra.id);
+  }
+
+  createInfrastructure(): void {
+    if (!this.newInfra.name || !this.newInfra.type) return;
+
+    this.infrastructureService.createInfrastructure({
+      name: this.newInfra.name,
+      type: this.newInfra.type,
+      description: this.newInfra.description
+    }).subscribe({
+      next: (infra) => {
+        this.allInfrastructure.push(infra);
+        this.selectedInfrastructure.push(infra);
+        this.newInfra = { name: '', type: '' as InfrastructureType, description: '' };
+        this.showCreateInfraForm = false;
+        this.snackBar.open('Infrastructure created and added', 'Close', { duration: 3000 });
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to create infrastructure', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  getInfraIcon(type: string): string {
+    const icons: Record<string, string> = {
+      'application': 'apps',
+      'network': 'router',
+      'database': 'storage',
+      'server': 'dns',
+      'service': 'settings_ethernet',
+      'api': 'api',
+      'storage': 'cloud_queue',
+      'cloud': 'cloud',
+      'container': 'view_in_ar',
+      'other': 'category'
+    };
+    return icons[type] || 'category';
   }
 
   loadDecision(id: number): void {
@@ -405,6 +679,10 @@ export class DecisionDetailComponent implements OnInit {
           decision: decision.decision,
           consequences: decision.consequences
         });
+        // Load decision's infrastructure
+        if (decision.infrastructure && decision.infrastructure.length > 0) {
+          this.selectedInfrastructure = [...decision.infrastructure];
+        }
         if (this.authService.isMasterAccount) {
           this.form.disable();
         }
@@ -422,6 +700,7 @@ export class DecisionDetailComponent implements OnInit {
 
     this.isSaving = true;
     const formValue = this.form.value;
+    const infrastructureIds = this.selectedInfrastructure.map(i => i.id);
 
     if (this.isNew) {
       this.decisionService.createDecision({
@@ -429,7 +708,8 @@ export class DecisionDetailComponent implements OnInit {
         context: formValue.context,
         decision: formValue.decision,
         status: formValue.status,
-        consequences: formValue.consequences
+        consequences: formValue.consequences,
+        infrastructure_ids: infrastructureIds
       }).subscribe({
         next: (decision) => {
           this.snackBar.open('Decision created successfully', 'Close', { duration: 3000 });
@@ -446,7 +726,8 @@ export class DecisionDetailComponent implements OnInit {
         context: formValue.context,
         decision: formValue.decision,
         status: formValue.status,
-        consequences: formValue.consequences
+        consequences: formValue.consequences,
+        infrastructure_ids: infrastructureIds
       };
       if (formValue.change_reason) {
         update.change_reason = formValue.change_reason;
@@ -455,6 +736,7 @@ export class DecisionDetailComponent implements OnInit {
       this.decisionService.updateDecision(this.decision!.id, update).subscribe({
         next: (decision) => {
           this.decision = decision;
+          this.selectedInfrastructure = decision.infrastructure || [];
           this.form.get('change_reason')?.reset();
           this.isSaving = false;
           this.snackBar.open('Decision updated successfully', 'Close', { duration: 3000 });

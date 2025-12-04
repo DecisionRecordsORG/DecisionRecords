@@ -238,6 +238,47 @@ class Subscription(db.Model):
         }
 
 
+# Association table for many-to-many relationship between Decisions and Infrastructure
+decision_infrastructure = db.Table('decision_infrastructure',
+    db.Column('decision_id', db.Integer, db.ForeignKey('architecture_decisions.id'), primary_key=True),
+    db.Column('infrastructure_id', db.Integer, db.ForeignKey('it_infrastructure.id'), primary_key=True),
+    db.Column('created_at', db.DateTime, nullable=False, default=datetime.utcnow)
+)
+
+
+class ITInfrastructure(db.Model):
+    """IT Infrastructure items that architecture decisions can be mapped to."""
+
+    __tablename__ = 'it_infrastructure'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    type = db.Column(db.String(50), nullable=False)  # application, network, database, server, service, api, storage, cloud, container, other
+    description = db.Column(db.Text, nullable=True)
+    domain = db.Column(db.String(255), nullable=False, index=True)  # Multi-tenancy
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+
+    # Valid infrastructure types
+    VALID_TYPES = ['application', 'network', 'database', 'server', 'service', 'api', 'storage', 'cloud', 'container', 'other']
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'type': self.type,
+            'description': self.description,
+            'domain': self.domain,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'created_by': self.created_by.to_dict() if self.created_by else None,
+        }
+
+
 class ArchitectureDecision(db.Model):
     """Main table for Architecture Decision Records (ADRs)."""
 
@@ -265,6 +306,7 @@ class ArchitectureDecision(db.Model):
     updated_by = db.relationship('User', foreign_keys=[updated_by_id])
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
     history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
+    infrastructure = db.relationship('ITInfrastructure', secondary=decision_infrastructure, backref=db.backref('decisions', lazy='dynamic'))
 
     # Valid status values
     VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
@@ -282,6 +324,7 @@ class ArchitectureDecision(db.Model):
             'domain': self.domain,
             'created_by': self.creator.to_dict() if self.creator else None,
             'updated_by': self.updated_by.to_dict() if self.updated_by else None,
+            'infrastructure': [i.to_dict() for i in self.infrastructure] if self.infrastructure else [],
         }
 
     def to_dict_with_history(self):

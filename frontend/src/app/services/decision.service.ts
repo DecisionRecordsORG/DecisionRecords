@@ -9,6 +9,7 @@ export interface CreateDecisionRequest {
   decision: string;
   status: string;
   consequences: string;
+  infrastructure_ids?: number[];
 }
 
 export interface UpdateDecisionRequest extends Partial<CreateDecisionRequest> {
