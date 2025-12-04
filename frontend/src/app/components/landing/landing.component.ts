@@ -9,7 +9,6 @@ import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
-import { MatDividerModule } from '@angular/material/divider';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 
 type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
@@ -26,8 +25,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
     MatInputModule,
     MatButtonModule,
     MatIconModule,
-    MatProgressSpinnerModule,
-    MatDividerModule
+    MatProgressSpinnerModule
   ],
   template: `
     <div class="landing-container">
@@ -233,15 +231,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
             </button>
           }
         </mat-card-content>
-
-        <mat-divider></mat-divider>
-
-        <mat-card-actions>
-          <a mat-button routerLink="/superadmin" class="admin-link">
-            <mat-icon>admin_panel_settings</mat-icon>
-            Super Admin Login
-          </a>
-        </mat-card-actions>
       </mat-card>
 
       <div class="features-section">
@@ -393,16 +382,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
     .back-button {
       margin-top: 16px;
-    }
-
-    mat-card-actions {
-      display: flex;
-      justify-content: center;
-      padding: 16px;
-    }
-
-    .admin-link {
-      color: #666;
     }
 
     .verification-sent {
@@ -571,6 +550,14 @@ export class LandingComponent implements OnInit {
       next: (status) => {
         this.tenantStatus = status;
         this.isLoading = false;
+
+        // If email verification is disabled, redirect directly to tenant login
+        if (!status.email_verification_required) {
+          this.router.navigate([`/${domain}/login`], {
+            queryParams: { email }
+          });
+          return;
+        }
 
         if (status.has_users) {
           // Tenant exists - check if approval is required

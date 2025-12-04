@@ -3,7 +3,7 @@ import json
 import secrets
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, save_history
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -807,6 +807,9 @@ def api_get_tenant_status(domain):
     # Check if SSO is configured for this domain
     sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
 
+    # Check global email verification setting
+    email_verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
+
     return jsonify({
         'domain': domain,
         'has_users': has_users,
@@ -817,6 +820,7 @@ def api_get_tenant_status(domain):
         'has_sso': sso_config is not None,
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
+        'email_verification_required': email_verification_required,
     })
 
 
@@ -1546,6 +1550,72 @@ def api_save_auth_config():
     db.session.commit()
 
     return jsonify(config.to_dict())
+
+
+# ==================== API Routes - System Configuration (Super Admin) ====================
+
+@app.route('/api/system/config', methods=['GET'])
+@master_required
+def api_get_system_config():
+    """Get all system configuration settings (super admin only)."""
+    configs = SystemConfig.query.all()
+    return jsonify({c.key: {'value': c.value, 'description': c.description, 'updated_at': c.updated_at.isoformat()} for c in configs})
+
+
+@app.route('/api/system/config/<key>', methods=['GET'])
+@master_required
+def api_get_system_config_key(key):
+    """Get a specific system configuration setting (super admin only)."""
+    config = SystemConfig.query.filter_by(key=key).first()
+    if config:
+        return jsonify(config.to_dict())
+    return jsonify({'key': key, 'value': None, 'description': None})
+
+
+@app.route('/api/system/config', methods=['POST', 'PUT'])
+@master_required
+def api_set_system_config():
+    """Set system configuration settings (super admin only)."""
+    data = request.get_json()
+
+    if not data or 'key' not in data:
+        return jsonify({'error': 'Key is required'}), 400
+
+    key = data['key']
+    value = data.get('value', '')
+    description = data.get('description')
+
+    config = SystemConfig.set(key, value, description)
+    return jsonify(config.to_dict())
+
+
+@app.route('/api/system/email-verification', methods=['GET'])
+def api_get_email_verification_status():
+    """Get email verification requirement status (public endpoint)."""
+    is_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
+    return jsonify({'required': is_required})
+
+
+@app.route('/api/system/email-verification', methods=['PUT'])
+@master_required
+def api_set_email_verification():
+    """Toggle email verification requirement (super admin only)."""
+    data = request.get_json()
+
+    if 'required' not in data:
+        return jsonify({'error': 'required field is required'}), 400
+
+    is_required = bool(data['required'])
+    SystemConfig.set(
+        SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED,
+        'true' if is_required else 'false',
+        'Require email verification for new user signups'
+    )
+
+    return jsonify({
+        'required': is_required,
+        'message': f'Email verification is now {"enabled" if is_required else "disabled"}'
+    })
 
 
 # ==================== API Routes - IT Infrastructure ====================
