@@ -60,6 +60,8 @@ def init_database():
             with app.app_context():
                 # Test database connection first using psycopg2 directly
                 database_url = app.config['SQLALCHEMY_DATABASE_URI']
+                logger.info(f"Testing database connection...")
+                
                 # Parse the DATABASE_URL to extract connection parameters
                 # Format: postgresql://user:password@host:port/dbname?sslmode=require
                 if database_url.startswith('postgresql://'):
@@ -93,26 +95,42 @@ def init_database():
                     logger.info("Database connection successful using SQLAlchemy")
                 
                 # Create tables
+                logger.info("Creating database tables...")
                 db.create_all()
                 logger.info("Database tables created")
 
                 # Create default master account
+                logger.info("Creating default master account...")
                 MasterAccount.create_default_master(db.session)
                 logger.info("Default master account created")
 
-                # Initialize default system config if not exists
-                if not SystemConfig.query.filter_by(key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED).first():
-                    SystemConfig.set(
-                        SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED,
-                        'true',
-                        'Require email verification for new user signups'
-                    )
-                    logger.info("Default system config initialized")
+                # Initialize default system config if not exists in a separate transaction
+                logger.info("Checking system configuration...")
+                try:
+                    if not SystemConfig.query.filter_by(key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED).first():
+                        logger.info("Creating default system config...")
+                        # Use a manual approach to avoid transaction issues
+                        config = SystemConfig(
+                            key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED,
+                            value='true',
+                            description='Require email verification for new user signups'
+                        )
+                        db.session.add(config)
+                        db.session.commit()
+                        logger.info("Default system config initialized")
+                    else:
+                        logger.info("System config already exists")
+                except Exception as config_error:
+                    logger.warning(f"System config initialization failed (non-critical): {str(config_error)}")
+                    # Don't fail the entire initialization for this
+                    db.session.rollback()
                 
                 _db_initialized = True
                 app_error_state['healthy'] = True
                 app_error_state['error'] = None
                 app_error_state['details'] = None
+                logger.info("Database initialization completed successfully")
+                
         except Exception as e:
             error_msg = f"Database initialization failed: {str(e)}"
             logger.error(error_msg)
@@ -125,7 +143,8 @@ def init_database():
 @app.before_request
 def initialize_db():
     """Initialize database before handling requests"""
-    if not _db_initialized and request.endpoint not in ['health_check', 'serve_angular'] and not request.endpoint.startswith('static'):
+    # Initialize database for any request except static files
+    if not _db_initialized and not (request.endpoint and request.endpoint.startswith('static')):
         try:
             init_database()
         except Exception as e:
