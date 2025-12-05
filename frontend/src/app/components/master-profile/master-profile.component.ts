@@ -155,12 +155,12 @@ import { MasterAccount } from '../../models/decision.model';
             <div class="notice-content">
               <mat-icon>info</mat-icon>
               <div>
-                <h3>Master Account Notes</h3>
+                <h3>Super Admin Notes</h3>
                 <ul>
-                  <li>The master account is used for system administration only.</li>
-                  <li>Configure SSO providers and email settings in <a routerLink="/settings">System Settings</a>.</li>
-                  <li>Master accounts can view all decisions across all domains but cannot create, edit, or delete them.</li>
-                  <li>For full functionality, log in with an SSO account after configuring your organization's SSO.</li>
+                  <li>The super admin manages the system and tenants (organizations).</li>
+                  <li>Manage tenant domain approvals in <a routerLink="/superadmin/tenants">Tenant Management</a>.</li>
+                  <li>Tenant admins configure their own SSO, login options, and users.</li>
+                  <li>Super admin can view all decisions across all tenants but cannot create, edit, or delete them.</li>
                 </ul>
               </div>
             </div>

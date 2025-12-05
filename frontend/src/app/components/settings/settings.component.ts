@@ -48,7 +48,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
     <div class="settings-container">
       <h1>
         <mat-icon>settings</mat-icon>
-        System Settings
+        {{ authService.isMasterAccount ? 'System Settings' : 'Organization Settings' }}
       </h1>
 
       <mat-tab-group>
@@ -67,7 +67,10 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                     <mat-form-field appearance="outline">
                       <mat-label>Domain</mat-label>
                       <input matInput formControlName="domain" placeholder="example.com"
-                             [readonly]="editingSSOId !== null">
+                             [readonly]="editingSSOId !== null || !authService.isMasterAccount">
+                      @if (!authService.isMasterAccount) {
+                        <mat-hint>Domain is set to your organization</mat-hint>
+                      }
                     </mat-form-field>
 
                     <mat-form-field appearance="outline">
@@ -822,6 +825,13 @@ export class SettingsComponent implements OnInit {
     this.loadAuthConfig();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
+      // Pre-fill domain for tenant admins
+      if (this.authService.currentUser?.user) {
+        const user = this.authService.currentUser.user as User;
+        if (user.sso_domain) {
+          this.ssoForm.patchValue({ domain: user.sso_domain });
+        }
+      }
     }
   }
 

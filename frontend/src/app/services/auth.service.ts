@@ -70,7 +70,7 @@ export class AuthService {
   }
 
   logout(): Observable<any> {
-    return this.http.get('/logout').pipe(
+    return this.http.post('/api/auth/logout', {}).pipe(
       tap(() => {
         this.currentUserSubject.next(null);
       })

@@ -20,10 +20,10 @@ export const routes: Routes = [
     loadComponent: () => import('./components/master-profile/master-profile.component').then(m => m.MasterProfileComponent),
     canActivate: [masterGuard]
   },
-  // Super admin settings (all tenants)
+  // Super admin tenant management
   {
-    path: 'superadmin/settings',
-    loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent),
+    path: 'superadmin/tenants',
+    loadComponent: () => import('./components/superadmin-tenants/superadmin-tenants.component').then(m => m.SuperadminTenantsComponent),
     canActivate: [masterGuard]
   },
   // Tenant-specific routes

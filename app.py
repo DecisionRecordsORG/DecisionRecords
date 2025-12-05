@@ -95,10 +95,19 @@ def init_database():
                 # Create tables
                 db.create_all()
                 logger.info("Database tables created")
-                
+
                 # Create default master account
                 MasterAccount.create_default_master(db.session)
                 logger.info("Default master account created")
+
+                # Initialize default system config if not exists
+                if not SystemConfig.query.filter_by(key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED).first():
+                    SystemConfig.set(
+                        SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED,
+                        'true',
+                        'Require email verification for new user signups'
+                    )
+                    logger.info("Default system config initialized")
                 
                 _db_initialized = True
                 app_error_state['healthy'] = True
@@ -385,6 +394,13 @@ def logout():
     """Log out the current user."""
     session.clear()
     return redirect('/')
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def api_logout():
+    """API endpoint for logout - returns JSON instead of redirect."""
+    session.clear()
+    return jsonify({'message': 'Logged out successfully'})
 
 
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
@@ -722,8 +738,12 @@ def api_update_subscription():
 @app.route('/api/admin/sso', methods=['GET'])
 @admin_required
 def api_list_sso_configs():
-    """List all SSO configurations (admin only)."""
-    configs = SSOConfig.query.all()
+    """List SSO configurations for user's domain (or all for master)."""
+    if is_master_account():
+        configs = SSOConfig.query.all()
+    else:
+        # Tenant admins only see their domain's SSO config
+        configs = SSOConfig.query.filter_by(domain=g.current_user.sso_domain).all()
     return jsonify([c.to_dict() for c in configs])
 
 
@@ -737,6 +757,11 @@ def api_create_sso_config():
     for field in required_fields:
         if not data.get(field):
             return jsonify({'error': f'Missing required field: {field}'}), 400
+
+    # Tenant admins can only create SSO for their own domain
+    if not is_master_account():
+        if data['domain'].lower() != g.current_user.sso_domain:
+            return jsonify({'error': 'You can only configure SSO for your own domain'}), 403
 
     # Check if domain already exists
     existing = SSOConfig.query.filter_by(domain=data['domain'].lower()).first()
@@ -768,6 +793,12 @@ def api_create_sso_config():
 def api_update_sso_config(config_id):
     """Update an SSO configuration (admin only)."""
     config = SSOConfig.query.get_or_404(config_id)
+
+    # Tenant admins can only update their own domain's SSO
+    if not is_master_account():
+        if config.domain != g.current_user.sso_domain:
+            return jsonify({'error': 'You can only update SSO for your own domain'}), 403
+
     data = request.get_json()
 
     if 'provider_name' in data:
@@ -795,6 +826,12 @@ def api_update_sso_config(config_id):
 def api_delete_sso_config(config_id):
     """Delete an SSO configuration (admin only)."""
     config = SSOConfig.query.get_or_404(config_id)
+
+    # Tenant admins can only delete their own domain's SSO
+    if not is_master_account():
+        if config.domain != g.current_user.sso_domain:
+            return jsonify({'error': 'You can only delete SSO for your own domain'}), 403
+
     db.session.delete(config)
     db.session.commit()
     return jsonify({'message': 'SSO configuration deleted'})
@@ -2042,6 +2079,34 @@ def api_check_domain_status(domain):
         'status': approval.status,
         'message': 'Domain is approved' if approval.status == 'approved' else f'Domain is {approval.status}'
     })
+
+
+@app.route('/api/tenants', methods=['GET'])
+@master_required
+def api_list_tenants():
+    """List all tenants (organizations) with their stats (super admin only)."""
+    # Get unique domains from users
+    domains = db.session.query(
+        User.sso_domain,
+        db.func.count(User.id).label('user_count'),
+        db.func.sum(db.case((User.is_admin == True, 1), else_=0)).label('admin_count'),
+        db.func.min(User.created_at).label('created_at')
+    ).group_by(User.sso_domain).all()
+
+    tenants = []
+    for domain, user_count, admin_count, created_at in domains:
+        if domain:
+            # Check if tenant has SSO configured
+            has_sso = SSOConfig.query.filter_by(domain=domain, enabled=True).first() is not None
+            tenants.append({
+                'domain': domain,
+                'user_count': user_count,
+                'admin_count': int(admin_count) if admin_count else 0,
+                'has_sso': has_sso,
+                'created_at': created_at.isoformat() if created_at else None
+            })
+
+    return jsonify(sorted(tenants, key=lambda x: x['domain']))
 
 
 # ==================== API Routes - Tenant Auth Config ====================
