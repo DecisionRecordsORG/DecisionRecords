@@ -1,6 +1,10 @@
 import os
 import json
 import secrets
+import logging
+import sys
+import traceback
+import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history
@@ -13,26 +17,144 @@ from webauthn_auth import (
     get_user_credentials, delete_credential, get_auth_config
 )
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
+
 # Determine if we're serving Angular frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist', 'frontend', 'browser')
 SERVE_ANGULAR = os.path.exists(FRONTEND_DIR)
 
 app = Flask(__name__, static_folder=FRONTEND_DIR if SERVE_ANGULAR else 'static')
 
+# Global error state
+app_error_state = {
+    'healthy': False,
+    'error': None,
+    'details': None
+}
+
 # Configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///architecture_decisions.db')
+database_url = os.environ.get('DATABASE_URL', 'sqlite:///architecture_decisions.db')
+logger.info(f"Database URL configured: {database_url.split('@')[1] if '@' in database_url else database_url}")
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 
 # Initialize database
 db.init_app(app)
 
-# Create tables and master account on startup
-with app.app_context():
-    db.create_all()
-    # Create default master account
-    MasterAccount.create_default_master(db.session)
+# Database initialization flag
+_db_initialized = False
 
+def init_database():
+    """Initialize database tables and master account on first request"""
+    global _db_initialized, app_error_state
+    if not _db_initialized:
+        try:
+            logger.info("Attempting to initialize database...")
+            with app.app_context():
+                # Test database connection first using psycopg2 directly
+                database_url = app.config['SQLALCHEMY_DATABASE_URI']
+                # Parse the DATABASE_URL to extract connection parameters
+                # Format: postgresql://user:password@host:port/dbname?sslmode=require
+                if database_url.startswith('postgresql://'):
+                    url_parts = database_url.replace('postgresql://', '').split('/')
+                    auth_host = url_parts[0]
+                    db_name = url_parts[1].split('?')[0] if '?' in url_parts[1] else url_parts[1]
+                    
+                    user_pass, host_port = auth_host.split('@')
+                    user, password = user_pass.split(':')
+                    host = host_port.split(':')[0] if ':' in host_port else host_port
+                    port = int(host_port.split(':')[1]) if ':' in host_port else 5432
+                    
+                    # Use psycopg2 connection as per Azure documentation
+                    conn = psycopg2.connect(
+                        user=user,
+                        password=password,
+                        host=host,
+                        port=port,
+                        database=db_name,
+                        sslmode='require'
+                    )
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT 1")
+                    cursor.close()
+                    conn.close()
+                    logger.info("Database connection successful using psycopg2")
+                else:
+                    # Fallback to SQLAlchemy if URL format is different
+                    with db.engine.connect() as connection:
+                        connection.execute(db.text("SELECT 1"))
+                    logger.info("Database connection successful using SQLAlchemy")
+                
+                # Create tables
+                db.create_all()
+                logger.info("Database tables created")
+                
+                # Create default master account
+                MasterAccount.create_default_master(db.session)
+                logger.info("Default master account created")
+                
+                _db_initialized = True
+                app_error_state['healthy'] = True
+                app_error_state['error'] = None
+                app_error_state['details'] = None
+        except Exception as e:
+            error_msg = f"Database initialization failed: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            app_error_state['healthy'] = False
+            app_error_state['error'] = error_msg
+            app_error_state['details'] = traceback.format_exc()
+            # Don't raise - let the app run but in error state
+
+@app.before_request
+def initialize_db():
+    """Initialize database before handling requests"""
+    if not _db_initialized and request.endpoint not in ['health_check', 'serve_angular'] and not request.endpoint.startswith('static'):
+        try:
+            init_database()
+        except Exception as e:
+            logger.error(f"Critical error during database initialization: {str(e)}")
+            logger.error(traceback.format_exc())
+            # Don't crash - just mark as unhealthy
+            app_error_state['healthy'] = False
+            app_error_state['error'] = f"Critical database error: {str(e)}"
+            app_error_state['details'] = traceback.format_exc()
+
+
+# ==================== Health Check ====================
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint that reports application status"""
+    if app_error_state['healthy']:
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'timestamp': datetime.utcnow().isoformat()
+        }), 200
+    else:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': app_error_state['error'],
+            'details': app_error_state['details'],
+            'timestamp': datetime.utcnow().isoformat()
+        }), 503
+
+@app.route('/ping')
+def ping():
+    """Simple ping endpoint for load balancer health checks - always returns 200"""
+    return jsonify({
+        'status': 'ok',
+        'server': 'running',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
 
 # ==================== Context Processor ====================
 
@@ -272,6 +394,23 @@ if not SERVE_ANGULAR:
     @login_required
     def index():
         """Home page - list all architecture decisions."""
+        # Check if app is healthy
+        if not app_error_state['healthy']:
+            # Return error page if database is not working
+            return f"""
+            <html>
+                <head><title>Application Error</title></head>
+                <body style='font-family: Arial, sans-serif; padding: 20px;'>
+                    <h1 style='color: red;'>Application Error</h1>
+                    <h2>Database Connection Failed</h2>
+                    <p><strong>Error:</strong> {app_error_state['error']}</p>
+                    <h3>Details:</h3>
+                    <pre style='background: #f0f0f0; padding: 15px; overflow-x: auto;'>{app_error_state['details']}</pre>
+                    <hr>
+                    <p><small>Please contact your administrator to resolve this issue.</small></p>
+                </body>
+            </html>
+            """, 503
         return render_template('index.html')
 
 
@@ -2131,6 +2270,25 @@ if SERVE_ANGULAR:
     @app.route('/<path:path>')
     def serve_angular(path):
         """Serve Angular frontend or fallback to index.html for SPA routing."""
+        # Check if app is healthy for root path
+        if path == '' and not app_error_state['healthy']:
+            # Return error page if database is not working
+            return f"""
+            <html>
+                <head><title>Application Error</title></head>
+                <body style='font-family: Arial, sans-serif; padding: 20px;'>
+                    <h1 style='color: red;'>Application Error</h1>
+                    <h2>Database Connection Failed</h2>
+                    <p><strong>Error:</strong> {app_error_state['error'] or 'Unknown error'}</p>
+                    <h3>Details:</h3>
+                    <pre style='background: #f0f0f0; padding: 15px; overflow-x: auto;'>{app_error_state['details'] or 'No details available'}</pre>
+                    <hr>
+                    <p><small>Please contact your administrator to resolve this issue.</small></p>
+                    <p><a href="/health">Check Health Status</a></p>
+                </body>
+            </html>
+            """, 503
+            
         # API and auth routes should be handled by Flask, not Angular
         # If we reach here for these paths, it means there's no handler - return 404
         if path.startswith('api/'):

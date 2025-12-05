@@ -1,0 +1,122 @@
+# Azure deployment template for Container Instances
+# Use this with Azure CLI: az deployment group create --resource-group <rg-name> --template-file azure-deploy.yml
+
+$schema: https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#
+contentVersion: 1.0.0.0
+
+parameters:
+  containerName:
+    type: string
+    defaultValue: architecture-decisions
+    description: Name of the container instance
+  
+  dnsNameLabel:
+    type: string
+    description: DNS name label for the container instance
+  
+  registryLoginServer:
+    type: string
+    description: Azure Container Registry login server (e.g., myregistry.azurecr.io)
+  
+  registryUsername:
+    type: string
+    description: Azure Container Registry username
+  
+  registryPassword:
+    type: secureString
+    description: Azure Container Registry password
+  
+  imageName:
+    type: string
+    defaultValue: architecture-decisions:latest
+    description: Container image name and tag
+  
+  postgresHost:
+    type: string
+    description: PostgreSQL server hostname
+  
+  postgresUser:
+    type: string
+    description: PostgreSQL username
+  
+  postgresPassword:
+    type: secureString
+    description: PostgreSQL password
+  
+  postgresDb:
+    type: string
+    defaultValue: architecture_decisions
+    description: PostgreSQL database name
+  
+  secretKey:
+    type: secureString
+    description: Flask secret key for session management
+  
+  masterUsername:
+    type: string
+    defaultValue: admin
+    description: Master account username
+  
+  masterPassword:
+    type: secureString
+    description: Master account password
+
+variables:
+  location: '[resourceGroup().location]'
+  containerImage: '[concat(parameters(''registryLoginServer''), ''/'', parameters(''imageName''))]'
+
+resources:
+  - type: Microsoft.ContainerInstance/containerGroups
+    apiVersion: 2021-03-01
+    name: '[parameters(''containerName'')]'
+    location: '[variables(''location'')]'
+    properties:
+      containers:
+        - name: '[parameters(''containerName'')]'
+          properties:
+            image: '[variables(''containerImage'')]'
+            ports:
+              - port: 8000
+                protocol: TCP
+            environmentVariables:
+              - name: DATABASE_URL
+                value: '[concat(''postgresql://'', parameters(''postgresUser''), '':'', parameters(''postgresPassword''), ''@'', parameters(''postgresHost''), '':5432/'', parameters(''postgresDb''))]'
+              - name: SECRET_KEY
+                secureValue: '[parameters(''secretKey'')]'
+              - name: ENVIRONMENT
+                value: production
+              - name: DEBUG
+                value: 'false'
+              - name: MASTER_USERNAME
+                value: '[parameters(''masterUsername'')]'
+              - name: MASTER_PASSWORD
+                secureValue: '[parameters(''masterPassword'')]'
+              - name: EMAIL_VERIFICATION_REQUIRED
+                value: 'true'
+            resources:
+              requests:
+                memoryInGB: 1.5
+                cpu: 0.5
+              limits:
+                memoryInGB: 2.0
+                cpu: 1.0
+      imageRegistryCredentials:
+        - server: '[parameters(''registryLoginServer'')]'
+          username: '[parameters(''registryUsername'')]'
+          password: '[parameters(''registryPassword'')]'
+      ipAddress:
+        type: Public
+        ports:
+          - port: 8000
+            protocol: TCP
+        dnsNameLabel: '[parameters(''dnsNameLabel'')]'
+      osType: Linux
+      restartPolicy: Always
+
+outputs:
+  containerFQDN:
+    type: string
+    value: '[reference(resourceId(''Microsoft.ContainerInstance/containerGroups'', parameters(''containerName''))).ipAddress.fqdn]'
+  containerIPAddress:
+    type: string
+    value: '[reference(resourceId(''Microsoft.ContainerInstance/containerGroups'', parameters(''containerName''))).ipAddress.ip]'

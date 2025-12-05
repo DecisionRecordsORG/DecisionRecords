@@ -1,3 +1,4 @@
+import os
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -5,8 +6,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 # Default master account credentials
-DEFAULT_MASTER_USERNAME = 'admin'
-DEFAULT_MASTER_PASSWORD = 'changeme'
+DEFAULT_MASTER_USERNAME = os.environ.get('MASTER_USERNAME', 'admin')
+DEFAULT_MASTER_PASSWORD = os.environ.get('MASTER_PASSWORD', 'changeme')
 
 
 class SystemConfig(db.Model):
