@@ -948,6 +948,78 @@ def api_test_email():
         return jsonify({'error': 'Failed to send test email'}), 500
 
 
+# ==================== API Routes - System Email Config (Super Admin) ====================
+
+@app.route('/api/admin/email/system', methods=['GET'])
+@master_required
+def api_get_system_email_config():
+    """Get system-wide email configuration (super admin only)."""
+    config = EmailConfig.query.filter_by(domain='system').first()
+    if not config:
+        return jsonify(None)
+    return jsonify(config.to_dict())
+
+
+@app.route('/api/admin/email/system', methods=['POST', 'PUT'])
+@master_required
+def api_save_system_email_config():
+    """Create or update system-wide email configuration (super admin only)."""
+    data = request.get_json()
+
+    required_fields = ['smtp_server', 'smtp_port', 'smtp_username', 'from_email']
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+
+    config = EmailConfig.query.filter_by(domain='system').first()
+
+    if not config:
+        config = EmailConfig(domain='system')
+        db.session.add(config)
+
+    config.smtp_server = data['smtp_server']
+    config.smtp_port = int(data['smtp_port'])
+    config.smtp_username = data['smtp_username']
+    if data.get('smtp_password'):
+        config.smtp_password = data['smtp_password']
+    config.from_email = data['from_email']
+    config.from_name = data.get('from_name', 'Architecture Decisions')
+    config.use_tls = bool(data.get('use_tls', True))
+    config.enabled = bool(data.get('enabled', True))
+
+    db.session.commit()
+
+    return jsonify(config.to_dict())
+
+
+@app.route('/api/admin/email/system/test', methods=['POST'])
+@master_required
+def api_test_system_email():
+    """Send a test email using system config (super admin only)."""
+    from notifications import send_email
+
+    config = EmailConfig.query.filter_by(domain='system').first()
+    if not config:
+        return jsonify({'error': 'System email configuration not found'}), 404
+
+    # Get master account email for test
+    master = MasterAccount.query.first()
+    test_email = f'{master.username}@localhost' if master else 'admin@localhost'
+
+    success = send_email(
+        config,
+        test_email,
+        'Architecture Decisions - Test Email',
+        '<h1>Test Email</h1><p>This is a test email from Architecture Decisions system config.</p>',
+        'Test Email\n\nThis is a test email from Architecture Decisions system config.'
+    )
+
+    if success:
+        return jsonify({'message': f'Test email sent to {test_email}'})
+    else:
+        return jsonify({'error': 'Failed to send test email'}), 500
+
+
 # ==================== API Routes - Admin (Users) ====================
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -1291,39 +1363,6 @@ def api_direct_signup():
             'is_public_domain': True
         }), 400
 
-    # Check if domain is approved
-    domain_approval = DomainApproval.query.filter_by(domain=domain).first()
-    if not domain_approval:
-        # New domain - create approval request
-        domain_approval = DomainApproval(
-            domain=domain,
-            status='pending',
-            requested_by_email=email,
-            requested_by_name=name
-        )
-        db.session.add(domain_approval)
-        db.session.commit()
-        # TODO: Send notification to super admin about new domain
-        return jsonify({
-            'error': 'Your organization domain needs approval before you can sign up.',
-            'domain_pending': True,
-            'message': 'The super admin has been notified and will review your domain shortly.'
-        }), 403
-
-    if domain_approval.status == 'pending':
-        return jsonify({
-            'error': 'Your organization domain is pending approval.',
-            'domain_pending': True,
-            'message': 'Please wait for the super admin to approve your domain.'
-        }), 403
-
-    if domain_approval.status == 'rejected':
-        return jsonify({
-            'error': 'Your organization domain has been rejected.',
-            'domain_rejected': True,
-            'reason': domain_approval.rejection_reason
-        }), 403
-
     # Check if user already exists
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
@@ -1339,6 +1378,31 @@ def api_direct_signup():
             'error': 'This organization already has users. Please use the login page.',
             'redirect': f'/{domain}/login'
         }), 400
+
+    # Check domain approval status - but allow signup even if pending
+    domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+    domain_pending = False
+
+    if domain_approval and domain_approval.status == 'rejected':
+        return jsonify({
+            'error': 'Your organization domain has been rejected.',
+            'domain_rejected': True,
+            'reason': domain_approval.rejection_reason
+        }), 403
+
+    if not domain_approval:
+        # New domain - create approval request
+        domain_approval = DomainApproval(
+            domain=domain,
+            status='pending',
+            requested_by_email=email,
+            requested_by_name=name
+        )
+        db.session.add(domain_approval)
+        domain_pending = True
+        # TODO: Send notification to super admin about new domain
+    elif domain_approval.status == 'pending':
+        domain_pending = True
 
     # Create user account directly (first user becomes admin)
     user = User(
@@ -1374,12 +1438,20 @@ def api_direct_signup():
     user.last_login = datetime.utcnow()
     db.session.commit()
 
-    # Redirect to passkey setup if user chose passkey, otherwise to dashboard
+    # Determine redirect based on auth preference and domain status
     if auth_preference == 'passkey':
-        redirect_url = f'/{domain}/profile?setup=passkey'
+        # Always go to profile for passkey setup first
+        if domain_pending:
+            redirect_url = f'/{domain}/profile?setup=passkey&pending=1'
+        else:
+            redirect_url = f'/{domain}/profile?setup=passkey'
         setup_passkey = True
     else:
-        redirect_url = f'/{domain}'
+        # Password auth - go to pending page or dashboard
+        if domain_pending:
+            redirect_url = f'/{domain}/pending'
+        else:
+            redirect_url = f'/{domain}'
         setup_passkey = False
 
     return jsonify({
@@ -1388,7 +1460,8 @@ def api_direct_signup():
         'domain': domain,
         'user': user.to_dict(),
         'redirect': redirect_url,
-        'setup_passkey': setup_passkey
+        'setup_passkey': setup_passkey,
+        'domain_pending': domain_pending
     })
 
 
@@ -2104,28 +2177,45 @@ def api_check_domain_status(domain):
 @master_required
 def api_list_tenants():
     """List all tenants (organizations) with their stats (super admin only)."""
-    # Get unique domains from users
-    domains = db.session.query(
+    tenants = {}
+
+    # Get domains from approved DomainApproval records
+    approved_domains = DomainApproval.query.filter_by(status='approved').all()
+    for approval in approved_domains:
+        tenants[approval.domain] = {
+            'domain': approval.domain,
+            'user_count': 0,
+            'admin_count': 0,
+            'has_sso': False,
+            'created_at': approval.reviewed_at.isoformat() if approval.reviewed_at else approval.created_at.isoformat()
+        }
+
+    # Get user stats by domain
+    domain_stats = db.session.query(
         User.sso_domain,
         db.func.count(User.id).label('user_count'),
         db.func.sum(db.case((User.is_admin == True, 1), else_=0)).label('admin_count'),
         db.func.min(User.created_at).label('created_at')
     ).group_by(User.sso_domain).all()
 
-    tenants = []
-    for domain, user_count, admin_count, created_at in domains:
+    for domain, user_count, admin_count, created_at in domain_stats:
         if domain:
-            # Check if tenant has SSO configured
-            has_sso = SSOConfig.query.filter_by(domain=domain, enabled=True).first() is not None
-            tenants.append({
-                'domain': domain,
-                'user_count': user_count,
-                'admin_count': int(admin_count) if admin_count else 0,
-                'has_sso': has_sso,
-                'created_at': created_at.isoformat() if created_at else None
-            })
+            if domain not in tenants:
+                tenants[domain] = {
+                    'domain': domain,
+                    'user_count': 0,
+                    'admin_count': 0,
+                    'has_sso': False,
+                    'created_at': created_at.isoformat() if created_at else None
+                }
+            tenants[domain]['user_count'] = user_count
+            tenants[domain]['admin_count'] = int(admin_count) if admin_count else 0
 
-    return jsonify(sorted(tenants, key=lambda x: x['domain']))
+    # Check SSO config for all domains
+    for domain in tenants:
+        tenants[domain]['has_sso'] = SSOConfig.query.filter_by(domain=domain, enabled=True).first() is not None
+
+    return jsonify(sorted(tenants.values(), key=lambda x: x['domain']))
 
 
 # ==================== API Routes - Tenant Auth Config ====================

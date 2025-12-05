@@ -150,6 +150,33 @@ import { MasterAccount } from '../../models/decision.model';
           </mat-card-content>
         </mat-card>
 
+        <mat-card class="navigation-card">
+          <mat-card-header>
+            <mat-card-title>
+              <mat-icon>admin_panel_settings</mat-icon>
+              Administration
+            </mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <div class="nav-links">
+              <a routerLink="/superadmin/tenants" class="nav-link">
+                <mat-icon>business</mat-icon>
+                <div>
+                  <strong>Tenant Management</strong>
+                  <span>Approve domains, manage organizations</span>
+                </div>
+              </a>
+              <a routerLink="/superadmin/email" class="nav-link">
+                <mat-icon>email</mat-icon>
+                <div>
+                  <strong>Email Configuration</strong>
+                  <span>Configure SMTP for notifications</span>
+                </div>
+              </a>
+            </div>
+          </mat-card-content>
+        </mat-card>
+
         <mat-card class="info-notice">
           <mat-card-content>
             <div class="notice-content">
@@ -158,7 +185,6 @@ import { MasterAccount } from '../../models/decision.model';
                 <h3>Super Admin Notes</h3>
                 <ul>
                   <li>The super admin manages the system and tenants (organizations).</li>
-                  <li>Manage tenant domain approvals in <a routerLink="/superadmin/tenants">Tenant Management</a>.</li>
                   <li>Tenant admins configure their own SSO, login options, and users.</li>
                   <li>Super admin can view all decisions across all tenants but cannot create, edit, or delete them.</li>
                 </ul>
@@ -267,6 +293,57 @@ import { MasterAccount } from '../../models/decision.model';
 
     .notice-content a {
       color: #3f51b5;
+    }
+
+    .navigation-card {
+      margin-bottom: 24px;
+    }
+
+    .navigation-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-top: 16px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #f5f5f5;
+      text-decoration: none;
+      color: inherit;
+      transition: background-color 0.2s;
+    }
+
+    .nav-link:hover {
+      background: #e0e0e0;
+    }
+
+    .nav-link mat-icon {
+      color: #3f51b5;
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+    }
+
+    .nav-link strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+
+    .nav-link span {
+      font-size: 13px;
+      color: #666;
     }
 
     .system-settings-card {

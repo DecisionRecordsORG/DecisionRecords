@@ -1,6 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatButtonModule } from '@angular/material/button';
@@ -37,10 +38,20 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
   ],
   template: `
     <div class="profile-container">
-      <h1>
-        <mat-icon>person</mat-icon>
-        Profile & Notifications
-      </h1>
+      @if (setupMode) {
+        <div class="setup-banner">
+          <mat-icon>key</mat-icon>
+          <div>
+            <h2>Complete Your Account Setup</h2>
+            <p>Set up a passkey for secure, passwordless authentication</p>
+          </div>
+        </div>
+      } @else {
+        <h1>
+          <mat-icon>person</mat-icon>
+          Profile & Notifications
+        </h1>
+      }
 
       @if (authService.currentUser) {
         <mat-card class="profile-card">
@@ -222,6 +233,33 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
       margin-bottom: 24px;
     }
 
+    .setup-banner {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 24px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .setup-banner mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+    }
+
+    .setup-banner h2 {
+      margin: 0 0 4px 0;
+      font-size: 20px;
+    }
+
+    .setup-banner p {
+      margin: 0;
+      opacity: 0.9;
+    }
+
     .profile-card, .subscription-card, .passkeys-card {
       margin-bottom: 24px;
     }
@@ -340,12 +378,16 @@ export class ProfileComponent implements OnInit {
   isSaving = false;
   isAddingPasskey = false;
   user: User | null = null;
+  setupMode = false;
+  pendingDomain = false;
 
   constructor(
     public authService: AuthService,
     private webAuthnService: WebAuthnService,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private route: ActivatedRoute,
+    private router: Router
   ) {}
 
   ngOnInit(): void {
@@ -357,6 +399,18 @@ export class ProfileComponent implements OnInit {
       } else {
         this.isLoadingCredentials = false;
       }
+
+      // Check for setup mode (new account passkey setup)
+      this.route.queryParams.subscribe(params => {
+        if (params['setup'] === 'passkey') {
+          this.setupMode = true;
+          this.pendingDomain = params['pending'] === '1';
+          // Auto-trigger passkey registration for new accounts
+          if (this.credentials.length === 0) {
+            setTimeout(() => this.addPasskeyWithRedirect(), 500);
+          }
+        }
+      });
     }
   }
 
@@ -413,6 +467,34 @@ export class ProfileComponent implements OnInit {
       error: (err) => {
         this.isAddingPasskey = false;
         this.snackBar.open(err.error?.error || 'Failed to add passkey', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  addPasskeyWithRedirect(): void {
+    if (!this.user) return;
+
+    this.isAddingPasskey = true;
+
+    this.webAuthnService.register(this.user.email, this.user.name).subscribe({
+      next: () => {
+        this.isAddingPasskey = false;
+        this.snackBar.open('Passkey added successfully! Redirecting...', 'Close', { duration: 2000 });
+        this.loadCredentials();
+
+        // Redirect based on domain status
+        setTimeout(() => {
+          if (this.pendingDomain) {
+            this.router.navigate([`/${this.user?.sso_domain}/pending`]);
+          } else {
+            this.router.navigate([`/${this.user?.sso_domain}`]);
+          }
+        }, 1500);
+      },
+      error: (err) => {
+        this.isAddingPasskey = false;
+        this.snackBar.open(err.error?.error || 'Failed to add passkey. Please try again.', 'Close', { duration: 5000 });
+        // In setup mode, show the button to try again
       }
     });
   }

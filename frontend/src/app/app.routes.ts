@@ -26,6 +26,12 @@ export const routes: Routes = [
     loadComponent: () => import('./components/superadmin-tenants/superadmin-tenants.component').then(m => m.SuperadminTenantsComponent),
     canActivate: [masterGuard]
   },
+  // Super admin email configuration
+  {
+    path: 'superadmin/email',
+    loadComponent: () => import('./components/superadmin-email/superadmin-email.component').then(m => m.SuperadminEmailComponent),
+    canActivate: [masterGuard]
+  },
   // Tenant-specific routes
   {
     path: ':tenant/login',
@@ -36,6 +42,11 @@ export const routes: Routes = [
     path: ':tenant/admin',
     loadComponent: () => import('./components/settings/settings.component').then(m => m.SettingsComponent),
     canActivate: [adminGuard, tenantGuard]
+  },
+  {
+    path: ':tenant/pending',
+    loadComponent: () => import('./components/pending-approval/pending-approval.component').then(m => m.PendingApprovalComponent),
+    canActivate: [authGuard]  // Only require auth, not tenant guard (domain may be pending)
   },
   {
     path: ':tenant',
