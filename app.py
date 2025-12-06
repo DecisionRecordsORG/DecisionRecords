@@ -16,6 +16,10 @@ from webauthn_auth import (
     create_authentication_options, verify_authentication,
     get_user_credentials, delete_credential, get_auth_config
 )
+from security import (
+    validate_tenant_ownership, filter_by_tenant, log_security_event,
+    generate_csrf_token, apply_security_headers
+)
 
 # Configure logging
 logging.basicConfig(
@@ -44,6 +48,38 @@ logger.info(f"Database URL configured: {database_url.split('@')[1] if '@' in dat
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+# ==================== Security Configuration ====================
+
+# Session security settings
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # Only send over HTTPS in production
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection - prevent cross-site cookie sending
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expiry
+
+# Rate limiting configuration
+app.config['RATELIMIT_ENABLED'] = True
+app.config['RATELIMIT_STORAGE_URL'] = os.environ.get('REDIS_URL', 'memory://')
+app.config['RATELIMIT_DEFAULT'] = '200 per minute'  # Default rate limit
+app.config['RATELIMIT_HEADERS_ENABLED'] = True  # Include rate limit info in response headers
+
+# Initialize rate limiter (if available)
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+
+    limiter = Limiter(
+        key_func=get_remote_address,
+        app=app,
+        default_limits=["200 per minute"],
+        storage_uri=app.config['RATELIMIT_STORAGE_URL'],
+    )
+    RATE_LIMITING_ENABLED = True
+    logger.info("Rate limiting enabled")
+except ImportError:
+    limiter = None
+    RATE_LIMITING_ENABLED = False
+    logger.warning("Flask-Limiter not installed, rate limiting disabled")
 
 # Initialize database
 db.init_app(app)
@@ -156,6 +192,19 @@ def initialize_db():
             app_error_state['details'] = traceback.format_exc()
 
 
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses."""
+    # Apply security headers
+    response = apply_security_headers(response)
+
+    # Add CSRF token to response header for SPA to use
+    if 'user_id' in session or 'master_id' in session:
+        response.headers['X-CSRF-Token'] = generate_csrf_token()
+
+    return response
+
+
 # ==================== Health Check ====================
 
 @app.route('/health')
@@ -203,9 +252,23 @@ def login():
     return redirect('/')
 
 
+# Rate limit decorator helper (no-op if limiter not available)
+def rate_limit(limit_string):
+    """Apply rate limiting if available, otherwise no-op."""
+    def decorator(f):
+        if RATE_LIMITING_ENABLED and limiter:
+            return limiter.limit(limit_string)(f)
+        return f
+    return decorator
+
+
 @app.route('/auth/local', methods=['POST'])
+@rate_limit("5 per minute")  # Strict limit on login attempts
 def local_login():
     """Handle local master account login."""
+    # Log login attempt for security auditing
+    log_security_event('auth', f"Master login attempt for user", severity='INFO')
+
     # Support both form data and JSON
     if request.is_json:
         data = request.get_json()
@@ -251,8 +314,11 @@ def api_get_sso_configs():
 
 
 @app.route('/api/auth/login', methods=['POST'])
+@rate_limit("10 per minute")  # Limit login attempts per IP
 def api_tenant_login():
     """Handle tenant user password login."""
+    log_security_event('auth', f"Tenant login attempt", severity='INFO')
+
     data = request.get_json()
     email = data.get('email', '').lower().strip()
     password = data.get('password', '')
@@ -420,6 +486,17 @@ def api_logout():
     """API endpoint for logout - returns JSON instead of redirect."""
     session.clear()
     return jsonify({'message': 'Logged out successfully'})
+
+
+@app.route('/api/auth/csrf-token', methods=['GET'])
+def api_get_csrf_token():
+    """Get a CSRF token for the current session.
+
+    The frontend should call this endpoint and include the token
+    in the X-CSRF-Token header for all state-changing requests.
+    """
+    token = generate_csrf_token()
+    return jsonify({'csrf_token': token})
 
 
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
