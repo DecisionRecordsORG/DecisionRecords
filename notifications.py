@@ -13,6 +13,23 @@ def send_email(email_config, to_email, subject, html_content, text_content=None)
         return False
 
     try:
+        # Determine actual credentials to use
+        smtp_username = email_config.smtp_username
+        smtp_password = email_config.smtp_password
+        
+        # If config uses Key Vault placeholders, fetch from Key Vault
+        if smtp_username == 'from-keyvault' or smtp_password == 'from-keyvault':
+            from keyvault_client import keyvault_client
+            kv_username, kv_password = keyvault_client.get_smtp_credentials()
+            
+            if not kv_username or not kv_password:
+                logger.error("SMTP credentials not available in Key Vault")
+                return False
+                
+            smtp_username = kv_username
+            smtp_password = kv_password
+            logger.info("Using SMTP credentials from Key Vault")
+
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
         msg['From'] = f"{email_config.from_name} <{email_config.from_email}>"
@@ -32,7 +49,7 @@ def send_email(email_config, to_email, subject, html_content, text_content=None)
         else:
             server = smtplib.SMTP_SSL(email_config.smtp_server, email_config.smtp_port)
 
-        server.login(email_config.smtp_username, email_config.smtp_password)
+        server.login(smtp_username, smtp_password)
         server.sendmail(email_config.from_email, to_email, msg.as_string())
         server.quit()
 

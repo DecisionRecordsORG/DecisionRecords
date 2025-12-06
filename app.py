@@ -954,22 +954,41 @@ def api_test_email():
 @master_required
 def api_get_system_email_config():
     """Get system-wide email configuration (super admin only)."""
+    from keyvault_client import keyvault_client
+    
     config = EmailConfig.query.filter_by(domain='system').first()
     if not config:
         return jsonify(None)
-    return jsonify(config.to_dict())
+    
+    # Get the config dict but override credentials with Key Vault status
+    config_dict = config.to_dict()
+    
+    # Check if Key Vault credentials are available
+    username, password = keyvault_client.get_smtp_credentials()
+    config_dict['smtp_username'] = '***PROTECTED***' if username else ''
+    config_dict['smtp_password'] = '***PROTECTED***' if password else ''
+    config_dict['using_keyvault'] = bool(username and password)
+    
+    return jsonify(config_dict)
 
 
 @app.route('/api/admin/email/system', methods=['POST', 'PUT'])
 @master_required
 def api_save_system_email_config():
     """Create or update system-wide email configuration (super admin only)."""
+    from keyvault_client import keyvault_client
     data = request.get_json()
 
-    required_fields = ['smtp_server', 'smtp_port', 'smtp_username', 'from_email']
+    # Username and password are not required since they come from Key Vault
+    required_fields = ['smtp_server', 'smtp_port', 'from_email']
     for field in required_fields:
         if not data.get(field):
             return jsonify({'error': f'Missing required field: {field}'}), 400
+
+    # Validate Key Vault credentials are available
+    username, password = keyvault_client.get_smtp_credentials()
+    if not username or not password:
+        return jsonify({'error': 'SMTP credentials not configured in Azure Key Vault. Please contact system administrator.'}), 400
 
     config = EmailConfig.query.filter_by(domain='system').first()
 
@@ -979,9 +998,9 @@ def api_save_system_email_config():
 
     config.smtp_server = data['smtp_server']
     config.smtp_port = int(data['smtp_port'])
-    config.smtp_username = data['smtp_username']
-    if data.get('smtp_password'):
-        config.smtp_password = data['smtp_password']
+    # Store placeholder values - actual credentials come from Key Vault
+    config.smtp_username = 'from-keyvault'
+    config.smtp_password = 'from-keyvault'
     config.from_email = data['from_email']
     config.from_name = data.get('from_name', 'Architecture Decisions')
     config.use_tls = bool(data.get('use_tls', True))
@@ -989,7 +1008,13 @@ def api_save_system_email_config():
 
     db.session.commit()
 
-    return jsonify(config.to_dict())
+    # Return response with protected credentials
+    config_dict = config.to_dict()
+    config_dict['smtp_username'] = '***PROTECTED***'
+    config_dict['smtp_password'] = '***PROTECTED***'
+    config_dict['using_keyvault'] = True
+
+    return jsonify(config_dict)
 
 
 @app.route('/api/admin/email/system/test', methods=['POST'])

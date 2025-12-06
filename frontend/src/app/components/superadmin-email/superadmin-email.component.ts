@@ -11,6 +11,7 @@ import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSelectModule } from '@angular/material/select';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterModule } from '@angular/router';
 
 interface EmailConfig {
@@ -23,6 +24,7 @@ interface EmailConfig {
   from_name: string;
   use_tls: boolean;
   enabled: boolean;
+  using_keyvault?: boolean;
 }
 
 @Component({
@@ -40,7 +42,8 @@ interface EmailConfig {
     MatSlideToggleModule,
     MatProgressSpinnerModule,
     MatSnackBarModule,
-    MatSelectModule
+    MatSelectModule,
+    MatTooltipModule
   ],
   template: `
     <div class="email-config-container">
@@ -83,13 +86,22 @@ interface EmailConfig {
             <div class="form-row">
               <mat-form-field appearance="outline">
                 <mat-label>SMTP Username</mat-label>
-                <input matInput formControlName="smtp_username">
+                <input matInput formControlName="smtp_username" 
+                       [readonly]="usingKeyVault"
+                       [placeholder]="usingKeyVault ? 'Managed by Azure Key Vault' : ''">
+                @if (usingKeyVault) {
+                  <mat-icon matSuffix color="primary" matTooltip="Credential secured in Azure Key Vault">security</mat-icon>
+                }
               </mat-form-field>
 
               <mat-form-field appearance="outline">
                 <mat-label>SMTP Password</mat-label>
                 <input matInput type="password" formControlName="smtp_password"
-                       [placeholder]="hasExistingConfig ? 'Leave blank to keep existing' : ''">
+                       [readonly]="usingKeyVault"
+                       [placeholder]="usingKeyVault ? 'Managed by Azure Key Vault' : (hasExistingConfig ? 'Leave blank to keep existing' : '')">
+                @if (usingKeyVault) {
+                  <mat-icon matSuffix color="primary" matTooltip="Credential secured in Azure Key Vault">security</mat-icon>
+                }
               </mat-form-field>
             </div>
 
@@ -144,6 +156,7 @@ interface EmailConfig {
               <ul>
                 <li>This configuration is used for system-wide notifications.</li>
                 <li>Domain approval notifications will be sent using this configuration.</li>
+                <li>SMTP credentials are securely stored in Azure Key Vault.</li>
                 <li>For AWS SES, use the SES SMTP endpoint (e.g., email-smtp.us-east-1.amazonaws.com).</li>
                 <li>Test email will be sent to the super admin account.</li>
               </ul>
@@ -257,6 +270,7 @@ export class SuperadminEmailComponent implements OnInit {
   isTesting = false;
   successMessage = '';
   errorMessage = '';
+  usingKeyVault = false;
 
   constructor(
     private fb: FormBuilder,
@@ -266,7 +280,7 @@ export class SuperadminEmailComponent implements OnInit {
     this.emailForm = this.fb.group({
       smtp_server: ['', Validators.required],
       smtp_port: [587, Validators.required],
-      smtp_username: ['', Validators.required],
+      smtp_username: [''], // Will be validated conditionally based on Key Vault availability
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
       from_name: ['Architecture Decisions'],
@@ -285,6 +299,8 @@ export class SuperadminEmailComponent implements OnInit {
       next: (config) => {
         if (config) {
           this.hasExistingConfig = true;
+          this.usingKeyVault = config.using_keyvault || false;
+          
           this.emailForm.patchValue({
             smtp_server: config.smtp_server,
             smtp_port: config.smtp_port,
@@ -294,6 +310,14 @@ export class SuperadminEmailComponent implements OnInit {
             use_tls: config.use_tls,
             enabled: config.enabled
           });
+
+          // If using Key Vault, make credential fields optional
+          if (this.usingKeyVault) {
+            this.emailForm.get('smtp_username')?.clearValidators();
+            this.emailForm.get('smtp_password')?.clearValidators();
+            this.emailForm.get('smtp_username')?.updateValueAndValidity();
+            this.emailForm.get('smtp_password')?.updateValueAndValidity();
+          }
         }
       },
       error: () => {
