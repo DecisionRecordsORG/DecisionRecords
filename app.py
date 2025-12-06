@@ -18,7 +18,9 @@ from webauthn_auth import (
 )
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
-    generate_csrf_token, apply_security_headers
+    generate_csrf_token, apply_security_headers,
+    sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
+    sanitize_request_data
 )
 
 # Configure logging
@@ -80,6 +82,44 @@ except ImportError:
     limiter = None
     RATE_LIMITING_ENABLED = False
     logger.warning("Flask-Limiter not installed, rate limiting disabled")
+
+# Initialize Flask-Talisman for CSP (Content Security Policy)
+try:
+    from flask_talisman import Talisman
+
+    # CSP configuration for Angular SPA
+    csp = {
+        'default-src': "'self'",
+        'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"],  # Angular requires unsafe-eval in dev
+        'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        'font-src': ["'self'", "https://fonts.gstatic.com"],
+        'img-src': ["'self'", "data:", "https:"],
+        'connect-src': ["'self'"],  # API calls - restrict to same origin
+        'frame-ancestors': "'none'",  # Prevent clickjacking
+        'form-action': "'self'",
+        'base-uri': "'self'",
+        'object-src': "'none'",
+    }
+
+    # Enable Talisman with CSP
+    # Note: force_https is handled by Azure App Gateway, so we disable it here
+    talisman = Talisman(
+        app,
+        content_security_policy=csp,
+        content_security_policy_nonce_in=['script-src'],
+        force_https=False,  # Azure handles HTTPS termination
+        session_cookie_secure=os.environ.get('FLASK_ENV') == 'production',
+        frame_options='DENY',
+        x_content_type_options=True,
+        x_xss_protection=True,
+        referrer_policy='strict-origin-when-cross-origin',
+    )
+    CSP_ENABLED = True
+    logger.info("Content Security Policy (CSP) enabled via Flask-Talisman")
+except ImportError:
+    talisman = None
+    CSP_ENABLED = False
+    logger.warning("Flask-Talisman not installed, CSP disabled")
 
 # Initialize database
 db.init_app(app)
@@ -595,24 +635,31 @@ def api_create_decision():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    # Validate required fields
-    required_fields = ['title', 'context', 'decision', 'consequences']
-    for field in required_fields:
-        if not data.get(field):
-            return jsonify({'error': f'Missing required field: {field}'}), 400
+    # Sanitize and validate input
+    sanitized, errors = sanitize_request_data(data, {
+        'title': {'type': 'title', 'max_length': 255, 'required': True},
+        'context': {'type': 'text', 'max_length': 50000, 'required': True},
+        'decision': {'type': 'text', 'max_length': 50000, 'required': True},
+        'consequences': {'type': 'text', 'max_length': 50000, 'required': True},
+        'status': {'type': 'string', 'max_length': 50},
+        'change_reason': {'type': 'text', 'max_length': 500},
+    })
+
+    if errors:
+        return jsonify({'error': errors[0]}), 400
 
     # Validate status if provided
-    status = data.get('status', 'proposed')
+    status = sanitized.get('status', 'proposed')
     if status not in ArchitectureDecision.VALID_STATUSES:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(ArchitectureDecision.VALID_STATUSES)}'}), 400
 
     decision = ArchitectureDecision(
-        title=data['title'],
-        context=data['context'],
-        decision=data['decision'],
+        title=sanitized['title'],
+        context=sanitized['context'],
+        decision=sanitized['decision'],
         status=status,
-        consequences=data['consequences'],
-        domain=g.current_user.sso_domain,
+        consequences=sanitized['consequences'],
+        domain=g.current_user.sso_domain,  # SECURITY: Always use authenticated user's domain
         created_by_id=g.current_user.id,
         updated_by_id=g.current_user.id
     )
@@ -1873,24 +1920,26 @@ def api_reject_access_request(request_id):
 
 
 @app.route('/api/webauthn/register/options', methods=['POST'])
+@rate_limit("10 per minute")
 def api_webauthn_register_options():
     """Generate WebAuthn registration options."""
     data = request.get_json()
 
     email = data.get('email')
     name = data.get('name')
-    domain = data.get('domain')
 
     if not email:
         return jsonify({'error': 'Email is required'}), 400
 
-    # Extract domain from email if not provided
-    if not domain:
-        from auth import extract_domain_from_email
-        domain = extract_domain_from_email(email)
+    # SECURITY: Always extract domain from email - never trust user input
+    from auth import extract_domain_from_email
+    domain = extract_domain_from_email(email)
 
     if not domain:
-        return jsonify({'error': 'Could not determine domain from email'}), 400
+        return jsonify({'error': 'Invalid email format'}), 400
+
+    # Log registration attempt
+    log_security_event('auth', f"WebAuthn registration attempt for {email}", severity='INFO')
 
     # Check auth config for this domain
     auth_config = get_auth_config(domain)

@@ -9,3 +9,4 @@ webauthn==2.0.0
 psycopg2-binary==2.9.9
 azure-keyvault-secrets==4.8.0
 azure-identity==1.15.0
+bleach==6.1.0
