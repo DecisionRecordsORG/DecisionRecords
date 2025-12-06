@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -27,12 +27,17 @@ interface EmailConfig {
   using_keyvault?: boolean;
 }
 
+interface SuperAdminEmail {
+  email: string;
+}
+
 @Component({
   selector: 'app-superadmin-email',
   standalone: true,
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     RouterModule,
     MatCardModule,
     MatFormFieldModule,
@@ -144,6 +149,46 @@ interface EmailConfig {
               </button>
             </div>
           </form>
+        </mat-card-content>
+      </mat-card>
+
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>notifications</mat-icon>
+            Notification Settings
+          </mat-card-title>
+          <mat-card-subtitle>
+            Configure where system notifications are sent
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (notificationSuccessMessage) {
+            <div class="success-message">{{ notificationSuccessMessage }}</div>
+          }
+          @if (notificationErrorMessage) {
+            <div class="error-message">{{ notificationErrorMessage }}</div>
+          }
+
+          <div class="notification-form">
+            <mat-form-field appearance="outline" class="full-width">
+              <mat-label>Super Admin Notification Email</mat-label>
+              <input matInput type="email" [(ngModel)]="superAdminEmail"
+                     placeholder="admin@example.com">
+              <mat-hint>Email address to receive domain approval requests and system notifications</mat-hint>
+            </mat-form-field>
+
+            <button mat-raised-button color="primary"
+                    (click)="saveSuperAdminEmail()"
+                    [disabled]="isSavingNotification">
+              @if (isSavingNotification) {
+                <mat-spinner diameter="20"></mat-spinner>
+              } @else {
+                <mat-icon>save</mat-icon>
+                Save Notification Email
+              }
+            </button>
+          </div>
         </mat-card-content>
       </mat-card>
 
@@ -261,6 +306,21 @@ interface EmailConfig {
     .info-content li {
       margin-bottom: 4px;
     }
+
+    .notification-form {
+      padding-top: 16px;
+    }
+
+    .notification-form .full-width {
+      width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .notification-form button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
   `]
 })
 export class SuperadminEmailComponent implements OnInit {
@@ -271,6 +331,12 @@ export class SuperadminEmailComponent implements OnInit {
   successMessage = '';
   errorMessage = '';
   usingKeyVault = false;
+
+  // Notification settings
+  superAdminEmail = '';
+  isSavingNotification = false;
+  notificationSuccessMessage = '';
+  notificationErrorMessage = '';
 
   constructor(
     private fb: FormBuilder,
@@ -291,6 +357,7 @@ export class SuperadminEmailComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadEmailConfig();
+    this.loadSuperAdminEmail();
   }
 
   loadEmailConfig(): void {
@@ -366,6 +433,37 @@ export class SuperadminEmailComponent implements OnInit {
       error: (err) => {
         this.isTesting = false;
         this.errorMessage = err.error?.error || 'Failed to send test email';
+      }
+    });
+  }
+
+  loadSuperAdminEmail(): void {
+    this.http.get<SuperAdminEmail>('/api/system/super-admin-email').subscribe({
+      next: (response) => {
+        this.superAdminEmail = response.email || '';
+      },
+      error: () => {
+        // No email set yet
+      }
+    });
+  }
+
+  saveSuperAdminEmail(): void {
+    this.isSavingNotification = true;
+    this.notificationSuccessMessage = '';
+    this.notificationErrorMessage = '';
+
+    this.http.put<{ email: string; message: string }>('/api/system/super-admin-email', {
+      email: this.superAdminEmail
+    }).subscribe({
+      next: (response) => {
+        this.isSavingNotification = false;
+        this.notificationSuccessMessage = response.message || 'Notification email saved!';
+        setTimeout(() => this.notificationSuccessMessage = '', 5000);
+      },
+      error: (err) => {
+        this.isSavingNotification = false;
+        this.notificationErrorMessage = err.error?.error || 'Failed to save notification email';
       }
     });
   }

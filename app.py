@@ -2109,6 +2109,36 @@ def api_set_email_verification():
     })
 
 
+@app.route('/api/system/super-admin-email', methods=['GET'])
+@master_required
+def api_get_super_admin_email():
+    """Get super admin notification email address."""
+    email = SystemConfig.get(SystemConfig.KEY_SUPER_ADMIN_EMAIL, default='')
+    return jsonify({'email': email})
+
+
+@app.route('/api/system/super-admin-email', methods=['PUT'])
+@master_required
+def api_set_super_admin_email():
+    """Set super admin notification email address."""
+    data = request.get_json()
+
+    email = data.get('email', '').strip()
+    if email and '@' not in email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    SystemConfig.set(
+        SystemConfig.KEY_SUPER_ADMIN_EMAIL,
+        email,
+        'Email address for super admin notifications (domain approvals, etc.)'
+    )
+
+    return jsonify({
+        'email': email,
+        'message': 'Super admin notification email updated'
+    })
+
+
 # ==================== API Routes - Domain Approval ====================
 
 @app.route('/api/domains/pending', methods=['GET'])
@@ -2212,7 +2242,7 @@ def api_list_tenants():
             'user_count': 0,
             'admin_count': 0,
             'has_sso': False,
-            'created_at': approval.reviewed_at.isoformat() if approval.reviewed_at else approval.created_at.isoformat()
+            'created_at': approval.updated_at.isoformat() if approval.updated_at else approval.created_at.isoformat()
         }
 
     # Get user stats by domain

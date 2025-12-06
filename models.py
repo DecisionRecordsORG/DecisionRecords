@@ -23,6 +23,7 @@ class SystemConfig(db.Model):
 
     # Default configuration keys
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
+    KEY_SUPER_ADMIN_EMAIL = 'super_admin_notification_email'
 
     @staticmethod
     def get(key, default=None):
