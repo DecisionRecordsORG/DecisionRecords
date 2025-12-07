@@ -275,21 +275,37 @@ class DomainApproval(db.Model):
     requested_by_name = db.Column(db.String(255), nullable=True)
     approved_by_id = db.Column(db.Integer, db.ForeignKey('master_accounts.id'), nullable=True)
     rejection_reason = db.Column(db.String(500), nullable=True)
+    auto_approved = db.Column(db.Boolean, default=False)  # True if auto-approved (corporate domain)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    # Common public email domains that should be auto-rejected or require careful review
-    PUBLIC_DOMAINS = [
-        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
-        'aol.com', 'icloud.com', 'mail.com', 'protonmail.com', 'proton.me',
-        'ymail.com', 'gmx.com', 'zoho.com', 'tutanota.com', 'fastmail.com',
-        'msn.com', 'me.com', 'mac.com', 'inbox.com', 'mail.ru'
-    ]
+    reviewed_at = db.Column(db.DateTime, nullable=True)  # When approved/rejected
 
     @staticmethod
     def is_public_domain(domain):
-        """Check if domain is a common public email provider."""
-        return domain.lower() in DomainApproval.PUBLIC_DOMAINS
+        """Check if domain is a free/public email provider using external blocklist."""
+        try:
+            from free_email_domains import whitelist as free_domains
+            return domain.lower() in free_domains
+        except ImportError:
+            # Fallback to basic list if package not installed
+            basic_public = [
+                'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+                'aol.com', 'icloud.com', 'mail.com', 'protonmail.com', 'proton.me'
+            ]
+            return domain.lower() in basic_public
+
+    @staticmethod
+    def is_disposable_domain(domain):
+        """Check if domain is a disposable/temporary email provider."""
+        try:
+            from disposable_email_domains import blocklist as disposable_domains
+            return domain.lower() in disposable_domains
+        except ImportError:
+            return False
+
+    @staticmethod
+    def is_blocked_domain(domain):
+        """Check if domain should be blocked (public or disposable)."""
+        return DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain)
 
     @staticmethod
     def is_approved(domain):
@@ -314,9 +330,11 @@ class DomainApproval(db.Model):
             'requested_by_email': self.requested_by_email,
             'requested_by_name': self.requested_by_name,
             'is_public_domain': self.is_public_domain(self.domain),
+            'is_disposable_domain': self.is_disposable_domain(self.domain),
+            'auto_approved': self.auto_approved,
             'rejection_reason': self.rejection_reason,
             'created_at': self.created_at.isoformat(),
-            'updated_at': self.updated_at.isoformat(),
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
         }
 
 

@@ -10,3 +10,5 @@ psycopg2-binary==2.9.9
 azure-keyvault-secrets==4.8.0
 azure-identity==1.15.0
 bleach==6.1.0
+free-email-domains==1.0.1
+disposable-email-domains==0.0.92

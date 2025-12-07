@@ -1433,6 +1433,20 @@ def api_send_verification():
 
     domain = email.split('@')[1].lower()
 
+    # Check if this is a public/free email domain (gmail, yahoo, etc.)
+    if DomainApproval.is_public_domain(domain):
+        return jsonify({
+            'error': f'{domain} is a public email provider. Please use your work email address.',
+            'is_public_domain': True
+        }), 400
+
+    # Check if this is a disposable/temporary email domain
+    if DomainApproval.is_disposable_domain(domain):
+        return jsonify({
+            'error': 'Disposable email addresses are not allowed. Please use your work email address.',
+            'is_disposable_domain': True
+        }), 400
+
     # Check if user already exists
     existing_user = User.query.filter_by(email=email).first()
     if existing_user:
@@ -1535,11 +1549,18 @@ def api_direct_signup():
 
     domain = email.split('@')[1].lower()
 
-    # Check if this is a public email domain
+    # Check if this is a public/free email domain (gmail, yahoo, etc.)
     if DomainApproval.is_public_domain(domain):
         return jsonify({
             'error': f'{domain} is a public email provider. Please use your work email address.',
             'is_public_domain': True
+        }), 400
+
+    # Check if this is a disposable/temporary email domain
+    if DomainApproval.is_disposable_domain(domain):
+        return jsonify({
+            'error': 'Disposable email addresses are not allowed. Please use your work email address.',
+            'is_disposable_domain': True
         }), 400
 
     # Check if user already exists
@@ -1558,9 +1579,8 @@ def api_direct_signup():
             'redirect': f'/{domain}/login'
         }), 400
 
-    # Check domain approval status - but allow signup even if pending
+    # Check domain approval status
     domain_approval = DomainApproval.query.filter_by(domain=domain).first()
-    domain_pending = False
 
     if domain_approval and domain_approval.status == 'rejected':
         return jsonify({
@@ -1570,18 +1590,19 @@ def api_direct_signup():
         }), 403
 
     if not domain_approval:
-        # New domain - create approval request
+        # New corporate domain - auto-approve since we already blocked public/disposable
         domain_approval = DomainApproval(
             domain=domain,
-            status='pending',
+            status='approved',  # Auto-approve corporate domains
             requested_by_email=email,
-            requested_by_name=name
+            requested_by_name=name,
+            auto_approved=True,
+            reviewed_at=datetime.utcnow()
         )
         db.session.add(domain_approval)
-        domain_pending = True
-        # TODO: Send notification to super admin about new domain
-    elif domain_approval.status == 'pending':
-        domain_pending = True
+        app.logger.info(f"Auto-approved corporate domain: {domain}")
+
+    # Domain is approved (either previously or just now)
 
     # Create user account directly (first user becomes admin)
     user = User(
@@ -1617,20 +1638,14 @@ def api_direct_signup():
     user.last_login = datetime.utcnow()
     db.session.commit()
 
-    # Determine redirect based on auth preference and domain status
+    # Determine redirect based on auth preference
     if auth_preference == 'passkey':
-        # Always go to profile for passkey setup first
-        if domain_pending:
-            redirect_url = f'/{domain}/profile?setup=passkey&pending=1'
-        else:
-            redirect_url = f'/{domain}/profile?setup=passkey'
+        # Go to profile for passkey setup
+        redirect_url = f'/{domain}/profile?setup=passkey'
         setup_passkey = True
     else:
-        # Password auth - go to pending page or dashboard
-        if domain_pending:
-            redirect_url = f'/{domain}/pending'
-        else:
-            redirect_url = f'/{domain}'
+        # Password auth - go directly to dashboard
+        redirect_url = f'/{domain}'
         setup_passkey = False
 
     return jsonify({
@@ -1639,8 +1654,7 @@ def api_direct_signup():
         'domain': domain,
         'user': user.to_dict(),
         'redirect': redirect_url,
-        'setup_passkey': setup_passkey,
-        'domain_pending': domain_pending
+        'setup_passkey': setup_passkey
     })
 
 
@@ -1699,11 +1713,27 @@ def api_verify_email(token):
                     auth_config = AuthConfig(
                         domain=verification.domain,
                         auth_method='webauthn',
+                        allow_password=True,
+                        allow_passkey=True,
                         allow_registration=True,
                         require_approval=True,
                         rp_name='Architecture Decisions'
                     )
                     db.session.add(auth_config)
+
+                # Auto-approve corporate domain (already validated during email request)
+                domain_approval = DomainApproval.query.filter_by(domain=verification.domain).first()
+                if not domain_approval:
+                    domain_approval = DomainApproval(
+                        domain=verification.domain,
+                        status='approved',
+                        requested_by_email=verification.email,
+                        requested_by_name=verification.name,
+                        auto_approved=True,
+                        reviewed_at=datetime.utcnow()
+                    )
+                    db.session.add(domain_approval)
+                    app.logger.info(f"Auto-approved corporate domain via email verification: {verification.domain}")
         else:
             user.email_verified = True
             if verification.name:
