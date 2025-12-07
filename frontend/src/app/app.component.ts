@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
 import { NavbarComponent } from './components/shared/navbar.component';
 import { AuthService } from './services/auth.service';
+import { VersionService } from './services/version.service';
 
 @Component({
   selector: 'app-root',
@@ -21,6 +22,8 @@ import { AuthService } from './services/auth.service';
         <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
         <span class="separator">|</span>
         Created by Lawrance Nyakiso
+        <span class="separator">|</span>
+        <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
       </small>
     </footer>
   `,
@@ -52,8 +55,22 @@ import { AuthService } from './services/auth.service';
       margin: 0 8px;
       color: #ccc;
     }
+
+    .app-footer .version {
+      font-family: monospace;
+      cursor: help;
+    }
   `]
 })
 export class AppComponent {
-  constructor(public authService: AuthService) {}
+  constructor(
+    public authService: AuthService,
+    public versionService: VersionService
+  ) {}
+
+  get versionTooltip(): string {
+    const info = this.versionService.currentVersion;
+    if (!info) return '';
+    return `Build: ${info.build_date}\nCommit: ${info.git_commit}\nEnvironment: ${info.environment}`;
+  }
 }

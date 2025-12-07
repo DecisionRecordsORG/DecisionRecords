@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(az container show:*)",
+      "Bash(az container logs:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

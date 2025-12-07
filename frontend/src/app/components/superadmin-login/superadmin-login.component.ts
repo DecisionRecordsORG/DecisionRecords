@@ -2,7 +2,6 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
-import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -147,7 +146,6 @@ export class SuperadminLoginComponent {
 
   constructor(
     private fb: FormBuilder,
-    private http: HttpClient,
     private router: Router,
     private authService: AuthService
   ) {
@@ -165,10 +163,14 @@ export class SuperadminLoginComponent {
 
     const { username, password } = this.loginForm.value;
 
-    this.http.post('/auth/local', { username, password }, { responseType: 'text' }).subscribe({
-      next: () => {
-        this.authService.loadCurrentUser();
-        this.router.navigate(['/superadmin/dashboard']);
+    this.authService.loginLocal(username, password).subscribe({
+      next: (user) => {
+        if (user) {
+          this.router.navigate(['/superadmin/dashboard']);
+        } else {
+          this.isLoading = false;
+          this.error = 'Login failed. Please try again.';
+        }
       },
       error: (err) => {
         this.isLoading = false;

@@ -1,6 +1,6 @@
 import { Injectable, signal, computed } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, tap, catchError, of, BehaviorSubject } from 'rxjs';
+import { Observable, tap, catchError, of, BehaviorSubject, switchMap, map } from 'rxjs';
 import { User, MasterAccount, SSOConfig, Subscription } from '../models/decision.model';
 
 export interface CurrentUser {
@@ -21,7 +21,7 @@ export class AuthService {
   isLoading$ = this.isLoadingSubject.asObservable();
 
   constructor(private http: HttpClient) {
-    this.loadCurrentUser();
+    this.loadCurrentUser().subscribe();
   }
 
   get currentUser(): CurrentUser | null {
@@ -42,30 +42,37 @@ export class AuthService {
     return user?.is_admin ?? false;
   }
 
-  loadCurrentUser(): void {
+  loadCurrentUser(): Observable<CurrentUser | null> {
     this.isLoadingSubject.next(true);
-    this.http.get<User | MasterAccount>(`${this.apiUrl}/user/me`).pipe(
-      tap(user => {
+    return this.http.get<User | MasterAccount>(`${this.apiUrl}/user/me`).pipe(
+      map(user => {
         // Check if it's a master account (has username instead of email)
         const isMaster = 'username' in user && !('email' in user);
-        this.currentUserSubject.next({ user, isMaster });
+        const currentUser: CurrentUser = { user, isMaster };
+        this.currentUserSubject.next(currentUser);
         this.isLoadingSubject.next(false);
+        return currentUser;
       }),
       catchError(() => {
         this.currentUserSubject.next(null);
         this.isLoadingSubject.next(false);
         return of(null);
       })
-    ).subscribe();
+    );
+  }
+
+  // Legacy method that fires and forgets - use loadCurrentUser() directly when you need the result
+  refreshCurrentUser(): void {
+    this.loadCurrentUser().subscribe();
   }
 
   getSSOConfigs(): Observable<SSOConfig[]> {
     return this.http.get<SSOConfig[]>(`${this.apiUrl}/auth/sso-configs`);
   }
 
-  loginLocal(username: string, password: string): Observable<any> {
+  loginLocal(username: string, password: string): Observable<CurrentUser | null> {
     return this.http.post(`/auth/local`, { username, password }).pipe(
-      tap(() => this.loadCurrentUser())
+      switchMap(() => this.loadCurrentUser())
     );
   }
 

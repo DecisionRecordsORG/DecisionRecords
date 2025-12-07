@@ -22,6 +22,7 @@ from security import (
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data
 )
+from keyvault_client import keyvault_client
 
 # Configure logging
 logging.basicConfig(
@@ -44,17 +45,34 @@ app_error_state = {
     'details': None
 }
 
-# Configuration
-database_url = os.environ.get('DATABASE_URL', 'sqlite:///architecture_decisions.db')
+# ==================== Secure Configuration via Azure Key Vault ====================
+# Priority: Key Vault -> Environment Variable -> Default
+# This ensures secrets are never hardcoded and can be rotated without redeployment
+
+# Database URL (Key Vault or environment variable)
+database_url = keyvault_client.get_database_url()
 logger.info(f"Database URL configured: {database_url.split('@')[1] if '@' in database_url else database_url}")
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+
+# SECRET_KEY for session signing (Key Vault or environment variable)
+# This MUST be persistent across restarts for sessions to remain valid
+secret_key = keyvault_client.get_flask_secret_key()
+if secret_key:
+    logger.info("SECRET_KEY loaded from Key Vault or environment variable")
+    app.config['SECRET_KEY'] = secret_key
+else:
+    # Generate random key - sessions will NOT persist across restarts
+    logger.warning("SECRET_KEY not found in Key Vault or environment. Using random key - sessions will not persist across restarts!")
+    app.config['SECRET_KEY'] = secrets.token_hex(32)
 
 # ==================== Security Configuration ====================
 
 # Session security settings
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # Only send over HTTPS in production
+# SESSION_COOKIE_SECURE should only be True when using HTTPS
+# Check for explicit HTTPS environment variable, or if behind HTTPS-terminating proxy
+_use_https = os.environ.get('USE_HTTPS', 'false').lower() == 'true'
+app.config['SESSION_COOKIE_SECURE'] = _use_https
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection - prevent cross-site cookie sending
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expiry
@@ -87,10 +105,15 @@ except ImportError:
 try:
     from flask_talisman import Talisman
 
-    # CSP configuration for Angular SPA
+    # CSP configuration for Angular SPA with Material UI
+    # Note: Angular Material uses inline event handlers (onload) for stylesheet loading
+    # which requires 'unsafe-inline' in script-src. We cannot use nonces with this.
     csp = {
         'default-src': "'self'",
-        'script-src': ["'self'", "'unsafe-inline'", "'unsafe-eval'"],  # Angular requires unsafe-eval in dev
+        # Angular production build and Material require:
+        # - 'unsafe-inline': for Angular Material's stylesheet onload handlers
+        # - 'unsafe-eval': only needed for dev; can be removed in strict production
+        'script-src': ["'self'", "'unsafe-inline'"],
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https:"],
@@ -103,12 +126,14 @@ try:
 
     # Enable Talisman with CSP
     # Note: force_https is handled by Azure App Gateway, so we disable it here
+    # Note: We do NOT use content_security_policy_nonce_in because Angular Material
+    #       uses inline event handlers that are incompatible with nonce-based CSP
     talisman = Talisman(
         app,
         content_security_policy=csp,
-        content_security_policy_nonce_in=['script-src'],
+        content_security_policy_nonce_in=[],  # Disabled - incompatible with Angular Material
         force_https=False,  # Azure handles HTTPS termination
-        session_cookie_secure=os.environ.get('FLASK_ENV') == 'production',
+        session_cookie_secure=_use_https,  # Only secure cookies over HTTPS
         frame_options='DENY',
         x_content_type_options=True,
         x_xss_protection=True,
@@ -242,6 +267,9 @@ def add_security_headers(response):
     if 'user_id' in session or 'master_id' in session:
         response.headers['X-CSRF-Token'] = generate_csrf_token()
 
+    # Remove server identification headers (security best practice)
+    response.headers.pop('Server', None)
+
     return response
 
 
@@ -272,6 +300,13 @@ def ping():
         'server': 'running',
         'timestamp': datetime.utcnow().isoformat()
     }), 200
+
+
+@app.route('/api/version')
+def get_version():
+    """Get application version information."""
+    from version import get_build_info
+    return jsonify(get_build_info()), 200
 
 # ==================== Context Processor ====================
 
@@ -1151,9 +1186,10 @@ def api_test_system_email():
     if not config:
         return jsonify({'error': 'System email configuration not found'}), 404
 
-    # Get master account email for test
-    master = MasterAccount.query.first()
-    test_email = f'{master.username}@localhost' if master else 'admin@localhost'
+    # Get super admin notification email for test
+    test_email = SystemConfig.get(SystemConfig.KEY_SUPER_ADMIN_EMAIL, default='')
+    if not test_email:
+        return jsonify({'error': 'Super admin email not configured. Please set notification email in Email Configuration.'}), 400
 
     success = send_email(
         config,

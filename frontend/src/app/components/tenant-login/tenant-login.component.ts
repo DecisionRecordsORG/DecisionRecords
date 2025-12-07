@@ -556,8 +556,16 @@ export class TenantLoginComponent implements OnInit {
       password: this.loginForm.value.password
     }).subscribe({
       next: (response) => {
-        this.authService.loadCurrentUser();
-        this.router.navigate([response.redirect || `/${this.tenant}`]);
+        // Wait for user to be loaded before navigating
+        this.authService.loadCurrentUser().subscribe({
+          next: () => {
+            this.router.navigate([response.redirect || `/${this.tenant}`]);
+          },
+          error: () => {
+            // Still navigate even if loadCurrentUser fails - session is set
+            this.router.navigate([response.redirect || `/${this.tenant}`]);
+          }
+        });
       },
       error: (err) => {
         this.isLoading = false;
@@ -572,8 +580,11 @@ export class TenantLoginComponent implements OnInit {
 
     this.webAuthnService.authenticate(this.currentEmail).subscribe({
       next: () => {
-        this.authService.loadCurrentUser();
-        this.router.navigate([`/${this.tenant}`]);
+        // Wait for user to be loaded before navigating
+        this.authService.loadCurrentUser().subscribe({
+          next: () => this.router.navigate([`/${this.tenant}`]),
+          error: () => this.router.navigate([`/${this.tenant}`])
+        });
       },
       error: (err) => {
         this.isLoading = false;
@@ -588,8 +599,11 @@ export class TenantLoginComponent implements OnInit {
 
     this.webAuthnService.authenticate().subscribe({
       next: () => {
-        this.authService.loadCurrentUser();
-        this.router.navigate([`/${this.tenant}`]);
+        // Wait for user to be loaded before navigating
+        this.authService.loadCurrentUser().subscribe({
+          next: () => this.router.navigate([`/${this.tenant}`]),
+          error: () => this.router.navigate([`/${this.tenant}`])
+        });
       },
       error: (err) => {
         this.isLoading = false;

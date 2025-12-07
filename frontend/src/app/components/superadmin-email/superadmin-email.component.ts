@@ -68,11 +68,23 @@ interface SuperAdminEmail {
           </mat-card-subtitle>
         </mat-card-header>
         <mat-card-content>
+          @if (superAdminEmail === '') {
+            <div class="warning-message">
+              <mat-icon>warning</mat-icon>
+              Super admin email not configured. Please set notification email below to enable test emails.
+            </div>
+          }
           @if (successMessage) {
-            <div class="success-message">{{ successMessage }}</div>
+            <div class="success-message">
+              <mat-icon>check_circle</mat-icon>
+              {{ successMessage }}
+            </div>
           }
           @if (errorMessage) {
-            <div class="error-message">{{ errorMessage }}</div>
+            <div class="error-message">
+              <mat-icon>error</mat-icon>
+              {{ errorMessage }}
+            </div>
           }
 
           <form [formGroup]="emailForm" (ngSubmit)="saveEmailConfig()">
@@ -139,7 +151,7 @@ interface SuperAdminEmail {
               </button>
 
               <button mat-button type="button" (click)="testEmail()"
-                      [disabled]="!hasExistingConfig || isTesting">
+                      [disabled]="!hasExistingConfig || isTesting || !superAdminEmail">
                 @if (isTesting) {
                   <mat-spinner diameter="20"></mat-spinner>
                 } @else {
@@ -164,10 +176,16 @@ interface SuperAdminEmail {
         </mat-card-header>
         <mat-card-content>
           @if (notificationSuccessMessage) {
-            <div class="success-message">{{ notificationSuccessMessage }}</div>
+            <div class="success-message">
+              <mat-icon>check_circle</mat-icon>
+              {{ notificationSuccessMessage }}
+            </div>
           }
           @if (notificationErrorMessage) {
-            <div class="error-message">{{ notificationErrorMessage }}</div>
+            <div class="error-message">
+              <mat-icon>error</mat-icon>
+              {{ notificationErrorMessage }}
+            </div>
           }
 
           <div class="notification-form">
@@ -269,6 +287,9 @@ interface SuperAdminEmail {
       padding: 12px;
       border-radius: 4px;
       margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .error-message {
@@ -277,6 +298,21 @@ interface SuperAdminEmail {
       padding: 12px;
       border-radius: 4px;
       margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .warning-message {
+      background-color: #fff3e0;
+      color: #ef6c00;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-left: 4px solid #ff9800;
     }
 
     .info-card {
@@ -320,6 +356,48 @@ interface SuperAdminEmail {
       display: flex;
       align-items: center;
       gap: 8px;
+    }
+
+    .form-actions button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .message-container {
+      min-height: 24px;
+      margin-bottom: 16px;
+    }
+
+    @media (max-width: 768px) {
+      .email-config-container {
+        padding: 16px;
+      }
+
+      .form-row {
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .form-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .form-actions button {
+        width: 100%;
+        justify-content: center;
+        margin-bottom: 8px;
+      }
+
+      .toggle-row {
+        flex-direction: column;
+        gap: 16px;
+        align-items: flex-start;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+      }
     }
   `]
 })
