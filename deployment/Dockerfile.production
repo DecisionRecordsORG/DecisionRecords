@@ -32,6 +32,10 @@ COPY *.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 
+# Copy startup script
+COPY deployment/startup.sh ./startup.sh
+RUN chmod +x ./startup.sh
+
 # Copy built Angular frontend from previous stage
 COPY --from=frontend-builder /app/frontend/dist/frontend/browser ./frontend/dist/frontend/browser
 
@@ -47,5 +51,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f -s http://localhost:8000/ > /dev/null || exit 1
 
-# Use gunicorn for production with proper worker configuration
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--worker-class", "gthread", "--threads", "4", "--timeout", "60", "--keep-alive", "2", "app:app"]
+# Use startup script that updates DNS and starts gunicorn
+CMD ["./startup.sh"]
