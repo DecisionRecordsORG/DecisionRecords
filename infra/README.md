@@ -53,7 +53,48 @@ Before deploying, ensure you have:
 ## Network Architecture
 
 ```
-Internet → Application Gateway (Public IP) → Container Instance (Private IP 10.0.1.4) → PostgreSQL (Private Endpoint)
+Internet → Application Gateway (Public IP) → Container Instance (Private IP) → PostgreSQL (Private Endpoint)
+                                    ↓
+                          app.adr.internal (Private DNS)
+```
+
+### Private DNS Auto-Registration
+
+Azure Container Instances in a VNet don't have static private IPs - the IP can change on restart. To handle this automatically:
+
+1. **Private DNS Zone**: `adr.internal` linked to the VNet
+2. **A Record**: `app.adr.internal` points to the container's current IP
+3. **Startup Script**: Container updates the DNS record on every start using Managed Identity
+4. **Application Gateway**: Uses FQDN (`app.adr.internal`) instead of hardcoded IP
+
+**How it works:**
+
+```
+Container Start → startup.sh → Get IP → Update DNS A Record → App Gateway resolves new IP
+```
+
+The container's Managed Identity has "Private DNS Zone Contributor" role on the `adr.internal` zone.
+
+**Azure Resources:**
+| Resource | Name | Purpose |
+|----------|------|---------|
+| Private DNS Zone | `adr.internal` | Internal DNS resolution |
+| VNet Link | `adr-vnet-link` | Links DNS zone to VNet |
+| A Record | `app.adr.internal` | Points to container IP |
+
+**Verify DNS is working:**
+```bash
+# Check DNS record
+az network private-dns record-set a show \
+  --resource-group adr-resources-eu \
+  --zone-name "adr.internal" \
+  --name "app"
+
+# Check Application Gateway backend health
+az network application-gateway show-backend-health \
+  --name adr-appgateway \
+  --resource-group adr-resources-eu \
+  --query "backendAddressPools[0].backendHttpSettingsCollection[0].servers[0]"
 ```
 
 ## Security Features
@@ -63,3 +104,4 @@ Internet → Application Gateway (Public IP) → Container Instance (Private IP 
 - Network Security Groups controlling traffic flow
 - SSL/TLS encryption for database connections
 - Secure value parameters for sensitive data
+- Managed Identity for DNS updates (no stored credentials)
