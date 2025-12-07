@@ -202,6 +202,30 @@ def init_database():
                 db.create_all()
                 logger.info("Database tables created")
 
+                # Run migrations for any new columns added to existing tables
+                # SQLAlchemy's create_all() doesn't modify existing tables
+                logger.info("Running schema migrations...")
+                try:
+                    with db.engine.connect() as conn:
+                        # Check and add auto_approved column to domain_approvals
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'domain_approvals' AND column_name = 'auto_approved'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding auto_approved column to domain_approvals...")
+                            conn.execute(db.text("""
+                                ALTER TABLE domain_approvals
+                                ADD COLUMN auto_approved BOOLEAN DEFAULT FALSE
+                            """))
+                            conn.commit()
+                            logger.info("auto_approved column added successfully")
+                        else:
+                            logger.info("auto_approved column already exists")
+                except Exception as migration_error:
+                    logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
+                logger.info("Schema migrations completed")
+
                 # Create default master account
                 logger.info("Creating default master account...")
                 MasterAccount.create_default_master(db.session)
@@ -263,12 +287,14 @@ def is_session_expired():
     """Check if current session has expired."""
     expires_at = session.get('_expires_at')
     if not expires_at:
-        return False  # Legacy sessions without expiry - allow but will get expiry on next login
+        # Legacy sessions without expiry - expire them immediately to force re-login
+        # This ensures all users get the new session timeout settings
+        return True
     try:
         expiry_time = datetime.fromisoformat(expires_at)
         return datetime.utcnow() > expiry_time
     except (ValueError, TypeError):
-        return False
+        return True  # Invalid expiry format - expire the session
 
 
 @app.before_request
