@@ -103,9 +103,12 @@ export const tenantGuard: CanActivateFn = (route, state) => {
     filter(isLoading => !isLoading),
     take(1),
     switchMap(() => {
-      // Master account can access any tenant
+      // SECURITY: Master/Super admin accounts should NOT access tenant data
+      // This prevents a compromised super admin account from accessing tenant data
+      // Super admin should only manage tenants through the admin dashboard
       if (authService.isMasterAccount) {
-        return of(true);
+        router.navigate(['/superadmin/dashboard']);
+        return of(false);
       }
 
       // Check if user belongs to this tenant

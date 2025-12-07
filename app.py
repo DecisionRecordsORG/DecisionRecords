@@ -644,16 +644,15 @@ if not SERVE_ANGULAR:
 @login_required
 def api_list_decisions():
     """List all architecture decisions for the user's domain."""
+    # SECURITY: Master accounts should NOT access tenant data
+    # This prevents a compromised super admin from accessing sensitive business data
     if is_master_account():
-        # Master accounts can see all decisions across all domains
-        decisions = ArchitectureDecision.query.filter_by(
-            deleted_at=None
-        ).order_by(ArchitectureDecision.id.desc()).all()
-    else:
-        decisions = ArchitectureDecision.query.filter_by(
-            domain=g.current_user.sso_domain,
-            deleted_at=None
-        ).order_by(ArchitectureDecision.id.desc()).all()
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    decisions = ArchitectureDecision.query.filter_by(
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).order_by(ArchitectureDecision.id.desc()).all()
     return jsonify([d.to_dict() for d in decisions])
 
 
@@ -722,18 +721,15 @@ def api_create_decision():
 @login_required
 def api_get_decision(decision_id):
     """Get a single architecture decision with its history."""
+    # SECURITY: Master accounts should NOT access tenant data
     if is_master_account():
-        # Master accounts can see any decision
-        decision = ArchitectureDecision.query.filter_by(
-            id=decision_id,
-            deleted_at=None
-        ).first_or_404()
-    else:
-        decision = ArchitectureDecision.query.filter_by(
-            id=decision_id,
-            domain=g.current_user.sso_domain,
-            deleted_at=None
-        ).first_or_404()
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first_or_404()
     return jsonify(decision.to_dict_with_history())
 
 
@@ -841,16 +837,14 @@ def api_delete_decision(decision_id):
 @login_required
 def api_get_decision_history(decision_id):
     """Get the update history for a decision."""
+    # SECURITY: Master accounts should NOT access tenant data
     if is_master_account():
-        # Master accounts can view any decision history
-        decision = ArchitectureDecision.query.filter_by(
-            id=decision_id
-        ).first_or_404()
-    else:
-        decision = ArchitectureDecision.query.filter_by(
-            id=decision_id,
-            domain=g.current_user.sso_domain
-        ).first_or_404()
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain
+    ).first_or_404()
 
     history = DecisionHistory.query.filter_by(decision_id=decision_id).order_by(DecisionHistory.changed_at.desc()).all()
     return jsonify([h.to_dict() for h in history])

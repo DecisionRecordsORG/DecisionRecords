@@ -12,8 +12,10 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
+import { Clipboard } from '@angular/cdk/clipboard';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 
 interface DomainApproval {
@@ -53,6 +55,7 @@ interface Tenant {
     MatTabsModule,
     MatFormFieldModule,
     MatInputModule,
+    MatTooltipModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -181,6 +184,20 @@ interface Tenant {
                       <th mat-header-cell *matHeaderCellDef>Domain</th>
                       <td mat-cell *matCellDef="let tenant">
                         <strong>{{ tenant.domain }}</strong>
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="login_url">
+                      <th mat-header-cell *matHeaderCellDef>Login URL</th>
+                      <td mat-cell *matCellDef="let tenant">
+                        <div class="login-url-cell">
+                          <code class="login-url">{{ getLoginUrl(tenant.domain) }}</code>
+                          <button mat-icon-button
+                                  (click)="copyLoginUrl(tenant.domain)"
+                                  matTooltip="Copy login URL">
+                            <mat-icon>content_copy</mat-icon>
+                          </button>
+                        </div>
                       </td>
                     </ng-container>
 
@@ -392,6 +409,28 @@ interface Tenant {
     td button mat-icon {
       margin-right: 4px;
     }
+
+    .login-url-cell {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .login-url {
+      font-size: 12px;
+      background: #f5f5f5;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #1976d2;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .login-url-cell button {
+      margin-right: 0;
+    }
   `]
 })
 export class SuperadminTenantsComponent implements OnInit {
@@ -409,14 +448,25 @@ export class SuperadminTenantsComponent implements OnInit {
   rejectionReason = '';
 
   pendingColumns = ['domain', 'requested_by', 'created_at', 'actions'];
-  tenantColumns = ['domain', 'user_count', 'admin_count', 'has_sso', 'created_at'];
+  tenantColumns = ['domain', 'login_url', 'user_count', 'admin_count', 'has_sso', 'created_at'];
   historyColumns = ['domain', 'status', 'requested_by', 'created_at', 'reviewed_at'];
 
   constructor(
     private http: HttpClient,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private clipboard: Clipboard
   ) {}
+
+  getLoginUrl(domain: string): string {
+    return `${window.location.origin}/${domain}/login`;
+  }
+
+  copyLoginUrl(domain: string): void {
+    const url = this.getLoginUrl(domain);
+    this.clipboard.copy(url);
+    this.snackBar.open('Login URL copied to clipboard', 'Close', { duration: 2000 });
+  }
 
   ngOnInit(): void {
     this.loadPendingApprovals();
