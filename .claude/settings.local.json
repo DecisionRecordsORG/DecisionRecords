@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(az container show:*)",
-      "Bash(az container logs:*)"
+      "Bash(az container logs:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []

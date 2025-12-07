@@ -32,6 +32,12 @@ export const routes: Routes = [
     loadComponent: () => import('./components/superadmin-email/superadmin-email.component').then(m => m.SuperadminEmailComponent),
     canActivate: [masterGuard]
   },
+  // Super admin system settings
+  {
+    path: 'superadmin/settings',
+    loadComponent: () => import('./components/superadmin-settings/superadmin-settings.component').then(m => m.SuperadminSettingsComponent),
+    canActivate: [masterGuard]
+  },
   // Tenant-specific routes
   {
     path: ':tenant/login',

@@ -24,6 +24,12 @@ class SystemConfig(db.Model):
     # Default configuration keys
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
     KEY_SUPER_ADMIN_EMAIL = 'super_admin_notification_email'
+    KEY_ADMIN_SESSION_TIMEOUT_HOURS = 'admin_session_timeout_hours'
+    KEY_USER_SESSION_TIMEOUT_HOURS = 'user_session_timeout_hours'
+
+    # Default values
+    DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
+    DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
 
     @staticmethod
     def get(key, default=None):
@@ -40,6 +46,17 @@ class SystemConfig(db.Model):
         if value is None:
             return default
         return value.lower() in ('true', '1', 'yes', 'on')
+
+    @staticmethod
+    def get_int(key, default=0):
+        """Get a configuration value as integer."""
+        value = SystemConfig.get(key)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
 
     @staticmethod
     def set(key, value, description=None):

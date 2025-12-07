@@ -75,7 +75,9 @@ _use_https = os.environ.get('USE_HTTPS', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_SECURE'] = _use_https
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection - prevent cross-site cookie sending
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)  # Session expiry
+# Note: PERMANENT_SESSION_LIFETIME is set dynamically per session type (admin vs user)
+# Default max is 24 hours, but actual expiry is stored in session['_expires_at']
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
 # Rate limiting configuration
 app.config['RATELIMIT_ENABLED'] = True
@@ -241,6 +243,49 @@ def init_database():
             app_error_state['details'] = traceback.format_exc()
             # Don't raise - let the app run but in error state
 
+def set_session_expiry(is_admin=False):
+    """Set session expiry based on user type (admin vs regular user)."""
+    if is_admin:
+        timeout_hours = SystemConfig.get_int(
+            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
+        )
+    else:
+        timeout_hours = SystemConfig.get_int(
+            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
+        )
+    session['_expires_at'] = (datetime.utcnow() + timedelta(hours=timeout_hours)).isoformat()
+    session.permanent = True
+
+
+def is_session_expired():
+    """Check if current session has expired."""
+    expires_at = session.get('_expires_at')
+    if not expires_at:
+        return False  # Legacy sessions without expiry - allow but will get expiry on next login
+    try:
+        expiry_time = datetime.fromisoformat(expires_at)
+        return datetime.utcnow() > expiry_time
+    except (ValueError, TypeError):
+        return False
+
+
+@app.before_request
+def check_session_expiry():
+    """Check if session has expired and clear it if so."""
+    if request.endpoint and request.endpoint.startswith('static'):
+        return  # Skip static files
+
+    if ('user_id' in session or 'master_id' in session) and is_session_expired():
+        # Session has expired - clear it
+        session.clear()
+        if request.is_json:
+            # API request - return 401
+            return  # Let the login_required decorator handle it
+        # Browser request - redirect will happen naturally
+
+
 @app.before_request
 def initialize_db():
     """Initialize database before handling requests"""
@@ -364,7 +409,7 @@ def local_login():
     if master:
         session['master_id'] = master.id
         session['is_master'] = True
-        session.permanent = True
+        set_session_expiry(is_admin=True)  # 1 hour default for super admin
         if request.is_json:
             return jsonify({'message': 'Login successful'}), 200
         return redirect(url_for('index'))
@@ -416,6 +461,7 @@ def api_tenant_login():
 
     # Login successful
     session['user_id'] = user.id
+    set_session_expiry(is_admin=False)  # 8 hours default for regular users
     user.last_login = datetime.utcnow()
     db.session.commit()
 
@@ -540,7 +586,7 @@ def sso_callback():
 
         # Set session
         session['user_id'] = user.id
-        session.permanent = True
+        set_session_expiry(is_admin=False)  # 8 hours default for regular users
 
         return redirect(url_for('index'))
 
@@ -1199,6 +1245,77 @@ def api_test_system_email():
         return jsonify({'error': 'Failed to send test email'}), 500
 
 
+# ==================== API Routes - System Settings (Super Admin) ====================
+
+@app.route('/api/admin/settings/session', methods=['GET'])
+@master_required
+def api_get_session_settings():
+    """Get session timeout settings (super admin only)."""
+    return jsonify({
+        'admin_session_timeout_hours': SystemConfig.get_int(
+            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
+        ),
+        'user_session_timeout_hours': SystemConfig.get_int(
+            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
+        ),
+        'defaults': {
+            'admin_session_timeout_hours': SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT,
+            'user_session_timeout_hours': SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
+        }
+    })
+
+
+@app.route('/api/admin/settings/session', methods=['POST', 'PUT'])
+@master_required
+def api_save_session_settings():
+    """Update session timeout settings (super admin only)."""
+    data = request.get_json()
+
+    admin_timeout = data.get('admin_session_timeout_hours')
+    user_timeout = data.get('user_session_timeout_hours')
+
+    # Validate values
+    if admin_timeout is not None:
+        try:
+            admin_timeout = int(admin_timeout)
+            if admin_timeout < 1 or admin_timeout > 24:
+                return jsonify({'error': 'Admin session timeout must be between 1 and 24 hours'}), 400
+            SystemConfig.set(
+                SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
+                admin_timeout,
+                description='Session timeout in hours for super admin accounts'
+            )
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid admin session timeout value'}), 400
+
+    if user_timeout is not None:
+        try:
+            user_timeout = int(user_timeout)
+            if user_timeout < 1 or user_timeout > 168:  # Max 1 week
+                return jsonify({'error': 'User session timeout must be between 1 and 168 hours'}), 400
+            SystemConfig.set(
+                SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
+                user_timeout,
+                description='Session timeout in hours for regular user accounts'
+            )
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid user session timeout value'}), 400
+
+    return jsonify({
+        'message': 'Session settings updated successfully',
+        'admin_session_timeout_hours': SystemConfig.get_int(
+            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
+        ),
+        'user_session_timeout_hours': SystemConfig.get_int(
+            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
+        )
+    })
+
+
 # ==================== API Routes - Admin (Users) ====================
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -1635,6 +1752,7 @@ def api_direct_signup():
 
     # Log the user in
     session['user_id'] = user.id
+    set_session_expiry(is_admin=False)  # 8 hours default for regular users
     user.last_login = datetime.utcnow()
     db.session.commit()
 
@@ -2045,7 +2163,7 @@ def api_webauthn_register_verify():
 
     # Log the user in
     session['user_id'] = user.id
-    session.permanent = True
+    set_session_expiry(is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Registration successful',
@@ -2095,7 +2213,7 @@ def api_webauthn_auth_verify():
 
     # Log the user in
     session['user_id'] = user.id
-    session.permanent = True
+    set_session_expiry(is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Authentication successful',

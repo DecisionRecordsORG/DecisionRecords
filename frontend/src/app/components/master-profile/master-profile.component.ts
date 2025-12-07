@@ -173,6 +173,13 @@ import { MasterAccount } from '../../models/decision.model';
                   <span>Configure SMTP for notifications</span>
                 </div>
               </a>
+              <a routerLink="/superadmin/settings" class="nav-link">
+                <mat-icon>settings</mat-icon>
+                <div>
+                  <strong>System Settings</strong>
+                  <span>Session timeouts, security settings</span>
+                </div>
+              </a>
             </div>
           </mat-card-content>
         </mat-card>

@@ -150,6 +150,10 @@
                 {
                   "name": "EMAIL_VERIFICATION_REQUIRED",
                   "value": "true"
+                },
+                {
+                  "name": "USE_HTTPS",
+                  "value": "true"
                 }
               ],
               "resources": {
