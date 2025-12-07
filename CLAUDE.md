@@ -35,6 +35,7 @@ docker build --platform linux/amd64 -t adrregistry2024eu.azurecr.io/architecture
 az acr login --name adrregistry2024eu
 docker push adrregistry2024eu.azurecr.io/architecture-decisions:latest
 az container restart --name adr-app-eu --resource-group adr-resources-eu
+./scripts/update-gateway-backend.sh  # Update Application Gateway if container IP changed
 ```
 
 ### Reasoning
@@ -172,3 +173,20 @@ Before deploying, consider testing:
 - Check DATABASE_URL environment variable
 - Verify PostgreSQL is accessible from container VNet
 - Check for migration errors in logs
+
+### 502 Gateway Errors
+
+If you get 502 errors after container restart, the container's private IP may have changed:
+
+```bash
+# Check backend health
+az network application-gateway show-backend-health \
+  --name adr-appgateway \
+  --resource-group adr-resources-eu \
+  --query "backendAddressPools[0].backendHttpSettingsCollection[0].servers[0]"
+
+# If unhealthy, run the update script
+./scripts/update-gateway-backend.sh
+```
+
+The container IP can change on restart because Azure Container Instances in VNets don't support static private IPs.
