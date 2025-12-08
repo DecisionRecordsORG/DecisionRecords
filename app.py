@@ -506,8 +506,17 @@ def api_set_password():
     password = data.get('password', '')
     current_password = data.get('current_password', '')
 
+    # Password policy validation
     if not password or len(password) < 8:
         return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    import re
+    if not re.search(r'[A-Z]', password):
+        return jsonify({'error': 'Password must contain at least one uppercase letter'}), 400
+    if not re.search(r'[a-z]', password):
+        return jsonify({'error': 'Password must contain at least one lowercase letter'}), 400
+    if not re.search(r'\d', password):
+        return jsonify({'error': 'Password must contain at least one number'}), 400
 
     user = g.current_user
     if isinstance(user, MasterAccount):

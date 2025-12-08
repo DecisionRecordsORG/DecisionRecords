@@ -1,7 +1,8 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatButtonModule } from '@angular/material/button';
@@ -13,10 +14,18 @@ import { MatListModule } from '@angular/material/list';
 import { MatChipsModule } from '@angular/material/chips';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatInputModule } from '@angular/material/input';
 import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { Subscription, User, WebAuthnCredential } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+
+// Password policy constants
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_REQUIRES_UPPERCASE = true;
+const PASSWORD_REQUIRES_LOWERCASE = true;
+const PASSWORD_REQUIRES_NUMBER = true;
 
 @Component({
   selector: 'app-profile',
@@ -24,6 +33,7 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
   imports: [
     CommonModule,
     FormsModule,
+    ReactiveFormsModule,
     MatCardModule,
     MatSlideToggleModule,
     MatButtonModule,
@@ -34,7 +44,9 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     MatListModule,
     MatChipsModule,
     MatDialogModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatFormFieldModule,
+    MatInputModule
   ],
   template: `
     <div class="profile-container">
@@ -43,9 +55,112 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
           <mat-icon>key</mat-icon>
           <div>
             <h2>Complete Your Account Setup</h2>
-            <p>Set up a passkey for secure, passwordless authentication</p>
+            <p>Set up a passkey or password to secure your account</p>
           </div>
         </div>
+
+        <!-- Credential Setup Card (only in setup mode) -->
+        <mat-card class="setup-card">
+          <mat-card-header>
+            <mat-card-title>Choose Your Authentication Method</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            @if (checkingPasskeySupport) {
+              <div class="loading">
+                <mat-spinner diameter="40"></mat-spinner>
+                <p>Checking device capabilities...</p>
+              </div>
+            } @else {
+              <div class="auth-options">
+                <!-- Passkey Option -->
+                <div class="auth-option" [class.recommended]="passkeyAvailable">
+                  <div class="option-header">
+                    <mat-icon>fingerprint</mat-icon>
+                    <div>
+                      <h3>Passkey</h3>
+                      @if (passkeyAvailable) {
+                        <span class="recommended-badge">Recommended</span>
+                      }
+                    </div>
+                  </div>
+                  <p class="option-description">
+                    Use Face ID, Touch ID, or Windows Hello for secure, passwordless login.
+                    Passkeys are phishing-resistant and more secure than passwords.
+                  </p>
+                  @if (passkeyAvailable) {
+                    <button mat-raised-button color="primary" (click)="setupPasskey()"
+                            [disabled]="isSettingUpCredential">
+                      @if (isSettingUpCredential && setupMethod === 'passkey') {
+                        <mat-spinner diameter="20"></mat-spinner>
+                      } @else {
+                        <mat-icon>fingerprint</mat-icon>
+                        Set up Passkey
+                      }
+                    </button>
+                  } @else {
+                    <p class="not-available">
+                      <mat-icon>info</mat-icon>
+                      Passkeys are not available on this device. Please use a password instead.
+                    </p>
+                  }
+                  @if (passkeyError) {
+                    <p class="error-message">{{ passkeyError }}</p>
+                  }
+                </div>
+
+                <mat-divider></mat-divider>
+
+                <!-- Password Option -->
+                <div class="auth-option">
+                  <div class="option-header">
+                    <mat-icon>lock</mat-icon>
+                    <h3>Password</h3>
+                  </div>
+                  <p class="option-description">
+                    Create a strong password. You can add a passkey later for easier login.
+                  </p>
+                  <form [formGroup]="passwordForm" (ngSubmit)="setupPassword()">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Password</mat-label>
+                      <input matInput type="password" formControlName="password">
+                      @if (passwordForm.get('password')?.hasError('required') && passwordForm.get('password')?.touched) {
+                        <mat-error>Password is required</mat-error>
+                      }
+                      @if (passwordForm.get('password')?.hasError('minlength')) {
+                        <mat-error>Password must be at least 8 characters</mat-error>
+                      }
+                      @if (passwordForm.get('password')?.hasError('pattern')) {
+                        <mat-error>Password must contain uppercase, lowercase, and a number</mat-error>
+                      }
+                    </mat-form-field>
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Confirm Password</mat-label>
+                      <input matInput type="password" formControlName="confirmPassword">
+                      @if (passwordForm.get('confirmPassword')?.hasError('passwordMismatch')) {
+                        <mat-error>Passwords do not match</mat-error>
+                      }
+                    </mat-form-field>
+                    <p class="password-requirements">
+                      <strong>Password requirements:</strong> At least 8 characters, including uppercase, lowercase, and a number.
+                    </p>
+                    <button mat-raised-button color="accent" type="submit"
+                            [disabled]="passwordForm.invalid || isSettingUpCredential">
+                      @if (isSettingUpCredential && setupMethod === 'password') {
+                        <mat-spinner diameter="20"></mat-spinner>
+                      } @else {
+                        <mat-icon>lock</mat-icon>
+                        Set Password
+                      }
+                    </button>
+                  </form>
+                  @if (passwordError) {
+                    <p class="error-message">{{ passwordError }}</p>
+                  }
+                </div>
+              </div>
+            }
+          </mat-card-content>
+        </mat-card>
       } @else {
         <h1>
           <mat-icon>person</mat-icon>
@@ -260,8 +375,98 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
       opacity: 0.9;
     }
 
-    .profile-card, .subscription-card, .passkeys-card {
+    .profile-card, .subscription-card, .passkeys-card, .setup-card {
       margin-bottom: 24px;
+    }
+
+    .setup-card {
+      border: 2px solid #667eea;
+    }
+
+    .auth-options {
+      padding: 16px 0;
+    }
+
+    .auth-option {
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .auth-option.recommended {
+      background: #f0f4ff;
+      border: 1px solid #667eea;
+    }
+
+    .option-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .option-header mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: #667eea;
+    }
+
+    .option-header h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .recommended-badge {
+      display: inline-block;
+      background: #667eea;
+      color: white;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-left: 8px;
+    }
+
+    .option-description {
+      color: #666;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .not-available {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #999;
+      font-size: 14px;
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 4px;
+    }
+
+    .not-available mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .password-requirements {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 16px;
+    }
+
+    .error-message {
+      color: #c62828;
+      font-size: 14px;
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: #ffebee;
+      border-radius: 4px;
+    }
+
+    .full-width {
+      width: 100%;
     }
 
     .info-grid {
@@ -381,14 +586,46 @@ export class ProfileComponent implements OnInit {
   setupMode = false;
   pendingDomain = false;
 
+  // Credential setup properties
+  checkingPasskeySupport = true;
+  passkeyAvailable = false;
+  isSettingUpCredential = false;
+  setupMethod: 'passkey' | 'password' | null = null;
+  passkeyError: string | null = null;
+  passwordError: string | null = null;
+  passwordForm: FormGroup;
+
   constructor(
     public authService: AuthService,
     private webAuthnService: WebAuthnService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
     private route: ActivatedRoute,
-    private router: Router
-  ) {}
+    private router: Router,
+    private fb: FormBuilder,
+    private http: HttpClient
+  ) {
+    // Password form with validation
+    // Pattern: at least one uppercase, one lowercase, one number
+    const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).+$/;
+    this.passwordForm = this.fb.group({
+      password: ['', [
+        Validators.required,
+        Validators.minLength(PASSWORD_MIN_LENGTH),
+        Validators.pattern(passwordPattern)
+      ]],
+      confirmPassword: ['', Validators.required]
+    }, { validators: this.passwordMatchValidator });
+  }
+
+  passwordMatchValidator(form: FormGroup) {
+    const password = form.get('password');
+    const confirmPassword = form.get('confirmPassword');
+    if (password && confirmPassword && password.value !== confirmPassword.value) {
+      confirmPassword.setErrors({ passwordMismatch: true });
+    }
+    return null;
+  }
 
   ngOnInit(): void {
     if (this.authService.currentUser && !this.authService.isMasterAccount) {
@@ -401,14 +638,16 @@ export class ProfileComponent implements OnInit {
       }
 
       // Check for setup mode (new account passkey setup)
-      this.route.queryParams.subscribe(params => {
+      this.route.queryParams.subscribe(async params => {
         if (params['setup'] === 'passkey') {
           this.setupMode = true;
           this.pendingDomain = params['pending'] === '1';
-          // Auto-trigger passkey registration for new accounts
-          if (this.credentials.length === 0) {
-            setTimeout(() => this.addPasskeyWithRedirect(), 500);
-          }
+
+          // Check if passkey is available on this device
+          // Per passkeys.dev best practices
+          this.checkingPasskeySupport = true;
+          this.passkeyAvailable = await this.webAuthnService.isPlatformAuthenticatorAvailable();
+          this.checkingPasskeySupport = false;
         }
       });
     }
@@ -497,6 +736,77 @@ export class ProfileComponent implements OnInit {
         // In setup mode, show the button to try again
       }
     });
+  }
+
+  /**
+   * Setup passkey for new account (setup mode)
+   */
+  setupPasskey(): void {
+    if (!this.user) return;
+
+    this.isSettingUpCredential = true;
+    this.setupMethod = 'passkey';
+    this.passkeyError = null;
+
+    this.webAuthnService.register(this.user.email, this.user.name).subscribe({
+      next: () => {
+        this.isSettingUpCredential = false;
+        this.setupMethod = null;
+        this.snackBar.open('Passkey created successfully! Redirecting...', 'Close', { duration: 2000 });
+
+        // Refresh user to update has_passkey status
+        this.authService.loadCurrentUser().subscribe(() => {
+          setTimeout(() => this.redirectAfterSetup(), 1500);
+        });
+      },
+      error: (err) => {
+        this.isSettingUpCredential = false;
+        this.setupMethod = null;
+        this.passkeyError = err.error?.error || 'Failed to create passkey. You can try again or use a password instead.';
+      }
+    });
+  }
+
+  /**
+   * Setup password for new account (setup mode)
+   */
+  setupPassword(): void {
+    if (!this.user || this.passwordForm.invalid) return;
+
+    this.isSettingUpCredential = true;
+    this.setupMethod = 'password';
+    this.passwordError = null;
+
+    const password = this.passwordForm.get('password')?.value;
+
+    this.http.post<{ message: string }>('/api/auth/set-password', { password }).subscribe({
+      next: () => {
+        this.isSettingUpCredential = false;
+        this.setupMethod = null;
+        this.snackBar.open('Password set successfully! Redirecting...', 'Close', { duration: 2000 });
+
+        // Refresh user to update has_password status
+        this.authService.loadCurrentUser().subscribe(() => {
+          setTimeout(() => this.redirectAfterSetup(), 1500);
+        });
+      },
+      error: (err) => {
+        this.isSettingUpCredential = false;
+        this.setupMethod = null;
+        this.passwordError = err.error?.error || 'Failed to set password. Please try again.';
+      }
+    });
+  }
+
+  /**
+   * Redirect after successful credential setup
+   */
+  private redirectAfterSetup(): void {
+    if (this.pendingDomain) {
+      this.router.navigate([`/${this.user?.sso_domain}/pending`]);
+    } else {
+      this.router.navigate([`/${this.user?.sso_domain}`]);
+    }
   }
 
   deleteCredential(credential: WebAuthnCredential): void {

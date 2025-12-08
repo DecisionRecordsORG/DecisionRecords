@@ -32,6 +32,42 @@ export class WebAuthnService {
   }
 
   /**
+   * Check if platform authenticator (Face ID, Touch ID, Windows Hello) is available
+   * This determines if we can offer passkey registration
+   * See: https://passkeys.dev/docs/use-cases/bootstrapping/
+   */
+  async isPlatformAuthenticatorAvailable(): Promise<boolean> {
+    if (!this.isWebAuthnSupported()) {
+      return false;
+    }
+    try {
+      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if conditional UI (autofill) is supported
+   * See: https://passkeys.dev/docs/use-cases/bootstrapping/
+   */
+  async isConditionalMediationAvailable(): Promise<boolean> {
+    if (!this.isWebAuthnSupported()) {
+      return false;
+    }
+    try {
+      // @ts-ignore - This is a newer API that TypeScript may not have types for
+      if (PublicKeyCredential.isConditionalMediationAvailable) {
+        // @ts-ignore
+        return await PublicKeyCredential.isConditionalMediationAvailable();
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Get authentication config for a domain
    */
   getAuthConfig(domain: string): Observable<AuthConfig> {

@@ -10,7 +10,8 @@
       "Bash(docker push:*)",
       "Bash(az container stop:*)",
       "Bash(az container start:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "WebFetch(domain:passkeys.dev)"
     ],
     "deny": [],
     "ask": []

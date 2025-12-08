@@ -22,6 +22,28 @@ This document defines the authentication flows for the Architecture Decisions ap
 2. **No access without credentials** - Users MUST have at least one authentication method before accessing the app
 3. **Recovery is essential** - Users must have a way to recover their account if they lose their device
 4. **Progressive security** - Allow password as fallback, but encourage passkey adoption
+5. **Email verification as security layer** - When enabled, ensures email ownership before account creation
+
+---
+
+## System Settings (Super Admin)
+
+These settings affect authentication behavior for all tenants:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Email Verification | ON | Require email verification before account creation |
+| Admin Session Timeout | 1 hour | How long super admin stays logged in |
+| User Session Timeout | 8 hours | How long regular users stay logged in |
+
+### Email Configuration
+
+The system uses **AWS SES** for sending emails:
+- Verification emails for signup
+- Account recovery emails
+- Notification emails (decision updates, etc.)
+
+Email settings are configured in the Super Admin portal under "Email Configuration".
 
 ---
 
@@ -44,6 +66,10 @@ A user can be in one of these states:
 
 This user becomes the tenant admin.
 
+### Prerequisites
+- Super admin email verification setting determines which sub-flow is used
+- Email is sent via AWS SES (configured in super admin portal)
+
 ### Steps
 
 ```
@@ -54,26 +80,49 @@ This user becomes the tenant admin.
    - If corporate domain → CONTINUE
 3. System checks if domain has existing users:
    - No users → This is a new tenant, user will be admin
-4. User enters name
-5. User selects auth preference:
+4. System checks EMAIL VERIFICATION setting:
+   - If ON → Email Verification Flow (Flow 1A)
+   - If OFF → Direct Signup Flow (Flow 1B)
+```
+
+### Flow 1A: Email Verification ON (Default, More Secure)
+
+```
+1. User enters name
+2. System sends verification email via AWS SES
+3. User receives email with verification link
+4. User clicks link → lands on verification page
+5. System verifies token, creates user account
+6. User selects auth method:
+   - Passkey (recommended) → passkey registration
+   - Password → password entry
+7. User completes credential setup
+8. User is logged in and redirected to dashboard
+```
+
+### Flow 1B: Email Verification OFF (Direct Signup)
+
+```
+1. User enters name
+2. User selects auth preference on signup form:
    - "Use Passkey (recommended)" → passkey flow
    - "Use Password" → password flow
 
-### Passkey Flow (5a):
-   5a.1. System creates user account (incomplete state)
-   5a.2. System logs user in (session created)
-   5a.3. System redirects to /[domain]/setup/passkey
-   5a.4. Setup page prompts WebAuthn registration
-   5a.5. User completes passkey creation
-   5a.6. System updates user state (has_passkey = true)
-   5a.7. System redirects to /[domain] (dashboard)
+### Passkey Sub-flow:
+   2a.1. System creates user account (incomplete state, email auto-verified)
+   2a.2. System logs user in (session created)
+   2a.3. System redirects to /[domain]/profile?setup=passkey
+   2a.4. Setup page prompts WebAuthn registration
+   2a.5. User completes passkey creation
+   2a.6. System updates user state (has_passkey = true)
+   2a.7. System redirects to /[domain] (dashboard)
 
-### Password Flow (5b):
-   5b.1. User enters password (min 8 chars)
-   5b.2. System creates user account with password
-   5b.3. System logs user in
-   5b.4. System redirects to /[domain] (dashboard)
-   5b.5. Dashboard shows prompt to add passkey for better security
+### Password Sub-flow:
+   2b.1. User enters password (min 8 chars)
+   2b.2. System creates user account with password (email auto-verified)
+   2b.3. System logs user in
+   2b.4. System redirects to /[domain] (dashboard)
+   2b.5. Dashboard shows prompt to add passkey for better security
 ```
 
 ### Success Criteria
@@ -81,6 +130,8 @@ This user becomes the tenant admin.
 - [ ] First user for domain is automatically admin
 - [ ] Domain approval record is created (auto-approved for corporate domains)
 - [ ] User session is created after credential setup complete
+- [ ] Email verification setting is respected (ON = verify first, OFF = direct signup)
+- [ ] When email verification ON, verification email is sent via AWS SES
 
 ---
 
