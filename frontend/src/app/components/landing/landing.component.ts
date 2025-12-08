@@ -642,8 +642,19 @@ export class LandingComponent implements OnInit {
       }).subscribe({
         next: (response) => {
           this.isLoading = false;
-          // Redirect - if passkey, go to passkey setup, otherwise dashboard
-          this.router.navigate([response.redirect || `/${this.tenantDomain}`]);
+          // Parse redirect URL to handle query parameters properly
+          const redirectUrl = response.redirect || `/${this.tenantDomain}`;
+          const [path, queryString] = redirectUrl.split('?');
+          if (queryString) {
+            const queryParams: { [key: string]: string } = {};
+            queryString.split('&').forEach(param => {
+              const [key, value] = param.split('=');
+              queryParams[key] = value;
+            });
+            this.router.navigate([path], { queryParams });
+          } else {
+            this.router.navigate([path]);
+          }
         },
         error: (err) => {
           this.isLoading = false;

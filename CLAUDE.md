@@ -27,15 +27,30 @@ The deployment workflow is:
 6. Restart container
 
 ```bash
-# Correct workflow
+# Correct workflow - use the redeploy script
 git add .
 git commit -m "Description of changes"
 ./scripts/version-bump.sh patch  # Optional: if releasing new version
+./scripts/redeploy.sh  # Builds, pushes, and redeploys container
+```
+
+The `redeploy.sh` script handles the full deployment:
+1. Checks for uncommitted changes (fails if any)
+2. Builds Docker image for linux/amd64
+3. Pushes to Azure Container Registry
+4. Stops and starts the container (forces new image pull)
+5. Waits for container to be ready
+6. Updates Application Gateway backend if IP changed
+7. Shows recent logs
+
+**Manual steps (if needed)**:
+```bash
 docker build --platform linux/amd64 -t adrregistry2024eu.azurecr.io/architecture-decisions:latest -f deployment/Dockerfile.production .
 az acr login --name adrregistry2024eu
 docker push adrregistry2024eu.azurecr.io/architecture-decisions:latest
-az container restart --name adr-app-eu --resource-group adr-resources-eu
-./scripts/update-gateway-backend.sh  # Update Application Gateway if container IP changed
+az container stop --name adr-app-eu --resource-group adr-resources-eu
+az container start --name adr-app-eu --resource-group adr-resources-eu
+./scripts/update-gateway-backend.sh
 ```
 
 ### Reasoning
