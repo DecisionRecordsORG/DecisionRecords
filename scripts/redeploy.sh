@@ -30,10 +30,13 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 
-# Check for uncommitted changes
+# Check for uncommitted changes (excluding local settings)
 check_git_status() {
     log "Checking git status..."
-    if [[ -n $(git status --porcelain) ]]; then
+    # Exclude .claude/settings.local.json from check as it's machine-specific
+    local changes=$(git status --porcelain | grep -v ".claude/settings.local.json" || true)
+    if [[ -n "$changes" ]]; then
+        echo "$changes"
         error "Uncommitted changes detected. Please commit before deploying.\nRun: git add . && git commit -m 'your message'"
     fi
     success "Git status clean"
