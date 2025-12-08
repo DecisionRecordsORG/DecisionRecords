@@ -42,6 +42,17 @@ export class AuthService {
     return user?.is_admin ?? false;
   }
 
+  /**
+   * Check if user needs to complete credential setup (no passkey and no password).
+   * Users in this state should not be able to access the app.
+   */
+  get needsCredentialSetup(): boolean {
+    if (this.isMasterAccount) return false;
+    const user = this.currentUser?.user as User;
+    if (!user) return false;
+    return !user.has_passkey && !user.has_password;
+  }
+
   loadCurrentUser(): Observable<CurrentUser | null> {
     this.isLoadingSubject.next(true);
     return this.http.get<User | MasterAccount>(`${this.apiUrl}/user/me`).pipe(

@@ -5,7 +5,11 @@
       "Bash(az container logs:*)",
       "Bash(source .venv/bin/activate)",
       "Bash(pip install:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(docker build:*)",
+      "Bash(docker push:*)",
+      "Bash(az container stop:*)",
+      "Bash(az container start:*)"
     ],
     "deny": [],
     "ask": []

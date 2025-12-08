@@ -86,7 +86,12 @@ export const guestGuard: CanActivateFn = (route, state) => {
         router.navigate(['/superadmin/dashboard']);
       } else {
         const user = authService.currentUser?.user as User;
-        router.navigate([`/${user.sso_domain}`]);
+        // If user needs credential setup, send to profile setup page
+        if (authService.needsCredentialSetup) {
+          router.navigate([`/${user.sso_domain}/profile`], { queryParams: { setup: 'passkey' } });
+        } else {
+          router.navigate([`/${user.sso_domain}`]);
+        }
       }
       return false;
     })
@@ -117,6 +122,17 @@ export const tenantGuard: CanActivateFn = (route, state) => {
         if (user.sso_domain !== tenant) {
           // User doesn't belong to this tenant, redirect to their tenant
           router.navigate([`/${user.sso_domain}`]);
+          return of(false);
+        }
+
+        // SECURITY: Check if user needs to complete credential setup
+        // Users without passkey or password must complete setup first
+        if (authService.needsCredentialSetup) {
+          // Allow access to profile page for setup
+          if (state.url.includes('/profile')) {
+            return of(true);
+          }
+          router.navigate([`/${tenant}/profile`], { queryParams: { setup: 'passkey' } });
           return of(false);
         }
 

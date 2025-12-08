@@ -54,6 +54,34 @@ def login_required(f):
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Authentication required'}), 401
             return redirect('/')
+
+        # Check if user has completed credential setup
+        # Users must have at least one auth method (passkey or password)
+        if not is_master_account():
+            has_passkey = len(g.current_user.webauthn_credentials) > 0 if g.current_user.webauthn_credentials else False
+            has_password = g.current_user.has_password()
+
+            if not has_passkey and not has_password:
+                # User is in incomplete state - redirect to setup
+                # Allow access to setup-related endpoints
+                allowed_paths = [
+                    '/api/webauthn/register',
+                    '/api/auth/set-password',
+                    '/api/auth/me',
+                    '/api/auth/logout',
+                    '/api/subscription',  # Profile page loads subscription
+                    '/api/webauthn/credentials',  # Profile page loads credentials
+                ]
+                if not any(request.path.startswith(p) for p in allowed_paths):
+                    domain = g.current_user.sso_domain
+                    if request.is_json or request.path.startswith('/api/'):
+                        return jsonify({
+                            'error': 'Credential setup required',
+                            'setup_required': True,
+                            'redirect': f'/{domain}/profile?setup=passkey'
+                        }), 403
+                    return redirect(f'/{domain}/profile?setup=passkey')
+
         return f(*args, **kwargs)
     return decorated_function
 
