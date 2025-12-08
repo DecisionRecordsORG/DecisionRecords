@@ -9,7 +9,8 @@
       "Bash(docker build:*)",
       "Bash(docker push:*)",
       "Bash(az container stop:*)",
-      "Bash(az container start:*)"
+      "Bash(az container start:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

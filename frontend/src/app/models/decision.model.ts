@@ -6,6 +6,7 @@ export interface User {
   auth_type: 'sso' | 'webauthn';
   is_admin: boolean;
   has_passkey: boolean;
+  has_password: boolean;
   email_verified: boolean;
   created_at: string;
   last_login: string;
