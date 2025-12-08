@@ -11,7 +11,11 @@
       "Bash(az container stop:*)",
       "Bash(az container start:*)",
       "Bash(npm run build:*)",
-      "WebFetch(domain:passkeys.dev)"
+      "WebFetch(domain:passkeys.dev)",
+      "Bash(curl:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

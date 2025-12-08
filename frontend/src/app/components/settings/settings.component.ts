@@ -17,6 +17,7 @@ import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigReq
 import { AuthService } from '../../services/auth.service';
 import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { SetupLinkDialogComponent } from '../shared/setup-link-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
@@ -42,7 +43,8 @@ import { MatTooltipModule } from '@angular/material/tooltip';
     MatSelectModule,
     MatRadioModule,
     MatTooltipModule,
-    ConfirmDialogComponent
+    ConfirmDialogComponent,
+    SetupLinkDialogComponent
   ],
   template: `
     <div class="settings-container">
@@ -101,12 +103,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                   <div class="form-actions">
                     <button mat-raised-button color="primary" type="submit"
                             [disabled]="ssoForm.invalid || savingSSOConfig">
-                      @if (savingSSOConfig) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>save</mat-icon>
-                        {{ editingSSOId ? 'Update' : 'Add Provider' }}
-                      }
+                      <mat-spinner diameter="20" *ngIf="savingSSOConfig"></mat-spinner>
+                      <mat-icon *ngIf="!savingSSOConfig">save</mat-icon>
+                      <span *ngIf="!savingSSOConfig">{{ editingSSOId ? 'Update' : 'Add Provider' }}</span>
                     </button>
                     @if (editingSSOId) {
                       <button mat-button type="button" (click)="cancelSSOEdit()">Cancel</button>
@@ -219,21 +218,15 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                   <div class="form-actions">
                     <button mat-raised-button color="primary" type="submit"
                             [disabled]="emailForm.invalid || savingEmailConfig">
-                      @if (savingEmailConfig) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>save</mat-icon>
-                        Save Configuration
-                      }
+                      <mat-spinner diameter="20" *ngIf="savingEmailConfig"></mat-spinner>
+                      <mat-icon *ngIf="!savingEmailConfig">save</mat-icon>
+                      <span *ngIf="!savingEmailConfig">Save Configuration</span>
                     </button>
                     <button mat-button type="button" (click)="testEmail()"
                             [disabled]="!hasExistingEmailConfig || testingEmail">
-                      @if (testingEmail) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>send</mat-icon>
-                        Send Test Email
-                      }
+                      <mat-spinner diameter="20" *ngIf="testingEmail"></mat-spinner>
+                      <mat-icon *ngIf="!testingEmail">send</mat-icon>
+                      <span *ngIf="!testingEmail">Send Test Email</span>
                     </button>
                   </div>
                 </form>
@@ -293,6 +286,28 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                       <th mat-header-cell *matHeaderCellDef>Last Login</th>
                       <td mat-cell *matCellDef="let user">
                         {{ user.last_login ? (user.last_login | date:'short') : 'Never' }}
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="actions">
+                      <th mat-header-cell *matHeaderCellDef>Actions</th>
+                      <td mat-cell *matCellDef="let user">
+                        @if (!user.has_passkey && !user.has_password) {
+                          <button mat-icon-button color="primary"
+                                  (click)="generateSetupLink(user)"
+                                  matTooltip="Generate Setup Link">
+                            <mat-icon>link</mat-icon>
+                          </button>
+                        } @else {
+                          <mat-chip class="credentials-chip">
+                            @if (user.has_passkey) {
+                              <mat-icon>fingerprint</mat-icon>
+                            }
+                            @if (user.has_password) {
+                              <mat-icon>password</mat-icon>
+                            }
+                          </mat-chip>
+                        }
                       </td>
                     </ng-container>
 
@@ -381,12 +396,9 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                   <div class="form-actions">
                     <button mat-raised-button color="primary" type="submit"
                             [disabled]="authConfigForm.invalid || savingAuthConfig">
-                      @if (savingAuthConfig) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>save</mat-icon>
-                        Save Configuration
-                      }
+                      <mat-spinner diameter="20" *ngIf="savingAuthConfig"></mat-spinner>
+                      <mat-icon *ngIf="!savingAuthConfig">save</mat-icon>
+                      <span *ngIf="!savingAuthConfig">Save Configuration</span>
                     </button>
                   </div>
                 </form>
@@ -758,6 +770,20 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       width: 16px;
       height: 16px;
     }
+
+    .credentials-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #e8f5e9 !important;
+      color: #2e7d32 !important;
+    }
+
+    .credentials-chip mat-icon {
+      font-size: 14px;
+      width: 14px;
+      height: 14px;
+    }
   `]
 })
 export class SettingsComponent implements OnInit {
@@ -769,7 +795,7 @@ export class SettingsComponent implements OnInit {
   authConfig: AuthConfig | null = null;
   accessRequests: AccessRequest[] = [];
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
-  userColumns = ['name', 'email', 'domain', 'auth_type', 'is_admin', 'last_login'];
+  userColumns = ['name', 'email', 'domain', 'auth_type', 'is_admin', 'last_login', 'actions'];
   accessRequestColumns = ['name', 'email', 'reason', 'created_at', 'status', 'actions'];
 
   editingSSOId: number | null = null;
@@ -1106,17 +1132,52 @@ export class SettingsComponent implements OnInit {
       if (result) {
         this.processingRequest = request.id;
         this.adminService.approveAccessRequest(request.id).subscribe({
-          next: (response) => {
-            this.snackBar.open(`Access approved for ${request.email}`, 'Close', { duration: 3000 });
+          next: (response: any) => {
             this.loadAccessRequests();
             this.loadUsers();
             this.processingRequest = null;
+
+            // Show the setup link dialog if a setup URL was generated
+            if (response.setup_url) {
+              this.dialog.open(SetupLinkDialogComponent, {
+                data: {
+                  userId: response.user?.id,
+                  userName: request.name,
+                  userEmail: request.email,
+                  setupUrl: response.setup_url,
+                  expiresInHours: response.token_expires_in_hours || 48
+                },
+                width: '500px'
+              });
+            } else {
+              this.snackBar.open(`Access approved for ${request.email}`, 'Close', { duration: 3000 });
+            }
           },
           error: (err) => {
             this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
             this.processingRequest = null;
           }
         });
+      }
+    });
+  }
+
+  generateSetupLink(user: User): void {
+    this.adminService.generateSetupLink(user.id).subscribe({
+      next: (response: any) => {
+        this.dialog.open(SetupLinkDialogComponent, {
+          data: {
+            userId: user.id,
+            userName: user.name || user.email,
+            userEmail: user.email,
+            setupUrl: response.setup_url,
+            expiresInHours: response.hours_valid || 48
+          },
+          width: '500px'
+        });
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to generate setup link', 'Close', { duration: 3000 });
       }
     });
   }

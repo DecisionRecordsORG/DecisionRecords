@@ -142,22 +142,16 @@ interface SuperAdminEmail {
             <div class="form-actions">
               <button mat-raised-button color="primary" type="submit"
                       [disabled]="emailForm.invalid || isSaving">
-                @if (isSaving) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  <mat-icon>save</mat-icon>
-                  Save Configuration
-                }
+                <mat-spinner diameter="20" *ngIf="isSaving"></mat-spinner>
+                <mat-icon *ngIf="!isSaving">save</mat-icon>
+                <span *ngIf="!isSaving">Save Configuration</span>
               </button>
 
               <button mat-button type="button" (click)="testEmail()"
                       [disabled]="!hasExistingConfig || isTesting || !superAdminEmail">
-                @if (isTesting) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  <mat-icon>send</mat-icon>
-                  Send Test Email
-                }
+                <mat-spinner diameter="20" *ngIf="isTesting"></mat-spinner>
+                <mat-icon *ngIf="!isTesting">send</mat-icon>
+                <span *ngIf="!isTesting">Send Test Email</span>
               </button>
             </div>
           </form>
@@ -199,12 +193,9 @@ interface SuperAdminEmail {
             <button mat-raised-button color="primary"
                     (click)="saveSuperAdminEmail()"
                     [disabled]="isSavingNotification">
-              @if (isSavingNotification) {
-                <mat-spinner diameter="20"></mat-spinner>
-              } @else {
-                <mat-icon>save</mat-icon>
-                Save Notification Email
-              }
+              <mat-spinner diameter="20" *ngIf="isSavingNotification"></mat-spinner>
+              <mat-icon *ngIf="!isSavingNotification">save</mat-icon>
+              <span *ngIf="!isSavingNotification">Save Notification Email</span>
             </button>
           </div>
         </mat-card-content>

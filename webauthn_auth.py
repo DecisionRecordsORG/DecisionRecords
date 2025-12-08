@@ -30,7 +30,17 @@ def get_rp_id():
 
 
 def get_rp_origin():
-    """Get the origin for WebAuthn verification."""
+    """Get the origin for WebAuthn verification.
+
+    For local development with Angular proxy, we need to use the frontend origin.
+    The frontend sends the 'Origin' header which we should use when available.
+    """
+    # Check for forwarded origin (from proxy) or use Origin header
+    origin = request.headers.get('Origin')
+    if origin:
+        return origin
+
+    # Fallback to constructing from request
     scheme = 'https' if request.is_secure else 'http'
     return f"{scheme}://{request.host}"
 

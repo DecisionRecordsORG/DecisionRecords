@@ -169,6 +169,62 @@ Before deploying, consider testing:
 2. **Python imports**: `python -c "import app"`
 3. **Local Docker**: `docker build -t test . && docker run -p 8000:8000 test`
 
+## API Integration Guidelines
+
+When creating new frontend components that call backend APIs, **always follow these rules** to avoid mismatches:
+
+### Before Writing Frontend Code
+
+1. **Read the backend route first** - Check `app.py` for the exact:
+   - URL path (e.g., `/api/webauthn/register/verify` not `/complete`)
+   - Expected request body structure (what `request.get_json()` parses)
+   - Response format (what `jsonify()` returns)
+
+2. **Check existing similar code** - Look for existing services/components that call similar endpoints:
+   - `webauthn.service.ts` for WebAuthn patterns
+   - `auth.service.ts` for authentication patterns
+   - `admin.service.ts` for admin API patterns
+
+### API Contract Checklist
+
+Before implementing any API call, verify:
+
+- [ ] **Endpoint URL** matches backend `@app.route()` exactly
+- [ ] **HTTP method** matches (GET, POST, PUT, DELETE)
+- [ ] **Request body structure** matches backend parsing:
+  ```python
+  # If backend does:
+  credential = data.get('credential')
+  # Frontend must send:
+  { credential: {...}, other_field: ... }
+  ```
+- [ ] **Response handling** matches backend return:
+  ```python
+  # If backend returns:
+  return jsonify({'message': 'Success', 'user': user_data})
+  # Frontend must check:
+  if (result.user || result.message === 'Success')
+  # NOT: if (result.success)
+  ```
+
+### Standard Response Patterns
+
+This project uses these response patterns:
+
+| Endpoint Type | Success Response | Error Response |
+|---------------|------------------|----------------|
+| Create/Register | `{ message: '...', entity: {...} }` | `{ error: '...' }, 400` |
+| Authenticate | `{ message: '...', user: {...} }` | `{ error: '...' }, 401` |
+| List | `[{...}, {...}]` | `{ error: '...' }, 500` |
+| Delete | `{ message: '...' }` | `{ error: '...' }, 404` |
+
+### Common Mistakes to Avoid
+
+1. **Don't assume `success: true`** - Backend may return `message` or entity directly
+2. **Don't flatten nested structures** - If backend expects `{ credential: {...} }`, don't send flat
+3. **Don't guess endpoint names** - Always verify against `app.py`
+4. **Don't skip error response handling** - Backend errors use `{ error: '...' }` format
+
 ## Troubleshooting
 
 ### Login Issues

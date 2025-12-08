@@ -580,6 +580,163 @@ class AccessRequest(db.Model):
         }
 
 
+class SetupToken(db.Model):
+    """Setup tokens for users to set up their credentials (passkey/password).
+
+    Tokens are encrypted using Fernet symmetric encryption for security.
+    The encrypted token contains the user_id and expiry timestamp.
+    """
+
+    __tablename__ = 'setup_tokens'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    token_hash = db.Column(db.String(255), nullable=False, unique=True, index=True)  # Hash of the token for lookup
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id])
+
+    # Token validity: 48 hours (2 days) by default
+    TOKEN_VALIDITY_HOURS = 48
+
+    def is_expired(self):
+        return datetime.utcnow() > self.expires_at
+
+    def is_used(self):
+        return self.used_at is not None
+
+    def is_valid(self):
+        return not self.is_expired() and not self.is_used()
+
+    @staticmethod
+    def _get_encryption_key():
+        """Get or generate the encryption key for setup tokens."""
+        import os
+        import base64
+        from hashlib import sha256
+
+        # Use app secret key as base for encryption key
+        secret = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+        # Derive a 32-byte key using SHA-256
+        key_bytes = sha256(secret.encode()).digest()
+        return base64.urlsafe_b64encode(key_bytes)
+
+    @staticmethod
+    def _encrypt_token_data(user_id: int, expires_at: datetime) -> str:
+        """Encrypt user_id and expiry into a token string."""
+        import json
+        from cryptography.fernet import Fernet
+
+        key = SetupToken._get_encryption_key()
+        fernet = Fernet(key)
+
+        payload = json.dumps({
+            'user_id': user_id,
+            'expires_at': expires_at.isoformat(),
+            'created_at': datetime.utcnow().isoformat()
+        })
+
+        encrypted = fernet.encrypt(payload.encode())
+        return encrypted.decode()
+
+    @staticmethod
+    def _decrypt_token_data(token: str) -> dict:
+        """Decrypt token to get user_id and expiry."""
+        import json
+        from cryptography.fernet import Fernet, InvalidToken
+
+        key = SetupToken._get_encryption_key()
+        fernet = Fernet(key)
+
+        try:
+            decrypted = fernet.decrypt(token.encode())
+            return json.loads(decrypted.decode())
+        except (InvalidToken, json.JSONDecodeError):
+            return None
+
+    @staticmethod
+    def _hash_token(token: str) -> str:
+        """Create a hash of the token for secure storage and lookup."""
+        from hashlib import sha256
+        return sha256(token.encode()).hexdigest()
+
+    @staticmethod
+    def generate_token(user_id: int, expires_at: datetime) -> str:
+        """Generate an encrypted secure token."""
+        return SetupToken._encrypt_token_data(user_id, expires_at)
+
+    @staticmethod
+    def validate_token(token: str):
+        """Validate a token and return the SetupToken record if valid."""
+        # Decrypt the token to get payload
+        payload = SetupToken._decrypt_token_data(token)
+        if not payload:
+            return None, 'Invalid token format'
+
+        # Look up by hash
+        token_hash = SetupToken._hash_token(token)
+        setup_token = SetupToken.query.filter_by(token_hash=token_hash).first()
+
+        if not setup_token:
+            return None, 'Token not found or already invalidated'
+
+        if setup_token.is_used():
+            return None, 'Token has already been used'
+
+        if setup_token.is_expired():
+            return None, 'Token has expired'
+
+        return setup_token, None
+
+    @staticmethod
+    def create_for_user(user, validity_hours=None):
+        """Create a new setup token for a user."""
+        from datetime import timedelta
+        if validity_hours is None:
+            validity_hours = SetupToken.TOKEN_VALIDITY_HOURS
+
+        # Invalidate any existing tokens for this user
+        SetupToken.query.filter_by(user_id=user.id, used_at=None).update({
+            'used_at': datetime.utcnow()
+        })
+        db.session.flush()
+
+        expires_at = datetime.utcnow() + timedelta(hours=validity_hours)
+        token_string = SetupToken.generate_token(user.id, expires_at)
+        token_hash = SetupToken._hash_token(token_string)
+
+        setup_token = SetupToken(
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at
+        )
+        db.session.add(setup_token)
+        db.session.commit()
+
+        # Return both the record and the actual token string
+        # The token string is returned only once at creation time
+        setup_token._token_string = token_string
+        return setup_token
+
+    def to_dict(self, include_token=False):
+        result = {
+            'id': self.id,
+            'user_id': self.user_id,
+            'expires_at': self.expires_at.isoformat(),
+            'used_at': self.used_at.isoformat() if self.used_at else None,
+            'created_at': self.created_at.isoformat(),
+            'is_valid': self.is_valid(),
+            'hours_remaining': max(0, int((self.expires_at - datetime.utcnow()).total_seconds() / 3600)) if not self.is_expired() else 0,
+        }
+        # Only include actual token if explicitly requested (e.g., at creation time)
+        if include_token and hasattr(self, '_token_string'):
+            result['token'] = self._token_string
+        return result
+
+
 class EmailVerification(db.Model):
     """Email verification tokens for validating user email addresses."""
 

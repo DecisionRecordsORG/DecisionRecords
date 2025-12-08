@@ -39,6 +39,8 @@ export const routes: Routes = [
     canActivate: [masterGuard]
   },
   // Tenant-specific routes
+  // NOTE: Order matters! More specific routes must come BEFORE less specific ones.
+  // The ':tenant' route must be LAST among tenant routes because it matches any single segment.
   {
     path: ':tenant/login',
     loadComponent: () => import('./components/tenant-login/tenant-login.component').then(m => m.TenantLoginComponent),
@@ -55,8 +57,13 @@ export const routes: Routes = [
     canActivate: [authGuard]  // Only require auth, not tenant guard (domain may be pending)
   },
   {
-    path: ':tenant',
-    loadComponent: () => import('./components/decision-list/decision-list.component').then(m => m.DecisionListComponent),
+    path: ':tenant/setup',
+    loadComponent: () => import('./components/account-setup/account-setup.component').then(m => m.AccountSetupComponent)
+    // No guards - accessed via setup token
+  },
+  {
+    path: ':tenant/profile',
+    loadComponent: () => import('./components/profile/profile.component').then(m => m.ProfileComponent),
     canActivate: [authGuard, tenantGuard]
   },
   {
@@ -69,9 +76,10 @@ export const routes: Routes = [
     loadComponent: () => import('./components/decision-detail/decision-detail.component').then(m => m.DecisionDetailComponent),
     canActivate: [authGuard, tenantGuard]
   },
+  // This must be LAST among tenant routes - it matches any single segment
   {
-    path: ':tenant/profile',
-    loadComponent: () => import('./components/profile/profile.component').then(m => m.ProfileComponent),
+    path: ':tenant',
+    loadComponent: () => import('./components/decision-list/decision-list.component').then(m => m.DecisionListComponent),
     canActivate: [authGuard, tenantGuard]
   },
   // Catch-all redirect to landing

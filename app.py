@@ -222,6 +222,24 @@ def init_database():
                             logger.info("auto_approved column added successfully")
                         else:
                             logger.info("auto_approved column already exists")
+
+                        # Check and fix setup_tokens table schema
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'setup_tokens' AND column_name = 'token_hash'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Fixing setup_tokens table schema...")
+                            # Drop the old table and let SQLAlchemy recreate it with correct schema
+                            conn.execute(db.text("DROP TABLE IF EXISTS setup_tokens CASCADE"))
+                            conn.commit()
+                            logger.info("Old setup_tokens table dropped, will be recreated")
+                            # Recreate the table with correct schema
+                            from models import SetupToken
+                            SetupToken.__table__.create(db.engine, checkfirst=True)
+                            logger.info("setup_tokens table recreated with correct schema")
+                        else:
+                            logger.info("setup_tokens table has correct schema")
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -934,10 +952,34 @@ def api_get_decision_history(decision_id):
 # ==================== API Routes - User ====================
 
 @app.route('/api/user/me', methods=['GET'])
-@login_required
 def api_get_current_user():
-    """Get current user info."""
-    return jsonify(g.current_user.to_dict())
+    """Get current user info. Supports both full sessions and setup tokens."""
+    from auth import validate_setup_token
+
+    # Check for setup token first (incomplete account during credential setup)
+    setup_user, _ = validate_setup_token()
+    if setup_user:
+        # Return user info with setup_mode flag
+        user_dict = setup_user.to_dict()
+        user_dict['setup_mode'] = True
+        return jsonify(user_dict)
+
+    # Check for regular session
+    if session.get('is_master') and session.get('master_id'):
+        from models import MasterAccount
+        master = MasterAccount.query.get(session.get('master_id'))
+        if master:
+            return jsonify(master.to_dict())
+
+    if 'user_id' not in session:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    user = User.query.get(session.get('user_id'))
+    if not user:
+        session.clear()
+        return jsonify({'error': 'Authentication required'}), 401
+
+    return jsonify(user.to_dict())
 
 
 @app.route('/api/user/subscription', methods=['GET'])
@@ -1785,19 +1827,31 @@ def api_direct_signup():
 
     db.session.commit()
 
-    # Log the user in
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
-    user.last_login = datetime.utcnow()
-    db.session.commit()
-
-    # Determine redirect based on auth preference
+    # Determine redirect and auth handling based on auth preference
     if auth_preference == 'passkey':
-        # Go to profile for passkey setup
-        redirect_url = f'/{domain}/profile?setup=passkey'
+        # SECURITY: For passkey signups, use a setup token instead of full session
+        # This prevents account hijacking if user doesn't complete passkey setup
+        # The token only allows access to credential setup endpoints
+        import secrets
+        setup_token = secrets.token_urlsafe(32)
+
+        # Store setup token in session with limited scope
+        session['setup_token'] = setup_token
+        session['setup_user_id'] = user.id
+        session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+        session.permanent = False  # Session-only cookie
+
+        # Do NOT set user_id - user is NOT fully logged in yet
+        redirect_url = f'/{domain}/profile?setup=passkey&token={setup_token}'
         setup_passkey = True
+
+        app.logger.info(f"Created setup token for user {email} - credential setup required")
     else:
-        # Password auth - go directly to dashboard
+        # Password auth - user already has credentials, log them in fully
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        user.last_login = datetime.utcnow()
+        db.session.commit()
         redirect_url = f'/{domain}'
         setup_passkey = False
 
@@ -2014,6 +2068,262 @@ def api_submit_access_request():
     })
 
 
+@app.route('/api/auth/setup-token/validate', methods=['POST'])
+def api_validate_setup_token():
+    """Validate a setup token and create a setup session for the user."""
+    from datetime import datetime, timedelta
+    from models import SetupToken
+    import secrets
+
+    data = request.get_json()
+    token = data.get('token', '')
+
+    if not token:
+        return jsonify({'error': 'No token provided', 'valid': False}), 400
+
+    # Validate the encrypted token
+    setup_token, error = SetupToken.validate_token(token)
+
+    if error:
+        # Determine specific error type
+        if 'expired' in error.lower():
+            return jsonify({'error': error, 'valid': False, 'expired': True}), 400
+        if 'used' in error.lower():
+            return jsonify({'error': error, 'valid': False, 'used': True}), 400
+        return jsonify({'error': error, 'valid': False}), 400
+
+    user = setup_token.user
+
+    # Check if user already has credentials set up
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        # Mark token as used since user already has credentials
+        setup_token.used_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({
+            'error': 'Your account is already set up. Please log in instead.',
+            'valid': False,
+            'already_setup': True,
+            'redirect': f'/{user.sso_domain}/login'
+        }), 400
+
+    # Create a setup session for the user
+    session_token = secrets.token_urlsafe(32)
+    session['setup_token'] = session_token
+    session['setup_user_id'] = user.id
+    session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+
+    return jsonify({
+        'valid': True,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'name': user.name,
+            'sso_domain': user.sso_domain,
+        },
+        'expires_at': setup_token.expires_at.isoformat(),
+        'message': 'Setup token validated. You can now set up your credentials.',
+        'redirect': f'/{user.sso_domain}/profile?setup=passkey'
+    })
+
+
+@app.route('/api/auth/setup-token/use', methods=['POST'])
+def api_use_setup_token():
+    """Mark a setup token as used after successful credential setup."""
+    from datetime import datetime
+    from models import SetupToken
+
+    data = request.get_json()
+    token = data.get('token', '')
+
+    if not token:
+        return jsonify({'error': 'No token provided'}), 400
+
+    # Validate and find the token
+    setup_token, error = SetupToken.validate_token(token)
+
+    if not setup_token:
+        # Even if validation fails, try to mark by hash if token format is recognizable
+        token_hash = SetupToken._hash_token(token)
+        setup_token = SetupToken.query.filter_by(token_hash=token_hash).first()
+        if not setup_token:
+            return jsonify({'error': 'Invalid setup token'}), 404
+
+    if setup_token.is_used():
+        return jsonify({'message': 'Token already marked as used'})
+
+    setup_token.used_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({'message': 'Token marked as used'})
+
+
+@app.route('/api/auth/setup-password', methods=['POST'])
+def api_setup_password():
+    """Set password for a user during account setup (uses setup token for auth)."""
+    import re
+    from datetime import datetime
+    from models import SetupToken
+
+    data = request.get_json()
+    token = data.get('token', '')
+    password = data.get('password', '')
+
+    if not token:
+        return jsonify({'error': 'Setup token is required'}), 400
+
+    # Validate the setup token
+    setup_token, error = SetupToken.validate_token(token)
+    if not setup_token:
+        return jsonify({'error': error or 'Invalid setup token'}), 401
+
+    # Password policy validation
+    if not password or len(password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    if not re.search(r'[A-Z]', password):
+        return jsonify({'error': 'Password must contain at least one uppercase letter'}), 400
+    if not re.search(r'[a-z]', password):
+        return jsonify({'error': 'Password must contain at least one lowercase letter'}), 400
+    if not re.search(r'\d', password):
+        return jsonify({'error': 'Password must contain at least one number'}), 400
+
+    # Get the user from the token
+    user = setup_token.user
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Set the password
+    user.set_password(password)
+    user.auth_type = 'local'
+
+    # Mark token as used
+    setup_token.used_at = datetime.utcnow()
+
+    db.session.commit()
+
+    # Log the user in
+    session['user_id'] = user.id
+    session['user_type'] = 'user'
+
+    return jsonify({
+        'message': 'Password set successfully',
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'name': user.name,
+            'sso_domain': user.sso_domain,
+            'has_password': True,
+            'has_passkey': len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+        }
+    })
+
+
+@app.route('/api/admin/users/<int:user_id>/setup-link', methods=['POST'])
+@admin_required
+def api_generate_setup_link(user_id):
+    """Generate a new setup link for a user (admin only)."""
+    from models import SetupToken
+
+    user = User.query.get_or_404(user_id)
+
+    # Check permission - admin can only generate links for users in their domain
+    if not is_master_account() and user.sso_domain != g.current_user.sso_domain:
+        return jsonify({'error': 'Not authorized to generate setup links for this user'}), 403
+
+    # Check if user already has credentials
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        return jsonify({
+            'error': 'User already has credentials set up',
+            'has_passkey': has_passkey,
+            'has_password': has_password
+        }), 400
+
+    # Generate new setup token (48hr expiry by default)
+    setup_token = SetupToken.create_for_user(user)
+    token_string = setup_token._token_string  # Get the actual token string
+    setup_url = f"{request.host_url.rstrip('/')}/{user.sso_domain}/setup?token={token_string}"
+
+    return jsonify({
+        'message': 'Setup link generated successfully',
+        'setup_url': setup_url,
+        'token': token_string,  # Also return raw token for copying
+        'expires_at': setup_token.expires_at.isoformat(),
+        'hours_valid': SetupToken.TOKEN_VALIDITY_HOURS
+    })
+
+
+@app.route('/api/admin/users/<int:user_id>/send-setup-email', methods=['POST'])
+@admin_required
+def api_send_setup_email(user_id):
+    """Send a setup token email to a user (admin only).
+
+    This endpoint generates a new setup token and sends it via email.
+    Only admins can call this, and it uses the system's configured SMTP settings.
+    """
+    from models import SetupToken
+    from notifications import send_setup_token_email
+
+    user = User.query.get_or_404(user_id)
+
+    # Check permission - admin can only send emails for users in their domain
+    if not is_master_account() and user.sso_domain != g.current_user.sso_domain:
+        return jsonify({'error': 'Not authorized to send emails for this user'}), 403
+
+    # Check if user already has credentials
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        return jsonify({
+            'error': 'User already has credentials set up',
+            'has_passkey': has_passkey,
+            'has_password': has_password
+        }), 400
+
+    # Get email configuration - prioritize system config (super admin), fall back to domain config
+    email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(domain=user.sso_domain, enabled=True).first()
+
+    if not email_config:
+        return jsonify({
+            'error': 'Email not configured. Please configure SMTP settings in the admin panel first.'
+        }), 400
+
+    # Generate new setup token (48hr expiry by default)
+    setup_token = SetupToken.create_for_user(user)
+    token_string = setup_token._token_string
+    setup_url = f"{request.host_url.rstrip('/')}/{user.sso_domain}/setup?token={token_string}"
+
+    # Send the email
+    success = send_setup_token_email(
+        email_config=email_config,
+        user_name=user.name or user.email.split('@')[0],
+        user_email=user.email,
+        setup_url=setup_url,
+        expires_in_hours=SetupToken.TOKEN_VALIDITY_HOURS
+    )
+
+    if success:
+        return jsonify({
+            'message': f'Setup email sent successfully to {user.email}',
+            'setup_url': setup_url,
+            'expires_at': setup_token.expires_at.isoformat(),
+            'hours_valid': SetupToken.TOKEN_VALIDITY_HOURS
+        })
+    else:
+        return jsonify({
+            'error': 'Failed to send email. Please check SMTP configuration.',
+            'setup_url': setup_url  # Still return the URL so admin can manually share
+        }), 500
+
+
 # ==================== API Routes - Admin (Access Requests) ====================
 
 @app.route('/api/admin/access-requests', methods=['GET'])
@@ -2052,6 +2362,7 @@ def api_list_pending_requests():
 def api_approve_access_request(request_id):
     """Approve an access request and create the user account."""
     from datetime import datetime
+    from models import SetupToken
 
     access_request = AccessRequest.query.get_or_404(request_id)
 
@@ -2069,7 +2380,24 @@ def api_approve_access_request(request_id):
         access_request.processed_by_id = g.current_user.id if not is_master_account() else None
         access_request.processed_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({'message': 'User already exists, request marked as approved', 'user': existing_user.to_dict()})
+
+        # Generate setup token for existing user if they don't have credentials
+        setup_url = None
+        setup_token_str = None
+        has_passkey = len(existing_user.webauthn_credentials) > 0 if existing_user.webauthn_credentials else False
+        has_password = existing_user.has_password()
+        if not has_passkey and not has_password:
+            setup_token = SetupToken.create_for_user(existing_user)
+            setup_token_str = setup_token._token_string
+            setup_url = f"{request.host_url.rstrip('/')}/{access_request.domain}/setup?token={setup_token_str}"
+
+        return jsonify({
+            'message': 'User already exists, request marked as approved',
+            'user': existing_user.to_dict(),
+            'setup_url': setup_url,
+            'setup_token': setup_token_str,
+            'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS if setup_token_str else None
+        })
 
     # Create the user account
     new_user = User(
@@ -2080,20 +2408,29 @@ def api_approve_access_request(request_id):
         is_admin=False
     )
     db.session.add(new_user)
+    db.session.flush()  # Get the user ID before creating token
 
     # Update request status
     access_request.status = 'approved'
     access_request.processed_by_id = g.current_user.id if not is_master_account() else None
     access_request.processed_at = datetime.utcnow()
 
+    # Generate setup token for the new user (48hr expiry)
+    setup_token = SetupToken.create_for_user(new_user)
+    setup_token_str = setup_token._token_string
+    setup_url = f"{request.host_url.rstrip('/')}/{access_request.domain}/setup?token={setup_token_str}"
+
     db.session.commit()
 
     # TODO: Send email to user informing them they've been approved
-    # notify_user_access_approved(access_request, new_user)
+    # notify_user_access_approved(access_request, new_user, setup_url)
 
     return jsonify({
         'message': 'Access request approved',
-        'user': new_user.to_dict()
+        'user': new_user.to_dict(),
+        'setup_url': setup_url,
+        'setup_token': setup_token_str,
+        'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS
     })
 
 
@@ -2136,8 +2473,28 @@ def api_reject_access_request(request_id):
 @rate_limit("10 per minute")
 def api_webauthn_register_options():
     """Generate WebAuthn registration options."""
+    from auth import validate_setup_token
+
     data = request.get_json()
 
+    # Check for setup token flow (incomplete account setting up first credential)
+    setup_user, _ = validate_setup_token()
+    if setup_user:
+        # User is in setup mode - generate options for their account
+        email = setup_user.email
+        name = setup_user.name
+        domain = setup_user.sso_domain
+
+        log_security_event('auth', f"WebAuthn setup registration for {email} (setup token)", severity='INFO')
+
+        try:
+            options = create_registration_options(email, name, domain)
+            return jsonify(json.loads(options))
+        except Exception as e:
+            app.logger.error(f"WebAuthn setup registration options error: {e}")
+            return jsonify({'error': 'Failed to generate registration options'}), 500
+
+    # Standard registration flow
     email = data.get('email')
     name = data.get('name')
 
@@ -2183,6 +2540,8 @@ def api_webauthn_register_options():
 @app.route('/api/webauthn/register/verify', methods=['POST'])
 def api_webauthn_register_verify():
     """Verify WebAuthn registration and create/login user."""
+    from auth import validate_setup_token, complete_setup_and_login
+
     data = request.get_json()
 
     credential = data.get('credential')
@@ -2191,14 +2550,22 @@ def api_webauthn_register_verify():
     if not credential:
         return jsonify({'error': 'Credential is required'}), 400
 
+    # Check for setup token flow
+    setup_user, _ = validate_setup_token()
+
     user, error = verify_registration(credential, device_name)
 
     if error:
         return jsonify({'error': error}), 400
 
-    # Log the user in
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
+    # If this was a setup token flow, complete the setup
+    if setup_user and setup_user.id == user.id:
+        complete_setup_and_login(user)
+        log_security_event('auth', f"Passkey setup completed for {user.email} (first credential)", severity='INFO')
+    else:
+        # Standard registration - log the user in
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Registration successful',
@@ -2570,7 +2937,13 @@ def api_check_domain_status(domain):
 @app.route('/api/tenants', methods=['GET'])
 @master_required
 def api_list_tenants():
-    """List all tenants (organizations) with their stats (super admin only)."""
+    """List all tenants (organizations) with their stats (super admin only).
+
+    A tenant is considered active if it has:
+    - An approved DomainApproval record, OR
+    - Users registered for the domain (for backwards compatibility with domains
+      created before the approval system was added)
+    """
     tenants = {}
 
     # Get domains from approved DomainApproval records
@@ -2581,7 +2954,9 @@ def api_list_tenants():
             'user_count': 0,
             'admin_count': 0,
             'has_sso': False,
-            'created_at': approval.updated_at.isoformat() if approval.updated_at else approval.created_at.isoformat()
+            'status': 'approved',
+            'auto_approved': approval.auto_approved,
+            'created_at': approval.reviewed_at.isoformat() if approval.reviewed_at else (approval.updated_at.isoformat() if approval.updated_at else approval.created_at.isoformat())
         }
 
     # Get user stats by domain
@@ -2595,11 +2970,15 @@ def api_list_tenants():
     for domain, user_count, admin_count, created_at in domain_stats:
         if domain:
             if domain not in tenants:
+                # Domain has users but no approval record - this is a legacy domain
+                # or was created through SSO before approval system existed
                 tenants[domain] = {
                     'domain': domain,
                     'user_count': 0,
                     'admin_count': 0,
                     'has_sso': False,
+                    'status': 'active',  # Mark as active since users exist
+                    'auto_approved': False,
                     'created_at': created_at.isoformat() if created_at else None
                 }
             tenants[domain]['user_count'] = user_count

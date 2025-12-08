@@ -20,6 +20,17 @@ export const authGuard: CanActivateFn = (route, state) => {
     filter(isLoading => !isLoading),
     take(1),
     map(() => {
+      // Check for setup mode - user authenticated but needs to complete credential setup
+      if (authService.isInSetupMode) {
+        const user = authService.currentUser?.user as User;
+        // Only allow access to profile page in setup mode
+        if (state.url.includes('/profile')) {
+          return true;
+        }
+        router.navigate([`/${user?.sso_domain}/profile`], { queryParams: { setup: 'passkey' } });
+        return false;
+      }
+
       if (authService.isAuthenticated) {
         return true;
       }
@@ -78,6 +89,13 @@ export const guestGuard: CanActivateFn = (route, state) => {
     filter(isLoading => !isLoading),
     take(1),
     map(() => {
+      // Users in setup mode should be redirected to profile
+      if (authService.isInSetupMode) {
+        const user = authService.currentUser?.user as User;
+        router.navigate([`/${user?.sso_domain}/profile`], { queryParams: { setup: 'passkey' } });
+        return false;
+      }
+
       if (!authService.isAuthenticated) {
         return true;
       }
@@ -113,6 +131,18 @@ export const tenantGuard: CanActivateFn = (route, state) => {
       // Super admin should only manage tenants through the admin dashboard
       if (authService.isMasterAccount) {
         router.navigate(['/superadmin/dashboard']);
+        return of(false);
+      }
+
+      // SECURITY: Handle setup mode - user completing first credential setup
+      // Setup mode users can only access the profile page
+      if (authService.isInSetupMode) {
+        const user = authService.currentUser?.user as User;
+        // Only allow access to profile page in setup mode
+        if (state.url.includes('/profile') && user?.sso_domain === tenant) {
+          return of(true);
+        }
+        router.navigate([`/${user?.sso_domain}/profile`], { queryParams: { setup: 'passkey' } });
         return of(false);
       }
 

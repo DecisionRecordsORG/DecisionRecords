@@ -124,22 +124,16 @@ interface Tenant {
                         <button mat-raised-button color="primary"
                                 (click)="approveDomain(approval)"
                                 [disabled]="processingId === approval.id">
-                          @if (processingId === approval.id && processingAction === 'approve') {
-                            <mat-spinner diameter="18"></mat-spinner>
-                          } @else {
-                            <mat-icon>check</mat-icon>
-                            Approve
-                          }
+                          <mat-spinner diameter="18" *ngIf="processingId === approval.id && processingAction === 'approve'"></mat-spinner>
+                          <mat-icon *ngIf="!(processingId === approval.id && processingAction === 'approve')">check</mat-icon>
+                          <span *ngIf="!(processingId === approval.id && processingAction === 'approve')">Approve</span>
                         </button>
                         <button mat-button color="warn"
                                 (click)="rejectDomain(approval)"
                                 [disabled]="processingId === approval.id">
-                          @if (processingId === approval.id && processingAction === 'reject') {
-                            <mat-spinner diameter="18"></mat-spinner>
-                          } @else {
-                            <mat-icon>close</mat-icon>
-                            Reject
-                          }
+                          <mat-spinner diameter="18" *ngIf="processingId === approval.id && processingAction === 'reject'"></mat-spinner>
+                          <mat-icon *ngIf="!(processingId === approval.id && processingAction === 'reject')">close</mat-icon>
+                          <span *ngIf="!(processingId === approval.id && processingAction === 'reject')">Reject</span>
                         </button>
                       </td>
                     </ng-container>

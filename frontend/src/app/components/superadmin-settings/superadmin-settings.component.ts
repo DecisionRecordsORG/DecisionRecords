@@ -81,12 +81,9 @@ interface SessionSettings {
 
               <div class="actions">
                 <button mat-raised-button color="primary" type="submit" [disabled]="saving || !sessionForm.valid">
-                  @if (saving) {
-                    <mat-spinner diameter="20"></mat-spinner>
-                  } @else {
-                    <mat-icon>save</mat-icon>
-                    Save Settings
-                  }
+                  <mat-spinner diameter="20" *ngIf="saving"></mat-spinner>
+                  <mat-icon *ngIf="!saving">save</mat-icon>
+                  <span *ngIf="!saving">Save Settings</span>
                 </button>
                 <button mat-button type="button" (click)="resetToDefaults()">
                   <mat-icon>restore</mat-icon>

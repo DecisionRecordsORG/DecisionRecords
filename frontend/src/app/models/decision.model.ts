@@ -3,7 +3,7 @@ export interface User {
   email: string;
   name: string;
   sso_domain: string;
-  auth_type: 'sso' | 'webauthn';
+  auth_type: 'sso' | 'webauthn' | 'local' | 'oidc';
   is_admin: boolean;
   has_passkey: boolean;
   has_password: boolean;

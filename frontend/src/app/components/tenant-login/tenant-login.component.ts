@@ -100,23 +100,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
               </mat-form-field>
 
               <button mat-raised-button color="primary" type="submit"
-                      [disabled]="emailForm.invalid || isLoading" class="full-width">
-                @if (isLoading) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  Continue
-                  <mat-icon>arrow_forward</mat-icon>
-                }
+                      [disabled]="emailForm.invalid || isLoading" class="full-width sign-in-button">
+                <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                <mat-icon *ngIf="!isLoading">login</mat-icon>
+                <span *ngIf="!isLoading">Sign In</span>
               </button>
             </form>
-
-            @if (webAuthnSupported && authConfig?.allow_passkey) {
-              <button mat-stroked-button class="full-width quick-login" (click)="quickPasskeyLogin()"
-                      [disabled]="isLoading">
-                <mat-icon>key</mat-icon>
-                Sign in with saved passkey
-              </button>
-            }
           }
 
           <!-- Login View: Passkey first (default), Password as alternative -->
@@ -128,12 +117,9 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
               @if (authConfig?.allow_passkey && userStatus?.has_passkey && !showPasswordLogin) {
                 <button mat-raised-button color="primary" class="full-width passkey-button"
                         (click)="signInWithPasskey()" [disabled]="isLoading">
-                  @if (isLoading) {
-                    <mat-spinner diameter="20"></mat-spinner>
-                  } @else {
-                    <mat-icon>fingerprint</mat-icon>
-                    Sign in with passkey
-                  }
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">fingerprint</mat-icon>
+                  <span *ngIf="!isLoading">Sign in with passkey</span>
                 </button>
 
                 @if (authConfig?.allow_password && userStatus?.has_password) {
@@ -156,12 +142,9 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
 
                     <button mat-raised-button color="primary" type="submit"
                             [disabled]="loginForm.invalid || isLoading" class="full-width">
-                      @if (isLoading) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>login</mat-icon>
-                        Sign In
-                      }
+                      <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                      <mat-icon *ngIf="!isLoading">login</mat-icon>
+                      <span *ngIf="!isLoading">Sign In</span>
                     </button>
                   </form>
 
@@ -223,12 +206,9 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="requestForm.invalid || isLoading" class="full-width">
-                  @if (isLoading) {
-                    <mat-spinner diameter="20"></mat-spinner>
-                  } @else {
-                    <mat-icon>send</mat-icon>
-                    Submit Request
-                  }
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">send</mat-icon>
+                  <span *ngIf="!isLoading">Submit Request</span>
                 </button>
               </form>
 
@@ -329,8 +309,35 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
       font-size: 14px;
     }
 
-    .quick-login {
-      margin-top: 12px;
+    .login-buttons {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .or-divider {
+      display: flex;
+      align-items: center;
+      margin: 16px 0;
+      color: #888;
+      font-size: 14px;
+    }
+
+    .or-divider::before,
+    .or-divider::after {
+      content: '';
+      flex: 1;
+      border-bottom: 1px solid #ddd;
+    }
+
+    .or-divider span {
+      padding: 0 12px;
+    }
+
+    .passkey-quick-login {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
 
     .login-section, .request-section, .request-sent-section {
@@ -423,6 +430,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
       justify-content: center;
       padding: 16px;
     }
+
+    .sign-in-button {
+      padding: 12px 24px;
+      font-size: 16px;
+      margin-top: 8px;
+    }
   `]
 })
 export class TenantLoginComponent implements OnInit {
@@ -483,6 +496,11 @@ export class TenantLoginComponent implements OnInit {
     if (this.route.snapshot.queryParamMap.get('verified') === '1') {
       this.success = 'Email verified! You can now sign in.';
     }
+
+    // Check for passkey setup success
+    if (this.route.snapshot.queryParamMap.get('passkey_setup') === 'success') {
+      this.success = 'Passkey created successfully! Sign in with your new passkey below.';
+    }
   }
 
   loadAuthConfig(): void {
@@ -527,13 +545,24 @@ export class TenantLoginComponent implements OnInit {
     // Check if user exists
     this.http.get<UserStatus>(`/api/auth/user-exists/${email}`).subscribe({
       next: (result) => {
-        this.isLoading = false;
         this.userStatus = result;
         if (result.exists) {
-          // User exists, show login options
-          this.currentView = 'login';
+          // User exists - check if passkey-only, auto-trigger passkey auth
+          if (result.has_passkey && !result.has_password && this.webAuthnSupported && this.authConfig?.allow_passkey) {
+            // Passkey-only user: auto-trigger passkey auth immediately
+            this.signInWithPasskey();
+          } else if (result.has_passkey && this.webAuthnSupported && this.authConfig?.allow_passkey) {
+            // User has both passkey and password - still auto-trigger passkey (preferred)
+            this.signInWithPasskey();
+          } else {
+            // Password-only user or passkey not supported - show login view
+            this.isLoading = false;
+            this.currentView = 'login';
+            this.showPasswordLogin = true;
+          }
         } else {
           // User doesn't exist, show request access form
+          this.isLoading = false;
           this.currentView = 'request-access';
           this.requestForm.patchValue({ email });
         }
@@ -579,25 +608,6 @@ export class TenantLoginComponent implements OnInit {
     this.error = '';
 
     this.webAuthnService.authenticate(this.currentEmail).subscribe({
-      next: () => {
-        // Wait for user to be loaded before navigating
-        this.authService.loadCurrentUser().subscribe({
-          next: () => this.router.navigate([`/${this.tenant}`]),
-          error: () => this.router.navigate([`/${this.tenant}`])
-        });
-      },
-      error: (err) => {
-        this.isLoading = false;
-        this.error = err.error?.error || 'Authentication failed. Please try again.';
-      }
-    });
-  }
-
-  quickPasskeyLogin(): void {
-    this.isLoading = true;
-    this.error = '';
-
-    this.webAuthnService.authenticate().subscribe({
       next: () => {
         // Wait for user to be loaded before navigating
         this.authService.loadCurrentUser().subscribe({

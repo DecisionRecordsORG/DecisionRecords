@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
+import { RouterModule, ActivatedRoute } from '@angular/router';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -36,8 +36,8 @@ import { Decision } from '../../models/decision.model';
     <div class="decision-list-container">
       <div class="header">
         <h1>Architecture Decisions</h1>
-        @if (!authService.isMasterAccount) {
-          <button mat-raised-button color="primary" routerLink="/decision/new">
+        @if (!authService.isMasterAccount && userDomain) {
+          <button mat-raised-button color="primary" [routerLink]="['/' + userDomain + '/decision/new']">
             <mat-icon>add</mat-icon>
             New Decision
           </button>
@@ -85,8 +85,8 @@ import { Decision } from '../../models/decision.model';
           <mat-icon>folder_open</mat-icon>
           <h2>No decisions found</h2>
           <p>{{ searchTerm || statusFilter ? 'Try adjusting your filters' : 'Create your first architecture decision to get started' }}</p>
-          @if (!searchTerm && !statusFilter && !authService.isMasterAccount) {
-            <button mat-raised-button color="primary" routerLink="/decision/new">
+          @if (!searchTerm && !statusFilter && !authService.isMasterAccount && userDomain) {
+            <button mat-raised-button color="primary" [routerLink]="['/' + userDomain + '/decision/new']">
               <mat-icon>add</mat-icon>
               Create Decision
             </button>
@@ -95,7 +95,7 @@ import { Decision } from '../../models/decision.model';
       } @else {
         <div class="decisions-grid">
           @for (decision of filteredDecisions; track decision.id) {
-            <mat-card class="decision-card" [routerLink]="['/decision', decision.id]">
+            <mat-card class="decision-card" [routerLink]="['/' + userDomain + '/decision', decision.id]">
               <mat-card-header>
                 <mat-card-title>
                   <span class="decision-id">ADR-{{ decision.id }}</span>
@@ -289,14 +289,19 @@ export class DecisionListComponent implements OnInit {
   isLoading = true;
   searchTerm = '';
   statusFilter = '';
+  userDomain = '';
 
   constructor(
     private decisionService: DecisionService,
-    public authService: AuthService
+    public authService: AuthService,
+    private route: ActivatedRoute
   ) {}
 
   ngOnInit(): void {
     this.loadDecisions();
+    // Get tenant from route params - this is the reliable source
+    this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
+    console.log('[DecisionList] userDomain from route:', this.userDomain);
   }
 
   loadDecisions(): void {

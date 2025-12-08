@@ -90,12 +90,9 @@ const PASSWORD_REQUIRES_NUMBER = true;
                   @if (passkeyAvailable) {
                     <button mat-raised-button color="primary" (click)="setupPasskey()"
                             [disabled]="isSettingUpCredential">
-                      @if (isSettingUpCredential && setupMethod === 'passkey') {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>fingerprint</mat-icon>
-                        Set up Passkey
-                      }
+                      <mat-spinner diameter="20" *ngIf="isSettingUpCredential && setupMethod === 'passkey'"></mat-spinner>
+                      <mat-icon *ngIf="!(isSettingUpCredential && setupMethod === 'passkey')">fingerprint</mat-icon>
+                      <span *ngIf="!(isSettingUpCredential && setupMethod === 'passkey')">Set up Passkey</span>
                     </button>
                   } @else {
                     <p class="not-available">
@@ -145,12 +142,9 @@ const PASSWORD_REQUIRES_NUMBER = true;
                     </p>
                     <button mat-raised-button color="accent" type="submit"
                             [disabled]="passwordForm.invalid || isSettingUpCredential">
-                      @if (isSettingUpCredential && setupMethod === 'password') {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>lock</mat-icon>
-                        Set Password
-                      }
+                      <mat-spinner diameter="20" *ngIf="isSettingUpCredential && setupMethod === 'password'"></mat-spinner>
+                      <mat-icon *ngIf="!(isSettingUpCredential && setupMethod === 'password')">lock</mat-icon>
+                      <span *ngIf="!(isSettingUpCredential && setupMethod === 'password')">Set Password</span>
                     </button>
                   </form>
                   @if (passwordError) {
@@ -192,8 +186,12 @@ const PASSWORD_REQUIRES_NUMBER = true;
                 <span class="value">
                   @if (user?.auth_type === 'webauthn') {
                     <mat-icon class="auth-icon">fingerprint</mat-icon> Passkey
-                  } @else {
+                  } @else if (user?.auth_type === 'local') {
+                    <mat-icon class="auth-icon">password</mat-icon> Password
+                  } @else if (user?.auth_type === 'oidc') {
                     <mat-icon class="auth-icon">login</mat-icon> SSO
+                  } @else {
+                    <mat-icon class="auth-icon">verified_user</mat-icon> {{ user?.auth_type || 'Not set' }}
                   }
                 </span>
               </div>
@@ -261,12 +259,9 @@ const PASSWORD_REQUIRES_NUMBER = true;
 
                 <button mat-raised-button color="primary" class="add-passkey-button"
                         (click)="addPasskey()" [disabled]="isAddingPasskey">
-                  @if (isAddingPasskey) {
-                    <mat-spinner diameter="20"></mat-spinner>
-                  } @else {
-                    <mat-icon>add</mat-icon>
-                    Add new passkey
-                  }
+                  <mat-spinner diameter="20" *ngIf="isAddingPasskey"></mat-spinner>
+                  <mat-icon *ngIf="!isAddingPasskey">add</mat-icon>
+                  <span *ngIf="!isAddingPasskey">Add new passkey</span>
                 </button>
               }
             </mat-card-content>
@@ -644,10 +639,28 @@ export class ProfileComponent implements OnInit {
           this.pendingDomain = params['pending'] === '1';
 
           // Check if passkey is available on this device
-          // Per passkeys.dev best practices
+          // We check both platform authenticator AND general WebAuthn support
+          // Even if platform auth isn't available, users might have security keys
           this.checkingPasskeySupport = true;
-          this.passkeyAvailable = await this.webAuthnService.isPlatformAuthenticatorAvailable();
+
+          // First check if WebAuthn is supported at all
+          const webAuthnSupported = this.webAuthnService.isWebAuthnSupported();
+          console.log('[Profile] WebAuthn supported:', webAuthnSupported);
+
+          if (webAuthnSupported) {
+            // Check for platform authenticator (Touch ID, Face ID, etc.)
+            const platformAvailable = await this.webAuthnService.isPlatformAuthenticatorAvailable();
+            console.log('[Profile] Platform authenticator available:', platformAvailable);
+
+            // Allow passkey registration if WebAuthn is supported
+            // (users can use security keys even without platform authenticator)
+            this.passkeyAvailable = webAuthnSupported;
+          } else {
+            this.passkeyAvailable = false;
+          }
+
           this.checkingPasskeySupport = false;
+          console.log('[Profile] Final passkeyAvailable:', this.passkeyAvailable);
         }
       });
     }
@@ -752,11 +765,18 @@ export class ProfileComponent implements OnInit {
       next: () => {
         this.isSettingUpCredential = false;
         this.setupMethod = null;
-        this.snackBar.open('Passkey created successfully! Redirecting...', 'Close', { duration: 2000 });
+
+        // Show success message with longer duration
+        this.snackBar.open('Passkey created successfully! You can now sign in with your passkey.', 'Close', { duration: 4000 });
 
         // Refresh user to update has_passkey status
         this.authService.loadCurrentUser().subscribe(() => {
-          setTimeout(() => this.redirectAfterSetup(), 1500);
+          // Redirect to login page with success message so user can test their new passkey
+          setTimeout(() => {
+            this.router.navigate([`/${this.user?.sso_domain}/login`], {
+              queryParams: { passkey_setup: 'success' }
+            });
+          }, 2000);
         });
       },
       error: (err) => {

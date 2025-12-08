@@ -31,6 +31,105 @@ def is_master_account():
     return session.get('is_master', False)
 
 
+def validate_setup_token():
+    """
+    Validate a setup token for credential setup during incomplete account registration.
+
+    Returns:
+        tuple: (user, error_message) - user object if valid, None and error message if invalid
+
+    Security Note:
+        Setup tokens are issued during passkey-preference signup to allow credential setup
+        without granting full session access. This prevents account hijacking if users
+        don't complete the setup process.
+    """
+    from models import User
+    from datetime import datetime
+
+    # Check for setup token in session
+    setup_token = session.get('setup_token')
+    setup_user_id = session.get('setup_user_id')
+    setup_expires = session.get('setup_expires')
+
+    if not setup_token or not setup_user_id or not setup_expires:
+        return None, 'No setup token found'
+
+    # Check if token has expired (30 minute window)
+    try:
+        expires_at = datetime.fromisoformat(setup_expires)
+        if datetime.utcnow() > expires_at:
+            # Clear expired setup session
+            session.pop('setup_token', None)
+            session.pop('setup_user_id', None)
+            session.pop('setup_expires', None)
+            return None, 'Setup token has expired. Please start signup again.'
+    except (ValueError, TypeError):
+        return None, 'Invalid setup token'
+
+    # Verify user exists and is in incomplete state
+    user = User.query.get(setup_user_id)
+    if not user:
+        return None, 'User not found'
+
+    # User should not have any credentials yet (incomplete state)
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        # User already has credentials - setup is complete
+        # Clear setup token and require normal login
+        session.pop('setup_token', None)
+        session.pop('setup_user_id', None)
+        session.pop('setup_expires', None)
+        return None, 'Account setup already complete. Please log in.'
+
+    return user, None
+
+
+def setup_token_required(f):
+    """
+    Decorator for endpoints that can be accessed with a setup token.
+    Allows incomplete accounts to set up their first credential.
+
+    The decorated function will have g.setup_user set if authenticated via setup token.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user, error = validate_setup_token()
+        if error:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': error, 'setup_expired': True}), 401
+            return redirect('/')
+
+        g.setup_user = user
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def complete_setup_and_login(user):
+    """
+    Complete the setup process and convert setup token to full session.
+    Called after user successfully creates their first credential.
+    """
+    from models import db
+    from datetime import datetime
+
+    # Clear setup token
+    session.pop('setup_token', None)
+    session.pop('setup_user_id', None)
+    session.pop('setup_expires', None)
+
+    # Create full session
+    session['user_id'] = user.id
+    session.permanent = True
+
+    # Update last login
+    user.last_login = datetime.utcnow()
+    db.session.commit()
+
+    logger.info(f"Setup completed for user {user.email} - full session created")
+
+
 def login_required(f):
     """Decorator to require authentication for a route."""
     @wraps(f)

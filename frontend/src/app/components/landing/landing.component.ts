@@ -10,6 +10,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
+import { AuthService } from '../../services/auth.service';
 
 type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
@@ -48,7 +49,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
             } @else if (currentView === 'access_request') {
               Request Access
             } @else {
-              Get Started
+              Get Started or Sign In
             }
           </mat-card-title>
           <mat-card-subtitle>
@@ -85,12 +86,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
               <button mat-raised-button color="primary" type="submit"
                       [disabled]="emailForm.invalid || isLoading" class="full-width">
-                @if (isLoading) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  Continue
-                  <mat-icon>arrow_forward</mat-icon>
-                }
+                <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                <span *ngIf="!isLoading">Continue</span>
+                <mat-icon *ngIf="!isLoading">arrow_forward</mat-icon>
               </button>
             </form>
           }
@@ -142,26 +140,21 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
               <button mat-raised-button color="primary" type="submit"
                       [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && usePasswordSignup && signupForm.get('password')?.value?.length < 8)" class="full-width">
-                @if (isLoading) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else if (tenantStatus?.email_verification_required === false) {
-                  <mat-icon>person_add</mat-icon>
-                  Create Account
-                } @else {
-                  <mat-icon>mail</mat-icon>
-                  Send Verification Email
-                }
+                <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                <ng-container *ngIf="!isLoading">
+                  <mat-icon *ngIf="tenantStatus?.email_verification_required === false">person_add</mat-icon>
+                  <mat-icon *ngIf="tenantStatus?.email_verification_required !== false">mail</mat-icon>
+                  <span *ngIf="tenantStatus?.email_verification_required === false">Create Account</span>
+                  <span *ngIf="tenantStatus?.email_verification_required !== false">Send Verification Email</span>
+                </ng-container>
               </button>
 
               @if (tenantStatus?.email_verification_required === false) {
                 <button mat-button type="button" class="password-toggle" (click)="togglePasswordSignup()">
-                  @if (!usePasswordSignup) {
-                    <mat-icon>password</mat-icon>
-                    I prefer to use a password
-                  } @else {
-                    <mat-icon>fingerprint</mat-icon>
-                    Use passkey instead (recommended)
-                  }
+                  <mat-icon *ngIf="!usePasswordSignup">password</mat-icon>
+                  <mat-icon *ngIf="usePasswordSignup">fingerprint</mat-icon>
+                  <span *ngIf="!usePasswordSignup">I prefer to use a password</span>
+                  <span *ngIf="usePasswordSignup">Use passkey instead (recommended)</span>
                 </button>
               }
             </form>
@@ -188,14 +181,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
               <div class="verification-actions">
                 <button mat-stroked-button (click)="resendVerification()" [disabled]="isLoading || resendCooldown > 0">
-                  @if (resendCooldown > 0) {
-                    Resend in {{ resendCooldown }}s
-                  } @else if (isLoading) {
-                    <mat-spinner diameter="16"></mat-spinner>
-                  } @else {
-                    <mat-icon>refresh</mat-icon>
-                    Resend Email
-                  }
+                  <span *ngIf="resendCooldown > 0">Resend in {{ resendCooldown }}s</span>
+                  <mat-spinner diameter="16" *ngIf="resendCooldown === 0 && isLoading"></mat-spinner>
+                  <mat-icon *ngIf="resendCooldown === 0 && !isLoading">refresh</mat-icon>
+                  <span *ngIf="resendCooldown === 0 && !isLoading">Resend Email</span>
                 </button>
               </div>
 
@@ -248,12 +237,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
 
               <button mat-raised-button color="primary" type="submit"
                       [disabled]="accessRequestForm.invalid || isLoading" class="full-width">
-                @if (isLoading) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  <mat-icon>mail</mat-icon>
-                  Verify Email & Request Access
-                }
+                <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                <mat-icon *ngIf="!isLoading">mail</mat-icon>
+                <span *ngIf="!isLoading">Verify Email & Request Access</span>
               </button>
             </form>
 
@@ -537,7 +523,8 @@ export class LandingComponent implements OnInit {
     private fb: FormBuilder,
     private http: HttpClient,
     private router: Router,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private authService: AuthService
   ) {
     this.emailForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]]
@@ -641,20 +628,31 @@ export class LandingComponent implements OnInit {
         auth_preference: this.usePasswordSignup ? 'password' : 'passkey'
       }).subscribe({
         next: (response) => {
-          this.isLoading = false;
-          // Parse redirect URL to handle query parameters properly
-          const redirectUrl = response.redirect || `/${this.tenantDomain}`;
-          const [path, queryString] = redirectUrl.split('?');
-          if (queryString) {
-            const queryParams: { [key: string]: string } = {};
-            queryString.split('&').forEach(param => {
-              const [key, value] = param.split('=');
-              queryParams[key] = value;
-            });
-            this.router.navigate([path], { queryParams });
-          } else {
-            this.router.navigate([path]);
-          }
+          // Load the current user before navigating so guards know we're authenticated
+          this.authService.loadCurrentUser().subscribe({
+            next: () => {
+              this.isLoading = false;
+              // Parse redirect URL to handle query parameters properly
+              const redirectUrl = response.redirect || `/${this.tenantDomain}`;
+              const [path, queryString] = redirectUrl.split('?');
+              if (queryString) {
+                const queryParams: { [key: string]: string } = {};
+                queryString.split('&').forEach(param => {
+                  const [key, value] = param.split('=');
+                  queryParams[key] = value;
+                });
+                this.router.navigate([path], { queryParams });
+              } else {
+                this.router.navigate([path]);
+              }
+            },
+            error: () => {
+              // If loading user fails, still try to navigate (session should be set)
+              this.isLoading = false;
+              const redirectUrl = response.redirect || `/${this.tenantDomain}`;
+              this.router.navigate([redirectUrl]);
+            }
+          });
         },
         error: (err) => {
           this.isLoading = false;

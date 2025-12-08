@@ -201,3 +201,65 @@ You are receiving this because you subscribed to decision update notifications.
         """
 
         send_email(email_config, subscriber.email, subject, html_content, text_content)
+
+
+def send_setup_token_email(email_config, user_name, user_email, setup_url, expires_in_hours, app_name="Architecture Decisions"):
+    """Send a setup token email to a user so they can set up their login credentials."""
+    subject = f"Set Up Your {app_name} Account"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">Welcome to {app_name}!</h2>
+
+            <p>Hi {user_name},</p>
+
+            <p>Your account has been approved! Please click the button below to set up your login credentials (passkey or password).</p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{setup_url}"
+                   style="display: inline-block; background-color: #3f51b5; color: white; padding: 14px 28px;
+                          text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    Set Up Your Account
+                </a>
+            </div>
+
+            <p style="color: #666; font-size: 14px;">
+                <strong>Important:</strong> This link will expire in <strong>{expires_in_hours} hours</strong>.
+            </p>
+
+            <p style="color: #666; font-size: 14px;">
+                If the button doesn't work, copy and paste this link into your browser:
+            </p>
+            <p style="background-color: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all; font-size: 13px;">
+                {setup_url}
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                If you didn't request access to {app_name}, you can safely ignore this email.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+Welcome to {app_name}!
+
+Hi {user_name},
+
+Your account has been approved! Please use the link below to set up your login credentials (passkey or password).
+
+Set Up Your Account:
+{setup_url}
+
+Important: This link will expire in {expires_in_hours} hours.
+
+---
+If you didn't request access to {app_name}, you can safely ignore this email.
+    """
+
+    return send_email(email_config, user_email, subject, html_content, text_content)

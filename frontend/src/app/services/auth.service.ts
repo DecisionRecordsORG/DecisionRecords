@@ -53,6 +53,16 @@ export class AuthService {
     return !user.has_passkey && !user.has_password;
   }
 
+  /**
+   * Check if user is in setup mode (completing first credential setup after signup).
+   * Setup mode users have limited access - only profile page for credential setup.
+   */
+  get isInSetupMode(): boolean {
+    if (this.isMasterAccount) return false;
+    const user = this.currentUser?.user as any;
+    return user?.setup_mode === true;
+  }
+
   loadCurrentUser(): Observable<CurrentUser | null> {
     this.isLoadingSubject.next(true);
     return this.http.get<User | MasterAccount>(`${this.apiUrl}/user/me`).pipe(

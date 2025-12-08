@@ -2,12 +2,19 @@
 # Quick redeploy script for Architecture Decisions application
 # This script builds, pushes, and redeploys the container with the new image
 #
-# Usage: ./scripts/redeploy.sh
+# Usage: ./scripts/redeploy.sh [patch|minor|major]
+#
+# Arguments:
+#   patch - Bump patch version (1.0.0 -> 1.0.1) for bug fixes
+#   minor - Bump minor version (1.0.0 -> 1.1.0) for new features
+#   major - Bump major version (1.0.0 -> 2.0.0) for breaking changes
+#   (none) - No version bump, just redeploy
 #
 # Prerequisites:
 # - Azure CLI installed and logged in (az login)
 # - Docker running
 # - Git changes committed (enforced by this script)
+# - CLOUDFLARE_API_TOKEN environment variable set (optional, for cache purge)
 
 set -e
 
@@ -17,6 +24,12 @@ CONTAINER_NAME="adr-app-eu"
 REGISTRY_NAME="adrregistry2024eu"
 IMAGE_NAME="architecture-decisions"
 GATEWAY_NAME="adr-appgateway"
+
+# Cloudflare configuration
+CLOUDFLARE_ZONE_ID="592b5c760ee2d37cabc0bcba764693ea"
+
+# Version bump type (optional argument)
+VERSION_BUMP="${1:-}"
 
 # Colors
 RED='\033[0;31m'
@@ -29,6 +42,29 @@ log() { echo -e "${BLUE}[INFO]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+
+# Bump version if requested
+bump_version() {
+    if [[ -n "$VERSION_BUMP" ]]; then
+        case "$VERSION_BUMP" in
+            patch|minor|major)
+                log "Bumping version ($VERSION_BUMP)..."
+                ./scripts/version-bump.sh "$VERSION_BUMP"
+
+                # Commit the version bump
+                local new_version=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
+                git add version.py
+                git commit -m "Bump version to $new_version"
+                success "Version bumped to $new_version"
+                ;;
+            *)
+                error "Invalid version bump type: $VERSION_BUMP. Use patch, minor, or major."
+                ;;
+        esac
+    else
+        log "No version bump requested"
+    fi
+}
 
 # Check for uncommitted changes (excluding local settings)
 check_git_status() {
@@ -158,12 +194,37 @@ show_logs() {
     echo "---"
 }
 
+# Purge Cloudflare cache
+purge_cloudflare_cache() {
+    if [[ -z "$CLOUDFLARE_API_TOKEN" ]]; then
+        warn "CLOUDFLARE_API_TOKEN not set. Skipping cache purge."
+        warn "Set it with: export CLOUDFLARE_API_TOKEN='your-token'"
+        return 0
+    fi
+
+    log "Purging Cloudflare cache..."
+
+    local response=$(curl -s -X POST \
+        "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+        -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        --data '{"purge_everything":true}')
+
+    # Check if successful
+    if echo "$response" | grep -q '"success":true'; then
+        success "Cloudflare cache purged successfully"
+    else
+        warn "Failed to purge Cloudflare cache: $response"
+    fi
+}
+
 # Main
 main() {
     echo ""
     log "=== Architecture Decisions Redeploy Script ==="
     echo ""
 
+    bump_version
     check_git_status
     check_azure_login
     build_image
@@ -171,6 +232,7 @@ main() {
     redeploy_container
     wait_for_container
     update_gateway
+    purge_cloudflare_cache
     show_logs
 
     echo ""

@@ -58,12 +58,9 @@ import { AuthService } from '../../services/auth.service';
 
             <button mat-raised-button color="primary" type="submit"
                     [disabled]="loginForm.invalid || isLoading" class="full-width">
-              @if (isLoading) {
-                <mat-spinner diameter="20"></mat-spinner>
-              } @else {
-                <mat-icon>login</mat-icon>
-                Sign In
-              }
+              <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+              <mat-icon *ngIf="!isLoading">login</mat-icon>
+              <span *ngIf="!isLoading">Sign In</span>
             </button>
           </form>
 

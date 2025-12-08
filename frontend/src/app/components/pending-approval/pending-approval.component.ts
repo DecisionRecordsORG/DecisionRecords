@@ -61,12 +61,9 @@ interface DomainStatus {
           <div class="status-check">
             <p>Last checked: {{ lastChecked | date:'medium' }}</p>
             <button mat-raised-button color="primary" (click)="checkStatus()" [disabled]="isChecking">
-              @if (isChecking) {
-                <mat-spinner diameter="20"></mat-spinner>
-              } @else {
-                <mat-icon>refresh</mat-icon>
-                Check Status
-              }
+              <mat-spinner diameter="20" *ngIf="isChecking"></mat-spinner>
+              <mat-icon *ngIf="!isChecking">refresh</mat-icon>
+              <span *ngIf="!isChecking">Check Status</span>
             </button>
           </div>
 

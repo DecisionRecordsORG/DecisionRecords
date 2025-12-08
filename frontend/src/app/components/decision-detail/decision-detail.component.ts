@@ -224,12 +224,9 @@ import { Observable, map, startWith } from 'rxjs';
                   <div class="form-actions">
                     <button mat-raised-button color="primary" type="submit"
                             [disabled]="form.invalid || isSaving">
-                      @if (isSaving) {
-                        <mat-spinner diameter="20"></mat-spinner>
-                      } @else {
-                        <mat-icon>save</mat-icon>
-                        {{ isNew ? 'Create Decision' : 'Save Changes' }}
-                      }
+                      <mat-spinner diameter="20" *ngIf="isSaving"></mat-spinner>
+                      <mat-icon *ngIf="!isSaving">save</mat-icon>
+                      <span *ngIf="!isSaving">{{ isNew ? 'Create Decision' : 'Save Changes' }}</span>
                     </button>
 
                     @if (!isNew) {
@@ -590,7 +587,8 @@ export class DecisionDetailComponent implements OnInit {
     );
 
     const id = this.route.snapshot.params['id'];
-    if (id === 'new') {
+    // Check if this is a new decision - either no id param (route is /decision/new) or id is undefined
+    if (!id || id === 'new') {
       this.isNew = true;
       this.isLoading = false;
       if (this.authService.isMasterAccount) {

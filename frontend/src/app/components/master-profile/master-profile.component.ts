@@ -112,12 +112,9 @@ import { MasterAccount } from '../../models/decision.model';
 
               <button mat-raised-button color="primary" type="submit"
                       [disabled]="passwordForm.invalid || isChangingPassword">
-                @if (isChangingPassword) {
-                  <mat-spinner diameter="20"></mat-spinner>
-                } @else {
-                  <mat-icon>save</mat-icon>
-                  Change Password
-                }
+                <mat-spinner diameter="20" *ngIf="isChangingPassword"></mat-spinner>
+                <mat-icon *ngIf="!isChangingPassword">save</mat-icon>
+                <span *ngIf="!isChangingPassword">Change Password</span>
               </button>
             </form>
           </mat-card-content>

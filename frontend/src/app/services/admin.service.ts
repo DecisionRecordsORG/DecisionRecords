@@ -115,4 +115,13 @@ export class AdminService {
   rejectAccessRequest(requestId: number, reason?: string): Observable<{ message: string; request: AccessRequest }> {
     return this.http.post<{ message: string; request: AccessRequest }>(`${this.apiUrl}/access-requests/${requestId}/reject`, { reason });
   }
+
+  // Setup Links
+  generateSetupLink(userId: number): Observable<{ message: string; setup_url: string; token: string; expires_at: string; hours_valid: number }> {
+    return this.http.post<{ message: string; setup_url: string; token: string; expires_at: string; hours_valid: number }>(`${this.apiUrl}/users/${userId}/setup-link`, {});
+  }
+
+  sendSetupEmail(userId: number): Observable<{ message: string; setup_url: string; expires_at: string; hours_valid: number }> {
+    return this.http.post<{ message: string; setup_url: string; expires_at: string; hours_valid: number }>(`${this.apiUrl}/users/${userId}/send-setup-email`, {});
+  }
 }

@@ -23,28 +23,87 @@ export class WebAuthnService {
 
   /**
    * Check if WebAuthn is supported in the browser
+   * Uses multiple detection methods for robustness
+   * See: https://github.com/MasterKale/SimpleWebAuthn
+   * See: https://passkeys.dev/docs/tools-libraries/libraries/
    */
   isWebAuthnSupported(): boolean {
-    return !!(
-      window.PublicKeyCredential &&
-      typeof window.PublicKeyCredential === 'function'
-    );
+    // First check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      console.log('[WebAuthn] Not in browser environment (SSR)');
+      return false;
+    }
+
+    // Check for secure context (required for WebAuthn)
+    // WebAuthn only works on HTTPS or localhost
+    const isSecureContext = window.isSecureContext ??
+      (window.location.protocol === 'https:' ||
+       window.location.hostname === 'localhost' ||
+       window.location.hostname === '127.0.0.1');
+
+    // Check for PublicKeyCredential - try multiple approaches
+    // Some environments may expose it differently
+    const hasPublicKeyCredential =
+      (typeof window.PublicKeyCredential !== 'undefined') ||
+      (typeof PublicKeyCredential !== 'undefined');
+
+    const isFunction =
+      (typeof window.PublicKeyCredential === 'function') ||
+      (typeof PublicKeyCredential === 'function');
+
+    const supported = isSecureContext && hasPublicKeyCredential && isFunction;
+
+    console.log('[WebAuthn] Checking support:', {
+      isSecureContext,
+      protocol: window.location?.protocol,
+      hostname: window.location?.hostname,
+      hasPublicKeyCredential,
+      isFunction,
+      windowPublicKeyCredential: typeof window.PublicKeyCredential,
+      globalPublicKeyCredential: typeof PublicKeyCredential,
+      supported
+    });
+
+    return supported;
   }
 
   /**
    * Check if platform authenticator (Face ID, Touch ID, Windows Hello) is available
    * This determines if we can offer passkey registration
    * See: https://passkeys.dev/docs/use-cases/bootstrapping/
+   *
+   * Note: Even if this returns false, users might still be able to use security keys
+   * or cross-platform authenticators. We use this primarily for UI recommendations.
    */
   async isPlatformAuthenticatorAvailable(): Promise<boolean> {
     if (!this.isWebAuthnSupported()) {
+      console.log('[WebAuthn] WebAuthn not supported in this browser');
       return false;
     }
     try {
-      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-    } catch {
+      // Use window.PublicKeyCredential for consistency
+      const pkc = window.PublicKeyCredential || PublicKeyCredential;
+      if (typeof pkc.isUserVerifyingPlatformAuthenticatorAvailable === 'function') {
+        const available = await pkc.isUserVerifyingPlatformAuthenticatorAvailable();
+        console.log('[WebAuthn] Platform authenticator available:', available);
+        return available;
+      }
+      console.log('[WebAuthn] isUserVerifyingPlatformAuthenticatorAvailable not available');
+      return false;
+    } catch (error) {
+      console.error('[WebAuthn] Error checking platform authenticator:', error);
       return false;
     }
+  }
+
+  /**
+   * Check if any authenticator method is available (platform or cross-platform)
+   * This is more permissive - returns true if WebAuthn is supported at all
+   */
+  canAttemptPasskeyRegistration(): boolean {
+    const supported = this.isWebAuthnSupported();
+    console.log('[WebAuthn] Can attempt passkey registration:', supported);
+    return supported;
   }
 
   /**
@@ -56,10 +115,11 @@ export class WebAuthnService {
       return false;
     }
     try {
+      const pkc = window.PublicKeyCredential || PublicKeyCredential;
       // @ts-ignore - This is a newer API that TypeScript may not have types for
-      if (PublicKeyCredential.isConditionalMediationAvailable) {
+      if (pkc.isConditionalMediationAvailable) {
         // @ts-ignore
-        return await PublicKeyCredential.isConditionalMediationAvailable();
+        return await pkc.isConditionalMediationAvailable();
       }
       return false;
     } catch {
