@@ -582,6 +582,23 @@ def handle_error(error):
 - [ ] Review audit logs regularly
 - [ ] Monitor for suspicious patterns
 
+## Sanitized Endpoints Summary
+
+All user-facing API endpoints that accept input have been reviewed and sanitized:
+
+| Endpoint | Input Fields | Sanitization Applied |
+|----------|--------------|---------------------|
+| `POST /api/decisions` | title, context, decision, consequences | `sanitize_request_data` with schema |
+| `PUT /api/decisions/:id` | title, context, decision, consequences, status, change_reason | `sanitize_request_data` with schema |
+| `POST /api/auth/login` | email | `sanitize_email` |
+| `POST /api/auth/send-verification` | email, name, reason | `sanitize_email`, `sanitize_name`, `sanitize_text_field` |
+| `POST /api/auth/direct-signup` | email, name | `sanitize_email`, `sanitize_name` |
+| `POST /api/auth/access-request` | email, name, reason | `sanitize_email`, `sanitize_name`, `sanitize_text_field` |
+| `POST /api/admin/sso` | domain, provider_name, client_id, discovery_url | `sanitize_title` |
+| `PUT /api/admin/sso/:id` | provider_name, client_id, discovery_url | `sanitize_title` |
+| `POST/PUT /api/admin/email` | smtp_server, smtp_username, from_email, from_name | `sanitize_title`, `sanitize_email`, `sanitize_name` |
+| `POST/PUT /api/admin/email/system` | smtp_server, from_email, from_name | `sanitize_title`, `sanitize_email`, `sanitize_name` |
+
 ---
 
-*Last Updated: December 2024*
+*Last Updated: December 2024 (v1.4.0)*

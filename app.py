@@ -604,7 +604,8 @@ def api_tenant_login():
     log_security_event('auth', f"Tenant login attempt", severity='INFO')
 
     data = request.get_json()
-    email = data.get('email', '').lower().strip()
+    # Sanitize email input to prevent injection attacks
+    email = sanitize_email(data.get('email', ''))
     password = data.get('password', '')
 
     if not email or not password:
@@ -987,8 +988,21 @@ def api_update_decision(decision_id):
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
+    # Sanitize input data to prevent XSS attacks
+    sanitized, errors = sanitize_request_data(data, {
+        'title': {'type': 'title', 'max_length': 255},
+        'context': {'type': 'text', 'max_length': 50000},
+        'decision': {'type': 'text', 'max_length': 50000},
+        'consequences': {'type': 'text', 'max_length': 50000},
+        'status': {'type': 'string', 'max_length': 50},
+        'change_reason': {'type': 'text', 'max_length': 500},
+    })
+
+    if errors:
+        return jsonify({'error': errors[0]}), 400
+
     # Validate status if provided
-    if 'status' in data and data['status'] not in ArchitectureDecision.VALID_STATUSES:
+    if 'status' in sanitized and sanitized['status'] not in ArchitectureDecision.VALID_STATUSES:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(ArchitectureDecision.VALID_STATUSES)}'}), 400
 
     # Check if there are actual changes
@@ -997,7 +1011,7 @@ def api_update_decision(decision_id):
     old_status = decision.status
 
     for field in ['title', 'context', 'decision', 'status', 'consequences']:
-        if field in data and data[field] != getattr(decision, field):
+        if field in sanitized and sanitized[field] != getattr(decision, field):
             has_changes = True
             if field == 'status':
                 status_changed = True
@@ -1007,20 +1021,20 @@ def api_update_decision(decision_id):
         return jsonify(decision.to_dict_with_history())
 
     # Save current state to history before updating
-    change_reason = data.get('change_reason', None)
+    change_reason = sanitized.get('change_reason', None)
     save_history(decision, change_reason, g.current_user)
 
-    # Update fields
-    if 'title' in data:
-        decision.title = data['title']
-    if 'context' in data:
-        decision.context = data['context']
-    if 'decision' in data:
-        decision.decision = data['decision']
-    if 'status' in data:
-        decision.status = data['status']
-    if 'consequences' in data:
-        decision.consequences = data['consequences']
+    # Update fields with sanitized data
+    if 'title' in sanitized:
+        decision.title = sanitized['title']
+    if 'context' in sanitized:
+        decision.context = sanitized['context']
+    if 'decision' in sanitized:
+        decision.decision = sanitized['decision']
+    if 'status' in sanitized:
+        decision.status = sanitized['status']
+    if 'consequences' in sanitized:
+        decision.consequences = sanitized['consequences']
 
     # Handle infrastructure associations
     if 'infrastructure_ids' in data:
@@ -1189,27 +1203,33 @@ def api_create_sso_config():
         if not data.get(field):
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
+    # Sanitize inputs to prevent XSS attacks
+    domain = sanitize_title(data['domain'], max_length=255).lower()
+    provider_name = sanitize_title(data['provider_name'], max_length=100)
+    client_id = sanitize_title(data['client_id'], max_length=500)
+    discovery_url = sanitize_title(data['discovery_url'], max_length=1000)
+
     # Tenant admins can only create SSO for their own domain
     if not is_master_account():
-        if data['domain'].lower() != g.current_user.sso_domain:
+        if domain != g.current_user.sso_domain:
             return jsonify({'error': 'You can only configure SSO for your own domain'}), 403
 
     # Check if domain already exists
-    existing = SSOConfig.query.filter_by(domain=data['domain'].lower()).first()
+    existing = SSOConfig.query.filter_by(domain=domain).first()
     if existing:
         return jsonify({'error': 'SSO configuration for this domain already exists'}), 400
 
     # Validate discovery URL
-    oidc_config = get_oidc_config(data['discovery_url'])
+    oidc_config = get_oidc_config(discovery_url)
     if not oidc_config:
         return jsonify({'error': 'Invalid discovery URL or unable to reach SSO provider'}), 400
 
     config = SSOConfig(
-        domain=data['domain'].lower(),
-        provider_name=data['provider_name'],
-        client_id=data['client_id'],
-        client_secret=data['client_secret'],
-        discovery_url=data['discovery_url'],
+        domain=domain,
+        provider_name=provider_name,
+        client_id=client_id,
+        client_secret=data['client_secret'],  # Don't sanitize secrets - they may contain special chars
+        discovery_url=discovery_url,
         enabled=data.get('enabled', True)
     )
 
@@ -1232,18 +1252,20 @@ def api_update_sso_config(config_id):
 
     data = request.get_json()
 
+    # Sanitize inputs to prevent XSS attacks
     if 'provider_name' in data:
-        config.provider_name = data['provider_name']
+        config.provider_name = sanitize_title(data['provider_name'], max_length=100)
     if 'client_id' in data:
-        config.client_id = data['client_id']
+        config.client_id = sanitize_title(data['client_id'], max_length=500)
     if 'client_secret' in data and data['client_secret']:
-        config.client_secret = data['client_secret']
+        config.client_secret = data['client_secret']  # Don't sanitize secrets
     if 'discovery_url' in data:
-        # Validate new discovery URL
-        oidc_config = get_oidc_config(data['discovery_url'])
+        # Sanitize and validate new discovery URL
+        sanitized_url = sanitize_title(data['discovery_url'], max_length=1000)
+        oidc_config = get_oidc_config(sanitized_url)
         if not oidc_config:
             return jsonify({'error': 'Invalid discovery URL or unable to reach SSO provider'}), 400
-        config.discovery_url = data['discovery_url']
+        config.discovery_url = sanitized_url
     if 'enabled' in data:
         config.enabled = bool(data['enabled'])
 
@@ -1291,6 +1313,15 @@ def api_save_email_config():
         if not data.get(field):
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
+    # Sanitize inputs to prevent XSS attacks
+    smtp_server = sanitize_title(data['smtp_server'], max_length=255)
+    smtp_username = sanitize_title(data['smtp_username'], max_length=255)
+    from_email_sanitized = sanitize_email(data['from_email'])
+    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+
+    if not from_email_sanitized:
+        return jsonify({'error': 'Invalid from_email address'}), 400
+
     config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain).first()
 
     if not config:
@@ -1299,24 +1330,24 @@ def api_save_email_config():
 
         config = EmailConfig(
             domain=g.current_user.sso_domain,
-            smtp_server=data['smtp_server'],
+            smtp_server=smtp_server,
             smtp_port=int(data['smtp_port']),
-            smtp_username=data['smtp_username'],
-            smtp_password=data['smtp_password'],
-            from_email=data['from_email'],
-            from_name=data.get('from_name', 'Architecture Decisions'),
+            smtp_username=smtp_username,
+            smtp_password=data['smtp_password'],  # Don't sanitize passwords
+            from_email=from_email_sanitized,
+            from_name=from_name,
             use_tls=data.get('use_tls', True),
             enabled=data.get('enabled', True)
         )
         db.session.add(config)
     else:
-        config.smtp_server = data['smtp_server']
+        config.smtp_server = smtp_server
         config.smtp_port = int(data['smtp_port'])
-        config.smtp_username = data['smtp_username']
+        config.smtp_username = smtp_username
         if data.get('smtp_password'):
-            config.smtp_password = data['smtp_password']
-        config.from_email = data['from_email']
-        config.from_name = data.get('from_name', 'Architecture Decisions')
+            config.smtp_password = data['smtp_password']  # Don't sanitize passwords
+        config.from_email = from_email_sanitized
+        config.from_name = from_name
         config.use_tls = data.get('use_tls', True)
         config.enabled = data.get('enabled', True)
 
@@ -1397,6 +1428,14 @@ def api_save_system_email_config():
         if not data.get(field):
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
+    # Sanitize inputs to prevent XSS attacks
+    smtp_server = sanitize_title(data['smtp_server'], max_length=255)
+    from_email_sanitized = sanitize_email(data['from_email'])
+    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+
+    if not from_email_sanitized:
+        return jsonify({'error': 'Invalid from_email address'}), 400
+
     # Validate Key Vault credentials are available
     username, password = keyvault_client.get_smtp_credentials()
     if not username or not password:
@@ -1408,13 +1447,13 @@ def api_save_system_email_config():
         config = EmailConfig(domain='system')
         db.session.add(config)
 
-    config.smtp_server = data['smtp_server']
+    config.smtp_server = smtp_server
     config.smtp_port = int(data['smtp_port'])
     # Store placeholder values - actual credentials come from Key Vault
     config.smtp_username = 'from-keyvault'
     config.smtp_password = 'from-keyvault'
-    config.from_email = data['from_email']
-    config.from_name = data.get('from_name', 'Architecture Decisions')
+    config.from_email = from_email_sanitized
+    config.from_name = from_name
     config.use_tls = bool(data.get('use_tls', True))
     config.enabled = bool(data.get('enabled', True))
 
@@ -1750,10 +1789,11 @@ def api_send_verification():
     """Send email verification link."""
     data = request.get_json()
 
-    email = data.get('email', '').lower().strip()
-    name = data.get('name', '').strip()
+    # Sanitize inputs to prevent XSS and injection attacks
+    email = sanitize_email(data.get('email', ''))
+    name = sanitize_name(data.get('name', ''), max_length=255)
     purpose = data.get('purpose', 'signup')  # signup, access_request, login
-    reason = data.get('reason', '')  # For access requests
+    reason = sanitize_text_field(data.get('reason', ''), max_length=1000)  # For access requests
 
     if not email:
         return jsonify({'error': 'Email is required'}), 400
@@ -1931,8 +1971,9 @@ def api_direct_signup():
         return jsonify({'error': 'Email verification is required. Please use the standard signup flow.'}), 403
 
     data = request.get_json()
-    email = data.get('email', '').lower().strip()
-    name = data.get('name', '').strip()
+    # Sanitize inputs to prevent XSS and injection attacks
+    email = sanitize_email(data.get('email', ''))
+    name = sanitize_name(data.get('name', ''), max_length=255)
     password = data.get('password', '').strip() if data.get('password') else None
     auth_preference = data.get('auth_preference', 'passkey')  # 'passkey' or 'password'
 
@@ -2226,10 +2267,11 @@ def api_submit_access_request():
     """Submit an access request to join a tenant."""
     data = request.get_json()
 
-    email = data.get('email', '').lower()
-    name = data.get('name')
-    reason = data.get('reason', '')
-    domain = data.get('domain', '').lower()
+    # Sanitize inputs to prevent XSS and injection attacks
+    email = sanitize_email(data.get('email', ''))
+    name = sanitize_name(data.get('name', ''), max_length=255)
+    reason = sanitize_text_field(data.get('reason', ''), max_length=1000)
+    domain = data.get('domain', '').lower().strip()
 
     if not email or not name:
         return jsonify({'error': 'Email and name are required'}), 400

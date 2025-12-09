@@ -421,18 +421,56 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <!-- Core Idea -->
       <section class="section core-section">
         <div class="container">
-          <div class="core-idea">
-            <h2>Our Core Idea</h2>
-            <p class="big-statement">
-              Architecture decisions should be treated as <strong>first-class records</strong>.
-            </p>
-            <p>
-              Just like financial records, legal documents, or policies — architecture decisions
-              deserve structure, traceability, and survival across personnel and technology changes.
-            </p>
-            <blockquote>
-              "Well-documented decisions enable better future decisions."
-            </blockquote>
+          <div class="core-section-grid">
+            <div class="core-idea">
+              <h2>Our Core Idea</h2>
+              <p class="big-statement">
+                Architecture decisions should be treated as <strong>first-class records</strong>.
+              </p>
+              <p>
+                Just like financial records, legal documents, or policies — architecture decisions
+                deserve structure, traceability, and survival across personnel and technology changes.
+              </p>
+              <blockquote>
+                "Well-documented decisions enable better future decisions."
+              </blockquote>
+            </div>
+            <div class="security-commitment">
+              <h2>Security & Trust</h2>
+              <p class="security-intro">
+                Your architecture decisions contain sensitive strategic information. We take security seriously.
+              </p>
+              <div class="security-features">
+                <div class="security-item">
+                  <mat-icon>apartment</mat-icon>
+                  <div>
+                    <strong>Tenant Isolation</strong>
+                    <span>Complete data separation between organizations</span>
+                  </div>
+                </div>
+                <div class="security-item">
+                  <mat-icon>lock</mat-icon>
+                  <div>
+                    <strong>Encryption at Rest</strong>
+                    <span>All data encrypted using industry standards</span>
+                  </div>
+                </div>
+                <div class="security-item">
+                  <mat-icon>fingerprint</mat-icon>
+                  <div>
+                    <strong>Passwordless Auth</strong>
+                    <span>WebAuthn/Passkeys for phishing-resistant login</span>
+                  </div>
+                </div>
+                <div class="security-item">
+                  <mat-icon>eu</mat-icon>
+                  <div>
+                    <strong>EU Data Residency</strong>
+                    <span>Data stored in European Azure datacenters</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -477,7 +515,13 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             Architecture-Decisions.org is an open initiative to make architectural decision-making
             transparent, durable, and reusable.
           </p>
-          <small>&copy; {{ currentYear }} Architecture-Decisions.org</small>
+          <div class="footer-bottom">
+            <small>&copy; {{ currentYear }} Architecture-Decisions.org</small>
+            <div class="footer-meta">
+              <img src="/assets/made-sweden-label.jpg.png" alt="Made in Sweden" class="sweden-badge" />
+              <span class="version">v{{ version }}</span>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
@@ -1102,6 +1146,72 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       border-radius: 0 8px 8px 0;
     }
 
+    .core-section-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: start;
+    }
+
+    .security-commitment {
+      text-align: left;
+    }
+
+    .security-commitment h2 {
+      text-align: left;
+      margin-bottom: 16px;
+    }
+
+    .security-intro {
+      color: #94a3b8;
+      font-size: 1rem;
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    .security-features {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .security-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 20px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .security-item mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      color: #60a5fa;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .security-item div {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .security-item strong {
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .security-item span {
+      color: #94a3b8;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+
     /* Audience Section */
     .audience-section {
       background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
@@ -1180,6 +1290,32 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #475569;
     }
 
+    .footer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .footer-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .sweden-badge {
+      height: 24px;
+      width: auto;
+      opacity: 0.8;
+    }
+
+    .version {
+      color: #64748b;
+      font-size: 0.85rem;
+      font-family: monospace;
+    }
+
     /* Responsive */
     @media (max-width: 900px) {
       .hero-grid {
@@ -1202,6 +1338,16 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       .decisions-content {
         grid-template-columns: 1fr;
         gap: 48px;
+      }
+
+      .core-section-grid {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .security-commitment h2,
+      .core-idea {
+        text-align: center;
       }
 
       .browser-frame {
@@ -1264,6 +1410,7 @@ export class HomepageComponent implements OnInit {
   resendCooldown = 0;
   usePasswordSignup = false;
   currentYear = new Date().getFullYear();
+  version = '1.4.0';
 
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -1298,6 +1445,15 @@ export class HomepageComponent implements OnInit {
         this.error = 'Invalid verification link. Please try again.';
       } else if (params['error'] === 'expired_token') {
         this.error = 'Verification link has expired. Please request a new one.';
+      }
+    });
+
+    // Fetch version from API
+    this.http.get<{ version: string }>('/api/version').subscribe({
+      next: (data) => {
+        if (data.version) {
+          this.version = data.version;
+        }
       }
     });
   }
