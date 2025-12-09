@@ -54,16 +54,29 @@ import { AuthService } from '../../services/auth.service';
         } @else if (user) {
           <mat-card-header>
             <mat-card-title>
-              <mat-icon>person_add</mat-icon>
-              Set Up Your Account
+              @if (isRecovery) {
+                <mat-icon>lock_reset</mat-icon>
+                Reset Your Credentials
+              } @else {
+                <mat-icon>person_add</mat-icon>
+                Set Up Your Account
+              }
             </mat-card-title>
           </mat-card-header>
           <mat-card-content>
             <p class="welcome-message">
-              Welcome, <strong>{{ user.name }}</strong>!
+              @if (isRecovery) {
+                Hi, <strong>{{ user.name }}</strong>
+              } @else {
+                Welcome, <strong>{{ user.name }}</strong>!
+              }
             </p>
             <p class="instruction">
-              Your account has been approved. Please set up your login credentials to continue.
+              @if (isRecovery) {
+                Choose a new login method to regain access to your account.
+              } @else {
+                Your account has been approved. Please set up your login credentials to continue.
+              }
             </p>
 
             <div class="setup-options">
@@ -268,6 +281,7 @@ export class AccountSetupComponent implements OnInit {
   showPasswordForm = false;
   settingUp = false;
   passwordForm: FormGroup;
+  isRecovery = false;  // Track if this is a recovery flow
 
   constructor(
     private route: ActivatedRoute,
@@ -300,6 +314,7 @@ export class AccountSetupComponent implements OnInit {
       next: (response) => {
         if (response.valid) {
           this.user = response.user;
+          this.isRecovery = response.is_recovery || false;
           this.isLoading = false;
         } else {
           this.handleError(response);
@@ -395,7 +410,10 @@ export class AccountSetupComponent implements OnInit {
           await this.http.post('/api/auth/setup-token/use', { token: this.token }).toPromise();
         }
 
-        this.snackBar.open('Passkey registered successfully! Redirecting to login...', 'Close', { duration: 3000 });
+        const successMsg = this.isRecovery
+          ? 'New passkey set up successfully! Redirecting to login...'
+          : 'Passkey registered successfully! Redirecting to login...';
+        this.snackBar.open(successMsg, 'Close', { duration: 3000 });
 
         // Refresh auth state
         this.authService.loadCurrentUser().subscribe();
@@ -422,7 +440,10 @@ export class AccountSetupComponent implements OnInit {
     // Use the setup-password endpoint which accepts token for auth
     this.http.post<any>('/api/auth/setup-password', { token: this.token, password }).subscribe({
       next: (response) => {
-        this.snackBar.open('Password set successfully! Redirecting to login...', 'Close', { duration: 3000 });
+        const successMsg = this.isRecovery
+          ? 'New password set successfully! Redirecting to login...'
+          : 'Password set successfully! Redirecting to login...';
+        this.snackBar.open(successMsg, 'Close', { duration: 3000 });
 
         // Refresh auth state
         this.authService.loadCurrentUser().subscribe();

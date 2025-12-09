@@ -31,7 +31,7 @@ interface UserStatus {
   has_password: boolean;
 }
 
-type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
+type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto-approved' | 'recovery' | 'resend-verification';
 
 @Component({
   selector: 'app-tenant-login',
@@ -64,6 +64,10 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
               Welcome back, {{ currentEmail }}
             } @else if (currentView === 'request-access') {
               Request access to join
+            } @else if (currentView === 'recovery') {
+              Reset your credentials
+            } @else if (currentView === 'resend-verification') {
+              Resend verification email
             } @else {
               Request submitted
             }
@@ -106,6 +110,13 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
                 <span *ngIf="!isLoading">Sign In</span>
               </button>
             </form>
+
+            <p class="resend-link">
+              <button mat-button (click)="showResendVerification()">
+                <mat-icon>mark_email_unread</mat-icon>
+                Didn't receive verification email?
+              </button>
+            </p>
           }
 
           <!-- Login View: Passkey first (default), Password as alternative -->
@@ -172,6 +183,77 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
                 <mat-icon>arrow_back</mat-icon>
                 Use different email
               </button>
+
+              <p class="recovery-link">
+                <button mat-button (click)="showRecovery()">
+                  <mat-icon>lock_reset</mat-icon>
+                  Forgot your credentials?
+                </button>
+              </p>
+            </div>
+          }
+
+          <!-- Recovery View -->
+          @if (currentView === 'recovery') {
+            <div class="recovery-section">
+              <div class="recovery-icon">
+                <mat-icon>lock_reset</mat-icon>
+              </div>
+              <p class="recovery-description">
+                Enter your email address and we'll send you a link to reset your credentials.
+              </p>
+
+              <form [formGroup]="recoveryForm" (ngSubmit)="requestRecovery()">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Email</mat-label>
+                  <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant">
+                  <mat-icon matPrefix>email</mat-icon>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="recoveryForm.invalid || isLoading" class="full-width">
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">send</mat-icon>
+                  <span *ngIf="!isLoading">Send Recovery Link</span>
+                </button>
+              </form>
+
+              <button mat-button class="back-button" (click)="goBack()">
+                <mat-icon>arrow_back</mat-icon>
+                Back to Sign In
+              </button>
+            </div>
+          }
+
+          <!-- Resend Verification View -->
+          @if (currentView === 'resend-verification') {
+            <div class="resend-section">
+              <div class="resend-icon">
+                <mat-icon>mark_email_unread</mat-icon>
+              </div>
+              <p class="resend-description">
+                Enter your email address and we'll send a new verification link. Links expire after 2 hours.
+              </p>
+
+              <form [formGroup]="resendForm" (ngSubmit)="resendVerification()">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Email</mat-label>
+                  <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant">
+                  <mat-icon matPrefix>email</mat-icon>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="resendForm.invalid || isLoading" class="full-width">
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">send</mat-icon>
+                  <span *ngIf="!isLoading">Resend Verification Link</span>
+                </button>
+              </form>
+
+              <button mat-button class="back-button" (click)="goBack()">
+                <mat-icon>arrow_back</mat-icon>
+                Back to Sign In
+              </button>
             </div>
           }
 
@@ -180,8 +262,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
             <div class="request-section">
               <p class="info-text">
                 <mat-icon>info</mat-icon>
-                You don't have an account with <strong>{{ tenant }}</strong> yet.
-                Request access from your organization's administrator.
+                <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access from your organization's administrator.</span>
               </p>
 
               <form [formGroup]="requestForm" (ngSubmit)="submitAccessRequest()">
@@ -227,6 +308,21 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
               <p>
                 Your access request has been sent to the administrator of <strong>{{ tenant }}</strong>.
                 You'll receive an email once your request is approved.
+              </p>
+              <button mat-raised-button color="primary" routerLink="/">
+                <mat-icon>home</mat-icon>
+                Back to Home
+              </button>
+            </div>
+          }
+
+          @if (currentView === 'auto-approved') {
+            <div class="request-sent-section">
+              <mat-icon class="success-icon">email</mat-icon>
+              <h3>Account Created!</h3>
+              <p>
+                Your account has been created for <strong>{{ tenant }}</strong>.
+                Check your email for a link to set up your login credentials.
               </p>
               <button mat-raised-button color="primary" routerLink="/">
                 <mat-icon>home</mat-icon>
@@ -401,6 +497,11 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
       width: 20px;
       height: 20px;
       color: #1976d2;
+      flex-shrink: 0;
+    }
+
+    .info-text span {
+      flex: 1;
     }
 
     .request-sent-section {
@@ -436,12 +537,74 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent';
       font-size: 16px;
       margin-top: 8px;
     }
+
+    .recovery-link {
+      margin-top: 24px;
+      text-align: center;
+    }
+
+    .recovery-link button {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .recovery-section {
+      text-align: center;
+    }
+
+    .recovery-icon {
+      margin-bottom: 16px;
+    }
+
+    .recovery-icon mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: #3f51b5;
+    }
+
+    .recovery-description {
+      color: #666;
+      margin-bottom: 24px;
+    }
+
+    .resend-section {
+      text-align: center;
+    }
+
+    .resend-icon {
+      margin-bottom: 16px;
+    }
+
+    .resend-icon mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: #ff9800;
+    }
+
+    .resend-description {
+      color: #666;
+      margin-bottom: 24px;
+    }
+
+    .resend-link {
+      margin-top: 16px;
+      text-align: center;
+    }
+
+    .resend-link button {
+      color: #666;
+      font-size: 14px;
+    }
   `]
 })
 export class TenantLoginComponent implements OnInit {
   emailForm: FormGroup;
   loginForm: FormGroup;
   requestForm: FormGroup;
+  recoveryForm: FormGroup;
+  resendForm: FormGroup;
 
   tenant = '';
   authConfig: TenantAuthConfig | null = null;
@@ -476,6 +639,14 @@ export class TenantLoginComponent implements OnInit {
       email: ['', [Validators.required, Validators.email]],
       name: ['', Validators.required],
       reason: ['']
+    });
+
+    this.recoveryForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]]
+    });
+
+    this.resendForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]]
     });
   }
 
@@ -630,15 +801,20 @@ export class TenantLoginComponent implements OnInit {
 
     const { email, name, reason } = this.requestForm.value;
 
-    this.http.post('/api/auth/access-request', {
+    this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string}>('/api/auth/access-request', {
       email,
       name,
       reason,
       domain: this.tenant
     }).subscribe({
-      next: () => {
+      next: (response) => {
         this.isLoading = false;
-        this.currentView = 'request-sent';
+        // Check if auto-approved (account created immediately)
+        if (response.auto_approved) {
+          this.currentView = 'auto-approved';
+        } else {
+          this.currentView = 'request-sent';
+        }
       },
       error: (err) => {
         this.isLoading = false;
@@ -650,8 +826,73 @@ export class TenantLoginComponent implements OnInit {
   goBack(): void {
     this.currentView = 'initial';
     this.error = '';
+    this.success = '';
     this.userStatus = null;
     this.showPasswordLogin = false;
     this.loginForm.reset();
+    this.recoveryForm.reset();
+    this.resendForm.reset();
+  }
+
+  showRecovery(): void {
+    this.currentView = 'recovery';
+    this.error = '';
+    this.success = '';
+    if (this.currentEmail) {
+      this.recoveryForm.patchValue({ email: this.currentEmail });
+    }
+  }
+
+  requestRecovery(): void {
+    if (this.recoveryForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.success = '';
+
+    const email = this.recoveryForm.value.email;
+
+    this.http.post<{ message: string }>('/api/auth/request-recovery', { email }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.success = response.message;
+      },
+      error: (err) => {
+        this.isLoading = false;
+        // Always show success message to prevent email enumeration
+        this.success = err.error?.message || 'If an account exists with this email, a recovery link has been sent.';
+      }
+    });
+  }
+
+  showResendVerification(): void {
+    this.currentView = 'resend-verification';
+    this.error = '';
+    this.success = '';
+    if (this.currentEmail) {
+      this.resendForm.patchValue({ email: this.currentEmail });
+    }
+  }
+
+  resendVerification(): void {
+    if (this.resendForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.success = '';
+
+    const email = this.resendForm.value.email;
+
+    this.http.post<{ message: string }>('/api/auth/resend-verification', { email }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.success = response.message;
+      },
+      error: (err) => {
+        this.isLoading = false;
+        // Always show success message to prevent email enumeration
+        this.success = err.error?.message || 'If a pending verification exists for this email, a new link has been sent.';
+      }
+    });
   }
 }

@@ -26,11 +26,21 @@ class KeyVaultClient:
         self._init_error = None
 
     def _initialize(self):
-        """Lazy initialization of Key Vault client."""
-        if self._initialized:
-            return self._init_error is None
+        """Lazy initialization of Key Vault client.
 
+        Re-attempts initialization if a previous attempt failed, since
+        Azure credentials may become available later (e.g., after Azure CLI login).
+        """
+        # If already successfully initialized, return True
+        if self._initialized and self._client is not None:
+            return True
+
+        # Reset state for retry
         self._initialized = True
+        self._init_error = None
+        self._client = None
+        self._credential = None
+
         try:
             self._credential = DefaultAzureCredential()
             self._client = SecretClient(vault_url=self.vault_url, credential=self._credential)
@@ -103,12 +113,18 @@ class KeyVaultClient:
         )
 
     def get_smtp_credentials(self):
-        """Get SMTP credentials from Key Vault."""
-        username = self.get_secret('smtp-username')
-        password = self.get_secret('smtp-password')
+        """
+        Get SMTP credentials from Key Vault or environment variables.
+
+        Priority:
+        1. Key Vault 'smtp-username' and 'smtp-password'
+        2. Environment variables 'SMTP_USERNAME' and 'SMTP_PASSWORD'
+        """
+        username = self.get_secret('smtp-username', fallback_env_var='SMTP_USERNAME')
+        password = self.get_secret('smtp-password', fallback_env_var='SMTP_PASSWORD')
 
         if not username or not password:
-            logger.warning("SMTP credentials not found in Key Vault")
+            logger.warning("SMTP credentials not found in Key Vault or environment variables")
             return None, None
 
         return username, password

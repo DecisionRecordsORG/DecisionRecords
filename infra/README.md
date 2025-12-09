@@ -2,6 +2,8 @@
 
 This folder contains Azure Resource Manager (ARM) templates for deploying the Architecture Decisions application infrastructure.
 
+**Production URL**: https://architecture-decisions.org
+
 ## Files
 
 ### `azure-deploy-vnet.json`
@@ -53,10 +55,22 @@ Before deploying, ensure you have:
 ## Network Architecture
 
 ```
-Internet → Application Gateway (Public IP) → Container Instance (Private IP) → PostgreSQL (Private Endpoint)
-                                    ↓
-                          app.adr.internal (Private DNS)
+Internet → Cloudflare (HTTPS) → Application Gateway (HTTPS:443) → Container Instance (HTTP:8000) → PostgreSQL (Private Endpoint)
+                                                    ↓
+                                          app.adr.internal (Private DNS)
 ```
+
+### SSL/TLS Configuration
+
+The application uses Cloudflare for edge SSL with Origin Server certificates:
+
+1. **Edge SSL**: Cloudflare terminates public HTTPS connections
+2. **Origin SSL**: Application Gateway has Cloudflare Origin certificate for Cloudflare → Origin encryption
+3. **SSL Mode**: Cloudflare SSL/TLS mode set to "Full (strict)"
+
+**Origin Certificate Files** (stored locally, not in repo):
+- Certificate: `~/.ssh/architecture-decisions.pem`
+- Private Key: `~/.ssh/architecture-decisions.key`
 
 ### Private DNS Auto-Registration
 

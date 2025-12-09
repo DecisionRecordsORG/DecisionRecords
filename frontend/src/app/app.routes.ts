@@ -2,11 +2,10 @@ import { Routes } from '@angular/router';
 import { authGuard, adminGuard, masterGuard, guestGuard, tenantGuard } from './guards/auth.guard';
 
 export const routes: Routes = [
-  // Main landing/signup page
+  // Public homepage with integrated signup form
   {
     path: '',
-    loadComponent: () => import('./components/landing/landing.component').then(m => m.LandingComponent),
-    canActivate: [guestGuard]
+    loadComponent: () => import('./components/homepage/homepage.component').then(m => m.HomepageComponent)
   },
   // Super admin login
   {

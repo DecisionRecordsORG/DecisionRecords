@@ -37,6 +37,8 @@ export interface AuthConfigRequest {
   allow_registration?: boolean;
   require_approval?: boolean;
   rp_name?: string;
+  allow_password?: boolean;
+  allow_passkey?: boolean;
 }
 
 @Injectable({

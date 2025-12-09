@@ -12,7 +12,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
 
-type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
+type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | 'join_organization' | 'account_created';
 
 @Component({
   selector: 'app-landing',
@@ -48,6 +48,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
               Check Your Email
             } @else if (currentView === 'access_request') {
               Request Access
+            } @else if (currentView === 'join_organization') {
+              Join Your Organization
+            } @else if (currentView === 'account_created') {
+              Account Created
             } @else {
               Get Started or Sign In
             }
@@ -60,7 +64,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
             } @else if (currentView === 'verification_sent') {
               We've sent you a verification link
             } @else if (currentView === 'access_request') {
-              Request access to join your organization
+              Request admin approval to join your organization
+            } @else if (currentView === 'join_organization') {
+              Verify your email to join your organization
+            } @else if (currentView === 'account_created') {
+              Check your email to complete setup
             }
           </mat-card-subtitle>
         </mat-card-header>
@@ -246,6 +254,74 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request';
             <button mat-button class="back-button" (click)="goBack()">
               <mat-icon>arrow_back</mat-icon>
               Back
+            </button>
+          }
+
+          <!-- Join Organization View (for tenants with auto-approval enabled) -->
+          @if (currentView === 'join_organization') {
+            <div class="tenant-info">
+              <mat-icon>business</mat-icon>
+              <span>Join <strong>{{ tenantDomain }}</strong></span>
+            </div>
+
+            <form [formGroup]="accessRequestForm" (ngSubmit)="submitJoinOrganization()">
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Email</mat-label>
+                <input matInput formControlName="email" type="email" readonly>
+                <mat-icon matPrefix>email</mat-icon>
+              </mat-form-field>
+
+              <mat-form-field appearance="outline" class="full-width">
+                <mat-label>Full Name</mat-label>
+                <input matInput formControlName="name" placeholder="Your name">
+                <mat-icon matPrefix>person</mat-icon>
+              </mat-form-field>
+
+              <p class="info-text">
+                <mat-icon>verified_user</mat-icon>
+                <span>
+                  We'll verify your email and create your account.
+                  You'll receive an email with a link to set up your login credentials.
+                </span>
+              </p>
+
+              <button mat-raised-button color="primary" type="submit"
+                      [disabled]="accessRequestForm.get('email')?.invalid || accessRequestForm.get('name')?.invalid || isLoading" class="full-width">
+                <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                <mat-icon *ngIf="!isLoading">person_add</mat-icon>
+                <span *ngIf="!isLoading">Join Organization</span>
+              </button>
+            </form>
+
+            <button mat-button class="back-button" (click)="goBack()">
+              <mat-icon>arrow_back</mat-icon>
+              Back
+            </button>
+          }
+
+          <!-- Account Created View (for auto-approved signups) -->
+          @if (currentView === 'account_created') {
+            <div class="verification-sent">
+              <div class="verification-icon success">
+                <mat-icon>check_circle</mat-icon>
+              </div>
+              <p>
+                Your account for <strong>{{ tenantDomain }}</strong> has been created!
+              </p>
+              <p class="small-text">
+                Check your email at <strong>{{ verificationEmail }}</strong> for a link to complete your account setup
+                and configure your login credentials.
+              </p>
+
+              <p class="help-text">
+                <mat-icon>help</mat-icon>
+                <span>Didn't receive the email? Check your spam folder.</span>
+              </p>
+            </div>
+
+            <button mat-button class="back-button" (click)="goBack()">
+              <mat-icon>arrow_back</mat-icon>
+              Start Over
             </button>
           }
         </mat-card-content>
@@ -589,14 +665,13 @@ export class LandingComponent implements OnInit {
 
           // Verification enabled - check if approval is required
           if (status.require_approval) {
-            // Show access request form
+            // Show access request form (admin approval needed)
             this.currentView = 'access_request';
             this.accessRequestForm.patchValue({ email });
           } else {
-            // Auto-signup allowed, redirect to tenant login
-            this.router.navigate([`/${domain}/login`], {
-              queryParams: { email }
-            });
+            // Auto-approval enabled - show join form (no approval needed)
+            this.currentView = 'join_organization';
+            this.accessRequestForm.patchValue({ email });
           }
         } else {
           // New tenant, show signup form (works for both verification enabled and disabled)
@@ -720,6 +795,46 @@ export class LandingComponent implements OnInit {
           this.router.navigate([err.error.redirect]);
         } else {
           this.error = err.error?.error || 'Failed to send verification email';
+        }
+      }
+    });
+  }
+
+  submitJoinOrganization(): void {
+    const emailCtrl = this.accessRequestForm.get('email');
+    const nameCtrl = this.accessRequestForm.get('name');
+    if (emailCtrl?.invalid || nameCtrl?.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+
+    const email = emailCtrl?.value;
+    const name = nameCtrl?.value;
+
+    // Call the access-request endpoint which handles auto-approval
+    this.http.post<{ message: string; auto_approved?: boolean }>('/api/auth/access-request', {
+      email,
+      name
+    }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.verificationEmail = email;
+
+        if (response.auto_approved) {
+          // Account was created, show account_created view
+          this.currentView = 'account_created';
+        } else {
+          // Fallback - shouldn't happen but handle gracefully
+          this.currentView = 'verification_sent';
+          this.startCooldown();
+        }
+      },
+      error: (err) => {
+        this.isLoading = false;
+        if (err.error?.redirect) {
+          this.router.navigate([err.error.redirect]);
+        } else {
+          this.error = err.error?.error || 'Failed to create account';
         }
       }
     });

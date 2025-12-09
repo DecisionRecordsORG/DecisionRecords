@@ -332,19 +332,35 @@ import { MatTooltipModule } from '@angular/material/tooltip';
               </mat-card-header>
               <mat-card-content>
                 <p class="section-description">
-                  Configure how users in your domain authenticate. You can choose between SSO (Single Sign-On)
-                  or Passkeys (WebAuthn) for passwordless authentication.
+                  Configure how users in your organization authenticate. Choose the method that best fits your security needs.
                 </p>
 
                 <form [formGroup]="authConfigForm" (ngSubmit)="saveAuthConfig()">
                   <div class="auth-method-options">
                     <mat-radio-group formControlName="auth_method" class="auth-method-group">
+                      <mat-radio-button value="both" class="auth-method-option">
+                        <div class="option-content">
+                          <div class="option-icons">
+                            <mat-icon>fingerprint</mat-icon>
+                            <span class="icon-plus">+</span>
+                            <mat-icon>password</mat-icon>
+                          </div>
+                          <div class="option-text">
+                            <strong>Passkey + Password</strong>
+                            <span class="recommended-badge">Recommended</span>
+                            <span class="option-desc">Users can choose their preferred authentication method</span>
+                          </div>
+                        </div>
+                      </mat-radio-button>
+
                       <mat-radio-button value="webauthn" class="auth-method-option">
                         <div class="option-content">
-                          <mat-icon>fingerprint</mat-icon>
+                          <div class="option-icons">
+                            <mat-icon>fingerprint</mat-icon>
+                          </div>
                           <div class="option-text">
-                            <strong>Passkeys (WebAuthn)</strong>
-                            <span>Passwordless authentication using device biometrics or security keys</span>
+                            <strong>Passkey Only</strong>
+                            <span class="option-desc">Enforce passwordless authentication for all users</span>
                           </div>
                         </div>
                       </mat-radio-button>
@@ -352,49 +368,57 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                       <mat-radio-button value="sso" class="auth-method-option"
                                         [disabled]="!hasSSOConfigForDomain">
                         <div class="option-content">
-                          <mat-icon>login</mat-icon>
+                          <div class="option-icons">
+                            <mat-icon>login</mat-icon>
+                          </div>
                           <div class="option-text">
                             <strong>Single Sign-On (SSO)</strong>
-                            <span>
-                              @if (hasSSOConfigForDomain) {
-                                Use your organization's identity provider
-                              } @else {
-                                Configure an SSO provider first to enable this option
-                              }
-                            </span>
+                            @if (hasSSOConfigForDomain) {
+                              <span class="option-desc">Use your organization's identity provider</span>
+                            } @else {
+                              <span class="option-desc disabled-hint">Configure SSO in the SSO Providers tab first</span>
+                            }
                           </div>
                         </div>
                       </mat-radio-button>
                     </mat-radio-group>
                   </div>
 
-                  @if (authConfigForm.value.auth_method === 'webauthn') {
-                    <div class="webauthn-options">
+                  <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
+                      <h4 class="options-header">User Registration</h4>
+
                       <mat-slide-toggle formControlName="allow_registration">
                         Allow new user registration
                       </mat-slide-toggle>
                       <p class="option-hint">
-                        When enabled, new users can create accounts with their email and a passkey.
-                        When disabled, only existing users can sign in.
+                        When enabled, new users can create accounts. When disabled, only existing users can sign in.
                       </p>
 
-                      <mat-slide-toggle formControlName="require_approval">
-                        Require admin approval for new users
-                      </mat-slide-toggle>
-                      <p class="option-hint">
-                        When enabled, new users from your domain must be approved by an admin before they can access the system.
-                        When disabled, users with verified email addresses from your domain can sign up automatically.
-                      </p>
+                      <div class="approval-toggle-section" *ngIf="authConfigForm.value.allow_registration">
+                          <mat-slide-toggle formControlName="auto_approve_users">
+                            Auto-approve new users from your domain
+                          </mat-slide-toggle>
+                          <p class="option-hint">
+                            When enabled, users with verified {{ '@' + getCurrentDomain() }} emails are automatically approved.
+                            When disabled, an admin must approve each new user.
+                          </p>
+                          <div class="auto-approve-warning" *ngIf="authConfigForm.value.auto_approve_users">
+                              <mat-icon>info</mat-icon>
+                              <span>Anyone with a verified {{ '@' + getCurrentDomain() }} email can automatically join your organization.</span>
+                          </div>
+                      </div>
 
-                      <mat-form-field appearance="outline" class="full-width">
-                        <mat-label>Application Name (shown during passkey setup)</mat-label>
-                        <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
-                      </mat-form-field>
-                    </div>
-                  }
+                      <div class="app-name-section">
+                        <mat-form-field appearance="outline" class="full-width">
+                          <mat-label>Application Name</mat-label>
+                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
+                          <mat-hint>Shown to users during passkey setup</mat-hint>
+                        </mat-form-field>
+                      </div>
+                  </div>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="authConfigForm.invalid || savingAuthConfig">
                       <mat-spinner diameter="20" *ngIf="savingAuthConfig"></mat-spinner>
                       <mat-icon *ngIf="!savingAuthConfig">save</mat-icon>
@@ -413,35 +437,46 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <h4>Passkeys (WebAuthn)</h4>
-                <ul>
-                  <li>No passwords to remember or manage</li>
-                  <li>Uses device biometrics (fingerprint, face) or security keys</li>
-                  <li>Resistant to phishing attacks</li>
-                  <li>Users can register multiple devices for backup access</li>
-                </ul>
-
-                <h4>Single Sign-On (SSO)</h4>
-                <ul>
-                  <li>Users authenticate with your organization's identity provider</li>
-                  <li>Centralized user management</li>
-                  <li>Supports Google, Microsoft, Okta, and other OIDC providers</li>
-                  <li>Requires SSO provider configuration in the SSO Providers tab</li>
-                </ul>
+                <div class="auth-info-grid">
+                  <div class="auth-info-item">
+                    <h4><mat-icon>fingerprint</mat-icon> Passkeys</h4>
+                    <ul>
+                      <li>No passwords to remember</li>
+                      <li>Uses device biometrics (fingerprint, face)</li>
+                      <li>Resistant to phishing</li>
+                      <li>Can register multiple devices</li>
+                    </ul>
+                  </div>
+                  <div class="auth-info-item">
+                    <h4><mat-icon>password</mat-icon> Passwords</h4>
+                    <ul>
+                      <li>Traditional authentication</li>
+                      <li>Works on any device</li>
+                      <li>Good fallback option</li>
+                      <li>Requires password management</li>
+                    </ul>
+                  </div>
+                  <div class="auth-info-item">
+                    <h4><mat-icon>login</mat-icon> SSO</h4>
+                    <ul>
+                      <li>Centralized authentication</li>
+                      <li>Google, Microsoft, Okta support</li>
+                      <li>One login for all apps</li>
+                      <li>Managed by IT</li>
+                    </ul>
+                  </div>
+                </div>
               </mat-card-content>
             </mat-card>
           </div>
         </mat-tab>
 
         <!-- Access Requests Tab (for non-master admins only) -->
-        @if (!authService.isMasterAccount) {
-          <mat-tab>
-            <ng-template mat-tab-label>
-              Access Requests
-              @if (pendingRequestsCount > 0) {
-                <span class="tab-badge">{{ pendingRequestsCount }}</span>
-              }
-            </ng-template>
+        <mat-tab *ngIf="!authService.isMasterAccount">
+          <ng-template mat-tab-label>
+            Access Requests
+            <span class="tab-badge" *ngIf="pendingRequestsCount > 0">{{ pendingRequestsCount }}</span>
+          </ng-template>
             <div class="tab-content">
               <mat-card class="list-card">
                 <mat-card-header>
@@ -451,14 +486,11 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                   </mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  @if (loadingRequests) {
-                    <div class="loading-container">
+                  <div class="loading-container" *ngIf="loadingRequests">
                       <mat-spinner diameter="40"></mat-spinner>
-                    </div>
-                  } @else if (accessRequests.length === 0) {
-                    <p class="empty-message">No pending access requests</p>
-                  } @else {
-                    <table mat-table [dataSource]="accessRequests" class="full-width">
+                  </div>
+                  <p class="empty-message" *ngIf="!loadingRequests && accessRequests.length === 0">No pending access requests</p>
+                  <table mat-table [dataSource]="accessRequests" class="full-width" *ngIf="!loadingRequests && accessRequests.length > 0">
                       <ng-container matColumnDef="name">
                         <th mat-header-cell *matHeaderCellDef>Name</th>
                         <td mat-cell *matCellDef="let request">{{ request.name }}</td>
@@ -495,16 +527,13 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                       <ng-container matColumnDef="actions">
                         <th mat-header-cell *matHeaderCellDef>Actions</th>
                         <td mat-cell *matCellDef="let request">
-                          @if (request.status === 'pending') {
+                          <ng-container *ngIf="request.status === 'pending'">
                             <button mat-icon-button color="primary"
                                     (click)="approveRequest(request)"
                                     [disabled]="processingRequest === request.id"
                                     matTooltip="Approve">
-                              @if (processingRequest === request.id) {
-                                <mat-spinner diameter="20"></mat-spinner>
-                              } @else {
-                                <mat-icon>check_circle</mat-icon>
-                              }
+                              <mat-spinner diameter="20" *ngIf="processingRequest === request.id"></mat-spinner>
+                              <mat-icon *ngIf="processingRequest !== request.id">check_circle</mat-icon>
                             </button>
                             <button mat-icon-button color="warn"
                                     (click)="rejectRequest(request)"
@@ -512,22 +541,19 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                                     matTooltip="Reject">
                               <mat-icon>cancel</mat-icon>
                             </button>
-                          } @else if (request.status === 'approved') {
-                            <span class="status-text approved">
+                          </ng-container>
+                          <span class="status-text approved" *ngIf="request.status === 'approved'">
                               <mat-icon>check</mat-icon> Approved
-                            </span>
-                          } @else {
-                            <span class="status-text rejected">
+                          </span>
+                          <span class="status-text rejected" *ngIf="request.status === 'rejected'">
                               <mat-icon>close</mat-icon> Rejected
-                            </span>
-                          }
+                          </span>
                         </td>
                       </ng-container>
 
                       <tr mat-header-row *matHeaderRowDef="accessRequestColumns"></tr>
                       <tr mat-row *matRowDef="let row; columns: accessRequestColumns;"></tr>
                     </table>
-                  }
                 </mat-card-content>
               </mat-card>
 
@@ -550,7 +576,6 @@ import { MatTooltipModule } from '@angular/material/tooltip';
               </mat-card>
             </div>
           </mat-tab>
-        }
       </mat-tab-group>
     </div>
   `,
@@ -784,6 +809,164 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       width: 14px;
       height: 14px;
     }
+
+    .approval-toggle-section {
+      margin-bottom: 16px;
+    }
+
+    .auto-approve-warning {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px;
+      margin-top: 12px;
+      background: #fff3e0;
+      border-radius: 8px;
+      border-left: 4px solid #ff9800;
+    }
+
+    .auto-approve-warning mat-icon {
+      color: #f57c00;
+      flex-shrink: 0;
+    }
+
+    .auto-approve-warning span {
+      font-size: 13px;
+      color: #5d4037;
+      line-height: 1.4;
+    }
+
+    /* Authentication method options styling */
+    .auth-method-options {
+      margin-bottom: 24px;
+    }
+
+    .option-icons {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .option-icons mat-icon {
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    .icon-plus {
+      font-size: 16px;
+      color: #666;
+      font-weight: 500;
+    }
+
+    .recommended-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #4caf50, #2e7d32);
+      color: white;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-left: 8px;
+    }
+
+    .option-desc {
+      display: block;
+      margin-top: 4px;
+    }
+
+    .disabled-hint {
+      color: #999 !important;
+      font-style: italic;
+    }
+
+    .registration-options {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+
+    .options-header {
+      margin: 0 0 16px 0;
+      font-size: 15px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .app-name-section {
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    /* Auth info grid for the info card */
+    .auth-info-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .auth-info-item {
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .auth-info-item h4 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px 0;
+      font-size: 15px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .auth-info-item h4 mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: #3f51b5;
+    }
+
+    .auth-info-item ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .auth-info-item li {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 6px;
+      line-height: 1.4;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .auth-info-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .form-row {
+        flex-direction: column;
+      }
+
+      .form-row mat-form-field.small {
+        flex: 1;
+      }
+
+      .option-content {
+        flex-direction: column;
+      }
+
+      .option-icons {
+        margin-bottom: 8px;
+      }
+    }
   `]
 })
 export class SettingsComponent implements OnInit {
@@ -837,9 +1020,9 @@ export class SettingsComponent implements OnInit {
     });
 
     this.authConfigForm = this.fb.group({
-      auth_method: ['webauthn', Validators.required],
+      auth_method: ['both', Validators.required],  // 'both', 'webauthn', or 'sso'
       allow_registration: [true],
-      require_approval: [true],
+      auto_approve_users: [false],  // Inverted from require_approval for better UX
       rp_name: ['Architecture Decisions']
     });
   }
@@ -1058,10 +1241,20 @@ export class SettingsComponent implements OnInit {
         }
 
         if (this.authConfig) {
+          // Convert from backend model to simplified UI model
+          let uiAuthMethod = 'both';  // default
+          if (this.authConfig.auth_method === 'sso') {
+            uiAuthMethod = 'sso';
+          } else if (this.authConfig.allow_passkey && !this.authConfig.allow_password) {
+            uiAuthMethod = 'webauthn';  // passkey only
+          } else {
+            uiAuthMethod = 'both';  // passkey + password
+          }
+
           this.authConfigForm.patchValue({
-            auth_method: this.authConfig.auth_method,
+            auth_method: uiAuthMethod,
             allow_registration: this.authConfig.allow_registration,
-            require_approval: this.authConfig.require_approval,
+            auto_approve_users: !this.authConfig.require_approval,  // Invert for UI
             rp_name: this.authConfig.rp_name
           });
         }
@@ -1069,7 +1262,7 @@ export class SettingsComponent implements OnInit {
       error: () => {
         // Use defaults if no config exists
         this.authConfigForm.patchValue({
-          require_approval: true,
+          auto_approve_users: false,  // Default to requiring approval
           auth_method: 'webauthn',
           allow_registration: true,
           rp_name: 'Architecture Decisions'
@@ -1084,11 +1277,36 @@ export class SettingsComponent implements OnInit {
     this.savingAuthConfig = true;
     const formValue = this.authConfigForm.value;
 
+    // Convert from simplified UI model to backend model
+    let backendAuthMethod: 'sso' | 'webauthn' = 'webauthn';
+    let allowPassword = true;
+    let allowPasskey = true;
+
+    switch (formValue.auth_method) {
+      case 'both':
+        backendAuthMethod = 'webauthn';
+        allowPassword = true;
+        allowPasskey = true;
+        break;
+      case 'webauthn':
+        backendAuthMethod = 'webauthn';
+        allowPassword = false;
+        allowPasskey = true;
+        break;
+      case 'sso':
+        backendAuthMethod = 'sso';
+        allowPassword = false;
+        allowPasskey = false;
+        break;
+    }
+
     const config: AuthConfigRequest = {
-      auth_method: formValue.auth_method,
+      auth_method: backendAuthMethod,
       allow_registration: formValue.allow_registration,
-      require_approval: formValue.require_approval,
-      rp_name: formValue.rp_name
+      require_approval: !formValue.auto_approve_users,  // Invert for API
+      rp_name: formValue.rp_name,
+      allow_password: allowPassword,
+      allow_passkey: allowPasskey
     };
 
     this.adminService.saveAuthConfig(config).subscribe({
@@ -1180,6 +1398,14 @@ export class SettingsComponent implements OnInit {
         this.snackBar.open(err.error?.error || 'Failed to generate setup link', 'Close', { duration: 3000 });
       }
     });
+  }
+
+  getCurrentDomain(): string {
+    if (this.authService.currentUser?.user) {
+      const user = this.authService.currentUser.user as User;
+      return user.sso_domain || '';
+    }
+    return '';
   }
 
   rejectRequest(request: AccessRequest): void {

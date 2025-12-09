@@ -54,7 +54,7 @@ import { Observable, map, startWith } from 'rxjs';
           <mat-icon>arrow_back</mat-icon>
           Back to Decisions
         </button>
-        <h1>{{ isNew ? 'New Decision' : 'ADR-' + decision?.id }}</h1>
+        <h1>{{ isNew ? 'New Decision' : (decision?.display_id || 'ADR-' + decision?.id) }}</h1>
       </div>
 
       @if (isLoading) {
@@ -751,7 +751,7 @@ export class DecisionDetailComponent implements OnInit {
     const dialogRef = this.dialog.open(ConfirmDialogComponent, {
       data: {
         title: 'Delete Decision',
-        message: `Are you sure you want to delete ADR-${this.decision?.id}? This action cannot be undone.`,
+        message: `Are you sure you want to delete ${this.decision?.display_id || 'ADR-' + this.decision?.id}? This action cannot be undone.`,
         confirmText: 'Delete',
         cancelText: 'Cancel'
       }

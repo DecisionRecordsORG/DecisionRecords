@@ -127,3 +127,8 @@ For issues or questions:
 ---
 
 *Last Updated: December 2024*
+
+DEMO
+ The backend is running on port 5001. Now you should be able to log in at http://localhost:4200/brandnewcorp.com/login with:
+  - Email: demo@brandnewcorp.com
+  - Password: demo123!

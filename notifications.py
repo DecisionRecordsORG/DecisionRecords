@@ -263,3 +263,129 @@ If you didn't request access to {app_name}, you can safely ignore this email.
     """
 
     return send_email(email_config, user_email, subject, html_content, text_content)
+
+
+def send_account_setup_email(email_config, user_name, user_email, setup_url, expires_in_hours, tenant_name=None, app_name="Architecture Decisions"):
+    """Send an email to a new user to complete their account setup (for auto-approved signups)."""
+    subject = f"Complete Your {app_name} Account Setup"
+
+    org_text = f" for {tenant_name}" if tenant_name else ""
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">Complete Your Account Setup</h2>
+
+            <p>Hi {user_name},</p>
+
+            <p>Your account{org_text} has been created! Please click the button below to set up your login credentials (passkey or password).</p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{setup_url}"
+                   style="display: inline-block; background-color: #3f51b5; color: white; padding: 14px 28px;
+                          text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    Complete Account Setup
+                </a>
+            </div>
+
+            <p style="color: #666; font-size: 14px;">
+                <strong>Important:</strong> This link will expire in <strong>{expires_in_hours} hours</strong>.
+            </p>
+
+            <p style="color: #666; font-size: 14px;">
+                If the button doesn't work, copy and paste this link into your browser:
+            </p>
+            <p style="background-color: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all; font-size: 13px;">
+                {setup_url}
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                If you didn't sign up for {app_name}, you can safely ignore this email.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+Complete Your Account Setup
+
+Hi {user_name},
+
+Your account{org_text} has been created! Please use the link below to set up your login credentials (passkey or password).
+
+Complete Account Setup:
+{setup_url}
+
+Important: This link will expire in {expires_in_hours} hours.
+
+---
+If you didn't sign up for {app_name}, you can safely ignore this email.
+    """
+
+    return send_email(email_config, user_email, subject, html_content, text_content)
+
+
+def send_account_recovery_email(email_config, user_name, user_email, recovery_url, expires_in_hours, app_name="Architecture Decisions"):
+    """Send an account recovery email to a user so they can reset their credentials."""
+    subject = f"Reset Your {app_name} Credentials"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">Account Recovery</h2>
+
+            <p>Hi {user_name},</p>
+
+            <p>We received a request to reset your login credentials for {app_name}. Click the button below to set up a new passkey or password.</p>
+
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{recovery_url}"
+                   style="display: inline-block; background-color: #3f51b5; color: white; padding: 14px 28px;
+                          text-decoration: none; border-radius: 6px; font-weight: bold;">
+                    Reset My Credentials
+                </a>
+            </div>
+
+            <p style="color: #666; font-size: 14px;">
+                <strong>Important:</strong> This link will expire in <strong>{expires_in_hours} hours</strong>.
+            </p>
+
+            <p style="color: #666; font-size: 14px;">
+                If the button doesn't work, copy and paste this link into your browser:
+            </p>
+            <p style="background-color: #f5f5f5; padding: 10px; border-radius: 4px; word-break: break-all; font-size: 13px;">
+                {recovery_url}
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                If you didn't request this password reset, you can safely ignore this email. Your current credentials will remain unchanged.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+Account Recovery - {app_name}
+
+Hi {user_name},
+
+We received a request to reset your login credentials for {app_name}. Use the link below to set up a new passkey or password.
+
+Reset My Credentials:
+{recovery_url}
+
+Important: This link will expire in {expires_in_hours} hours.
+
+---
+If you didn't request this password reset, you can safely ignore this email. Your current credentials will remain unchanged.
+    """
+
+    return send_email(email_config, user_email, subject, html_content, text_content)

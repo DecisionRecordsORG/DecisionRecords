@@ -15,7 +15,7 @@ import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { SSOConfig, AuthConfig } from '../../models/decision.model';
 
-type LoginView = 'initial' | 'webauthn' | 'register';
+type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
 
 @Component({
   selector: 'app-login',
@@ -45,8 +45,10 @@ type LoginView = 'initial' | 'webauthn' | 'register';
               Sign in to continue
             } @else if (currentView === 'webauthn') {
               Sign in with passkey
-            } @else {
+            } @else if (currentView === 'register') {
               Create your account
+            } @else {
+              Reset your credentials
             }
           </mat-card-subtitle>
         </mat-card-header>
@@ -183,6 +185,13 @@ type LoginView = 'initial' | 'webauthn' | 'register';
                 </p>
               }
 
+              <p class="recovery-link">
+                <button mat-button (click)="showRecovery()">
+                  <mat-icon>lock_reset</mat-icon>
+                  Forgot your credentials?
+                </button>
+              </p>
+
               <button mat-button class="back-button" (click)="goBack()">
                 <mat-icon>arrow_back</mat-icon>
                 Back
@@ -225,6 +234,41 @@ type LoginView = 'initial' | 'webauthn' | 'register';
               <button mat-button class="back-button" (click)="goBack()">
                 <mat-icon>arrow_back</mat-icon>
                 Back
+              </button>
+            </div>
+          }
+
+          <!-- Account Recovery View -->
+          @if (currentView === 'recovery') {
+            <div class="recovery-section">
+              <div class="recovery-icon">
+                <mat-icon>lock_reset</mat-icon>
+              </div>
+              <p class="recovery-description">
+                Enter your email address and we'll send you a link to reset your credentials.
+              </p>
+
+              <form [formGroup]="recoveryForm" (ngSubmit)="requestRecovery()">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Email</mat-label>
+                  <input matInput formControlName="email" type="email" placeholder="you@example.com">
+                  <mat-icon matPrefix>email</mat-icon>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="recoveryForm.invalid || isLoading" class="full-width">
+                  @if (isLoading) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>send</mat-icon>
+                    Send Recovery Link
+                  }
+                </button>
+              </form>
+
+              <button mat-button class="back-button" (click)="goBack()">
+                <mat-icon>arrow_back</mat-icon>
+                Back to login
               </button>
             </div>
           }
@@ -363,12 +407,45 @@ type LoginView = 'initial' | 'webauthn' | 'register';
     .back-button {
       margin-top: 16px;
     }
+
+    .recovery-link {
+      margin-top: 16px;
+      text-align: center;
+    }
+
+    .recovery-link button {
+      color: #666;
+      font-size: 13px;
+    }
+
+    .recovery-section {
+      text-align: center;
+    }
+
+    .recovery-icon {
+      margin-bottom: 16px;
+    }
+
+    .recovery-icon mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: #3f51b5;
+    }
+
+    .recovery-description {
+      color: #666;
+      margin-bottom: 24px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
   `]
 })
 export class LoginComponent implements OnInit {
   emailForm: FormGroup;
   adminForm: FormGroup;
   registerForm: FormGroup;
+  recoveryForm: FormGroup;
 
   ssoConfigs: SSOConfig[] = [];
   authConfig: AuthConfig | null = null;
@@ -401,6 +478,10 @@ export class LoginComponent implements OnInit {
     this.registerForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       name: ['', Validators.required]
+    });
+
+    this.recoveryForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]]
     });
   }
 
@@ -558,9 +639,42 @@ export class LoginComponent implements OnInit {
     this.error = '';
   }
 
+  showRecovery(): void {
+    this.currentView = 'recovery';
+    this.error = '';
+    this.success = '';
+    // Pre-fill email if we have it
+    if (this.currentEmail) {
+      this.recoveryForm.patchValue({ email: this.currentEmail });
+    }
+  }
+
+  requestRecovery(): void {
+    if (this.recoveryForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.success = '';
+
+    const email = this.recoveryForm.value.email;
+
+    this.http.post<{ message: string }>('/api/auth/request-recovery', { email }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.success = response.message;
+      },
+      error: (err) => {
+        this.isLoading = false;
+        // For security, we still show a success-like message
+        this.success = err.error?.message || 'If an account exists with this email, a recovery link has been sent.';
+      }
+    });
+  }
+
   goBack(): void {
     this.currentView = 'initial';
     this.error = '';
+    this.success = '';
     this.authConfig = null;
     this.currentEmail = '';
   }

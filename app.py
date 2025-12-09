@@ -148,6 +148,62 @@ except ImportError:
     CSP_ENABLED = False
     logger.warning("Flask-Talisman not installed, CSP disabled")
 
+# ==================== Global Error Handlers ====================
+# SECURITY: Prevent stack traces and sensitive information from leaking to clients
+# All errors are logged server-side but only generic messages are returned to clients
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Global exception handler to prevent stack trace leakage."""
+    # Log the full error details server-side
+    logger.error(f"Unhandled exception: {str(e)}")
+    logger.error(traceback.format_exc())
+
+    # Return generic error to client - NEVER expose internal details
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'An internal server error occurred'}), 500
+    else:
+        return "An error occurred", 500
+
+@app.errorhandler(500)
+def handle_500(e):
+    """Handle 500 Internal Server Error."""
+    logger.error(f"500 Error: {str(e)}")
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Internal server error'}), 500
+    return "Internal server error", 500
+
+@app.errorhandler(404)
+def handle_404(e):
+    """Handle 404 Not Found."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Resource not found'}), 404
+    # For non-API routes, let Angular handle routing
+    if SERVE_ANGULAR:
+        return send_from_directory(app.static_folder, 'index.html')
+    return "Not found", 404
+
+@app.errorhandler(403)
+def handle_403(e):
+    """Handle 403 Forbidden."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Access forbidden'}), 403
+    return "Access forbidden", 403
+
+@app.errorhandler(401)
+def handle_401(e):
+    """Handle 401 Unauthorized."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Authentication required'}), 401
+    return "Authentication required", 401
+
+@app.errorhandler(400)
+def handle_400(e):
+    """Handle 400 Bad Request."""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Bad request'}), 400
+    return "Bad request", 400
+
 # Initialize database
 db.init_app(app)
 
@@ -240,6 +296,70 @@ def init_database():
                             logger.info("setup_tokens table recreated with correct schema")
                         else:
                             logger.info("setup_tokens table has correct schema")
+
+                        # Check and add tenant_prefix column to auth_configs
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'auth_configs' AND column_name = 'tenant_prefix'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding tenant_prefix column to auth_configs...")
+                            conn.execute(db.text("""
+                                ALTER TABLE auth_configs
+                                ADD COLUMN tenant_prefix VARCHAR(10)
+                            """))
+                            conn.commit()
+                            logger.info("tenant_prefix column added successfully")
+                        else:
+                            logger.info("tenant_prefix column already exists")
+
+                        # Check and add decision_number column to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'decision_number'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding decision_number column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN decision_number INTEGER
+                            """))
+                            conn.commit()
+                            logger.info("decision_number column added successfully")
+                        else:
+                            logger.info("decision_number column already exists")
+
+                        # Check and add purpose column to setup_tokens
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'setup_tokens' AND column_name = 'purpose'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding purpose column to setup_tokens...")
+                            conn.execute(db.text("""
+                                ALTER TABLE setup_tokens
+                                ADD COLUMN purpose VARCHAR(50) DEFAULT 'initial_setup'
+                            """))
+                            conn.commit()
+                            logger.info("purpose column added successfully")
+                        else:
+                            logger.info("purpose column already exists")
+
+                        # Check and add email column to setup_tokens
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'setup_tokens' AND column_name = 'email'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding email column to setup_tokens...")
+                            conn.execute(db.text("""
+                                ALTER TABLE setup_tokens
+                                ADD COLUMN email VARCHAR(320)
+                            """))
+                            conn.commit()
+                            logger.info("email column added successfully")
+                        else:
+                            logger.info("email column already exists")
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -786,13 +906,29 @@ def api_create_decision():
     if status not in ArchitectureDecision.VALID_STATUSES:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(ArchitectureDecision.VALID_STATUSES)}'}), 400
 
+    # Get or generate tenant prefix and next decision number
+    domain = g.current_user.sso_domain
+    auth_config = AuthConfig.query.filter_by(domain=domain).first()
+
+    # Ensure tenant has a prefix
+    if auth_config and not auth_config.tenant_prefix:
+        auth_config.tenant_prefix = AuthConfig.generate_unique_prefix()
+        db.session.flush()
+
+    # Get next decision number for this domain
+    max_number = db.session.query(db.func.max(ArchitectureDecision.decision_number)).filter(
+        ArchitectureDecision.domain == domain
+    ).scalar() or 0
+    next_number = max_number + 1
+
     decision = ArchitectureDecision(
         title=sanitized['title'],
         context=sanitized['context'],
         decision=sanitized['decision'],
         status=status,
         consequences=sanitized['consequences'],
-        domain=g.current_user.sso_domain,  # SECURITY: Always use authenticated user's domain
+        decision_number=next_number,
+        domain=domain,  # SECURITY: Always use authenticated user's domain
         created_by_id=g.current_user.id,
         updated_by_id=g.current_user.id
     )
@@ -802,7 +938,7 @@ def api_create_decision():
     if infrastructure_ids:
         infrastructure_items = ITInfrastructure.query.filter(
             ITInfrastructure.id.in_(infrastructure_ids),
-            ITInfrastructure.domain == g.current_user.sso_domain
+            ITInfrastructure.domain == domain
         ).all()
         decision.infrastructure = infrastructure_items
 
@@ -1682,9 +1818,9 @@ def api_send_verification():
     ).delete()
     db.session.commit()
 
-    # Create new verification token
+    # Create new verification token (2-hour validity per PLAN-v1.4)
     token = generate_verification_token()
-    expires_at = datetime.utcnow() + timedelta(hours=24)
+    expires_at = datetime.utcnow() + timedelta(hours=2)
 
     verification = EmailVerification(
         email=email,
@@ -1714,6 +1850,76 @@ def api_send_verification():
             'purpose': purpose,
             'token': token if app.debug else None  # Only expose token in debug mode
         })
+
+
+@app.route('/api/auth/resend-verification', methods=['POST'])
+def api_resend_verification():
+    """Resend email verification link for pending verifications.
+
+    This endpoint allows users to request a new verification email if their
+    previous one expired or they didn't receive it.
+    """
+    data = request.get_json()
+    email = data.get('email', '').lower().strip()
+
+    if not email or '@' not in email:
+        return jsonify({'error': 'Valid email address is required'}), 400
+
+    # Generic success message (always return this to prevent email enumeration)
+    success_message = 'If a pending verification exists for this email, a new link has been sent.'
+
+    # Check for existing pending verification
+    pending = EmailVerification.query.filter(
+        EmailVerification.email == email,
+        EmailVerification.verified_at.is_(None)
+    ).order_by(EmailVerification.created_at.desc()).first()
+
+    if not pending:
+        # Don't reveal that no verification exists
+        logger.info(f"Resend verification requested for email without pending verification: {email}")
+        return jsonify({'message': success_message})
+
+    # Rate limiting: Check for recent verification emails (2 minutes)
+    if pending.created_at > datetime.utcnow() - timedelta(minutes=2):
+        logger.info(f"Rate limited resend verification for: {email}")
+        return jsonify({'message': success_message})
+
+    # Create new token, invalidate old one
+    old_purpose = pending.purpose
+    old_name = pending.name
+    old_domain = pending.domain
+    old_reason = pending.access_request_reason
+
+    # Delete old pending verification
+    db.session.delete(pending)
+    db.session.commit()
+
+    # Create new verification token (2-hour validity)
+    token = generate_verification_token()
+    expires_at = datetime.utcnow() + timedelta(hours=2)
+
+    new_verification = EmailVerification(
+        email=email,
+        name=old_name,
+        token=token,
+        purpose=old_purpose,
+        domain=old_domain,
+        expires_at=expires_at,
+        access_request_reason=old_reason
+    )
+    db.session.add(new_verification)
+    db.session.commit()
+
+    # Send verification email
+    email_sent = send_verification_email(email, token, old_purpose, old_domain)
+
+    if email_sent:
+        logger.info(f"Resent verification email to: {email}")
+    else:
+        logger.error(f"Failed to resend verification email to: {email}")
+
+    # Always return success to prevent email enumeration
+    return jsonify({'message': success_message})
 
 
 @app.route('/api/auth/direct-signup', methods=['POST'])
@@ -2049,7 +2255,56 @@ def api_submit_access_request():
     if User.query.filter_by(sso_domain=domain).count() == 0:
         return jsonify({'error': 'This organization does not exist yet. Please sign up instead.'}), 400
 
-    # Create access request
+    # Check if tenant has auto-approval enabled (require_approval=False)
+    auth_config = AuthConfig.query.filter_by(domain=domain).first()
+    require_approval = auth_config.require_approval if auth_config else True
+
+    if not require_approval:
+        # Auto-approval enabled: create user immediately and send setup email
+        from models import SetupToken
+        from notifications import send_account_setup_email
+
+        # Create the user account
+        new_user = User(
+            email=email,
+            name=name,
+            sso_domain=domain,
+            auth_type='webauthn',
+            is_admin=False
+        )
+        db.session.add(new_user)
+        db.session.flush()  # Get the user ID before creating token
+
+        # Generate setup token for the new user
+        setup_token = SetupToken.create_for_user(new_user)
+        setup_token_str = setup_token._token_string
+        setup_url = f"{request.host_url.rstrip('/')}/{domain}/setup?token={setup_token_str}"
+
+        db.session.commit()
+
+        # Send setup email to user
+        email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
+        if email_config:
+            send_account_setup_email(
+                email_config,
+                name,
+                email,
+                setup_url,
+                SetupToken.TOKEN_VALIDITY_HOURS,
+                tenant_name=domain
+            )
+            app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
+        else:
+            app.logger.warning(f"Auto-approved user {email} for tenant {domain}, but no email config to send setup link")
+
+        return jsonify({
+            'message': 'Your account has been created! Check your email for a link to set up your login credentials.',
+            'auto_approved': True,
+            'email': email,
+            'domain': domain
+        })
+
+    # require_approval=True: Create access request for admin review
     access_request = AccessRequest(
         email=email,
         name=name,
@@ -2066,6 +2321,89 @@ def api_submit_access_request():
         'message': 'Access request submitted successfully',
         'request': access_request.to_dict()
     })
+
+
+@app.route('/api/auth/request-recovery', methods=['POST'])
+def api_request_account_recovery():
+    """Self-service: User requests their own account recovery link.
+
+    This endpoint allows users who have lost access to their passkey/password
+    to request a recovery email. For security, the response is always the same
+    whether or not the email exists (to prevent email enumeration).
+    """
+    from datetime import datetime, timedelta
+    from models import SetupToken
+    from notifications import send_account_recovery_email
+
+    data = request.get_json()
+    email = data.get('email', '').lower().strip()
+
+    if not email or '@' not in email:
+        return jsonify({'error': 'Valid email address is required'}), 400
+
+    # Generic success message (always return this to prevent email enumeration)
+    success_message = 'If an account exists with this email, a recovery link has been sent.'
+
+    # Find the user
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        # Don't reveal that user doesn't exist
+        logger.info(f"Account recovery requested for non-existent email: {email}")
+        return jsonify({'message': success_message})
+
+    # Check if user belongs to a tenant
+    if not user.sso_domain:
+        logger.warning(f"Account recovery requested for user without domain: {email}")
+        return jsonify({'message': success_message})
+
+    # Rate limiting: Check for existing recent recovery tokens
+    recent_token = SetupToken.query.filter(
+        SetupToken.user_id == user.id,
+        SetupToken.purpose == SetupToken.PURPOSE_ACCOUNT_RECOVERY,
+        SetupToken.created_at > datetime.utcnow() - timedelta(minutes=2)
+    ).first()
+
+    if recent_token:
+        logger.info(f"Rate limited recovery request for: {email}")
+        return jsonify({'message': success_message})
+
+    # Get email configuration
+    email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(domain=user.sso_domain, enabled=True).first()
+
+    if not email_config:
+        # No email config, but still return success message
+        logger.warning(f"Account recovery requested but no email config for domain: {user.sso_domain}")
+        return jsonify({'message': success_message})
+
+    # Generate recovery token (2-hour expiry)
+    setup_token = SetupToken.create_for_user(
+        user,
+        validity_hours=SetupToken.RECOVERY_VALIDITY_HOURS,
+        purpose=SetupToken.PURPOSE_ACCOUNT_RECOVERY
+    )
+    token_string = setup_token._token_string
+    # Use the existing setup route - it now handles both initial setup and recovery
+    recovery_url = f"{request.host_url.rstrip('/')}/{user.sso_domain}/setup?token={token_string}"
+
+    # Send the recovery email
+    success = send_account_recovery_email(
+        email_config=email_config,
+        user_name=user.name or user.email.split('@')[0],
+        user_email=user.email,
+        recovery_url=recovery_url,
+        expires_in_hours=SetupToken.RECOVERY_VALIDITY_HOURS
+    )
+
+    if success:
+        logger.info(f"Account recovery email sent to: {email}")
+    else:
+        logger.error(f"Failed to send account recovery email to: {email}")
+
+    # Always return success to prevent email enumeration
+    return jsonify({'message': success_message})
 
 
 @app.route('/api/auth/setup-token/validate', methods=['POST'])
@@ -2093,12 +2431,15 @@ def api_validate_setup_token():
         return jsonify({'error': error, 'valid': False}), 400
 
     user = setup_token.user
+    is_recovery = setup_token.purpose == SetupToken.PURPOSE_ACCOUNT_RECOVERY
 
     # Check if user already has credentials set up
     has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
     has_password = user.has_password()
 
-    if has_passkey or has_password:
+    # For initial setup tokens, block if user already has credentials
+    # For recovery tokens, allow resetting credentials
+    if (has_passkey or has_password) and not is_recovery:
         # Mark token as used since user already has credentials
         setup_token.used_at = datetime.utcnow()
         db.session.commit()
@@ -2115,17 +2456,29 @@ def api_validate_setup_token():
     session['setup_user_id'] = user.id
     session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
 
+    # Determine the redirect based on token purpose
+    if is_recovery:
+        redirect_url = f'/{user.sso_domain}/recover?token={token}'
+        message = 'Recovery token validated. You can now reset your credentials.'
+    else:
+        redirect_url = f'/{user.sso_domain}/profile?setup=passkey'
+        message = 'Setup token validated. You can now set up your credentials.'
+
     return jsonify({
         'valid': True,
+        'purpose': setup_token.purpose,
+        'is_recovery': is_recovery,
         'user': {
             'id': user.id,
             'email': user.email,
             'name': user.name,
             'sso_domain': user.sso_domain,
+            'has_passkey': has_passkey,
+            'has_password': has_password,
         },
         'expires_at': setup_token.expires_at.isoformat(),
-        'message': 'Setup token validated. You can now set up your credentials.',
-        'redirect': f'/{user.sso_domain}/profile?setup=passkey'
+        'message': message,
+        'redirect': redirect_url
     })
 
 

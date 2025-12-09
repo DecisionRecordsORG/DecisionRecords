@@ -35,6 +35,8 @@ export type InfrastructureType = 'application' | 'network' | 'database' | 'serve
 
 export interface Decision {
   id: number;
+  display_id?: string;  // e.g., "GYH-034"
+  decision_number?: number;
   title: string;
   context: string;
   decision: string;
@@ -104,6 +106,9 @@ export interface AuthConfig {
   allow_registration: boolean;
   require_approval: boolean;
   rp_name: string;
+  tenant_prefix?: string;  // 3-letter prefix for decision IDs
+  allow_password?: boolean;
+  allow_passkey?: boolean;
   id?: number;
   created_at?: string;
   updated_at?: string;

@@ -262,8 +262,24 @@ class AuthConfig(db.Model):
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=True)  # Require admin approval for new users to join tenant
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
+    tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # 3-letter prefix for decision IDs (consonants only)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Consonants only for tenant prefix (no vowels to avoid offensive words)
+    CONSONANTS = 'BCDFGHJKLMNPQRSTVWXYZ'
+
+    @staticmethod
+    def generate_unique_prefix():
+        """Generate a unique 3-letter prefix using consonants only."""
+        import random
+        max_attempts = 100
+        for _ in range(max_attempts):
+            prefix = ''.join(random.choices(AuthConfig.CONSONANTS, k=3))
+            existing = AuthConfig.query.filter_by(tenant_prefix=prefix).first()
+            if not existing:
+                return prefix
+        raise ValueError("Could not generate unique prefix after {} attempts".format(max_attempts))
 
     def to_dict(self):
         return {
@@ -275,6 +291,7 @@ class AuthConfig(db.Model):
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
+            'tenant_prefix': self.tenant_prefix,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
@@ -458,6 +475,7 @@ class ArchitectureDecision(db.Model):
     decision = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(50), nullable=False, default='proposed')
     consequences = db.Column(db.Text, nullable=False)
+    decision_number = db.Column(db.Integer, nullable=True)  # Sequential number per tenant for display ID
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -479,9 +497,21 @@ class ArchitectureDecision(db.Model):
     # Valid status values
     VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
 
+    def get_display_id(self):
+        """Get the display ID in format PREFIX-NNN (e.g., GYH-034)."""
+        if self.decision_number is None:
+            return None
+        # Get tenant prefix from AuthConfig
+        auth_config = AuthConfig.query.filter_by(domain=self.domain).first()
+        if auth_config and auth_config.tenant_prefix:
+            return f"{auth_config.tenant_prefix}-{self.decision_number:03d}"
+        return f"ADR-{self.decision_number:03d}"  # Fallback format
+
     def to_dict(self):
         return {
             'id': self.id,
+            'display_id': self.get_display_id(),
+            'decision_number': self.decision_number,
             'title': self.title,
             'context': self.context,
             'decision': self.decision,
@@ -590,8 +620,10 @@ class SetupToken(db.Model):
     __tablename__ = 'setup_tokens'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Nullable for pre-user tokens
+    email = db.Column(db.String(320), nullable=True)  # For tokens created before user exists
     token_hash = db.Column(db.String(255), nullable=False, unique=True, index=True)  # Hash of the token for lookup
+    purpose = db.Column(db.String(20), nullable=False, default='initial_setup')  # 'initial_setup', 'account_recovery', 'admin_invite'
     expires_at = db.Column(db.DateTime, nullable=False)
     used_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -599,8 +631,16 @@ class SetupToken(db.Model):
     # Relationships
     user = db.relationship('User', foreign_keys=[user_id])
 
-    # Token validity: 48 hours (2 days) by default
-    TOKEN_VALIDITY_HOURS = 48
+    # Token validity
+    TOKEN_VALIDITY_HOURS = 48  # Default for admin invites
+    RECOVERY_VALIDITY_HOURS = 2  # Shorter for account recovery
+    VERIFICATION_VALIDITY_HOURS = 2  # For email verification
+
+    # Valid purposes
+    PURPOSE_INITIAL_SETUP = 'initial_setup'
+    PURPOSE_ACCOUNT_RECOVERY = 'account_recovery'
+    PURPOSE_ADMIN_INVITE = 'admin_invite'
+    VALID_PURPOSES = [PURPOSE_INITIAL_SETUP, PURPOSE_ACCOUNT_RECOVERY, PURPOSE_ADMIN_INVITE]
 
     def is_expired(self):
         return datetime.utcnow() > self.expires_at
@@ -692,14 +732,23 @@ class SetupToken(db.Model):
         return setup_token, None
 
     @staticmethod
-    def create_for_user(user, validity_hours=None):
+    def create_for_user(user, validity_hours=None, purpose=None):
         """Create a new setup token for a user."""
         from datetime import timedelta
-        if validity_hours is None:
-            validity_hours = SetupToken.TOKEN_VALIDITY_HOURS
 
-        # Invalidate any existing tokens for this user
-        SetupToken.query.filter_by(user_id=user.id, used_at=None).update({
+        # Set default purpose
+        if purpose is None:
+            purpose = SetupToken.PURPOSE_INITIAL_SETUP
+
+        # Set default validity based on purpose
+        if validity_hours is None:
+            if purpose == SetupToken.PURPOSE_ACCOUNT_RECOVERY:
+                validity_hours = SetupToken.RECOVERY_VALIDITY_HOURS
+            else:
+                validity_hours = SetupToken.TOKEN_VALIDITY_HOURS
+
+        # Invalidate any existing tokens for this user with the same purpose
+        SetupToken.query.filter_by(user_id=user.id, purpose=purpose, used_at=None).update({
             'used_at': datetime.utcnow()
         })
         db.session.flush()
@@ -710,7 +759,9 @@ class SetupToken(db.Model):
 
         setup_token = SetupToken(
             user_id=user.id,
+            email=user.email,
             token_hash=token_hash,
+            purpose=purpose,
             expires_at=expires_at
         )
         db.session.add(setup_token)
@@ -725,6 +776,8 @@ class SetupToken(db.Model):
         result = {
             'id': self.id,
             'user_id': self.user_id,
+            'email': self.email,
+            'purpose': self.purpose,
             'expires_at': self.expires_at.isoformat(),
             'used_at': self.used_at.isoformat() if self.used_at else None,
             'created_at': self.created_at.isoformat(),

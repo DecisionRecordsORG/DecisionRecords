@@ -1,3 +1,4 @@
+
 # Architecture Decisions
 
 A self-hosted web application for managing Architecture Decision Records (ADRs) based on the [arc42 Section 9](https://docs.arc42.org/section-9/) format with enterprise features.
