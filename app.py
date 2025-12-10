@@ -366,6 +366,54 @@ def init_database():
                             logger.info("email column added successfully")
                         else:
                             logger.info("email column already exists")
+
+                        # Check and add has_seen_admin_onboarding column to users
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'has_seen_admin_onboarding'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding has_seen_admin_onboarding column to users...")
+                            conn.execute(db.text("""
+                                ALTER TABLE users
+                                ADD COLUMN has_seen_admin_onboarding BOOLEAN DEFAULT FALSE
+                            """))
+                            conn.commit()
+                            logger.info("has_seen_admin_onboarding column added successfully")
+                        else:
+                            logger.info("has_seen_admin_onboarding column already exists")
+
+                        # Check and add email_verified column to users
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'email_verified'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding email_verified column to users...")
+                            conn.execute(db.text("""
+                                ALTER TABLE users
+                                ADD COLUMN email_verified BOOLEAN DEFAULT FALSE
+                            """))
+                            conn.commit()
+                            logger.info("email_verified column added successfully")
+                        else:
+                            logger.info("email_verified column already exists")
+
+                        # Check and add auth_type column to users
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'users' AND column_name = 'auth_type'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding auth_type column to users...")
+                            conn.execute(db.text("""
+                                ALTER TABLE users
+                                ADD COLUMN auth_type VARCHAR(20) DEFAULT 'local'
+                            """))
+                            conn.commit()
+                            logger.info("auth_type column added successfully")
+                        else:
+                            logger.info("auth_type column already exists")
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
