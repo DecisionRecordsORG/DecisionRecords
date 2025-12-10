@@ -788,7 +788,9 @@ export class TenantLoginComponent implements OnInit {
       },
       error: (err) => {
         this.isLoading = false;
-        this.error = err.error?.error || 'Authentication failed. Please try again.';
+        // Show login view so user can see recovery options
+        this.currentView = 'login';
+        this.error = err.error?.error || 'Authentication failed. Please try again or use account recovery.';
       }
     });
   }

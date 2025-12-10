@@ -1668,10 +1668,26 @@ def api_get_auth_config_public(domain):
     })
 
 
-@app.route('/api/auth/tenant/<domain>', methods=['GET'])
-def api_get_tenant_status(domain):
-    """Get tenant status - whether users exist and auth configuration."""
+def _api_get_tenant_status_impl(domain):
+    """Get tenant status - whether users exist and auth configuration.
+
+    Security note: Rate-limited to prevent domain enumeration attacks.
+    """
     domain = domain.lower()
+
+    # Check if this is a public/free email domain (gmail, yahoo, etc.)
+    if DomainApproval.is_public_domain(domain):
+        return jsonify({
+            'error': f'{domain} is a public email provider. Please use your work email address.',
+            'is_public_domain': True
+        }), 400
+
+    # Check if this is a disposable/temporary email domain
+    if DomainApproval.is_disposable_domain(domain):
+        return jsonify({
+            'error': 'Disposable email addresses are not allowed. Please use your work email address.',
+            'is_disposable_domain': True
+        }), 400
 
     # Check if any users exist for this domain
     user_count = User.query.filter_by(sso_domain=domain).count()
@@ -1700,10 +1716,35 @@ def api_get_tenant_status(domain):
     })
 
 
-@app.route('/api/auth/user-exists/<email>', methods=['GET'])
-def api_check_user_exists(email):
-    """Check if a user exists by email."""
-    user = User.query.filter_by(email=email.lower()).first()
+# Apply rate limiting if available (20 requests/minute - slightly more lenient for tenant checks)
+if RATE_LIMITING_ENABLED:
+    api_get_tenant_status = app.route('/api/auth/tenant/<domain>', methods=['GET'])(
+        limiter.limit("20 per minute")(_api_get_tenant_status_impl)
+    )
+else:
+    api_get_tenant_status = app.route('/api/auth/tenant/<domain>', methods=['GET'])(
+        _api_get_tenant_status_impl
+    )
+
+
+def _api_check_user_exists_impl(email):
+    """Check if a user exists by email.
+
+    Security note: This endpoint is rate-limited to prevent account enumeration.
+    Rate limit: 10 requests per minute per IP address.
+
+    This is a balance between security and usability:
+    - Legitimate users may try 2-5 times when troubleshooting login issues
+    - Corporate users behind NAT may share IP addresses
+    - Attackers attempting bulk enumeration will be significantly slowed
+    """
+    email = email.lower()
+
+    # Log the request for security monitoring (only log domain, not full email for privacy)
+    domain = email.split('@')[1] if '@' in email else 'invalid'
+    logger.info(f"User existence check for domain: {domain}")
+
+    user = User.query.filter_by(email=email).first()
 
     if user:
         return jsonify({
@@ -1721,6 +1762,17 @@ def api_check_user_exists(email):
             'auth_type': None,
             'email_verified': False
         })
+
+
+# Apply rate limiting if available (10 requests/minute to prevent account enumeration)
+if RATE_LIMITING_ENABLED:
+    api_check_user_exists = app.route('/api/auth/user-exists/<email>', methods=['GET'])(
+        limiter.limit("10 per minute")(_api_check_user_exists_impl)
+    )
+else:
+    api_check_user_exists = app.route('/api/auth/user-exists/<email>', methods=['GET'])(
+        _api_check_user_exists_impl
+    )
 
 
 # ==================== Email Verification ====================

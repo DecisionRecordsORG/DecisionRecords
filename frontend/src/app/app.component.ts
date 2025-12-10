@@ -17,14 +17,17 @@ import { VersionService } from './services/version.service';
       <router-outlet></router-outlet>
     </main>
     <footer class="app-footer">
-      <small>
-        Architecture Decision Records - Based on
-        <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
-        <span class="separator">|</span>
-        Created by Lawrance Nyakiso
-        <span class="separator">|</span>
-        <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
-      </small>
+      <div class="footer-content">
+        <small>
+          Architecture Decision Records - Based on
+          <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
+          <span class="separator">|</span>
+          Created by Lawrance Nyakiso
+          <span class="separator">|</span>
+          <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
+        </small>
+        <img src="/assets/made-sweden-label.jpg.png" alt="Made in Sweden" class="sweden-badge" />
+      </div>
     </footer>
   `,
   styles: [`
@@ -41,10 +44,17 @@ import { VersionService } from './services/version.service';
 
     .app-footer {
       padding: 16px;
-      text-align: center;
       background: #fafafa;
       border-top: 1px solid #eee;
       color: #888;
+    }
+
+    .app-footer .footer-content {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
     }
 
     .app-footer a {
@@ -59,6 +69,12 @@ import { VersionService } from './services/version.service';
     .app-footer .version {
       font-family: monospace;
       cursor: help;
+    }
+
+    .app-footer .sweden-badge {
+      height: 20px;
+      width: auto;
+      opacity: 0.8;
     }
   `]
 })

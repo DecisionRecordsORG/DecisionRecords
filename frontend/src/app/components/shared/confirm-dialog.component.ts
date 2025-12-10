@@ -62,7 +62,7 @@ export interface ConfirmDialogResult {
       <button mat-raised-button
               [color]="data.isDanger ? 'warn' : 'primary'"
               (click)="confirm()"
-              [disabled]="data.showInput && data.inputRequired && !inputValue?.trim()">
+              [disabled]="data.showInput && data.inputRequired && !inputValue.trim()">
         {{ data.confirmText || 'Confirm' }}
       </button>
     </mat-dialog-actions>

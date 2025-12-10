@@ -463,7 +463,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   </div>
                 </div>
                 <div class="security-item">
-                  <mat-icon>eu</mat-icon>
+                  <img src="/assets/european-union-europe-svgrepo-com.svg" alt="EU" class="eu-icon" />
                   <div>
                     <strong>EU Data Residency</strong>
                     <span>Data stored in European Azure datacenters</span>
@@ -508,6 +508,58 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
+      <!-- Trust & Governance -->
+      <section class="section governance-section">
+        <div class="container">
+          <div class="governance-content">
+            <div class="governance-illustration">
+              <img src="/assets/collaborative-combine-hand-svgrepo-com.svg" alt="Collaborative hands" class="governance-svg" />
+            </div>
+            <div class="governance-text">
+              <h2>Trust & Governance</h2>
+              <p class="governance-intro">
+                Architecture Decisions is a <strong>non-profit, independent initiative</strong>.
+                No organisation owns or controls the platform.
+              </p>
+              <div class="governance-list">
+                <div class="governance-item">
+                  <mat-icon>person</mat-icon>
+                  <div>
+                    <strong>Users own their data</strong>
+                    <span>You retain ownership of all decision records and content you create.</span>
+                  </div>
+                </div>
+                <div class="governance-item">
+                  <mat-icon>block</mat-icon>
+                  <div>
+                    <strong>No data sales, no advertising</strong>
+                    <span>We do not sell user data, analytics, or insights — now or in the future.</span>
+                  </div>
+                </div>
+                <div class="governance-item">
+                  <mat-icon>volunteer_activism</mat-icon>
+                  <div>
+                    <strong>Sustainable, transparent funding</strong>
+                    <span>The project covers operating costs through sponsorships and community support.</span>
+                  </div>
+                </div>
+                <div class="governance-item">
+                  <mat-icon>balance</mat-icon>
+                  <div>
+                    <strong>Neutral by design</strong>
+                    <span>Not tied to any vendor, consultancy, framework, or certification scheme.</span>
+                  </div>
+                </div>
+              </div>
+              <p class="governance-goal">
+                Our goal is simple: to provide durable infrastructure for capturing and preserving
+                architectural decisions — without hidden incentives.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Footer -->
       <footer class="homepage-footer">
         <div class="container">
@@ -517,10 +569,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           </p>
           <div class="footer-bottom">
             <small>&copy; {{ currentYear }} Architecture-Decisions.org</small>
-            <div class="footer-meta">
-              <img src="/assets/made-sweden-label.jpg.png" alt="Made in Sweden" class="sweden-badge" />
-              <span class="version">v{{ version }}</span>
-            </div>
           </div>
         </div>
       </footer>
@@ -789,6 +837,19 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .submit-btn span,
     .submit-btn mat-icon {
       color: #ffffff !important;
+    }
+
+    .submit-btn .mdc-button__label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    ::ng-deep .submit-btn .mdc-button__label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 8px !important;
     }
 
     .submit-btn:hover {
@@ -1194,6 +1255,13 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin-top: 2px;
     }
 
+    .security-item .eu-icon {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
     .security-item div {
       display: flex;
       flex-direction: column;
@@ -1270,6 +1338,98 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       line-height: 1.5;
     }
 
+    /* Governance Section */
+    .governance-section {
+      background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+    }
+
+    .governance-content {
+      display: grid;
+      grid-template-columns: 1fr 1.5fr;
+      gap: 80px;
+      align-items: center;
+    }
+
+    .governance-illustration {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .governance-svg {
+      width: 100%;
+      max-width: 320px;
+      height: auto;
+      filter: invert(36%) sepia(85%) saturate(1352%) hue-rotate(206deg) brightness(97%) contrast(91%);
+      opacity: 0.85;
+    }
+
+    .governance-text h2 {
+      margin-bottom: 16px;
+    }
+
+    .governance-intro {
+      font-size: 1.15rem;
+      color: #475569;
+      line-height: 1.7;
+      margin-bottom: 32px;
+    }
+
+    .governance-intro strong {
+      color: #1e40af;
+    }
+
+    .governance-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .governance-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .governance-item mat-icon {
+      color: #2563eb;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .governance-item div {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .governance-item strong {
+      color: #0f172a;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .governance-item span {
+      color: #64748b;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+
+    .governance-goal {
+      font-size: 1rem;
+      color: #475569;
+      line-height: 1.7;
+      padding: 20px 24px;
+      background: #f8fafc;
+      border-left: 4px solid #2563eb;
+      border-radius: 0 8px 8px 0;
+      font-style: italic;
+    }
+
     /* Footer - Salient dark theme */
     .homepage-footer {
       background: #0f172a;
@@ -1292,28 +1452,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .footer-bottom {
       display: flex;
-      justify-content: space-between;
+      justify-content: center;
       align-items: center;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-
-    .footer-meta {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .sweden-badge {
-      height: 24px;
-      width: auto;
-      opacity: 0.8;
-    }
-
-    .version {
-      color: #64748b;
-      font-size: 0.85rem;
-      font-family: monospace;
     }
 
     /* Responsive */
@@ -1348,6 +1488,19 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       .security-commitment h2,
       .core-idea {
         text-align: center;
+      }
+
+      .governance-content {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .governance-illustration {
+        order: -1;
+      }
+
+      .governance-svg {
+        max-width: 240px;
       }
 
       .browser-frame {
@@ -1410,7 +1563,6 @@ export class HomepageComponent implements OnInit {
   resendCooldown = 0;
   usePasswordSignup = false;
   currentYear = new Date().getFullYear();
-  version = '1.4.0';
 
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -1447,15 +1599,6 @@ export class HomepageComponent implements OnInit {
         this.error = 'Verification link has expired. Please request a new one.';
       }
     });
-
-    // Fetch version from API
-    this.http.get<{ version: string }>('/api/version').subscribe({
-      next: (data) => {
-        if (data.version) {
-          this.version = data.version;
-        }
-      }
-    });
   }
 
   checkEmail(): void {
@@ -1478,32 +1621,64 @@ export class HomepageComponent implements OnInit {
     this.http.get<TenantStatus>(`/api/auth/tenant/${domain}`).subscribe({
       next: (status) => {
         this.tenantStatus = status;
-        this.isLoading = false;
 
         if (status.has_users) {
-          if (!status.email_verification_required) {
-            this.closeDialog();
-            this.router.navigate([`/${domain}/login`], {
-              queryParams: { email }
-            });
-            return;
-          }
+          // Tenant exists - check if this specific user already exists
+          this.http.get<{ exists: boolean; has_passkey: boolean; has_password: boolean }>(`/api/auth/user-exists/${email}`).subscribe({
+            next: (userStatus) => {
+              this.isLoading = false;
 
-          if (status.require_approval) {
-            this.currentView = 'access_request';
-            this.accessRequestForm.patchValue({ email });
-          } else {
-            this.currentView = 'join_organization';
-            this.accessRequestForm.patchValue({ email });
-          }
+              if (userStatus.exists) {
+                // User already exists - redirect to tenant login
+                this.closeDialog();
+                this.router.navigate([`/${domain}/login`], {
+                  queryParams: { email }
+                });
+                return;
+              }
+
+              // User doesn't exist in this tenant
+              if (!status.email_verification_required) {
+                // If no email verification required, still redirect to login for new user signup
+                this.closeDialog();
+                this.router.navigate([`/${domain}/login`], {
+                  queryParams: { email }
+                });
+                return;
+              }
+
+              if (status.require_approval) {
+                this.currentView = 'access_request';
+                this.accessRequestForm.patchValue({ email });
+              } else {
+                this.currentView = 'join_organization';
+                this.accessRequestForm.patchValue({ email });
+              }
+            },
+            error: () => {
+              this.isLoading = false;
+              // If user check fails, fall back to redirecting to login
+              this.closeDialog();
+              this.router.navigate([`/${domain}/login`], {
+                queryParams: { email }
+              });
+            }
+          });
         } else {
+          this.isLoading = false;
           this.currentView = 'signup';
           this.signupForm.patchValue({ email });
         }
       },
       error: (err) => {
         this.isLoading = false;
-        this.error = err.error?.error || 'Failed to check domain status';
+        if (err.error?.is_public_domain) {
+          this.error = err.error.error || 'Public email domains are not allowed. Please use your work email.';
+        } else if (err.error?.is_disposable_domain) {
+          this.error = err.error.error || 'Disposable email addresses are not allowed.';
+        } else {
+          this.error = err.error?.error || 'Failed to check domain status';
+        }
       }
     });
   }
