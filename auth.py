@@ -33,7 +33,8 @@ def is_master_account():
 
 def validate_setup_token():
     """
-    Validate a setup token for credential setup during incomplete account registration.
+    Validate a setup token for credential setup during incomplete account registration
+    or account recovery.
 
     Returns:
         tuple: (user, error_message) - user object if valid, None and error message if invalid
@@ -42,14 +43,18 @@ def validate_setup_token():
         Setup tokens are issued during passkey-preference signup to allow credential setup
         without granting full session access. This prevents account hijacking if users
         don't complete the setup process.
+
+        Recovery tokens allow users who have lost access to their credentials to set up
+        new ones. For recovery, users ARE expected to have existing credentials.
     """
-    from models import User
+    from models import User, SetupToken
     from datetime import datetime
 
     # Check for setup token in session
     setup_token = session.get('setup_token')
     setup_user_id = session.get('setup_user_id')
     setup_expires = session.get('setup_expires')
+    setup_purpose = session.get('setup_purpose')
 
     if not setup_token or not setup_user_id or not setup_expires:
         return None, 'No setup token found'
@@ -62,6 +67,7 @@ def validate_setup_token():
             session.pop('setup_token', None)
             session.pop('setup_user_id', None)
             session.pop('setup_expires', None)
+            session.pop('setup_purpose', None)
             return None, 'Setup token has expired. Please start signup again.'
     except (ValueError, TypeError):
         return None, 'Invalid setup token'
@@ -71,16 +77,20 @@ def validate_setup_token():
     if not user:
         return None, 'User not found'
 
-    # User should not have any credentials yet (incomplete state)
+    # Check if this is a recovery flow - recovery users ARE expected to have credentials
+    is_recovery = setup_purpose == SetupToken.PURPOSE_ACCOUNT_RECOVERY
+
+    # User should not have any credentials yet (incomplete state) - unless this is recovery
     has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
     has_password = user.has_password()
 
-    if has_passkey or has_password:
-        # User already has credentials - setup is complete
+    if (has_passkey or has_password) and not is_recovery:
+        # User already has credentials and this is not a recovery flow
         # Clear setup token and require normal login
         session.pop('setup_token', None)
         session.pop('setup_user_id', None)
         session.pop('setup_expires', None)
+        session.pop('setup_purpose', None)
         return None, 'Account setup already complete. Please log in.'
 
     return user, None
@@ -118,6 +128,7 @@ def complete_setup_and_login(user):
     session.pop('setup_token', None)
     session.pop('setup_user_id', None)
     session.pop('setup_expires', None)
+    session.pop('setup_purpose', None)
 
     # Create full session
     session['user_id'] = user.id

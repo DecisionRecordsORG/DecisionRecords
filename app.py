@@ -2788,6 +2788,7 @@ def api_validate_setup_token():
     session['setup_token'] = session_token
     session['setup_user_id'] = user.id
     session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+    session['setup_purpose'] = setup_token.purpose  # Track if this is recovery or initial setup
 
     # Determine the redirect based on token purpose
     if is_recovery:
