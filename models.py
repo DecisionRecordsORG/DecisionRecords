@@ -1,9 +1,32 @@
 import os
+import enum
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+# ============================================================================
+# ENUMS for v1.5 Governance Model
+# ============================================================================
+
+class MaturityState(enum.Enum):
+    """Tenant maturity states that control admin permissions."""
+    BOOTSTRAP = 'bootstrap'  # Single admin, limited powers
+    MATURE = 'mature'        # Full admin capabilities
+
+class GlobalRole(enum.Enum):
+    """User roles within a tenant."""
+    USER = 'user'
+    PROVISIONAL_ADMIN = 'provisional_admin'
+    STEWARD = 'steward'
+    ADMIN = 'admin'
+
+class VisibilityPolicy(enum.Enum):
+    """Space visibility policies."""
+    TENANT_VISIBLE = 'tenant_visible'  # All tenant members see decisions
+    SPACE_FOCUSED = 'space_focused'    # Default view scoped to space
 
 # Default master account credentials
 DEFAULT_MASTER_USERNAME = os.environ.get('MASTER_USERNAME', 'admin')
@@ -129,6 +152,353 @@ class MasterAccount(db.Model):
         return existing
 
 
+# ============================================================================
+# v1.5 GOVERNANCE MODELS
+# ============================================================================
+
+class Tenant(db.Model):
+    """
+    Tenant represents an organization/domain in the multi-tenant system.
+
+    Key invariants:
+    - A Tenant is identified by domain, not by a user
+    - A Tenant always has at least one default Space
+    - No tenant is ever "owned" by a user
+    """
+    __tablename__ = 'tenants'
+
+    id = db.Column(db.Integer, primary_key=True)
+    domain = db.Column(db.String(255), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(255), nullable=True)  # Display name (defaults to domain)
+    status = db.Column(db.String(20), default='active')  # active, suspended
+    maturity_state = db.Column(db.Enum(MaturityState), default=MaturityState.BOOTSTRAP)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Maturity thresholds (can be overridden by super admin)
+    maturity_age_days = db.Column(db.Integer, default=14)
+    maturity_user_threshold = db.Column(db.Integer, default=5)
+
+    # Relationships (defined after related models exist)
+    # memberships - backref from TenantMembership
+    # spaces - backref from Space
+    # decisions - backref from ArchitectureDecision
+    # settings - backref from TenantSettings
+
+    def get_admin_count(self):
+        """Count of full admins (not provisional)."""
+        return TenantMembership.query.filter_by(
+            tenant_id=self.id,
+            global_role=GlobalRole.ADMIN
+        ).count()
+
+    def get_steward_count(self):
+        """Count of stewards."""
+        return TenantMembership.query.filter_by(
+            tenant_id=self.id,
+            global_role=GlobalRole.STEWARD
+        ).count()
+
+    def get_member_count(self):
+        """Total member count."""
+        return TenantMembership.query.filter_by(tenant_id=self.id).count()
+
+    def compute_maturity_state(self):
+        """
+        Derive maturity state from current conditions.
+
+        Exit conditions for MATURE (any one triggers):
+        - 2+ ADMINs
+        - 1 ADMIN + 1 STEWARD
+        - User count >= threshold
+        - Age >= threshold days
+        """
+        admin_count = self.get_admin_count()
+        steward_count = self.get_steward_count()
+        member_count = self.get_member_count()
+
+        has_multi_admin = admin_count >= 2 or (admin_count >= 1 and steward_count >= 1)
+        has_enough_users = member_count >= self.maturity_user_threshold
+        is_old_enough = (datetime.utcnow() - self.created_at).days >= self.maturity_age_days
+
+        if has_multi_admin or has_enough_users or is_old_enough:
+            return MaturityState.MATURE
+        return MaturityState.BOOTSTRAP
+
+    def update_maturity(self):
+        """Update maturity state if conditions have changed. Returns True if changed."""
+        new_state = self.compute_maturity_state()
+        if new_state != self.maturity_state:
+            self.maturity_state = new_state
+            return True
+        return False
+
+    def is_mature(self):
+        """Check if tenant has reached maturity."""
+        return self.maturity_state == MaturityState.MATURE
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'domain': self.domain,
+            'name': self.name or self.domain,
+            'status': self.status,
+            'maturity_state': self.maturity_state.value,
+            'created_at': self.created_at.isoformat(),
+            'maturity_age_days': self.maturity_age_days,
+            'maturity_user_threshold': self.maturity_user_threshold,
+            'admin_count': self.get_admin_count(),
+            'steward_count': self.get_steward_count(),
+            'member_count': self.get_member_count(),
+        }
+
+
+class TenantMembership(db.Model):
+    """
+    Links users to tenants with their role.
+
+    Key invariants:
+    - A User may belong to only one Tenant per domain (enforced by unique constraint)
+    - Role lives on membership, not on user
+    - PROVISIONAL_ADMIN only allowed while tenant is in BOOTSTRAP state
+    """
+    __tablename__ = 'tenant_memberships'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+    global_role = db.Column(db.Enum(GlobalRole), default=GlobalRole.USER)
+    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('memberships', lazy='dynamic'))
+    tenant = db.relationship('Tenant', backref=db.backref('memberships', lazy='dynamic'))
+
+    # Constraints
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'tenant_id', name='unique_user_tenant'),
+    )
+
+    @property
+    def is_admin(self):
+        """Backward compatibility - any admin-level role."""
+        return self.global_role in [
+            GlobalRole.PROVISIONAL_ADMIN,
+            GlobalRole.STEWARD,
+            GlobalRole.ADMIN
+        ]
+
+    @property
+    def is_full_admin(self):
+        """Only full admin, not provisional."""
+        return self.global_role == GlobalRole.ADMIN
+
+    @property
+    def can_change_tenant_settings(self):
+        """Can modify tenant configuration (full admin only)."""
+        return self.global_role == GlobalRole.ADMIN
+
+    @property
+    def can_approve_requests(self):
+        """Can approve/reject access requests."""
+        return self.global_role in [
+            GlobalRole.PROVISIONAL_ADMIN,
+            GlobalRole.STEWARD,
+            GlobalRole.ADMIN
+        ]
+
+    @property
+    def can_promote_to_steward(self):
+        """Can promote users to steward role."""
+        return self.global_role in [
+            GlobalRole.PROVISIONAL_ADMIN,
+            GlobalRole.STEWARD,
+            GlobalRole.ADMIN
+        ]
+
+    @property
+    def can_promote_to_admin(self):
+        """Can promote users to admin role (admin only)."""
+        return self.global_role == GlobalRole.ADMIN
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'tenant_id': self.tenant_id,
+            'global_role': self.global_role.value,
+            'joined_at': self.joined_at.isoformat(),
+            'is_admin': self.is_admin,
+            'is_full_admin': self.is_full_admin,
+        }
+
+
+class TenantSettings(db.Model):
+    """
+    Tenant-specific settings. One-to-one with Tenant.
+    Replaces AuthConfig for v1.5+.
+    """
+    __tablename__ = 'tenant_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, unique=True)
+
+    # Auth settings
+    auth_method = db.Column(db.String(20), default='local')  # 'sso', 'webauthn', 'local'
+    allow_password = db.Column(db.Boolean, default=True)
+    allow_passkey = db.Column(db.Boolean, default=True)
+    rp_name = db.Column(db.String(255), default='Architecture Decisions')
+
+    # Registration settings
+    allow_registration = db.Column(db.Boolean, default=True)
+    require_approval = db.Column(db.Boolean, default=False)
+
+    # Display settings
+    tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # For decision IDs
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref=db.backref('settings', uselist=False))
+
+    # NOTE: No 'delete tenant' setting - that's Super Admin only
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'auth_method': self.auth_method,
+            'allow_password': self.allow_password,
+            'allow_passkey': self.allow_passkey,
+            'allow_registration': self.allow_registration,
+            'require_approval': self.require_approval,
+            'rp_name': self.rp_name,
+            'tenant_prefix': self.tenant_prefix,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+        }
+
+
+class Space(db.Model):
+    """
+    Organizational space within a tenant.
+
+    Key invariants:
+    - Every tenant has exactly one default space
+    - Spaces organize, they don't isolate
+    - Space deletion removes links, not decisions
+    - Admins/Stewards can see ALL decisions regardless of space
+    """
+    __tablename__ = 'spaces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    is_default = db.Column(db.Boolean, default=False)
+    visibility_policy = db.Column(db.Enum(VisibilityPolicy), default=VisibilityPolicy.TENANT_VISIBLE)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref=db.backref('spaces', lazy='dynamic'))
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'name': self.name,
+            'description': self.description,
+            'is_default': self.is_default,
+            'visibility_policy': self.visibility_policy.value,
+            'created_by_id': self.created_by_id,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
+class DecisionSpace(db.Model):
+    """
+    Links decisions to spaces (many-to-many).
+
+    Key invariants:
+    - A decision can be in zero or more spaces
+    - Removing from space doesn't delete the decision
+    """
+    __tablename__ = 'decision_spaces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    decision_id = db.Column(db.Integer, db.ForeignKey('architecture_decisions.id'), nullable=False)
+    space_id = db.Column(db.Integer, db.ForeignKey('spaces.id'), nullable=False)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    added_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Relationships
+    space = db.relationship('Space', backref=db.backref('decision_links', lazy='dynamic', cascade='all, delete-orphan'))
+    added_by = db.relationship('User', foreign_keys=[added_by_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('decision_id', 'space_id', name='unique_decision_space'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'decision_id': self.decision_id,
+            'space_id': self.space_id,
+            'added_at': self.added_at.isoformat(),
+            'added_by_id': self.added_by_id,
+        }
+
+
+class AuditLog(db.Model):
+    """
+    Immutable audit log for admin/steward actions.
+
+    Key invariants:
+    - Entries are immutable (no update/delete)
+    - All admin/steward actions MUST generate entries
+    """
+    __tablename__ = 'audit_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+    actor_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    action_type = db.Column(db.String(50), nullable=False)
+    target_entity = db.Column(db.String(50), nullable=True)  # 'user', 'tenant_settings', etc.
+    target_id = db.Column(db.Integer, nullable=True)
+    details = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships (read-only)
+    tenant = db.relationship('Tenant', backref=db.backref('audit_logs', lazy='dynamic'))
+    actor = db.relationship('User', foreign_keys=[actor_user_id])
+
+    # Action type constants
+    ACTION_PROMOTE_USER = 'promote_user'
+    ACTION_DEMOTE_USER = 'demote_user'
+    ACTION_CHANGE_SETTING = 'change_setting'
+    ACTION_APPROVE_REQUEST = 'approve_request'
+    ACTION_REJECT_REQUEST = 'reject_request'
+    ACTION_CREATE_SPACE = 'create_space'
+    ACTION_DELETE_SPACE = 'delete_space'
+    ACTION_MATURITY_CHANGE = 'maturity_change'
+    ACTION_USER_JOINED = 'user_joined'
+    ACTION_USER_LEFT = 'user_left'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'actor_user_id': self.actor_user_id,
+            'action_type': self.action_type,
+            'target_entity': self.target_entity,
+            'target_id': self.target_id,
+            'details': self.details,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
 class User(db.Model):
     """User model for authenticated users via SSO, WebAuthn, or local password."""
 
@@ -143,6 +513,7 @@ class User(db.Model):
     auth_type = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
     is_admin = db.Column(db.Boolean, default=False)
     email_verified = db.Column(db.Boolean, default=False)  # Email verification status
+    has_seen_admin_onboarding = db.Column(db.Boolean, default=False)  # Track if admin has seen the onboarding modal
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, nullable=True)
 
@@ -165,6 +536,38 @@ class User(db.Model):
         """Check if user has a password set."""
         return self.password_hash is not None
 
+    # v1.5 Membership helpers
+    def get_membership(self, tenant_id=None):
+        """Get user's membership for a tenant. If tenant_id not specified, uses sso_domain."""
+        if tenant_id:
+            return TenantMembership.query.filter_by(
+                user_id=self.id,
+                tenant_id=tenant_id
+            ).first()
+        # Fallback: look up tenant by domain then get membership
+        tenant = Tenant.query.filter_by(domain=self.sso_domain).first()
+        if tenant:
+            return TenantMembership.query.filter_by(
+                user_id=self.id,
+                tenant_id=tenant.id
+            ).first()
+        return None
+
+    def get_role(self, tenant_id=None):
+        """Get user's role in a tenant."""
+        membership = self.get_membership(tenant_id)
+        return membership.global_role if membership else None
+
+    def is_admin_of(self, tenant_id=None):
+        """Check if user has admin privileges (any admin-level role) in tenant."""
+        membership = self.get_membership(tenant_id)
+        return membership.is_admin if membership else False
+
+    def is_full_admin_of(self, tenant_id=None):
+        """Check if user is a full admin (not provisional) in tenant."""
+        membership = self.get_membership(tenant_id)
+        return membership.is_full_admin if membership else False
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -174,6 +577,7 @@ class User(db.Model):
             'auth_type': self.auth_type,
             'is_admin': self.is_admin,
             'email_verified': self.email_verified,
+            'has_seen_admin_onboarding': self.has_seen_admin_onboarding,
             'created_at': self.created_at.isoformat(),
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'has_passkey': len(self.webauthn_credentials) > 0 if self.webauthn_credentials else False,
@@ -260,7 +664,7 @@ class AuthConfig(db.Model):
     allow_password = db.Column(db.Boolean, default=True)  # Allow password login
     allow_passkey = db.Column(db.Boolean, default=True)  # Allow passkey/WebAuthn login
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
-    require_approval = db.Column(db.Boolean, default=True)  # Require admin approval for new users to join tenant
+    require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
     tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # 3-letter prefix for decision IDs (consonants only)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
@@ -479,8 +883,9 @@ class ArchitectureDecision(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Multi-tenancy
+    # Multi-tenancy - v1.5 uses tenant_id FK, domain kept for backward compatibility during migration
     domain = db.Column(db.String(255), nullable=False, index=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True, index=True)  # v1.5: FK to tenant (nullable during migration)
 
     # User tracking
     created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -493,9 +898,17 @@ class ArchitectureDecision(db.Model):
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
     history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
     infrastructure = db.relationship('ITInfrastructure', secondary=decision_infrastructure, backref=db.backref('decisions', lazy='dynamic'))
+    # v1.5 relationships
+    tenant = db.relationship('Tenant', backref=db.backref('decisions', lazy='dynamic'))
+    space_links = db.relationship('DecisionSpace', backref='decision', lazy='dynamic', cascade='all, delete-orphan')
 
     # Valid status values
     VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
+
+    @property
+    def spaces(self):
+        """Get all spaces this decision belongs to."""
+        return [link.space for link in self.space_links]
 
     def get_display_id(self):
         """Get the display ID in format PREFIX-NNN (e.g., GYH-034)."""
@@ -507,8 +920,8 @@ class ArchitectureDecision(db.Model):
             return f"{auth_config.tenant_prefix}-{self.decision_number:03d}"
         return f"ADR-{self.decision_number:03d}"  # Fallback format
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_spaces=False):
+        result = {
             'id': self.id,
             'display_id': self.get_display_id(),
             'decision_number': self.decision_number,
@@ -520,10 +933,14 @@ class ArchitectureDecision(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'domain': self.domain,
+            'tenant_id': self.tenant_id,  # v1.5
             'created_by': self.creator.to_dict() if self.creator else None,
             'updated_by': self.updated_by.to_dict() if self.updated_by else None,
             'infrastructure': [i.to_dict() for i in self.infrastructure] if self.infrastructure else [],
         }
+        if include_spaces:
+            result['spaces'] = [s.to_dict() for s in self.spaces]
+        return result
 
     def to_dict_with_history(self):
         data = self.to_dict()

@@ -46,13 +46,13 @@ interface DomainStatus {
         @if (status === 'pending') {
           <h1>Domain Approval Pending</h1>
           <p class="subtitle">
-            Your organization domain <strong>{{ domain }}</strong> is awaiting approval from the system administrator.
+            Your organisation domain <strong>{{ domain }}</strong> is awaiting approval.
           </p>
 
           <div class="info-section">
             <h3>What happens next?</h3>
             <ol>
-              <li>The system administrator will review your domain request</li>
+              <li>Your domain request will be reviewed</li>
               <li>You will receive an email notification when your domain is approved</li>
               <li>Once approved, you can access all features of the application</li>
             </ol>
@@ -84,14 +84,14 @@ interface DomainStatus {
         } @else if (status === 'rejected') {
           <h1>Domain Rejected</h1>
           <p class="subtitle error-text">
-            Unfortunately, your organization domain <strong>{{ domain }}</strong> has been rejected.
+            Unfortunately, your organisation domain <strong>{{ domain }}</strong> has been rejected.
           </p>
           @if (rejectionReason) {
             <div class="rejection-reason">
               <strong>Reason:</strong> {{ rejectionReason }}
             </div>
           }
-          <p>Please contact the system administrator for more information.</p>
+          <p>Please contact support for more information.</p>
 
           <button mat-raised-button (click)="logout()">
             <mat-icon>logout</mat-icon>

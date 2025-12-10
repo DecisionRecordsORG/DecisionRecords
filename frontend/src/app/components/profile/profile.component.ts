@@ -213,8 +213,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
           </mat-card-content>
         </mat-card>
 
-        <!-- Passkeys Section (only for WebAuthn users) -->
-        @if (user?.auth_type === 'webauthn') {
+        <!-- Passkeys Section (only for WebAuthn users, hidden during initial setup) -->
+        @if (user?.auth_type === 'webauthn' && !setupMode) {
           <mat-card class="passkeys-card">
             <mat-card-header>
               <mat-card-title>
@@ -268,6 +268,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
           </mat-card>
         }
 
+        <!-- Subscription card (hidden during setup mode) -->
+        @if (!setupMode) {
         <mat-card class="subscription-card">
           <mat-card-header>
             <mat-card-title>
@@ -326,6 +328,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
             }
           </mat-card-content>
         </mat-card>
+        }
       }
     </div>
   `,

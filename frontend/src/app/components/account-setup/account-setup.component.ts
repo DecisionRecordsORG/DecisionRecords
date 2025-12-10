@@ -332,10 +332,10 @@ export class AccountSetupComponent implements OnInit {
 
     if (response.expired) {
       this.errorTitle = 'Link Expired';
-      this.error = 'This setup link has expired. Please contact your administrator for a new link.';
+      this.error = 'This setup link has expired. Please request a new link from your organisation.';
     } else if (response.used) {
       this.errorTitle = 'Link Already Used';
-      this.error = 'This setup link has already been used. Please contact your administrator if you need a new link.';
+      this.error = 'This setup link has already been used. Please request a new link if needed.';
     } else if (response.already_setup) {
       this.errorTitle = 'Already Set Up';
       this.error = 'Your account is already set up. Please log in instead.';

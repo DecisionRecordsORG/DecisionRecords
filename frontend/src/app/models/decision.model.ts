@@ -1,15 +1,43 @@
+// v1.5 Role types
+export type GlobalRole = 'user' | 'provisional_admin' | 'steward' | 'admin';
+
+export interface TenantMembership {
+  id: number;
+  user_id: number;
+  tenant_id: number;
+  global_role: GlobalRole;
+  joined_at: string;
+}
+
+// v1.5 Tenant info (included in /api/user/me response)
+export type MaturityState = 'bootstrap' | 'mature';
+
+export interface TenantInfo {
+  id: number;
+  domain: string;
+  name: string | null;
+  maturity_state: MaturityState;
+  admin_count: number;
+  steward_count: number;
+}
+
 export interface User {
   id: number;
   email: string;
   name: string;
   sso_domain: string;
   auth_type: 'sso' | 'webauthn' | 'local' | 'oidc';
-  is_admin: boolean;
+  is_admin: boolean;  // Legacy field - use membership.global_role for v1.5
   has_passkey: boolean;
   has_password: boolean;
   email_verified: boolean;
+  has_seen_admin_onboarding: boolean;
   created_at: string;
   last_login: string;
+  // v1.5 additions
+  membership?: TenantMembership;
+  global_role?: GlobalRole;  // Convenience field populated by backend
+  tenant_info?: TenantInfo;  // Tenant status info for governance UI
 }
 
 export interface MasterAccount {
@@ -33,6 +61,29 @@ export interface ITInfrastructure {
 
 export type InfrastructureType = 'application' | 'network' | 'database' | 'server' | 'service' | 'api' | 'storage' | 'cloud' | 'container' | 'other';
 
+// v1.5 Space types
+export type VisibilityPolicy = 'tenant_visible' | 'space_focused';
+
+export interface Space {
+  id: number;
+  tenant_id: number;
+  name: string;
+  description: string | null;
+  is_default: boolean;
+  visibility_policy: VisibilityPolicy;
+  created_by_id: number | null;
+  created_at: string;
+  decision_count?: number;  // Optional, included in GET /api/spaces/:id
+}
+
+export interface DecisionSpace {
+  id: number;
+  decision_id: number;
+  space_id: number;
+  added_at: string;
+  added_by_id: number | null;
+}
+
 export interface Decision {
   id: number;
   display_id?: string;  // e.g., "GYH-034"
@@ -51,6 +102,9 @@ export interface Decision {
   deleted_by?: User;
   history?: DecisionHistory[];
   infrastructure?: ITInfrastructure[];
+  // v1.5 additions
+  tenant_id?: number;
+  spaces?: Space[];
 }
 
 export interface DecisionHistory {

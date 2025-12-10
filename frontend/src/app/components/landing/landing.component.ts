@@ -133,7 +133,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
               <p class="info-text">
                 <mat-icon>info</mat-icon>
                 <span>
-                  You'll be the first user and administrator for <strong>{{ tenantDomain }}</strong>.
+                  You're helping bootstrap a shared space for <strong>&#64;{{ tenantDomain }}</strong>. Others from your organisation can join automatically.
                   @if (tenantStatus?.email_verification_required === false) {
                     @if (!usePasswordSignup) {
                       After creating your account, you'll set up a passkey for secure passwordless login.

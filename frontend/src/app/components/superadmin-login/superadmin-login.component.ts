@@ -40,16 +40,16 @@ import { AuthService } from '../../services/auth.service';
             <div class="error-message">{{ error }}</div>
           }
 
-          <form [formGroup]="loginForm" (ngSubmit)="login()">
+          <form [formGroup]="loginForm" (ngSubmit)="login()" data-testid="superadmin-login-form">
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Username</mat-label>
-              <input matInput formControlName="username" placeholder="admin">
+              <input matInput formControlName="username" placeholder="admin" data-testid="username-input">
               <mat-icon matPrefix>person</mat-icon>
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
               <mat-label>Password</mat-label>
-              <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password">
+              <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password" data-testid="password-input">
               <mat-icon matPrefix>lock</mat-icon>
               <button mat-icon-button matSuffix type="button" (click)="hidePassword = !hidePassword">
                 <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
@@ -57,7 +57,7 @@ import { AuthService } from '../../services/auth.service';
             </mat-form-field>
 
             <button mat-raised-button color="primary" type="submit"
-                    [disabled]="loginForm.invalid || isLoading" class="full-width">
+                    [disabled]="loginForm.invalid || isLoading" class="full-width" data-testid="login-button">
               <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
               <mat-icon *ngIf="!isLoading">login</mat-icon>
               <span *ngIf="!isLoading">Sign In</span>

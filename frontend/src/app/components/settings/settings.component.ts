@@ -15,12 +15,13 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
 import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest } from '../../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { SetupLinkDialogComponent } from '../shared/setup-link-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
 @Component({
   selector: 'app-settings',
@@ -52,6 +53,18 @@ import { MatTooltipModule } from '@angular/material/tooltip';
         <mat-icon>settings</mat-icon>
         {{ authService.isMasterAccount ? 'System Settings' : 'Organization Settings' }}
       </h1>
+
+      <!-- Provisional Admin Banner -->
+      @if (isProvisionalAdmin) {
+        <div class="provisional-admin-banner" data-testid="provisional-admin-banner">
+          <mat-icon>info</mat-icon>
+          <div class="banner-content">
+            <strong>Some settings are restricted</strong>
+            <p>To protect your organization, certain settings (like disabling registration) require at least one other admin or steward.
+            Assign another admin or steward to unlock all settings.</p>
+          </div>
+        </div>
+      }
 
       <mat-tab-group>
         <!-- SSO Configuration Tab -->
@@ -246,7 +259,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                 @if (users.length === 0) {
                   <p class="empty-message">No users found</p>
                 } @else {
-                  <table mat-table [dataSource]="users" class="full-width">
+                  <table mat-table [dataSource]="users" class="full-width" data-testid="user-list">
                     <ng-container matColumnDef="name">
                       <th mat-header-cell *matHeaderCellDef>Name</th>
                       <td mat-cell *matCellDef="let user">{{ user.name || 'No name' }}</td>
@@ -273,12 +286,14 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                       </td>
                     </ng-container>
 
-                    <ng-container matColumnDef="is_admin">
-                      <th mat-header-cell *matHeaderCellDef>Admin</th>
+                    <ng-container matColumnDef="role">
+                      <th mat-header-cell *matHeaderCellDef>Role</th>
                       <td mat-cell *matCellDef="let user">
-                        <mat-slide-toggle [checked]="user.is_admin"
-                                          (change)="toggleAdmin(user, $event.checked)">
-                        </mat-slide-toggle>
+                        <mat-chip [class]="getUserRoleBadge(user.global_role).cssClass"
+                                  [matTooltip]="getUserRoleBadge(user.global_role).tooltip"
+                                  [attr.data-testid]="'role-badge-' + user.global_role">
+                          {{ getUserRoleBadge(user.global_role).label }}
+                        </mat-chip>
                       </td>
                     </ng-container>
 
@@ -387,17 +402,39 @@ import { MatTooltipModule } from '@angular/material/tooltip';
                   <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
 
-                      <mat-slide-toggle formControlName="allow_registration">
-                        Allow new user registration
-                      </mat-slide-toggle>
+                      <div class="toggle-with-tooltip">
+                        <mat-slide-toggle formControlName="allow_registration"
+                                          [disabled]="isRegistrationToggleRestricted && !authConfigForm.value.allow_registration"
+                                          data-testid="allow-registration-toggle">
+                          Allow new user registration
+                        </mat-slide-toggle>
+                        @if (isRegistrationToggleRestricted) {
+                          <mat-icon class="restricted-icon"
+                                    matTooltip="This setting is restricted until another admin or steward is assigned"
+                                    data-testid="registration-lock-icon">
+                            lock
+                          </mat-icon>
+                        }
+                      </div>
                       <p class="option-hint">
                         When enabled, new users can create accounts. When disabled, only existing users can sign in.
                       </p>
 
                       <div class="approval-toggle-section" *ngIf="authConfigForm.value.allow_registration">
-                          <mat-slide-toggle formControlName="auto_approve_users">
-                            Auto-approve new users from your domain
-                          </mat-slide-toggle>
+                          <div class="toggle-with-tooltip">
+                            <mat-slide-toggle formControlName="auto_approve_users"
+                                              [disabled]="isApprovalToggleRestricted && authConfigForm.value.auto_approve_users"
+                                              data-testid="auto-approve-toggle">
+                              Auto-approve new users from your domain
+                            </mat-slide-toggle>
+                            @if (isApprovalToggleRestricted) {
+                              <mat-icon class="restricted-icon"
+                                        matTooltip="This setting is restricted until another admin or steward is assigned"
+                                        data-testid="approval-lock-icon">
+                                lock
+                              </mat-icon>
+                            }
+                          </div>
                           <p class="option-hint">
                             When enabled, users with verified {{ '@' + getCurrentDomain() }} emails are automatically approved.
                             When disabled, an admin must approve each new user.
@@ -591,6 +628,78 @@ import { MatTooltipModule } from '@angular/material/tooltip';
       align-items: center;
       gap: 8px;
       margin-bottom: 24px;
+    }
+
+    /* Provisional Admin Banner */
+    .provisional-admin-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+      border-radius: 12px;
+      border-left: 4px solid #ff9800;
+    }
+
+    .provisional-admin-banner mat-icon {
+      color: #f57c00;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .provisional-admin-banner .banner-content {
+      flex: 1;
+    }
+
+    .provisional-admin-banner strong {
+      display: block;
+      color: #e65100;
+      margin-bottom: 4px;
+      font-size: 15px;
+    }
+
+    .provisional-admin-banner p {
+      margin: 0;
+      font-size: 13px;
+      color: #5d4037;
+      line-height: 1.5;
+    }
+
+    /* Toggle with tooltip */
+    .toggle-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .restricted-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #ff9800;
+      cursor: help;
+    }
+
+    /* Role badge styles */
+    .role-admin {
+      background-color: #e3f2fd !important;
+      color: #1565c0 !important;
+    }
+
+    .role-provisional {
+      background-color: #fff3e0 !important;
+      color: #e65100 !important;
+    }
+
+    .role-steward {
+      background-color: #f3e5f5 !important;
+      color: #7b1fa2 !important;
+    }
+
+    .role-user {
+      background-color: #f5f5f5 !important;
+      color: #616161 !important;
     }
 
     .tab-content {
@@ -978,7 +1087,7 @@ export class SettingsComponent implements OnInit {
   authConfig: AuthConfig | null = null;
   accessRequests: AccessRequest[] = [];
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
-  userColumns = ['name', 'email', 'domain', 'auth_type', 'is_admin', 'last_login', 'actions'];
+  userColumns = ['name', 'email', 'domain', 'auth_type', 'role', 'last_login', 'actions'];
   accessRequestColumns = ['name', 'email', 'reason', 'created_at', 'status', 'actions'];
 
   editingSSOId: number | null = null;
@@ -991,6 +1100,35 @@ export class SettingsComponent implements OnInit {
   loadingRequests = false;
   processingRequest: number | null = null;
   pendingRequestsCount = 0;
+
+  /**
+   * Check if current user is a provisional admin
+   */
+  get isProvisionalAdmin(): boolean {
+    const user = this.authService.currentUser?.user as User | undefined;
+    return user?.global_role === 'provisional_admin';
+  }
+
+  /**
+   * Check if registration toggle is restricted (provisional admin trying to disable registration)
+   */
+  get isRegistrationToggleRestricted(): boolean {
+    return this.isProvisionalAdmin;
+  }
+
+  /**
+   * Check if approval toggle is restricted (provisional admin trying to require approval)
+   */
+  get isApprovalToggleRestricted(): boolean {
+    return this.isProvisionalAdmin;
+  }
+
+  /**
+   * Get role badge for a user
+   */
+  getUserRoleBadge(role: GlobalRole | undefined): RoleBadge {
+    return getRoleBadge(role);
+  }
 
   constructor(
     private fb: FormBuilder,

@@ -96,15 +96,15 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               </div>
             }
 
-            <form [formGroup]="emailForm" (ngSubmit)="checkUser()">
+            <form [formGroup]="emailForm" (ngSubmit)="checkUser()" data-testid="email-form">
               <mat-form-field appearance="outline" class="full-width">
                 <mat-label>Email</mat-label>
-                <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant">
+                <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant" data-testid="email-input">
                 <mat-icon matPrefix>email</mat-icon>
               </mat-form-field>
 
               <button mat-raised-button color="primary" type="submit"
-                      [disabled]="emailForm.invalid || isLoading" class="full-width sign-in-button">
+                      [disabled]="emailForm.invalid || isLoading" class="full-width sign-in-button" data-testid="continue-button">
                 <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
                 <mat-icon *ngIf="!isLoading">login</mat-icon>
                 <span *ngIf="!isLoading">Sign In</span>
@@ -121,8 +121,8 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
 
           <!-- Login View: Passkey first (default), Password as alternative -->
           @if (currentView === 'login') {
-            <div class="login-section">
-              <p class="user-email">{{ currentEmail }}</p>
+            <div class="login-section" data-testid="login-view">
+              <p class="user-email" data-testid="current-email">{{ currentEmail }}</p>
 
               <!-- Passkey Login (Primary) -->
               @if (authConfig?.allow_passkey && userStatus?.has_passkey && !showPasswordLogin) {
@@ -144,15 +144,15 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               <!-- Password Login (Secondary) -->
               @if (showPasswordLogin || (!userStatus?.has_passkey && userStatus?.has_password)) {
                 @if (authConfig?.allow_password && userStatus?.has_password) {
-                  <form [formGroup]="loginForm" (ngSubmit)="loginWithPassword()">
+                  <form [formGroup]="loginForm" (ngSubmit)="loginWithPassword()" data-testid="password-form">
                     <mat-form-field appearance="outline" class="full-width">
                       <mat-label>Password</mat-label>
-                      <input matInput formControlName="password" type="password">
+                      <input matInput formControlName="password" type="password" data-testid="password-input">
                       <mat-icon matPrefix>lock</mat-icon>
                     </mat-form-field>
 
                     <button mat-raised-button color="primary" type="submit"
-                            [disabled]="loginForm.invalid || isLoading" class="full-width">
+                            [disabled]="loginForm.invalid || isLoading" class="full-width" data-testid="login-button">
                       <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
                       <mat-icon *ngIf="!isLoading">login</mat-icon>
                       <span *ngIf="!isLoading">Sign In</span>
@@ -174,7 +174,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                   <mat-icon>warning</mat-icon>
                   <span>
                     Your account doesn't have any login credentials set up yet.
-                    Please contact your administrator.
+                    Please check your email for a setup link.
                   </span>
                 </div>
               }
@@ -262,7 +262,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             <div class="request-section">
               <p class="info-text">
                 <mat-icon>info</mat-icon>
-                <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access from your organization's administrator.</span>
+                <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access to join your organisation.</span>
               </p>
 
               <form [formGroup]="requestForm" (ngSubmit)="submitAccessRequest()">
@@ -306,7 +306,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               <mat-icon class="success-icon">check_circle</mat-icon>
               <h3>Request Submitted</h3>
               <p>
-                Your access request has been sent to the administrator of <strong>{{ tenant }}</strong>.
+                Your access request has been submitted for <strong>{{ tenant }}</strong>.
                 You'll receive an email once your request is approved.
               </p>
               <button mat-raised-button color="primary" routerLink="/">

@@ -177,9 +177,9 @@ def login_required(f):
                         return jsonify({
                             'error': 'Credential setup required',
                             'setup_required': True,
-                            'redirect': f'/{domain}/profile?setup=passkey'
+                            'redirect': f'/{domain}/setup'
                         }), 403
-                    return redirect(f'/{domain}/profile?setup=passkey')
+                    return redirect(f'/{domain}/setup')
 
         return f(*args, **kwargs)
     return decorated_function
@@ -213,6 +213,64 @@ def master_required(f):
             return redirect(url_for('index'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+def steward_or_admin_required(f):
+    """Decorator to require steward or admin privileges for a route."""
+    @wraps(f)
+    @login_required
+    def decorated_function(*args, **kwargs):
+        from models import Tenant, GlobalRole
+
+        # Master accounts always have access
+        if is_master_account():
+            return f(*args, **kwargs)
+
+        # Get user's membership for their domain's tenant
+        tenant = Tenant.query.filter_by(domain=g.current_user.sso_domain).first()
+        if not tenant:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Tenant not found'}), 404
+            return redirect(url_for('index'))
+
+        membership = g.current_user.get_membership(tenant_id=tenant.id)
+        if not membership:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Not a member of this tenant'}), 403
+            return redirect(url_for('index'))
+
+        # Check if user is steward or admin (any admin level)
+        if membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+            if request.is_json or request.path.startswith('/api/'):
+                return jsonify({'error': 'Steward or admin access required'}), 403
+            return redirect(url_for('index'))
+
+        # Set tenant and membership in g for route handlers
+        g.current_tenant = tenant
+        g.current_membership = membership
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_current_tenant():
+    """Get the current user's tenant based on their domain."""
+    from models import Tenant
+
+    if is_master_account():
+        return None
+
+    if not g.current_user or not g.current_user.sso_domain:
+        return None
+
+    return Tenant.query.filter_by(domain=g.current_user.sso_domain).first()
+
+
+def get_current_membership():
+    """Get the current user's membership in their tenant."""
+    tenant = get_current_tenant()
+    if not tenant or not g.current_user:
+        return None
+    return g.current_user.get_membership(tenant_id=tenant.id)
 
 
 def authenticate_master(username, password):

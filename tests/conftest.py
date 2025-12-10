@@ -1,0 +1,158 @@
+"""
+Pytest fixtures for Architecture Decisions tests.
+"""
+import os
+import sys
+import pytest
+
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from models import db, User, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, \
+    AuditLog, ArchitectureDecision, MaturityState, GlobalRole, VisibilityPolicy
+from flask import Flask
+
+
+@pytest.fixture
+def app():
+    """Create application for testing."""
+    app = Flask(__name__)
+    app.config['TESTING'] = True
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['SECRET_KEY'] = 'test-secret-key'
+
+    db.init_app(app)
+
+    with app.app_context():
+        db.create_all()
+        yield app
+        db.drop_all()
+
+
+@pytest.fixture
+def session(app):
+    """Create database session for testing."""
+    with app.app_context():
+        yield db.session
+
+
+@pytest.fixture
+def sample_user(session):
+    """Create a sample user."""
+    user = User(
+        email='test@example.com',
+        name='Test User',
+        sso_domain='example.com',
+        auth_type='local',
+        email_verified=True
+    )
+    session.add(user)
+    session.commit()
+    return user
+
+
+@pytest.fixture
+def sample_tenant(session):
+    """Create a sample tenant."""
+    tenant = Tenant(
+        domain='example.com',
+        name='Example Corp',
+        status='active',
+        maturity_state=MaturityState.BOOTSTRAP
+    )
+    session.add(tenant)
+    session.commit()
+    return tenant
+
+
+@pytest.fixture
+def sample_tenant_with_settings(session, sample_tenant):
+    """Create a tenant with settings."""
+    settings = TenantSettings(
+        tenant_id=sample_tenant.id,
+        auth_method='local',
+        allow_password=True,
+        allow_passkey=True,
+        allow_registration=True,
+        require_approval=False,
+        tenant_prefix='EXM'
+    )
+    session.add(settings)
+    session.commit()
+    return sample_tenant
+
+
+@pytest.fixture
+def sample_membership(session, sample_user, sample_tenant):
+    """Create a sample membership."""
+    membership = TenantMembership(
+        user_id=sample_user.id,
+        tenant_id=sample_tenant.id,
+        global_role=GlobalRole.USER
+    )
+    session.add(membership)
+    session.commit()
+    return membership
+
+
+@pytest.fixture
+def admin_user(session, sample_tenant):
+    """Create an admin user with membership."""
+    user = User(
+        email='admin@example.com',
+        name='Admin User',
+        sso_domain='example.com',
+        auth_type='local',
+        email_verified=True
+    )
+    session.add(user)
+    session.flush()
+
+    membership = TenantMembership(
+        user_id=user.id,
+        tenant_id=sample_tenant.id,
+        global_role=GlobalRole.ADMIN
+    )
+    session.add(membership)
+    session.commit()
+    return user
+
+
+@pytest.fixture
+def steward_user(session, sample_tenant):
+    """Create a steward user with membership."""
+    user = User(
+        email='steward@example.com',
+        name='Steward User',
+        sso_domain='example.com',
+        auth_type='local',
+        email_verified=True
+    )
+    session.add(user)
+    session.flush()
+
+    membership = TenantMembership(
+        user_id=user.id,
+        tenant_id=sample_tenant.id,
+        global_role=GlobalRole.STEWARD
+    )
+    session.add(membership)
+    session.commit()
+    return user
+
+
+@pytest.fixture
+def sample_space(session, sample_tenant, sample_user):
+    """Create a sample space."""
+    space = Space(
+        tenant_id=sample_tenant.id,
+        name='Default Space',
+        description='The default space',
+        is_default=True,
+        visibility_policy=VisibilityPolicy.TENANT_VISIBLE,
+        created_by_id=sample_user.id
+    )
+    session.add(space)
+    session.commit()
+    return space

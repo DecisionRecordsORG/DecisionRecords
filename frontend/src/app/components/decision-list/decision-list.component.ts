@@ -1,6 +1,7 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule, TitleCasePipe } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
@@ -10,10 +11,11 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatDialogModule, MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { FormsModule } from '@angular/forms';
 import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
-import { Decision } from '../../models/decision.model';
+import { Decision, User } from '../../models/decision.model';
 
 @Component({
   selector: 'app-decision-list',
@@ -30,7 +32,8 @@ import { Decision } from '../../models/decision.model';
     MatTooltipModule,
     MatProgressSpinnerModule,
     MatInputModule,
-    MatFormFieldModule
+    MatFormFieldModule,
+    MatDialogModule
   ],
   template: `
     <div class="decision-list-container">
@@ -181,6 +184,59 @@ import { Decision } from '../../models/decision.model';
           }
         </div>
       }
+
+      <!-- Admin Onboarding Modal -->
+      <ng-template #adminOnboardingDialog>
+        <div class="onboarding-dialog">
+          <div class="onboarding-header">
+            <mat-icon class="onboarding-icon">admin_panel_settings</mat-icon>
+            <h2>You're a Provisional Admin</h2>
+          </div>
+
+          <p class="onboarding-intro">
+            You are currently a provisional administrator for <strong>{{ userDomain }}</strong>.
+            Some settings will unlock once others from your organisation join.
+          </p>
+
+          <div class="onboarding-tip">
+            <mat-icon>lightbulb</mat-icon>
+            <div>
+              <strong>Tip: Shared administration</strong>
+              <p>
+                Administration is shared. Consider assigning this role to people who can represent organisational continuity.
+              </p>
+            </div>
+          </div>
+
+          <div class="onboarding-features">
+            <h3>As a steward, you can:</h3>
+            <ul>
+              <li>
+                <mat-icon>person_add</mat-icon>
+                <span>Invite colleagues using their &#64;{{ userDomain }} email address</span>
+              </li>
+              <li>
+                <mat-icon>settings</mat-icon>
+                <span>Configure authentication and security settings</span>
+              </li>
+              <li>
+                <mat-icon>group</mat-icon>
+                <span>Manage users and share administrative responsibilities</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="onboarding-actions">
+            <button mat-stroked-button (click)="dismissOnboarding()">
+              Got it
+            </button>
+            <button mat-raised-button color="primary" [routerLink]="['/' + userDomain + '/admin']" (click)="dismissOnboarding()">
+              <mat-icon>settings</mat-icon>
+              Go to Settings
+            </button>
+          </div>
+        </div>
+      </ng-template>
     </div>
   `,
   styles: [`
@@ -477,6 +533,116 @@ import { Decision } from '../../models/decision.model';
       color: #999;
     }
 
+    /* Admin Onboarding Modal */
+    .onboarding-dialog {
+      padding: 32px;
+      max-width: 480px;
+    }
+
+    .onboarding-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .onboarding-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .onboarding-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: #2563eb;
+    }
+
+    .onboarding-intro {
+      color: #475569;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0 0 20px;
+    }
+
+    .onboarding-intro strong {
+      color: #1e40af;
+    }
+
+    .onboarding-tip {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      background: #fef3c7;
+      border-radius: 8px;
+      margin-bottom: 20px;
+    }
+
+    .onboarding-tip mat-icon {
+      color: #d97706;
+      flex-shrink: 0;
+    }
+
+    .onboarding-tip strong {
+      display: block;
+      color: #92400e;
+      margin-bottom: 4px;
+    }
+
+    .onboarding-tip p {
+      margin: 0;
+      font-size: 0.9rem;
+      color: #78350f;
+      line-height: 1.5;
+    }
+
+    .onboarding-features h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #374151;
+      margin: 0 0 12px;
+    }
+
+    .onboarding-features ul {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 24px;
+    }
+
+    .onboarding-features li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .onboarding-features li:last-child {
+      border-bottom: none;
+    }
+
+    .onboarding-features li mat-icon {
+      color: #2563eb;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .onboarding-features li span {
+      color: #475569;
+      font-size: 0.9rem;
+    }
+
+    .onboarding-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      padding-top: 16px;
+      border-top: 1px solid #e2e8f0;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .decision-list-container {
@@ -512,17 +678,22 @@ import { Decision } from '../../models/decision.model';
   `]
 })
 export class DecisionListComponent implements OnInit {
+  @ViewChild('adminOnboardingDialog') adminOnboardingDialog!: TemplateRef<any>;
+
   decisions: Decision[] = [];
   filteredDecisions: Decision[] = [];
   isLoading = true;
   searchTerm = '';
   statusFilter = '';
   userDomain = '';
+  onboardingDialogRef: MatDialogRef<any> | null = null;
 
   constructor(
     private decisionService: DecisionService,
     public authService: AuthService,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private http: HttpClient,
+    private dialog: MatDialog
   ) {}
 
   ngOnInit(): void {
@@ -530,6 +701,55 @@ export class DecisionListComponent implements OnInit {
     // Get tenant from route params - this is the reliable source
     this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
     console.log('[DecisionList] userDomain from route:', this.userDomain);
+
+    // Check if admin needs to see onboarding modal
+    this.checkAdminOnboarding();
+  }
+
+  private checkAdminOnboarding(): void {
+    const currentUser = this.authService.currentUser;
+    if (!currentUser || currentUser.isMaster) return;
+
+    const user = currentUser.user as User;
+    if (user && user.is_admin && !user.has_seen_admin_onboarding) {
+      // Small delay to ensure the view is ready
+      setTimeout(() => {
+        this.showAdminOnboarding();
+      }, 500);
+    }
+  }
+
+  showAdminOnboarding(): void {
+    this.onboardingDialogRef = this.dialog.open(this.adminOnboardingDialog, {
+      width: '520px',
+      disableClose: false,
+      panelClass: 'admin-onboarding-dialog'
+    });
+  }
+
+  dismissOnboarding(): void {
+    // Call API to mark onboarding as seen
+    this.http.post('/api/user/dismiss-admin-onboarding', {}).subscribe({
+      next: (response: any) => {
+        // Update local user state
+        const currentUser = this.authService.currentUser;
+        if (currentUser && !currentUser.isMaster) {
+          const user = currentUser.user as User;
+          if (user) {
+            user.has_seen_admin_onboarding = true;
+          }
+        }
+      },
+      error: (err) => {
+        console.error('Failed to dismiss onboarding:', err);
+      }
+    });
+
+    // Close the dialog
+    if (this.onboardingDialogRef) {
+      this.onboardingDialogRef.close();
+      this.onboardingDialogRef = null;
+    }
   }
 
   loadDecisions(): void {

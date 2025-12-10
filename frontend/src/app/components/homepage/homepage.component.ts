@@ -10,6 +10,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDialogModule, MatDialog, MatDialogRef } from '@angular/material/dialog';
+import { MatSelectModule } from '@angular/material/select';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
 
@@ -28,7 +29,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     MatFormFieldModule,
     MatInputModule,
     MatProgressSpinnerModule,
-    MatDialogModule
+    MatDialogModule,
+    MatSelectModule
   ],
   template: `
     <div class="homepage">
@@ -51,6 +53,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
               <button mat-raised-button class="cta-button" (click)="openGetStartedDialog()">
                 <span>Get Started</span>
                 <mat-icon>arrow_forward</mat-icon>
+              </button>
+              <button mat-stroked-button class="cta-button-secondary" (click)="openSignInDialog()">
+                <mat-icon>login</mat-icon>
+                <span>Sign In</span>
               </button>
             </div>
           </div>
@@ -92,13 +98,19 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 Join Your Organization
               } @else if (currentView === 'account_created') {
                 Account Created
+              } @else if (isSignInMode) {
+                Welcome Back
               } @else {
                 Get Started
               }
             </h2>
             <p class="dialog-subtitle">
               @if (currentView === 'email') {
-                Enter your work email to sign up or sign in
+                @if (isSignInMode) {
+                  Enter your work email to sign in to your account
+                } @else {
+                  Enter your work email to sign up or sign in
+                }
               } @else if (currentView === 'signup') {
                 Create your account
               } @else if (currentView === 'verification_sent') {
@@ -172,7 +184,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <p class="info-text">
                   <mat-icon>info</mat-icon>
                   <span>
-                    You'll be the first user and administrator for <strong>{{ tenantDomain }}</strong>.
+                    You're helping bootstrap a shared space for <strong>{{ tenantDomain }}</strong>. Others from your organisation can join automatically.
                     @if (tenantStatus?.email_verification_required === false) {
                       @if (!usePasswordSignup) {
                         After creating your account, you'll set up a passkey for secure passwordless login.
@@ -563,15 +575,116 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <!-- Footer -->
       <footer class="homepage-footer">
         <div class="container">
-          <p class="footer-mission">
-            Architecture-Decisions.org is an open initiative to make architectural decision-making
-            transparent, durable, and reusable.
-          </p>
-          <div class="footer-bottom">
-            <small>&copy; {{ currentYear }} Architecture-Decisions.org</small>
+          <div class="footer-grid">
+            <div class="footer-mission-col">
+              <p class="footer-mission">
+                Architecture-Decisions.org is an open initiative to make architectural decision-making
+                transparent, durable, and reusable.
+              </p>
+              <small class="footer-copyright">&copy; {{ currentYear }} Architecture-Decisions.org</small>
+            </div>
+            <div class="footer-support-col">
+              <h4>Support the Initiative</h4>
+              <p class="footer-support-text">Help us keep the platform free, independent, and sustainable.</p>
+              <button mat-stroked-button class="sponsorship-button" (click)="openSponsorshipDialog()">
+                <mat-icon>volunteer_activism</mat-icon>
+                Sponsorship & Support
+              </button>
+            </div>
           </div>
         </div>
       </footer>
+
+      <!-- Sponsorship Dialog Template -->
+      <ng-template #sponsorshipDialog>
+        <div class="sponsorship-dialog">
+          <button mat-icon-button class="dialog-close" (click)="closeSponsorshipDialog()">
+            <mat-icon>close</mat-icon>
+          </button>
+
+          <div class="sponsorship-header">
+            <mat-icon class="dialog-icon">volunteer_activism</mat-icon>
+            <h2>Support the Project</h2>
+          </div>
+
+          @if (sponsorshipSuccess) {
+            <div class="verification-sent">
+              <div class="verification-icon success">
+                <mat-icon>check_circle</mat-icon>
+              </div>
+              <p>{{ sponsorshipSuccess }}</p>
+            </div>
+          } @else {
+            <div class="sponsorship-content">
+              <div class="sponsorship-text">
+                <p>
+                  Architecture Decisions is a <strong>non-profit initiative</strong>. The platform is free to use,
+                  and we do not monetise user data or sell access.
+                </p>
+                <p>
+                  To cover infrastructure and operational costs, the project is supported through sponsorships.
+                  Sponsorship does not grant control, influence over content, or preferential treatment.
+                  It simply helps ensure the platform remains <strong>stable, independent, and available</strong> over the long term.
+                </p>
+              </div>
+
+              <div class="sponsorship-form">
+                <form [formGroup]="sponsorshipForm" (ngSubmit)="submitSponsorship()">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Organisation Name</mat-label>
+                    <input matInput formControlName="organisation_name" placeholder="Acme Corporation">
+                    <mat-icon matPrefix>business</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Contact Email</mat-label>
+                    <input matInput formControlName="contact_email" type="email" placeholder="contact@acme.com">
+                    <mat-icon matPrefix>email</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Contact Name</mat-label>
+                    <input matInput formControlName="contact_name" placeholder="Jane Smith">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Area of Interest</mat-label>
+                    <mat-select formControlName="area_of_interest">
+                      <mat-option value="">Select an option...</mat-option>
+                      <mat-option value="General sponsorship">General sponsorship</mat-option>
+                      <mat-option value="Public sector use">Public sector use</mat-option>
+                      <mat-option value="Research">Research</mat-option>
+                      <mat-option value="Internal adoption">Internal adoption</mat-option>
+                      <mat-option value="Other">Other</mat-option>
+                    </mat-select>
+                    <mat-icon matPrefix>category</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Message (optional)</mat-label>
+                    <textarea matInput formControlName="message" rows="2"
+                              placeholder="Tell us about your interest..."></textarea>
+                  </mat-form-field>
+
+                  @if (sponsorshipError) {
+                    <p class="error-message">{{ sponsorshipError }}</p>
+                  }
+
+                  <button mat-raised-button color="primary" type="submit"
+                          [disabled]="sponsorshipForm.invalid || sponsorshipLoading" class="full-width submit-btn">
+                    <mat-spinner diameter="20" *ngIf="sponsorshipLoading"></mat-spinner>
+                    <ng-container *ngIf="!sponsorshipLoading">
+                      <mat-icon>send</mat-icon>
+                      <span>Submit Inquiry</span>
+                    </ng-container>
+                  </button>
+                </form>
+              </div>
+            </div>
+          }
+        </div>
+      </ng-template>
     </div>
   `,
   styles: [`
@@ -1046,8 +1159,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     /* Problem Section */
     .problem-section {
-      background: linear-gradient(180deg, #f1f5f9 0%, #ffffff 100%);
+      background: #f8fafc;
       text-align: center;
+      padding-bottom: 60px;
     }
 
     .problem-grid {
@@ -1098,7 +1212,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     /* Decisions Section */
     .decisions-section {
-      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      background: #f8fafc;
+      padding-top: 60px;
     }
 
     .decisions-content {
@@ -1282,8 +1397,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     /* Audience Section */
     .audience-section {
-      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      background: #f8fafc;
       text-align: center;
+      padding-bottom: 60px;
     }
 
     .audience-section h2 {
@@ -1340,7 +1456,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     /* Governance Section */
     .governance-section {
-      background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+      background: #f8fafc;
+      padding-top: 60px;
     }
 
     .governance-content {
@@ -1450,10 +1567,144 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #475569;
     }
 
-    .footer-bottom {
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 60px;
+      align-items: start;
+      text-align: left;
+    }
+
+    .footer-mission-col .footer-mission {
+      margin: 0 0 16px;
+      text-align: left;
+    }
+
+    .footer-copyright {
+      color: #64748b;
+    }
+
+    .footer-support-col {
+      background: rgba(255, 255, 255, 0.05);
+      padding: 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .footer-support-col h4 {
+      color: #e2e8f0;
+      margin: 0 0 8px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    .footer-support-text {
+      color: #94a3b8;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      margin: 0 0 16px;
+    }
+
+    .sponsorship-button {
+      border-color: rgba(255, 255, 255, 0.3) !important;
+      color: #e2e8f0 !important;
+    }
+
+    .sponsorship-button:hover {
+      background: rgba(255, 255, 255, 0.1) !important;
+    }
+
+    .sponsorship-button mat-icon {
+      margin-right: 8px;
+    }
+
+    /* Dialog icon */
+    .dialog-icon {
+      color: #2563eb;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    /* Sponsorship Dialog - Two Column Layout */
+    .sponsorship-dialog {
+      padding: 32px;
+      position: relative;
+      min-width: 700px;
+      max-width: 800px;
+    }
+
+    .sponsorship-header {
       display: flex;
-      justify-content: center;
       align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      padding-right: 32px;
+    }
+
+    .sponsorship-header h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #0f172a;
+      margin: 0;
+    }
+
+    .sponsorship-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
+    }
+
+    .sponsorship-text {
+      padding-right: 16px;
+      border-right: 1px solid #e2e8f0;
+    }
+
+    .sponsorship-text p {
+      color: #475569;
+      font-size: 0.95rem;
+      line-height: 1.7;
+      margin: 0 0 16px;
+    }
+
+    .sponsorship-text p:last-child {
+      margin-bottom: 0;
+    }
+
+    .sponsorship-text strong {
+      color: #1e40af;
+    }
+
+    .sponsorship-form {
+      padding-left: 8px;
+    }
+
+    .sponsorship-form mat-form-field {
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 768px) {
+      .sponsorship-dialog {
+        min-width: auto;
+        max-width: 100%;
+        padding: 24px;
+      }
+
+      .sponsorship-content {
+        grid-template-columns: 1fr;
+        gap: 24px;
+      }
+
+      .sponsorship-text {
+        padding-right: 0;
+        border-right: none;
+        border-bottom: 1px solid #e2e8f0;
+        padding-bottom: 20px;
+      }
+
+      .sponsorship-form {
+        padding-left: 0;
+      }
     }
 
     /* Responsive */
@@ -1503,6 +1754,16 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         max-width: 240px;
       }
 
+      .footer-grid {
+        grid-template-columns: 1fr;
+        gap: 32px;
+        text-align: center;
+      }
+
+      .footer-mission-col .footer-mission {
+        text-align: center;
+      }
+
       .browser-frame {
         margin: 0 -8px;
         border-radius: 12px;
@@ -1546,11 +1807,14 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 })
 export class HomepageComponent implements OnInit {
   @ViewChild('getStartedDialog') getStartedDialog!: TemplateRef<any>;
+  @ViewChild('sponsorshipDialog') sponsorshipDialogTemplate!: TemplateRef<any>;
   dialogRef: MatDialogRef<any> | null = null;
+  sponsorshipDialogRef: MatDialogRef<any> | null = null;
 
   emailForm: FormGroup;
   signupForm: FormGroup;
   accessRequestForm: FormGroup;
+  sponsorshipForm: FormGroup;
 
   currentView: ViewState = 'email';
   tenantDomain = '';
@@ -1562,7 +1826,13 @@ export class HomepageComponent implements OnInit {
   success = '';
   resendCooldown = 0;
   usePasswordSignup = false;
+  isSignInMode = false;
   currentYear = new Date().getFullYear();
+
+  // Sponsorship form state
+  sponsorshipLoading = false;
+  sponsorshipError = '';
+  sponsorshipSuccess = '';
 
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -1588,6 +1858,14 @@ export class HomepageComponent implements OnInit {
       email: ['', [Validators.required, Validators.email]],
       name: ['', Validators.required],
       reason: ['']
+    });
+
+    this.sponsorshipForm = this.fb.group({
+      organisation_name: ['', Validators.required],
+      contact_email: ['', [Validators.required, Validators.email]],
+      contact_name: [''],
+      area_of_interest: [''],
+      message: ['']
     });
   }
 
@@ -1897,6 +2175,18 @@ export class HomepageComponent implements OnInit {
     this.currentView = 'email';
     this.error = '';
     this.success = '';
+    this.isSignInMode = false;
+    this.dialogRef = this.dialog.open(this.getStartedDialog, {
+      width: '450px',
+      panelClass: 'get-started-dialog'
+    });
+  }
+
+  openSignInDialog(): void {
+    this.currentView = 'email';
+    this.error = '';
+    this.success = '';
+    this.isSignInMode = true;
     this.dialogRef = this.dialog.open(this.getStartedDialog, {
       width: '450px',
       panelClass: 'get-started-dialog'
@@ -1908,5 +2198,43 @@ export class HomepageComponent implements OnInit {
       this.dialogRef.close();
       this.dialogRef = null;
     }
+  }
+
+  // Sponsorship dialog methods
+  openSponsorshipDialog(): void {
+    this.sponsorshipError = '';
+    this.sponsorshipSuccess = '';
+    this.sponsorshipForm.reset();
+    this.sponsorshipDialogRef = this.dialog.open(this.sponsorshipDialogTemplate, {
+      width: '800px',
+      maxWidth: '90vw',
+      panelClass: 'sponsorship-dialog-panel'
+    });
+  }
+
+  closeSponsorshipDialog(): void {
+    if (this.sponsorshipDialogRef) {
+      this.sponsorshipDialogRef.close();
+      this.sponsorshipDialogRef = null;
+    }
+  }
+
+  submitSponsorship(): void {
+    if (this.sponsorshipForm.invalid) return;
+
+    this.sponsorshipLoading = true;
+    this.sponsorshipError = '';
+
+    this.http.post<{ message?: string; error?: string }>('/api/sponsorship', this.sponsorshipForm.value).subscribe({
+      next: (result) => {
+        this.sponsorshipLoading = false;
+        this.sponsorshipSuccess = result.message || 'Thank you for your interest!';
+        this.sponsorshipForm.reset();
+      },
+      error: (err) => {
+        this.sponsorshipLoading = false;
+        this.sponsorshipError = err.error?.error || 'Failed to submit inquiry. Please try again.';
+      }
+    });
   }
 }

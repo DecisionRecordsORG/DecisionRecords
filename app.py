@@ -7,9 +7,10 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, Space, DecisionSpace, GlobalRole, AuditLog
 from datetime import datetime, timedelta
-from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required
+from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from governance import log_admin_action
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
     create_registration_options, verify_registration,
@@ -50,7 +51,12 @@ app_error_state = {
 # This ensures secrets are never hardcoded and can be rotated without redeployment
 
 # Database URL (Key Vault or environment variable)
-database_url = keyvault_client.get_database_url()
+# IMPORTANT: When FLASK_ENV=testing, use isolated SQLite database to protect production
+if os.environ.get('FLASK_ENV') == 'testing':
+    database_url = 'sqlite:///test_database.db'
+    logger.info("TESTING MODE: Using isolated SQLite test database")
+else:
+    database_url = keyvault_client.get_database_url()
 logger.info(f"Database URL configured: {database_url.split('@')[1] if '@' in database_url else database_url}")
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -516,6 +522,142 @@ def get_version():
     """Get application version information."""
     from version import get_build_info
     return jsonify(get_build_info()), 200
+
+
+# ==================== Feedback & Sponsorship ====================
+
+def _api_submit_feedback_impl():
+    """Submit feedback from users.
+
+    Rate limited to 5 requests per minute to prevent spam.
+    All inputs are sanitized to prevent XSS and injection attacks.
+    """
+    from notifications import send_feedback_email
+    from security import sanitize_name, sanitize_email, sanitize_text_field
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate required fields
+    name = data.get('name', '').strip()
+    email = data.get('email', '').strip()
+    feedback = data.get('feedback', '').strip()
+    contact_consent = data.get('contact_consent', data.get('contactConsent', False))
+
+    if not name or not email or not feedback:
+        return jsonify({'error': 'Name, email, and feedback are required'}), 400
+
+    # Sanitize inputs
+    name = sanitize_name(name, max_length=100)
+    email = sanitize_email(email)
+    feedback = sanitize_text_field(feedback, max_length=5000)
+    contact_consent = bool(contact_consent)
+
+    if not email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    if len(feedback) < 10:
+        return jsonify({'error': 'Feedback must be at least 10 characters'}), 400
+
+    # Get email config (use any enabled config)
+    email_config = EmailConfig.query.filter_by(enabled=True).first()
+    if not email_config:
+        logger.warning("Feedback received but no email config available")
+        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+
+    # Send the feedback email
+    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent)
+
+    if success:
+        logger.info(f"Feedback submitted successfully from {email}")
+        return jsonify({'message': 'Thank you for your feedback! We will review it shortly.'})
+    else:
+        logger.error(f"Failed to send feedback email from {email}")
+        return jsonify({'error': 'Failed to submit feedback. Please try again later.'}), 500
+
+
+# Apply rate limiting if available (5 requests/minute to prevent spam)
+if RATE_LIMITING_ENABLED:
+    api_submit_feedback = app.route('/api/feedback', methods=['POST'])(
+        limiter.limit("5 per minute")(_api_submit_feedback_impl)
+    )
+else:
+    api_submit_feedback = app.route('/api/feedback', methods=['POST'])(
+        _api_submit_feedback_impl
+    )
+
+
+def _api_submit_sponsorship_impl():
+    """Submit sponsorship inquiry.
+
+    Rate limited to 3 requests per minute to prevent spam.
+    All inputs are sanitized to prevent XSS and injection attacks.
+    """
+    from notifications import send_sponsorship_inquiry_email
+    from security import sanitize_name, sanitize_email, sanitize_text_field, sanitize_title
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate required fields
+    org_name = data.get('organisation_name', '').strip()
+    contact_email = data.get('contact_email', '').strip()
+
+    if not org_name or not contact_email:
+        return jsonify({'error': 'Organisation name and contact email are required'}), 400
+
+    # Get optional fields
+    contact_name = data.get('contact_name', '').strip() or None
+    area_of_interest = data.get('area_of_interest', '').strip() or None
+    message = data.get('message', '').strip() or None
+
+    # Sanitize all inputs
+    org_name = sanitize_title(org_name, max_length=200)
+    contact_email = sanitize_email(contact_email)
+    if contact_name:
+        contact_name = sanitize_name(contact_name, max_length=100)
+    if area_of_interest:
+        area_of_interest = sanitize_title(area_of_interest, max_length=100)
+    if message:
+        message = sanitize_text_field(message, max_length=2000)
+
+    if not contact_email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    # Get email config (use any enabled config)
+    email_config = EmailConfig.query.filter_by(enabled=True).first()
+    if not email_config:
+        logger.warning("Sponsorship inquiry received but no email config available")
+        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+
+    # Send the sponsorship inquiry email
+    success = send_sponsorship_inquiry_email(
+        email_config, org_name, contact_email,
+        contact_name=contact_name,
+        area_of_interest=area_of_interest,
+        message=message
+    )
+
+    if success:
+        logger.info(f"Sponsorship inquiry submitted from {org_name} ({contact_email})")
+        return jsonify({'message': 'Thank you for your interest in sponsoring Architecture Decisions! We will be in touch shortly.'})
+    else:
+        logger.error(f"Failed to send sponsorship inquiry email from {contact_email}")
+        return jsonify({'error': 'Failed to submit inquiry. Please try again later.'}), 500
+
+
+# Apply rate limiting if available (3 requests/minute to prevent spam)
+if RATE_LIMITING_ENABLED:
+    api_submit_sponsorship = app.route('/api/sponsorship', methods=['POST'])(
+        limiter.limit("3 per minute")(_api_submit_sponsorship_impl)
+    )
+else:
+    api_submit_sponsorship = app.route('/api/sponsorship', methods=['POST'])(
+        _api_submit_sponsorship_impl
+    )
+
 
 # ==================== Context Processor ====================
 
@@ -1129,7 +1271,38 @@ def api_get_current_user():
         session.clear()
         return jsonify({'error': 'Authentication required'}), 401
 
-    return jsonify(user.to_dict())
+    # Get user dict and add v1.5 membership info
+    user_dict = user.to_dict()
+
+    # Add membership and role info for v1.5
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if tenant:
+        membership = user.get_membership(tenant_id=tenant.id)
+        if membership:
+            user_dict['global_role'] = membership.global_role.value
+            user_dict['membership'] = {
+                'id': membership.id,
+                'tenant_id': membership.tenant_id,
+                'global_role': membership.global_role.value,
+                'joined_at': membership.joined_at.isoformat() if membership.joined_at else None
+            }
+            # Add tenant maturity info for UI to decide what to show
+            user_dict['tenant_info'] = {
+                'id': tenant.id,
+                'domain': tenant.domain,
+                'name': tenant.name,
+                'maturity_state': tenant.maturity_state.value,
+                'admin_count': TenantMembership.query.filter_by(
+                    tenant_id=tenant.id,
+                    global_role=GlobalRole.ADMIN
+                ).count(),
+                'steward_count': TenantMembership.query.filter_by(
+                    tenant_id=tenant.id,
+                    global_role=GlobalRole.STEWARD
+                ).count()
+            }
+
+    return jsonify(user_dict)
 
 
 @app.route('/api/user/subscription', methods=['GET'])
@@ -1176,6 +1349,24 @@ def api_update_subscription():
     db.session.commit()
 
     return jsonify(subscription.to_dict())
+
+
+@app.route('/api/user/dismiss-admin-onboarding', methods=['POST'])
+@login_required
+def api_dismiss_admin_onboarding():
+    """Mark the admin onboarding modal as seen."""
+    # Master accounts don't need this
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    user = g.current_user
+    if not user.is_admin:
+        return jsonify({'error': 'Not an admin'}), 403
+
+    user.has_seen_admin_onboarding = True
+    db.session.commit()
+
+    return jsonify({'message': 'Admin onboarding dismissed', 'user': user.to_dict()})
 
 
 # ==================== API Routes - Admin (SSO Config) ====================
@@ -2141,7 +2332,7 @@ def api_direct_signup():
         session.permanent = False  # Session-only cookie
 
         # Do NOT set user_id - user is NOT fully logged in yet
-        redirect_url = f'/{domain}/profile?setup=passkey&token={setup_token}'
+        redirect_url = f'/{domain}/setup?token={setup_token}'
         setup_passkey = True
 
         app.logger.info(f"Created setup token for user {email} - credential setup required")
@@ -2555,7 +2746,7 @@ def api_validate_setup_token():
         redirect_url = f'/{user.sso_domain}/recover?token={token}'
         message = 'Recovery token validated. You can now reset your credentials.'
     else:
-        redirect_url = f'/{user.sso_domain}/profile?setup=passkey'
+        redirect_url = f'/{user.sso_domain}/setup?token={token}'
         message = 'Setup token validated. You can now set up your credentials.'
 
     return jsonify({
@@ -3657,6 +3848,278 @@ def api_get_infrastructure_types():
     return jsonify(ITInfrastructure.VALID_TYPES)
 
 
+# ==================== API Routes - Spaces ====================
+
+@app.route('/api/spaces', methods=['GET'])
+@login_required
+def api_list_spaces():
+    """List all spaces for the user's tenant."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    spaces = Space.query.filter_by(tenant_id=tenant.id).order_by(Space.is_default.desc(), Space.name).all()
+    return jsonify([s.to_dict() for s in spaces])
+
+
+@app.route('/api/spaces', methods=['POST'])
+@steward_or_admin_required
+def api_create_space():
+    """Create a new space (steward or admin only)."""
+    data = request.get_json()
+
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Space name is required'}), 400
+
+    if len(name) > 255:
+        return jsonify({'error': 'Space name cannot exceed 255 characters'}), 400
+
+    description = data.get('description', '').strip() if data.get('description') else None
+
+    # Check for duplicate name in tenant
+    existing = Space.query.filter_by(tenant_id=g.current_tenant.id, name=name).first()
+    if existing:
+        return jsonify({'error': 'A space with this name already exists'}), 400
+
+    space = Space(
+        tenant_id=g.current_tenant.id,
+        name=name,
+        description=description,
+        is_default=False,
+        created_by_id=g.current_user.id
+    )
+    db.session.add(space)
+
+    # Log the action
+    log_admin_action(
+        tenant_id=g.current_tenant.id,
+        actor_user_id=g.current_user.id,
+        action_type=AuditLog.ACTION_CREATE_SPACE,
+        target_entity='space',
+        target_id=None,  # Will be set after flush
+        details={'name': name}
+    )
+
+    db.session.commit()
+
+    return jsonify(space.to_dict()), 201
+
+
+@app.route('/api/spaces/<int:space_id>', methods=['GET'])
+@login_required
+def api_get_space(space_id):
+    """Get a specific space."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
+    if not space:
+        return jsonify({'error': 'Space not found'}), 404
+
+    # Include decision count
+    result = space.to_dict()
+    result['decision_count'] = space.decision_links.count()
+
+    return jsonify(result)
+
+
+@app.route('/api/spaces/<int:space_id>', methods=['PUT'])
+@steward_or_admin_required
+def api_update_space(space_id):
+    """Update a space (steward or admin only)."""
+    space = Space.query.filter_by(id=space_id, tenant_id=g.current_tenant.id).first()
+    if not space:
+        return jsonify({'error': 'Space not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Can't rename default space to something else
+    if space.is_default and data.get('name') and data.get('name') != space.name:
+        return jsonify({'error': 'Cannot rename the default space'}), 400
+
+    if data.get('name'):
+        name = data['name'].strip()
+        if not name:
+            return jsonify({'error': 'Space name cannot be empty'}), 400
+        if len(name) > 255:
+            return jsonify({'error': 'Space name cannot exceed 255 characters'}), 400
+
+        # Check for duplicate
+        existing = Space.query.filter(
+            Space.tenant_id == g.current_tenant.id,
+            Space.name == name,
+            Space.id != space_id
+        ).first()
+        if existing:
+            return jsonify({'error': 'A space with this name already exists'}), 400
+
+        space.name = name
+
+    if 'description' in data:
+        space.description = data['description'].strip() if data['description'] else None
+
+    db.session.commit()
+
+    return jsonify(space.to_dict())
+
+
+@app.route('/api/spaces/<int:space_id>', methods=['DELETE'])
+@admin_required
+def api_delete_space(space_id):
+    """Delete a space (admin only). Cannot delete default space."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
+    if not space:
+        return jsonify({'error': 'Space not found'}), 404
+
+    if space.is_default:
+        return jsonify({'error': 'Cannot delete the default space'}), 400
+
+    # Log the action before deletion
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=g.current_user.id,
+        action_type=AuditLog.ACTION_DELETE_SPACE,
+        target_entity='space',
+        target_id=space.id,
+        details={'name': space.name}
+    )
+
+    # Delete removes links but not decisions (cascade configured in model)
+    db.session.delete(space)
+    db.session.commit()
+
+    return jsonify({'message': 'Space deleted successfully'})
+
+
+@app.route('/api/spaces/<int:space_id>/decisions', methods=['GET'])
+@login_required
+def api_list_space_decisions(space_id):
+    """List decisions in a specific space."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
+    if not space:
+        return jsonify({'error': 'Space not found'}), 404
+
+    # Get decisions linked to this space
+    decision_ids = [link.decision_id for link in space.decision_links.all()]
+    decisions = ArchitectureDecision.query.filter(
+        ArchitectureDecision.id.in_(decision_ids),
+        ArchitectureDecision.deleted_at == None
+    ).order_by(ArchitectureDecision.id.desc()).all()
+
+    return jsonify([d.to_dict() for d in decisions])
+
+
+@app.route('/api/decisions/<int:decision_id>/spaces', methods=['GET'])
+@login_required
+def api_get_decision_spaces(decision_id):
+    """Get spaces that a decision belongs to."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first()
+    if not decision:
+        return jsonify({'error': 'Decision not found'}), 404
+
+    # Get linked spaces
+    links = DecisionSpace.query.filter_by(decision_id=decision_id).all()
+    space_ids = [link.space_id for link in links]
+    spaces = Space.query.filter(Space.id.in_(space_ids)).all() if space_ids else []
+
+    return jsonify([s.to_dict() for s in spaces])
+
+
+@app.route('/api/decisions/<int:decision_id>/spaces', methods=['PUT'])
+@login_required
+def api_update_decision_spaces(decision_id):
+    """Update which spaces a decision belongs to."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot access tenant data'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first()
+    if not decision:
+        return jsonify({'error': 'Decision not found'}), 404
+
+    data = request.get_json()
+    if not data or 'space_ids' not in data:
+        return jsonify({'error': 'space_ids is required'}), 400
+
+    space_ids = data['space_ids']
+    if not isinstance(space_ids, list):
+        return jsonify({'error': 'space_ids must be a list'}), 400
+
+    # Validate all space_ids belong to the tenant
+    valid_spaces = Space.query.filter(
+        Space.id.in_(space_ids),
+        Space.tenant_id == tenant.id
+    ).all()
+    valid_ids = {s.id for s in valid_spaces}
+
+    invalid_ids = set(space_ids) - valid_ids
+    if invalid_ids:
+        return jsonify({'error': f'Invalid space IDs: {list(invalid_ids)}'}), 400
+
+    # Remove existing links
+    DecisionSpace.query.filter_by(decision_id=decision_id).delete()
+
+    # Add new links
+    for space_id in space_ids:
+        link = DecisionSpace(
+            decision_id=decision_id,
+            space_id=space_id,
+            added_by_id=g.current_user.id
+        )
+        db.session.add(link)
+
+    db.session.commit()
+
+    # Return updated spaces
+    spaces = Space.query.filter(Space.id.in_(space_ids)).all() if space_ids else []
+    return jsonify([s.to_dict() for s in spaces])
+
+
 # ==================== Angular Frontend Serving ====================
 
 if SERVE_ANGULAR:
@@ -3695,6 +4158,276 @@ if SERVE_ANGULAR:
         # Fallback to index.html for Angular SPA routing
         # This handles all frontend routes like /, /superadmin, /{tenant}/login, etc.
         return send_from_directory(FRONTEND_DIR, 'index.html')
+
+
+# ==================== Test-Only API Endpoints ====================
+# These endpoints are ONLY available when FLASK_ENV=testing
+# They allow E2E tests to set up test data without manual intervention
+
+@app.route('/api/test/reset-database', methods=['POST'])
+def reset_test_database():
+    """Reset database to clean state. TEST ONLY."""
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    try:
+        # Use SQLAlchemy's drop_all/create_all for a clean slate
+        # This handles missing tables gracefully
+        db.drop_all()
+        db.create_all()
+
+        # Create default super admin
+        from werkzeug.security import generate_password_hash
+        admin = MasterAccount(
+            username='admin',
+            password_hash=generate_password_hash('admin')
+        )
+        db.session.add(admin)
+        db.session.commit()
+
+        logger.info("Test database reset complete")
+        return jsonify({'message': 'Database reset successful'})
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Database reset failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/create-user', methods=['POST'])
+def create_test_user():
+    """Create a user with specified role. TEST ONLY."""
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    try:
+        data = request.get_json(force=True)  # Force parse even without content-type
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+    except Exception as e:
+        logger.error(f"JSON parse error: {str(e)}")
+        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
+
+    email = data.get('email')
+    password = data.get('password')
+    name = data.get('name', email.split('@')[0] if email else 'Test User')
+    role = data.get('role', 'user')
+    domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
+
+    if not email or not password:
+        return jsonify({'error': 'email and password required'}), 400
+
+    try:
+        from werkzeug.security import generate_password_hash
+
+        # Get or create tenant
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=f"{domain.split('.')[0].title()} Organization",
+                maturity_state='BOOTSTRAP'
+            )
+            db.session.add(tenant)
+            db.session.flush()
+
+            # Create default space for tenant
+            default_space = Space(
+                tenant_id=tenant.id,
+                name='General',
+                description='Default space for all architecture decisions',
+                is_default=True
+            )
+            db.session.add(default_space)
+
+        # Create user
+        user = User(
+            email=email,
+            name=name,
+            sso_domain=domain,
+            password_hash=generate_password_hash(password),
+            auth_type='local'
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Map role string to GlobalRole enum
+        role_map = {
+            'user': GlobalRole.USER,
+            'admin': GlobalRole.ADMIN,
+            'steward': GlobalRole.STEWARD,
+            'provisional_admin': GlobalRole.PROVISIONAL_ADMIN
+        }
+        global_role = role_map.get(role, GlobalRole.USER)
+
+        # Create tenant membership
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            global_role=global_role
+        )
+        db.session.add(membership)
+        db.session.commit()
+
+        logger.info(f"Test user created: {email} with role {role}")
+        return jsonify({
+            'message': 'User created',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'role': role,
+                'domain': domain
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Create test user failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/set-tenant-maturity', methods=['POST'])
+def set_test_tenant_maturity():
+    """Set tenant maturity state. TEST ONLY."""
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    data = request.get_json()
+    domain = data.get('domain')
+    state = data.get('state', 'BOOTSTRAP').upper()
+
+    if not domain:
+        return jsonify({'error': 'domain required'}), 400
+
+    if state not in ['BOOTSTRAP', 'MATURE']:
+        return jsonify({'error': 'state must be BOOTSTRAP or MATURE'}), 400
+
+    try:
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            return jsonify({'error': f'Tenant {domain} not found'}), 404
+
+        tenant.maturity_state = state
+        db.session.commit()
+
+        logger.info(f"Tenant {domain} maturity set to {state}")
+        return jsonify({
+            'message': 'Maturity state updated',
+            'tenant': {
+                'id': tenant.id,
+                'domain': tenant.domain,
+                'maturity_state': tenant.maturity_state
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Set tenant maturity failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/create-incomplete-user', methods=['POST'])
+def create_incomplete_test_user():
+    """Create an incomplete user (no credentials) with setup token. TEST ONLY."""
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    try:
+        data = request.get_json(force=True)
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+    except Exception as e:
+        logger.error(f"JSON parse error: {str(e)}")
+        return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
+
+    email = data.get('email')
+    name = data.get('name', email.split('@')[0] if email else 'Test User')
+    domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
+
+    if not email:
+        return jsonify({'error': 'email required'}), 400
+
+    try:
+        import secrets
+        from datetime import datetime, timedelta
+
+        # Get or create tenant
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=f"{domain.split('.')[0].title()} Organization",
+                maturity_state='BOOTSTRAP'
+            )
+            db.session.add(tenant)
+            db.session.flush()
+
+            # Create default space for tenant
+            default_space = Space(
+                tenant_id=tenant.id,
+                name='General',
+                description='Default space for all architecture decisions',
+                is_default=True
+            )
+            db.session.add(default_space)
+
+        # Create user WITHOUT password (incomplete state)
+        user = User(
+            email=email,
+            name=name,
+            sso_domain=domain,
+            password_hash=None,  # No password - incomplete user
+            auth_type=None  # No auth type yet
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Create tenant membership
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            global_role=GlobalRole.PROVISIONAL_ADMIN
+        )
+        db.session.add(membership)
+
+        # Generate setup token
+        setup_token = secrets.token_urlsafe(32)
+        token_expires = datetime.utcnow() + timedelta(hours=48)
+
+        # Store token in SetupToken table if it exists, otherwise use session approach
+        try:
+            setup_token_record = SetupToken(
+                user_id=user.id,
+                token=setup_token,
+                expires_at=token_expires,
+                is_recovery=False
+            )
+            db.session.add(setup_token_record)
+        except Exception:
+            # If SetupToken model doesn't exist, we'll just return the token
+            pass
+
+        db.session.commit()
+
+        # Build setup URL (this is what the URL change tests verify)
+        setup_url = f'/{domain}/setup?token={setup_token}'
+
+        logger.info(f"Incomplete test user created: {email}")
+        return jsonify({
+            'message': 'Incomplete user created',
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.name,
+                'domain': domain,
+                'has_password': False,
+                'has_passkey': False
+            },
+            'setup_url': setup_url,
+            'setup_token': setup_token
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Create incomplete test user failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 
 if __name__ == '__main__':

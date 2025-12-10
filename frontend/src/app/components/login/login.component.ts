@@ -15,7 +15,7 @@ import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { SSOConfig, AuthConfig } from '../../models/decision.model';
 
-type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
+type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
 
 @Component({
   selector: 'app-login',
@@ -94,15 +94,15 @@ type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
                   Sign in with Passkey
                 </p>
 
-                <form [formGroup]="emailForm" (ngSubmit)="checkEmail()">
+                <form [formGroup]="emailForm" (ngSubmit)="checkEmail()" data-testid="email-form">
                   <mat-form-field appearance="outline" class="full-width">
                     <mat-label>Email</mat-label>
-                    <input matInput formControlName="email" type="email" placeholder="you@example.com">
+                    <input matInput formControlName="email" type="email" placeholder="you@example.com" data-testid="email-input">
                     <mat-icon matPrefix>email</mat-icon>
                   </mat-form-field>
 
                   <button mat-raised-button color="primary" type="submit"
-                          [disabled]="emailForm.invalid || isLoading" class="full-width">
+                          [disabled]="emailForm.invalid || isLoading" class="full-width" data-testid="continue-button">
                     @if (isLoading) {
                       <mat-spinner diameter="20"></mat-spinner>
                     } @else {
@@ -165,11 +165,11 @@ type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
 
           <!-- WebAuthn Sign In View -->
           @if (currentView === 'webauthn') {
-            <div class="webauthn-auth-section">
-              <p class="user-email">{{ currentEmail }}</p>
+            <div class="webauthn-auth-section" data-testid="webauthn-view">
+              <p class="user-email" data-testid="current-email">{{ currentEmail }}</p>
 
               <button mat-raised-button color="primary" class="full-width passkey-button"
-                      (click)="signInWithPasskey()" [disabled]="isLoading">
+                      (click)="signInWithPasskey()" [disabled]="isLoading" data-testid="passkey-signin-button">
                 @if (isLoading) {
                   <mat-spinner diameter="20"></mat-spinner>
                 } @else {
@@ -177,6 +177,13 @@ type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
                   Use passkey to sign in
                 }
               </button>
+
+              <p class="alt-action">
+                <button mat-button color="primary" (click)="showPasswordLogin()" data-testid="use-password-link">
+                  <mat-icon>password</mat-icon>
+                  Sign in with password instead
+                </button>
+              </p>
 
               @if (authConfig?.allow_registration) {
                 <p class="alt-action">
@@ -192,7 +199,54 @@ type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
                 </button>
               </p>
 
-              <button mat-button class="back-button" (click)="goBack()">
+              <button mat-button class="back-button" (click)="goBack()" data-testid="back-button">
+                <mat-icon>arrow_back</mat-icon>
+                Back
+              </button>
+            </div>
+          }
+
+          <!-- Password Sign In View -->
+          @if (currentView === 'password') {
+            <div class="password-auth-section" data-testid="password-view">
+              <p class="user-email" data-testid="current-email">{{ currentEmail }}</p>
+
+              <form [formGroup]="passwordForm" (ngSubmit)="passwordLogin()" data-testid="password-form">
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Password</mat-label>
+                  <input matInput [type]="hidePassword ? 'password' : 'text'" formControlName="password" data-testid="password-input">
+                  <mat-icon matPrefix>lock</mat-icon>
+                  <button mat-icon-button matSuffix type="button" (click)="hidePassword = !hidePassword">
+                    <mat-icon>{{ hidePassword ? 'visibility_off' : 'visibility' }}</mat-icon>
+                  </button>
+                </mat-form-field>
+
+                <button mat-raised-button color="primary" type="submit"
+                        [disabled]="passwordForm.invalid || isLoading" class="full-width" data-testid="login-button">
+                  @if (isLoading) {
+                    <mat-spinner diameter="20"></mat-spinner>
+                  } @else {
+                    <mat-icon>login</mat-icon>
+                    Sign In
+                  }
+                </button>
+              </form>
+
+              <p class="alt-action">
+                <button mat-button color="primary" (click)="showWebAuthn()" data-testid="use-passkey-link">
+                  <mat-icon>fingerprint</mat-icon>
+                  Sign in with passkey instead
+                </button>
+              </p>
+
+              <p class="recovery-link">
+                <button mat-button (click)="showRecovery()">
+                  <mat-icon>lock_reset</mat-icon>
+                  Forgot your password?
+                </button>
+              </p>
+
+              <button mat-button class="back-button" (click)="goBack()" data-testid="back-button">
                 <mat-icon>arrow_back</mat-icon>
                 Back
               </button>
@@ -380,7 +434,7 @@ type LoginView = 'initial' | 'webauthn' | 'register' | 'recovery';
       margin-top: 12px;
     }
 
-    .webauthn-auth-section, .register-section {
+    .webauthn-auth-section, .register-section, .password-auth-section {
       text-align: center;
     }
 
@@ -446,6 +500,7 @@ export class LoginComponent implements OnInit {
   adminForm: FormGroup;
   registerForm: FormGroup;
   recoveryForm: FormGroup;
+  passwordForm: FormGroup;
 
   ssoConfigs: SSOConfig[] = [];
   authConfig: AuthConfig | null = null;
@@ -482,6 +537,11 @@ export class LoginComponent implements OnInit {
 
     this.recoveryForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]]
+    });
+
+    this.passwordForm = this.fb.group({
+      email: ['', [Validators.required, Validators.email]],
+      password: ['', Validators.required]
     });
   }
 
@@ -637,6 +697,36 @@ export class LoginComponent implements OnInit {
   showWebAuthn(): void {
     this.currentView = 'webauthn';
     this.error = '';
+  }
+
+  showPasswordLogin(): void {
+    this.currentView = 'password';
+    this.error = '';
+    this.passwordForm.patchValue({ email: this.currentEmail });
+  }
+
+  passwordLogin(): void {
+    if (this.passwordForm.invalid) return;
+
+    this.isLoading = true;
+    this.error = '';
+
+    const password = this.passwordForm.value.password;
+
+    this.http.post<{ message: string; user?: any; redirect?: string }>('/api/auth/login', {
+      email: this.currentEmail,
+      password
+    }).subscribe({
+      next: (response) => {
+        this.authService.loadCurrentUser();
+        const domain = this.currentEmail.split('@')[1];
+        this.router.navigate(['/' + domain + '/decisions']);
+      },
+      error: (err) => {
+        this.isLoading = false;
+        this.error = err.error?.error || 'Invalid email or password';
+      }
+    });
   }
 
   showRecovery(): void {

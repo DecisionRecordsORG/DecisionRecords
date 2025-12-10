@@ -389,3 +389,131 @@ If you didn't request this password reset, you can safely ignore this email. You
     """
 
     return send_email(email_config, user_email, subject, html_content, text_content)
+
+
+def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions"):
+    """Send user feedback to the feedback inbox."""
+    subject = f"[{app_name}] New Feedback from {sender_name}"
+    consent_text = "Yes, okay to contact" if contact_consent else "No, do not contact"
+    consent_badge = "✅ Can contact" if contact_consent else "❌ Do not contact"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">New Feedback Received</h2>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; width: 140px;">From:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{sender_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Email:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><a href="mailto:{sender_email}">{sender_email}</a></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Contact Consent:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{consent_badge}</td>
+                </tr>
+            </table>
+
+            <h3 style="color: #555;">Feedback Message:</h3>
+            <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; border-left: 4px solid #3f51b5;">
+                <p style="white-space: pre-wrap; margin: 0;">{feedback_message}</p>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                This feedback was submitted through the {app_name} website.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+New Feedback Received - {app_name}
+
+From: {sender_name}
+Email: {sender_email}
+Contact Consent: {consent_text}
+
+Feedback Message:
+{feedback_message}
+
+---
+This feedback was submitted through the {app_name} website.
+    """
+
+    # Send to the feedback inbox
+    return send_email(email_config, "feedback@architecture-decisions.org", subject, html_content, text_content)
+
+
+def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
+                                    area_of_interest=None, message=None, app_name="Architecture Decisions"):
+    """Send sponsorship inquiry to the sponsorship inbox."""
+    subject = f"[{app_name}] Sponsorship Inquiry from {org_name}"
+
+    contact_display = contact_name if contact_name else "Not provided"
+    area_display = area_of_interest if area_of_interest else "Not specified"
+    message_display = message if message else "No additional message"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">New Sponsorship Inquiry</h2>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; width: 150px;">Organisation:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{org_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Contact Email:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><a href="mailto:{contact_email}">{contact_email}</a></td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Contact Person:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{contact_display}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Area of Interest:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{area_display}</td>
+                </tr>
+            </table>
+
+            <h3 style="color: #555;">Message:</h3>
+            <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; border-left: 4px solid #3f51b5;">
+                <p style="white-space: pre-wrap; margin: 0;">{message_display}</p>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                This sponsorship inquiry was submitted through the {app_name} website.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+New Sponsorship Inquiry - {app_name}
+
+Organisation: {org_name}
+Contact Email: {contact_email}
+Contact Person: {contact_display}
+Area of Interest: {area_display}
+
+Message:
+{message_display}
+
+---
+This sponsorship inquiry was submitted through the {app_name} website.
+    """
+
+    # Send to the sponsors inbox
+    return send_email(email_config, "sponsors@architecture-decisions.org", subject, html_content, text_content)
