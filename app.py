@@ -420,6 +420,78 @@ def init_database():
                             logger.info("auth_type column added successfully")
                         else:
                             logger.info("auth_type column already exists")
+
+                        # === Deletion Controls Migrations (v1.5.2) ===
+
+                        # Add deletion_expires_at to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'deletion_expires_at'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding deletion_expires_at column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN deletion_expires_at TIMESTAMP
+                            """))
+                            conn.commit()
+                            logger.info("deletion_expires_at column added successfully")
+
+                        # Add GDPR deletion fields to users
+                        for col_name, col_type in [
+                            ('deletion_requested_at', 'TIMESTAMP'),
+                            ('deletion_scheduled_at', 'TIMESTAMP'),
+                            ('deleted_at', 'TIMESTAMP'),
+                            ('is_anonymized', 'BOOLEAN DEFAULT FALSE')
+                        ]:
+                            result = conn.execute(db.text(f"""
+                                SELECT column_name FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = '{col_name}'
+                            """))
+                            if not result.fetchone():
+                                logger.info(f"Adding {col_name} column to users...")
+                                conn.execute(db.text(f"""
+                                    ALTER TABLE users ADD COLUMN {col_name} {col_type}
+                                """))
+                                conn.commit()
+                                logger.info(f"{col_name} column added successfully")
+
+                        # Add deletion rate limiting fields to tenant_memberships
+                        for col_name, col_type in [
+                            ('deletion_rate_limited_at', 'TIMESTAMP'),
+                            ('deletion_count_window_start', 'TIMESTAMP'),
+                            ('deletion_count', 'INTEGER DEFAULT 0')
+                        ]:
+                            result = conn.execute(db.text(f"""
+                                SELECT column_name FROM information_schema.columns
+                                WHERE table_name = 'tenant_memberships' AND column_name = '{col_name}'
+                            """))
+                            if not result.fetchone():
+                                logger.info(f"Adding {col_name} column to tenant_memberships...")
+                                conn.execute(db.text(f"""
+                                    ALTER TABLE tenant_memberships ADD COLUMN {col_name} {col_type}
+                                """))
+                                conn.commit()
+                                logger.info(f"{col_name} column added successfully")
+
+                        # Add soft-delete fields to tenants
+                        for col_name, col_type in [
+                            ('deleted_at', 'TIMESTAMP'),
+                            ('deleted_by_admin', 'VARCHAR(255)'),
+                            ('deletion_expires_at', 'TIMESTAMP')
+                        ]:
+                            result = conn.execute(db.text(f"""
+                                SELECT column_name FROM information_schema.columns
+                                WHERE table_name = 'tenants' AND column_name = '{col_name}'
+                            """))
+                            if not result.fetchone():
+                                logger.info(f"Adding {col_name} column to tenants...")
+                                conn.execute(db.text(f"""
+                                    ALTER TABLE tenants ADD COLUMN {col_name} {col_type}
+                                """))
+                                conn.commit()
+                                logger.info(f"{col_name} column added successfully")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -1262,24 +1334,135 @@ def api_update_decision(decision_id):
 @app.route('/api/decisions/<int:decision_id>', methods=['DELETE'])
 @login_required
 def api_delete_decision(decision_id):
-    """Soft delete an architecture decision."""
+    """Soft delete an architecture decision with retention window and rate limiting.
+
+    Requirements per deletion-controls.md:
+    - Only ADMIN/STEWARD can delete (PROVISIONAL_ADMIN if tenant is BOOTSTRAP)
+    - Regular users cannot delete decisions
+    - Rate limiting: >3 deletions in 5 minutes triggers lockout
+    - 30-day retention window before permanent deletion
+    """
     # Master accounts cannot delete decisions
     if is_master_account():
         return jsonify({'error': 'Master accounts cannot delete decisions. Please log in with an SSO account.'}), 403
 
+    user = g.current_user
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Check role - only ADMIN/STEWARD can delete (PROVISIONAL_ADMIN in BOOTSTRAP state)
+    membership = TenantMembership.query.filter_by(
+        user_id=user.id,
+        tenant_id=tenant.id
+    ).first()
+
+    if not membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    allowed_roles = [GlobalRole.ADMIN, GlobalRole.STEWARD]
+    if tenant.maturity_state == MaturityState.BOOTSTRAP:
+        allowed_roles.append(GlobalRole.PROVISIONAL_ADMIN)
+
+    if membership.global_role not in allowed_roles:
+        return jsonify({
+            'error': 'Permission denied',
+            'message': 'Only admins and stewards can delete decisions'
+        }), 403
+
+    # Check if user is rate-limited for deletions
+    if membership.deletion_rate_limited_at:
+        # Rate limit lasts for 1 hour
+        if datetime.utcnow() < membership.deletion_rate_limited_at + timedelta(hours=1):
+            return jsonify({
+                'error': 'Deletion rate limited',
+                'message': 'Your deletion privileges have been temporarily suspended due to multiple rapid deletions. Please contact an administrator.',
+                'rate_limited_until': (membership.deletion_rate_limited_at + timedelta(hours=1)).isoformat()
+            }), 429
+
+    # Rate limiting check: >3 deletions in 5 minutes triggers lockout
+    RATE_LIMIT_COUNT = 3
+    RATE_LIMIT_WINDOW_MINUTES = 5
+
+    now = datetime.utcnow()
+    window_start = membership.deletion_count_window_start
+
+    # Reset window if expired or not set
+    if not window_start or (now - window_start) > timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES):
+        membership.deletion_count_window_start = now
+        membership.deletion_count = 0
+        window_start = now
+
+    # Check if already at limit
+    if membership.deletion_count >= RATE_LIMIT_COUNT:
+        # Trigger rate limiting
+        membership.deletion_rate_limited_at = now
+        db.session.commit()
+
+        # Notify tenant admins (async notification would be better)
+        # For now, just log it
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            action_type='rate_limit_triggered',
+            target_entity='user',
+            target_id=user.id,
+            details={
+                'reason': 'excessive_deletions',
+                'count': membership.deletion_count,
+                'window_minutes': RATE_LIMIT_WINDOW_MINUTES
+            }
+        )
+
+        return jsonify({
+            'error': 'Deletion rate limited',
+            'message': 'You have deleted too many decisions in a short period. Your deletion privileges have been temporarily suspended for security.',
+            'rate_limited_until': (now + timedelta(hours=1)).isoformat()
+        }), 429
+
+    # Get the decision
     decision = ArchitectureDecision.query.filter_by(
         id=decision_id,
-        domain=g.current_user.sso_domain,
+        domain=user.sso_domain,
         deleted_at=None
     ).first_or_404()
 
-    # Soft delete
-    decision.deleted_at = datetime.utcnow()
-    decision.deleted_by_id = g.current_user.id
+    # Soft delete with retention window
+    deletion_time = datetime.utcnow()
+    retention_days = 30
+    decision.deleted_at = deletion_time
+    decision.deleted_by_id = user.id
+    decision.deletion_expires_at = deletion_time + timedelta(days=retention_days)
+
+    # Update deletion count for rate limiting
+    membership.deletion_count = (membership.deletion_count or 0) + 1
+
+    # Log the deletion
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_DELETE,
+        target_entity='decision',
+        target_id=decision.id,
+        details={
+            'title': decision.title,
+            'retention_days': retention_days,
+            'deletion_expires_at': decision.deletion_expires_at.isoformat()
+        }
+    )
 
     db.session.commit()
 
-    return jsonify({'message': 'Decision deleted successfully'})
+    return jsonify({
+        'message': 'Decision deleted successfully',
+        'deletion_details': {
+            'deleted_at': deletion_time.isoformat(),
+            'expires_at': decision.deletion_expires_at.isoformat(),
+            'retention_days': retention_days,
+            'note': f'This decision can be restored within {retention_days} days by an administrator.'
+        }
+    })
 
 
 @app.route('/api/decisions/<int:decision_id>/history', methods=['GET'])
@@ -4359,8 +4542,11 @@ def api_get_tenant_maturity(domain):
     ).count()
     total_members = TenantMembership.query.filter_by(tenant_id=tenant.id).count()
 
-    # Calculate age
-    age_days = (datetime.utcnow() - tenant.created_at).days
+    # Calculate age (handle None created_at)
+    if tenant.created_at:
+        age_days = (datetime.utcnow() - tenant.created_at).days
+    else:
+        age_days = 0
 
     # Calculate what the computed maturity state would be
     computed_state = tenant.compute_maturity_state()
@@ -4389,7 +4575,7 @@ def api_get_tenant_maturity(domain):
             'has_enough_users': total_members >= tenant.maturity_user_threshold,
             'is_old_enough': age_days >= tenant.maturity_age_days
         },
-        'created_at': tenant.created_at.isoformat()
+        'created_at': tenant.created_at.isoformat() if tenant.created_at else None
     })
 
 
@@ -4522,15 +4708,15 @@ def api_force_tenant_maturity_upgrade(domain):
 @app.route('/api/tenants/<domain>', methods=['DELETE'])
 @master_required
 def api_delete_tenant(domain):
-    """Delete a tenant and all associated data (super admin only).
+    """Soft-delete a tenant with 30-day retention window (super admin only).
 
-    This is a destructive operation that removes:
-    - Tenant record
-    - All tenant memberships
-    - All spaces
-    - All decisions (soft-deleted)
-    - All audit logs
-    - Tenant settings
+    This marks the tenant for deletion but preserves all data for 30 days:
+    - Tenant record is marked as deleted (not removed)
+    - All decisions are soft-deleted with retention window
+    - Audit logs are preserved (never deleted)
+    - Data can be restored during the retention window
+
+    After 30 days, a scheduled job should permanently delete the data.
 
     Requires confirmation parameter to prevent accidental deletion.
     """
@@ -4549,7 +4735,17 @@ def api_delete_tenant(domain):
     if not tenant:
         return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
 
+    # Check if already deleted
+    if tenant.deleted_at:
+        return jsonify({
+            'error': f'Tenant {domain} is already marked for deletion',
+            'deletion_expires_at': tenant.deletion_expires_at.isoformat() if tenant.deletion_expires_at else None
+        }), 400
+
     tenant_id = tenant.id
+    deletion_time = datetime.utcnow()
+    retention_days = 30  # Configurable retention window
+    deletion_expires_at = deletion_time + timedelta(days=retention_days)
 
     try:
         # Get counts for reporting
@@ -4557,50 +4753,144 @@ def api_delete_tenant(domain):
         space_count = Space.query.filter_by(tenant_id=tenant_id).count()
         decision_count = ArchitectureDecision.query.filter_by(tenant_id=tenant_id).count()
 
-        # Soft delete all decisions (don't actually remove, just mark deleted)
+        # Soft delete all decisions with retention window
         decisions = ArchitectureDecision.query.filter_by(tenant_id=tenant_id).all()
         for decision in decisions:
             if not decision.deleted_at:
-                decision.deleted_at = datetime.utcnow()
+                decision.deleted_at = deletion_time
                 decision.deleted_by_id = None  # Super admin deletion
+                decision.deletion_expires_at = deletion_expires_at
 
-        # Delete all spaces (this will cascade delete DecisionSpace links)
-        Space.query.filter_by(tenant_id=tenant_id).delete()
+        # Soft-delete the tenant (keep the record but mark as deleted)
+        tenant.deleted_at = deletion_time
+        tenant.deleted_by_admin = session.get('master_username', 'super_admin')
+        tenant.deletion_expires_at = deletion_expires_at
+        tenant.status = 'deleted'
 
-        # Delete all memberships
-        TenantMembership.query.filter_by(tenant_id=tenant_id).delete()
+        # Log the deletion action (audit logs are immutable and never deleted)
+        log_admin_action(
+            tenant_id=tenant_id,
+            actor_user_id=None,  # Super admin
+            action_type=AuditLog.ACTION_DELETE,
+            target_entity='tenant',
+            target_id=tenant_id,
+            details={
+                'domain': domain,
+                'actor': 'super_admin',
+                'deletion_type': 'soft_delete',
+                'retention_days': retention_days,
+                'deletion_expires_at': deletion_expires_at.isoformat(),
+                'affected_counts': {
+                    'members': member_count,
+                    'spaces': space_count,
+                    'decisions': decision_count
+                }
+            }
+        )
 
-        # Delete audit logs (optional - you might want to keep these)
-        AuditLog.query.filter_by(tenant_id=tenant_id).delete()
-
-        # Delete tenant settings
-        TenantSettings.query.filter_by(tenant_id=tenant_id).delete()
-
-        # Delete the tenant record itself
-        db.session.delete(tenant)
-
-        # Optionally update domain approval status to 'rejected' so it can't be re-registered
+        # Update domain approval status
         domain_approval = DomainApproval.query.filter_by(domain=domain).first()
         if domain_approval:
             domain_approval.status = 'rejected'
             domain_approval.rejection_reason = 'Tenant deleted by super admin'
-            domain_approval.reviewed_at = datetime.utcnow()
+            domain_approval.reviewed_at = deletion_time
 
         db.session.commit()
 
         return jsonify({
-            'message': f'Tenant {domain} deleted successfully',
-            'deleted': {
+            'message': f'Tenant {domain} scheduled for deletion',
+            'soft_deleted': {
                 'domain': domain,
                 'tenant_id': tenant_id,
-                'members': member_count,
-                'spaces': space_count,
-                'decisions_soft_deleted': decision_count
+                'deleted_at': deletion_time.isoformat(),
+                'deletion_expires_at': deletion_expires_at.isoformat(),
+                'retention_days': retention_days,
+                'affected': {
+                    'members': member_count,
+                    'spaces': space_count,
+                    'decisions_soft_deleted': decision_count
+                },
+                'note': f'Data will be permanently deleted after {retention_days} days. Contact support to restore.'
             }
         })
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': f'Failed to delete tenant: {str(e)}'}), 500
+
+
+@app.route('/api/tenants/<domain>/restore', methods=['POST'])
+@master_required
+def api_restore_tenant(domain):
+    """Restore a soft-deleted tenant (super admin only).
+
+    Can only restore tenants within their retention window.
+    """
+    domain = domain.lower()
+
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
+
+    if not tenant.deleted_at:
+        return jsonify({'error': f'Tenant {domain} is not deleted'}), 400
+
+    # Check if retention window has expired
+    if tenant.deletion_expires_at and datetime.utcnow() > tenant.deletion_expires_at:
+        return jsonify({
+            'error': 'Retention window has expired',
+            'message': 'This tenant cannot be restored as the retention period has passed'
+        }), 400
+
+    try:
+        # Restore tenant
+        tenant.deleted_at = None
+        tenant.deleted_by_admin = None
+        tenant.deletion_expires_at = None
+        tenant.status = 'active'
+
+        # Restore all soft-deleted decisions
+        decisions = ArchitectureDecision.query.filter_by(tenant_id=tenant.id).all()
+        restored_count = 0
+        for decision in decisions:
+            if decision.deleted_at:
+                decision.deleted_at = None
+                decision.deleted_by_id = None
+                decision.deletion_expires_at = None
+                restored_count += 1
+
+        # Log the restoration
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=None,
+            action_type='restore',
+            target_entity='tenant',
+            target_id=tenant.id,
+            details={
+                'domain': domain,
+                'actor': 'super_admin',
+                'decisions_restored': restored_count
+            }
+        )
+
+        # Update domain approval
+        domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+        if domain_approval and domain_approval.status == 'rejected':
+            domain_approval.status = 'approved'
+            domain_approval.rejection_reason = None
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'Tenant {domain} restored successfully',
+            'restored': {
+                'domain': domain,
+                'tenant_id': tenant.id,
+                'decisions_restored': restored_count
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to restore tenant: {str(e)}'}), 500
 
 
 # ==================== API Routes - Tenant Auth Config ====================

@@ -189,6 +189,11 @@ class Tenant(db.Model):
     maturity_age_days = db.Column(db.Integer, default=14)
     maturity_user_threshold = db.Column(db.Integer, default=5)
 
+    # Soft-delete fields for tenant deletion
+    deleted_at = db.Column(db.DateTime, nullable=True)  # When tenant was soft-deleted
+    deleted_by_admin = db.Column(db.String(255), nullable=True)  # Super admin who deleted (username or identifier)
+    deletion_expires_at = db.Column(db.DateTime, nullable=True)  # When deletion becomes permanent (default: 30 days)
+
     # Relationships (defined after related models exist)
     # memberships - backref from TenantMembership
     # spaces - backref from Space
@@ -279,6 +284,11 @@ class TenantMembership(db.Model):
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
     global_role = db.Column(db.Enum(GlobalRole), default=GlobalRole.USER)
     joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Deletion rate limiting fields
+    deletion_rate_limited_at = db.Column(db.DateTime, nullable=True)  # When user was rate-limited
+    deletion_count_window_start = db.Column(db.DateTime, nullable=True)  # Start of rate limit window
+    deletion_count = db.Column(db.Integer, default=0)  # Number of deletions in current window
 
     # Relationships
     user = db.relationship('User', backref=db.backref('memberships', lazy='dynamic'))
@@ -530,6 +540,12 @@ class User(db.Model):
     has_seen_admin_onboarding = db.Column(db.Boolean, default=False)  # Track if admin has seen the onboarding modal
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     last_login = db.Column(db.DateTime, nullable=True)
+
+    # GDPR deletion fields
+    deletion_requested_at = db.Column(db.DateTime, nullable=True)  # When user requested deletion
+    deletion_scheduled_at = db.Column(db.DateTime, nullable=True)  # When deletion will execute (7 days after request)
+    deleted_at = db.Column(db.DateTime, nullable=True)  # When account was actually deleted/anonymized
+    is_anonymized = db.Column(db.Boolean, default=False)  # True if user data has been anonymized
 
     # Relationships
     decisions_created = db.relationship('ArchitectureDecision', backref='creator', lazy=True, foreign_keys='ArchitectureDecision.created_by_id')
@@ -904,8 +920,9 @@ class ArchitectureDecision(db.Model):
     # User tracking
     created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     updated_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    deleted_at = db.Column(db.DateTime, nullable=True)  # Soft delete
+    deleted_at = db.Column(db.DateTime, nullable=True)  # Soft delete timestamp
     deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    deletion_expires_at = db.Column(db.DateTime, nullable=True)  # When soft-delete becomes permanent (default: 30 days)
 
     # Relationships
     updated_by = db.relationship('User', foreign_keys=[updated_by_id])

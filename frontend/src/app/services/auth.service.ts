@@ -43,6 +43,17 @@ export class AuthService {
   }
 
   /**
+   * Check if user can delete decisions (ADMIN or STEWARD role).
+   * Master accounts cannot delete decisions.
+   */
+  get canDeleteDecisions(): boolean {
+    if (this.isMasterAccount) return false;
+    const user = this.currentUser?.user as User;
+    if (!user) return false;
+    return user.global_role === 'admin' || user.global_role === 'steward';
+  }
+
+  /**
    * Check if user needs to complete credential setup (no passkey and no password).
    * Users in this state should not be able to access the app.
    */

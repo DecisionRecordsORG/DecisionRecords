@@ -899,7 +899,7 @@ export class TenantDetailsDialogComponent {
 
   updateThresholds(): void {
     this.isUpdating = true;
-    this.http.post(`/api/tenants/${this.data.tenant.domain}/maturity/thresholds`, this.thresholds).subscribe({
+    this.http.put(`/api/tenants/${this.data.tenant.domain}/maturity`, this.thresholds).subscribe({
       next: () => {
         this.snackBar.open('Maturity thresholds updated', 'Close', { duration: 3000 });
         this.isUpdating = false;

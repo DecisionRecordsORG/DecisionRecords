@@ -249,7 +249,7 @@ import { Observable, map, startWith } from 'rxjs';
                       <span *ngIf="!isSaving">{{ isNew ? 'Create Decision' : 'Save Changes' }}</span>
                     </button>
 
-                    @if (!isNew) {
+                    @if (!isNew && authService.canDeleteDecisions) {
                       <button mat-raised-button color="warn" type="button" (click)="confirmDelete()">
                         <mat-icon>delete</mat-icon>
                         Delete
