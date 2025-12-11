@@ -218,18 +218,44 @@ const PASSWORD_REQUIRES_NUMBER = true;
               </div>
             </div>
 
-            <!-- Role Request Button (only for regular users or users without assigned role) -->
+            <!-- Role Request Section (only for regular users or users without assigned role) -->
             @if (!setupMode && canRequestRole) {
               <div class="role-request-section">
+                <div class="role-request-explainer">
+                  <mat-icon class="explainer-icon">info_outline</mat-icon>
+                  <div class="explainer-text">
+                    <p>
+                      <strong>Want to help manage this organization?</strong>
+                      Request an elevated role to gain additional permissions like approving access requests,
+                      inviting users, or managing tenant settings.
+                    </p>
+                  </div>
+                </div>
+
                 <button mat-raised-button color="accent" (click)="requestRole()"
                         [disabled]="isRequestingRole">
                   <mat-spinner diameter="20" *ngIf="isRequestingRole"></mat-spinner>
                   <mat-icon *ngIf="!isRequestingRole">admin_panel_settings</mat-icon>
                   <span *ngIf="!isRequestingRole">Request Elevated Role</span>
                 </button>
-                <p class="role-request-hint">
-                  Request steward or admin privileges to help manage this organization
-                </p>
+
+                <!-- Tenant Admins List -->
+                @if (tenantAdmins.length > 0) {
+                  <div class="tenant-admins-list">
+                    <p class="admins-header">
+                      <mat-icon>group</mat-icon>
+                      Current administrators who can review your request:
+                    </p>
+                    <div class="admins-chips">
+                      @for (admin of tenantAdmins; track admin.name) {
+                        <mat-chip class="admin-chip" [class.admin-role]="admin.role === 'admin'" [class.steward-role]="admin.role === 'steward'">
+                          <mat-icon matChipAvatar>{{ admin.role === 'admin' ? 'admin_panel_settings' : 'shield' }}</mat-icon>
+                          {{ admin.name }}
+                        </mat-chip>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
             }
           </mat-card-content>
@@ -546,18 +572,82 @@ const PASSWORD_REQUIRES_NUMBER = true;
       margin-top: 24px;
       padding-top: 24px;
       border-top: 1px solid #e0e0e0;
-      text-align: center;
+    }
+
+    .role-request-explainer {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px;
+      background: linear-gradient(135deg, #f5f7ff 0%, #e8eaf6 100%);
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border-left: 4px solid #3f51b5;
+    }
+
+    .role-request-explainer .explainer-icon {
+      color: #3f51b5;
+      flex-shrink: 0;
+    }
+
+    .role-request-explainer .explainer-text p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.5;
+      color: #333;
+    }
+
+    .role-request-explainer .explainer-text strong {
+      color: #1a237e;
     }
 
     .role-request-section button {
-      width: 100%;
-      max-width: 300px;
+      display: block;
+      margin: 0 auto;
+      max-width: 280px;
     }
 
-    .role-request-hint {
-      margin-top: 8px;
+    .tenant-admins-list {
+      margin-top: 20px;
+      padding: 16px;
+      background: #fafafa;
+      border-radius: 8px;
+    }
+
+    .tenant-admins-list .admins-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 12px 0;
       font-size: 13px;
       color: #666;
+    }
+
+    .tenant-admins-list .admins-header mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #999;
+    }
+
+    .admins-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .admin-chip {
+      font-size: 12px;
+    }
+
+    .admin-chip.admin-role {
+      background-color: #e3f2fd !important;
+      color: #1565c0 !important;
+    }
+
+    .admin-chip.steward-role {
+      background-color: #f3e5f5 !important;
+      color: #7b1fa2 !important;
     }
 
     .subscription-card mat-card-title,
@@ -644,6 +734,7 @@ export class ProfileComponent implements OnInit {
   user: User | null = null;
   setupMode = false;
   pendingDomain = false;
+  tenantAdmins: { name: string; role: string }[] = [];
 
   /**
    * Check if user can request a role elevation
@@ -706,6 +797,11 @@ export class ProfileComponent implements OnInit {
         this.loadCredentials();
       } else {
         this.isLoadingCredentials = false;
+      }
+
+      // Load tenant admins for role request section
+      if (this.canRequestRole) {
+        this.loadTenantAdmins();
       }
 
       // Check for setup mode (new account passkey setup)
@@ -926,6 +1022,18 @@ export class ProfileComponent implements OnInit {
             this.snackBar.open(err.error?.error || 'Failed to delete passkey', 'Close', { duration: 3000 });
           }
         });
+      }
+    });
+  }
+
+  loadTenantAdmins(): void {
+    this.adminService.getTenantAdmins().subscribe({
+      next: (response) => {
+        this.tenantAdmins = response.admins;
+      },
+      error: () => {
+        // Silently fail - admins list is not critical
+        this.tenantAdmins = [];
       }
     });
   }

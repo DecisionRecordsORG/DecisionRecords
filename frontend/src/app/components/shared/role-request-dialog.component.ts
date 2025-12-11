@@ -32,35 +32,42 @@ export interface RoleRequestDialogResult {
   ],
   template: `
     <h2 mat-dialog-title>
-      <mat-icon>admin_panel_settings</mat-icon>
-      Request shared administration responsibilities
+      <mat-icon color="primary">admin_panel_settings</mat-icon>
+      Request Elevated Role
     </h2>
     <mat-dialog-content>
-      <p class="dialog-subtext">(visible to current admins and logged for transparency)</p>
+      <p class="dialog-description">
+        Request shared administration responsibilities. This request will be visible to current admins
+        and logged for transparency.
+      </p>
 
       <div class="role-selection">
-        <h3>Select the role you are requesting:</h3>
+        <label class="selection-label">Select the role you are requesting:</label>
 
         <mat-radio-group [(ngModel)]="selectedRole" class="role-radio-group">
-          <mat-radio-button value="steward" class="role-option">
-            <div class="role-option-content">
-              <div class="role-header">
-                <strong>Steward</strong>
-                <mat-icon class="role-icon steward-icon">shield</mat-icon>
+          <div class="role-option" [class.selected]="selectedRole === 'steward'" (click)="selectedRole = 'steward'">
+            <mat-radio-button value="steward">
+              <div class="role-option-content">
+                <div class="role-header">
+                  <span class="role-name">Steward</span>
+                  <mat-icon class="steward-icon">shield</mat-icon>
+                </div>
+                <p class="role-description">Shared governance role - can approve access requests and invite users</p>
               </div>
-              <p class="role-description">Shared governance role - can approve requests and invite users</p>
-            </div>
-          </mat-radio-button>
+            </mat-radio-button>
+          </div>
 
-          <mat-radio-button value="admin" class="role-option">
-            <div class="role-option-content">
-              <div class="role-header">
-                <strong>Admin</strong>
-                <mat-icon class="role-icon admin-icon">admin_panel_settings</mat-icon>
+          <div class="role-option" [class.selected]="selectedRole === 'admin'" (click)="selectedRole = 'admin'">
+            <mat-radio-button value="admin">
+              <div class="role-option-content">
+                <div class="role-header">
+                  <span class="role-name">Administrator</span>
+                  <mat-icon class="admin-icon">admin_panel_settings</mat-icon>
+                </div>
+                <p class="role-description">Full administrator - can manage all tenant settings and configurations</p>
               </div>
-              <p class="role-description">Full administrator - can manage all tenant settings</p>
-            </div>
-          </mat-radio-button>
+            </mat-radio-button>
+          </div>
         </mat-radio-group>
       </div>
 
@@ -74,10 +81,8 @@ export interface RoleRequestDialogResult {
       </mat-form-field>
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button (click)="cancel()">
-        Cancel
-      </button>
-      <button mat-raised-button
+      <button mat-button mat-dialog-close>Cancel</button>
+      <button mat-flat-button
               color="primary"
               (click)="submit()"
               [disabled]="!selectedRole || !reason.trim()">
@@ -87,69 +92,90 @@ export interface RoleRequestDialogResult {
     </mat-dialog-actions>
   `,
   styles: [`
-    h2 {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: #3f51b5;
+    :host {
+      display: block;
     }
 
-    .dialog-subtext {
+    h2[mat-dialog-title] {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0;
+      padding: 16px 24px;
+      font-size: 20px;
+      font-weight: 500;
+    }
+
+    mat-dialog-content {
+      padding: 0 24px 24px 24px;
+      max-height: 65vh;
+    }
+
+    .dialog-description {
       color: #666;
-      font-size: 13px;
-      margin: -8px 0 16px 0;
-      font-style: italic;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 20px 0;
     }
 
     .role-selection {
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
 
-    .role-selection h3 {
-      font-size: 15px;
+    .selection-label {
+      display: block;
+      font-size: 14px;
       font-weight: 500;
-      margin: 0 0 12px 0;
       color: #333;
+      margin-bottom: 12px;
     }
 
     .role-radio-group {
       display: flex;
       flex-direction: column;
       gap: 12px;
-      width: 100%;
     }
 
     .role-option {
-      border: 1px solid #ddd;
+      border: 2px solid #e0e0e0;
       border-radius: 8px;
       padding: 16px;
-      margin: 0;
-      width: 100%;
+      cursor: pointer;
+      transition: all 0.2s ease;
     }
 
-    .role-option.mat-mdc-radio-checked {
+    .role-option:hover {
+      border-color: #bdbdbd;
+      background-color: #fafafa;
+    }
+
+    .role-option.selected {
       border-color: #3f51b5;
       background-color: #f5f7ff;
     }
 
-    .role-option-content {
+    .role-option mat-radio-button {
       width: 100%;
-      margin-left: 8px;
+    }
+
+    .role-option-content {
+      padding-left: 8px;
     }
 
     .role-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
     }
 
-    .role-header strong {
+    .role-name {
       font-size: 16px;
+      font-weight: 500;
       color: #333;
     }
 
-    .role-icon {
+    .role-header mat-icon {
       font-size: 24px;
       width: 24px;
       height: 24px;
@@ -165,7 +191,7 @@ export interface RoleRequestDialogResult {
 
     .role-description {
       margin: 0;
-      font-size: 14px;
+      font-size: 13px;
       color: #666;
       line-height: 1.4;
     }
@@ -174,20 +200,24 @@ export interface RoleRequestDialogResult {
       width: 100%;
     }
 
-    mat-dialog-content {
-      padding-top: 8px;
-      min-width: 500px;
+    mat-dialog-actions {
+      padding: 16px 24px;
+      margin: 0;
     }
 
     mat-dialog-actions button {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 4px;
+      gap: 6px;
     }
 
     @media (max-width: 600px) {
       mat-dialog-content {
         min-width: auto;
+      }
+
+      .role-option {
+        padding: 12px;
       }
     }
   `]

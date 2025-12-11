@@ -3445,6 +3445,310 @@ def api_reject_role_request(domain, request_id):
     })
 
 
+# ==================== API Routes - Admin Role Requests (Convenience Routes) ====================
+# These routes use /api/admin/ prefix and derive the tenant from the logged-in user
+
+@app.route('/api/admin/role-requests', methods=['GET'])
+@steward_or_admin_required
+def api_admin_list_role_requests():
+    """List role requests for admin's domain."""
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get tenant from user's domain
+    tenant = Tenant.query.filter_by(domain=user.sso_domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get filter parameter (default to all)
+    status_filter = request.args.get('status', 'all').lower()
+
+    # Build query
+    query = RoleRequest.query.filter_by(tenant_id=tenant.id)
+
+    if status_filter == 'pending':
+        query = query.filter_by(status=RequestStatus.PENDING)
+    elif status_filter == 'approved':
+        query = query.filter_by(status=RequestStatus.APPROVED)
+    elif status_filter == 'rejected':
+        query = query.filter_by(status=RequestStatus.REJECTED)
+    elif status_filter != 'all':
+        return jsonify({'error': 'Invalid status filter. Use: all, pending, approved, or rejected'}), 400
+
+    requests = query.order_by(RoleRequest.created_at.desc()).all()
+
+    return jsonify([r.to_dict() for r in requests])
+
+
+@app.route('/api/admin/role-requests', methods=['POST'])
+@login_required
+def api_admin_create_role_request():
+    """Create a role elevation request (user requests steward or admin privileges)."""
+    from governance import check_and_upgrade_provisional_admins
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get tenant from user's domain
+    tenant = Tenant.query.filter_by(domain=user.sso_domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get user's membership
+    membership = user.get_membership(tenant.id)
+    if not membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    # Sanitize and validate input
+    data = request.get_json()
+    requested_role_str = data.get('requested_role', '').lower()
+    reason = sanitize_text_field(data.get('reason', ''))
+
+    # Validate requested role
+    if requested_role_str not in ['steward', 'admin']:
+        return jsonify({'error': 'Invalid role. Must be steward or admin'}), 400
+
+    requested_role = RequestedRole.STEWARD if requested_role_str == 'steward' else RequestedRole.ADMIN
+
+    # Check if user already has this role or higher
+    current_role = membership.global_role
+    if current_role == GlobalRole.ADMIN:
+        return jsonify({'error': 'You already have admin privileges'}), 400
+    if current_role == GlobalRole.STEWARD and requested_role == RequestedRole.STEWARD:
+        return jsonify({'error': 'You already have steward privileges'}), 400
+
+    # Check for existing pending request for same role
+    existing_request = RoleRequest.query.filter_by(
+        user_id=user.id,
+        tenant_id=tenant.id,
+        requested_role=requested_role,
+        status=RequestStatus.PENDING
+    ).first()
+
+    if existing_request:
+        return jsonify({'error': 'You already have a pending request for this role'}), 400
+
+    # Create the request
+    role_request = RoleRequest(
+        user_id=user.id,
+        tenant_id=tenant.id,
+        requested_role=requested_role,
+        reason=reason
+    )
+    db.session.add(role_request)
+
+    # Log the request
+    log_admin_action(
+        tenant_id=tenant.id,
+        performed_by_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUESTED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'requested_role': requested_role.value,
+            'reason': reason
+        }
+    )
+
+    db.session.commit()
+
+    # Check if provisional admin should be upgraded
+    check_and_upgrade_provisional_admins(tenant.id)
+
+    return jsonify({
+        'message': 'Role request submitted successfully',
+        'request': role_request.to_dict()
+    }), 201
+
+
+@app.route('/api/admin/role-requests/<int:request_id>/approve', methods=['POST'])
+@steward_or_admin_required
+def api_admin_approve_role_request(request_id):
+    """Approve a role request and promote the user."""
+    from governance import can_promote_to_role, check_and_upgrade_provisional_admins
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get tenant from user's domain
+    tenant = Tenant.query.filter_by(domain=user.sso_domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get the role request
+    role_request = RoleRequest.query.get_or_404(request_id)
+
+    # Verify request belongs to this tenant
+    if role_request.tenant_id != tenant.id:
+        return jsonify({'error': 'Role request not found in this tenant'}), 404
+
+    # Check if already processed
+    if role_request.status != RequestStatus.PENDING:
+        return jsonify({'error': f'Request is already {role_request.status.value}'}), 400
+
+    # Get reviewer's membership
+    reviewer_membership = user.get_membership(tenant.id)
+    if not reviewer_membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    # Map requested role to GlobalRole
+    target_role = GlobalRole.STEWARD if role_request.requested_role == RequestedRole.STEWARD else GlobalRole.ADMIN
+
+    # Check if reviewer can promote to this role
+    can_promote, reason = can_promote_to_role(reviewer_membership, target_role)
+    if not can_promote:
+        return jsonify({'error': reason}), 403
+
+    # Get target user's membership
+    target_membership = TenantMembership.query.filter_by(
+        user_id=role_request.user_id,
+        tenant_id=tenant.id
+    ).first()
+
+    if not target_membership:
+        return jsonify({'error': 'Target user is not a member of this tenant'}), 400
+
+    # Store old role for audit log
+    old_role = target_membership.global_role
+
+    # Update the user's role
+    target_membership.global_role = target_role
+
+    # Update request status
+    role_request.status = RequestStatus.APPROVED
+    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_by_id = user.id
+
+    # Log the approval and role change
+    log_admin_action(
+        tenant_id=tenant.id,
+        performed_by_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUEST_APPROVED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'target_user_id': role_request.user_id,
+            'old_role': old_role.value,
+            'new_role': target_role.value,
+            'requested_role': role_request.requested_role.value
+        }
+    )
+
+    db.session.commit()
+
+    # Check if any provisional admins should be upgraded
+    check_and_upgrade_provisional_admins(tenant.id)
+
+    # Get updated user
+    target_user = User.query.get(role_request.user_id)
+
+    return jsonify({
+        'message': f'Role request approved. User is now a {target_role.value}.',
+        'request': role_request.to_dict(),
+        'user': target_user.to_dict() if target_user else None
+    })
+
+
+@app.route('/api/admin/role-requests/<int:request_id>/reject', methods=['POST'])
+@steward_or_admin_required
+def api_admin_reject_role_request(request_id):
+    """Reject a role request."""
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get tenant from user's domain
+    tenant = Tenant.query.filter_by(domain=user.sso_domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get the role request
+    role_request = RoleRequest.query.get_or_404(request_id)
+
+    # Verify request belongs to this tenant
+    if role_request.tenant_id != tenant.id:
+        return jsonify({'error': 'Role request not found in this tenant'}), 404
+
+    # Check if already processed
+    if role_request.status != RequestStatus.PENDING:
+        return jsonify({'error': f'Request is already {role_request.status.value}'}), 400
+
+    # Get rejection reason
+    data = request.get_json() or {}
+    rejection_reason = sanitize_text_field(data.get('reason', ''))
+
+    # Update request status
+    role_request.status = RequestStatus.REJECTED
+    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_by_id = user.id
+    role_request.rejection_reason = rejection_reason
+
+    # Log the rejection
+    log_admin_action(
+        tenant_id=tenant.id,
+        performed_by_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUEST_REJECTED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'target_user_id': role_request.user_id,
+            'requested_role': role_request.requested_role.value,
+            'rejection_reason': rejection_reason
+        }
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Role request rejected',
+        'request': role_request.to_dict()
+    })
+
+
+@app.route('/api/admin/tenant-admins', methods=['GET'])
+@login_required
+def api_get_tenant_admins():
+    """Get list of admins and stewards for the current user's tenant.
+
+    This endpoint is available to all authenticated users so they can see
+    who to contact for role elevation requests.
+
+    Security: Only returns basic info (name, role) - no email to prevent enumeration.
+    """
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Get tenant from user's domain
+    tenant = Tenant.query.filter_by(domain=user.sso_domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get admins and stewards for this tenant
+    admin_memberships = TenantMembership.query.filter(
+        TenantMembership.tenant_id == tenant.id,
+        TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN])
+    ).all()
+
+    admins = []
+    for membership in admin_memberships:
+        admin_user = User.query.get(membership.user_id)
+        if admin_user:
+            admins.append({
+                'name': admin_user.name or 'Unnamed Admin',
+                'role': membership.global_role.value,
+                # Don't expose email to prevent enumeration - users can see names only
+            })
+
+    return jsonify({
+        'admins': admins,
+        'total': len(admins)
+    })
+
+
 @app.route('/api/webauthn/register/options', methods=['POST'])
 @rate_limit("10 per minute")
 def api_webauthn_register_options():

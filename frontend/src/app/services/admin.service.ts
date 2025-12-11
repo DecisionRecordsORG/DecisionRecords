@@ -143,4 +143,9 @@ export class AdminService {
   rejectRoleRequest(id: number, reason?: string): Observable<{ message: string; request: RoleRequest }> {
     return this.http.post<{ message: string; request: RoleRequest }>(`${this.apiUrl}/role-requests/${id}/reject`, { reason });
   }
+
+  // Tenant Admins (for regular users to see who to contact)
+  getTenantAdmins(): Observable<{ admins: { name: string; role: string }[]; total: number }> {
+    return this.http.get<{ admins: { name: string; role: string }[]; total: number }>(`${this.apiUrl}/tenant-admins`);
+  }
 }
