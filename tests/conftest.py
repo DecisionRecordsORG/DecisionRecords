@@ -156,3 +156,47 @@ def sample_space(session, sample_tenant, sample_user):
     session.add(space)
     session.commit()
     return space
+
+
+@pytest.fixture
+def sample_decision(session, sample_tenant, sample_user):
+    """Create a sample decision."""
+    from models import ArchitectureDecision
+    decision = ArchitectureDecision(
+        title='Test Decision',
+        context='Test context for the decision',
+        decision='The decision text',
+        status='proposed',
+        consequences='Expected consequences',
+        domain=sample_tenant.domain,
+        tenant_id=sample_tenant.id,
+        created_by_id=sample_user.id,
+        decision_number=1
+    )
+    session.add(decision)
+    session.commit()
+    return decision
+
+
+@pytest.fixture
+def client(app):
+    """Create test client for making HTTP requests."""
+    return app.test_client()
+
+
+@pytest.fixture
+def authenticated_client(app, sample_user):
+    """Create authenticated test client."""
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['user_id'] = sample_user.id
+    return client
+
+
+@pytest.fixture
+def admin_client(app, admin_user):
+    """Create admin authenticated test client."""
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['user_id'] = admin_user.id
+    return client
