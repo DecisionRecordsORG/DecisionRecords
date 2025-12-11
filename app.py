@@ -4572,8 +4572,8 @@ def api_get_tenant_maturity(domain):
         },
         'maturity_conditions': {
             'has_multi_admin': admin_count >= 2 or (admin_count >= 1 and steward_count >= 1),
-            'has_enough_users': total_members >= tenant.maturity_user_threshold,
-            'is_old_enough': age_days >= tenant.maturity_age_days
+            'has_enough_users': total_members >= (tenant.maturity_user_threshold if tenant.maturity_user_threshold is not None else 5),
+            'is_old_enough': age_days >= (tenant.maturity_age_days if tenant.maturity_age_days is not None else 90)
         },
         'created_at': tenant.created_at.isoformat() if tenant.created_at else None
     })
