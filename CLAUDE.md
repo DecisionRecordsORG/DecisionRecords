@@ -177,13 +177,104 @@ Key files to understand:
 | `deployment/Dockerfile.production` | Production Docker build |
 | `infra/azure-deploy-vnet.json` | Azure ARM template |
 
-## Testing
+## Testing Requirements
 
-Before deploying, consider testing:
+**MANDATORY: Always write tests when adding or modifying code.**
 
-1. **Frontend build**: `cd frontend && npm run build`
-2. **Python imports**: `python -c "import app"`
-3. **Local Docker**: `docker build -t test . && docker run -p 8000:8000 test`
+### Test Suite Overview
+
+| Test Type | Location | Command | Count |
+|-----------|----------|---------|-------|
+| Backend Unit Tests | `tests/` | `.venv/bin/python -m pytest tests/` | 265+ |
+| E2E Tests | `e2e/tests/` | `npx playwright test` | 40+ |
+| Integration Tests | `tests/test_api_integration.py` | `.venv/bin/python -m pytest tests/test_api_integration.py` | 30 |
+
+### When to Write Tests
+
+**Backend Changes (app.py, models.py, auth.py, etc.):**
+1. Add unit tests in `tests/test_*.py` for new functions/methods
+2. Add integration tests in `tests/test_api_integration.py` for new API endpoints
+3. Test both success AND error cases
+4. Test edge cases (null values, empty strings, missing fields)
+
+**Frontend Changes (Angular components):**
+1. Add E2E tests in `e2e/tests/*.spec.ts` for new UI features
+2. Test the user flow end-to-end through the browser
+3. Use existing patterns from `e2e/fixtures/auth.ts`
+
+**API Contract Changes:**
+1. Update both backend unit tests AND frontend E2E tests
+2. Verify request/response formats match on both sides
+
+### Test File Mapping
+
+| Code Area | Test File |
+|-----------|-----------|
+| Authentication | `tests/test_auth.py` |
+| Tenant management | `tests/test_tenants.py` |
+| Decisions CRUD | `tests/test_decisions.py` |
+| Role requests | `tests/test_role_requests.py` |
+| Security/sanitization | `tests/test_security.py` |
+| API endpoints | `tests/test_api_integration.py` |
+| Super admin UI | `e2e/tests/superadmin-tenants.spec.ts` |
+| Decisions UI | `e2e/tests/decisions.spec.ts` |
+| Spaces UI | `e2e/tests/spaces.spec.ts` |
+
+### Running Tests
+
+```bash
+# Run all backend tests
+.venv/bin/python -m pytest tests/ -v
+
+# Run specific test file
+.venv/bin/python -m pytest tests/test_auth.py -v
+
+# Run E2E tests (requires frontend running)
+cd frontend && npm run build && cd ..
+npx playwright test
+
+# Run specific E2E test
+npx playwright test e2e/tests/decisions.spec.ts
+```
+
+### Test Patterns to Follow
+
+**Backend Unit Tests:**
+```python
+class TestFeatureName:
+    def test_success_case(self, app, session, sample_user):
+        """Description of what it tests."""
+        # Arrange
+        # Act
+        # Assert
+
+    def test_error_case_returns_appropriate_error(self, app, session):
+        """Tests error handling."""
+        # Test with invalid input, expect specific error
+
+    def test_handles_null_values(self, app, session):
+        """Tests null/None handling."""
+        # Test with None values to prevent 500 errors
+```
+
+**E2E Tests:**
+```typescript
+test.describe('Feature Name', () => {
+  test('can-do-action: Description of what it tests', async ({ page }) => {
+    await loginAsUser(page);
+    await page.goto('/relevant-page');
+    // Perform action
+    // Assert result
+  });
+});
+```
+
+### Before Deploying
+
+1. **Run backend tests**: `.venv/bin/python -m pytest tests/ -v`
+2. **Build frontend**: `cd frontend && npm run build`
+3. **Verify app imports**: `python -c "import app"`
+4. **Run E2E tests** (optional but recommended): `npx playwright test`
 
 ## API Integration Guidelines
 
