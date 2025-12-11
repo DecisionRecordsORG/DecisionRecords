@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest } from '../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, RoleRequest } from '../models/decision.model';
 
 export interface CreateSSOConfigRequest {
   domain: string;
@@ -125,5 +125,22 @@ export class AdminService {
 
   sendSetupEmail(userId: number): Observable<{ message: string; setup_url: string; expires_at: string; hours_valid: number }> {
     return this.http.post<{ message: string; setup_url: string; expires_at: string; hours_valid: number }>(`${this.apiUrl}/users/${userId}/send-setup-email`, {});
+  }
+
+  // Role Requests
+  createRoleRequest(role: string, reason: string): Observable<RoleRequest> {
+    return this.http.post<RoleRequest>(`${this.apiUrl}/role-requests`, { requested_role: role, reason });
+  }
+
+  getRoleRequests(): Observable<RoleRequest[]> {
+    return this.http.get<RoleRequest[]>(`${this.apiUrl}/role-requests`);
+  }
+
+  approveRoleRequest(id: number): Observable<{ message: string; user: User }> {
+    return this.http.post<{ message: string; user: User }>(`${this.apiUrl}/role-requests/${id}/approve`, {});
+  }
+
+  rejectRoleRequest(id: number, reason?: string): Observable<{ message: string; request: RoleRequest }> {
+    return this.http.post<{ message: string; request: RoleRequest }>(`${this.apiUrl}/role-requests/${id}/reject`, { reason });
   }
 }

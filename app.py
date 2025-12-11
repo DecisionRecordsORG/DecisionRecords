@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, Space, DecisionSpace, GlobalRole, AuditLog
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -3156,6 +3156,295 @@ def api_reject_access_request(request_id):
     })
 
 
+# ==================== API Routes - Role Requests ====================
+
+@app.route('/api/tenant/<domain>/role-requests', methods=['POST'])
+@login_required
+def api_create_role_request(domain):
+    """Create a role elevation request (user requests steward or admin privileges)."""
+    from governance import check_and_upgrade_provisional_admins
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Verify domain matches user's domain
+    if user.sso_domain.lower() != domain.lower():
+        return jsonify({'error': 'Cannot request role for different domain'}), 403
+
+    # Get tenant
+    tenant = Tenant.query.filter_by(domain=domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get user's membership
+    membership = user.get_membership(tenant.id)
+    if not membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    # Sanitize and validate input
+    data = request.get_json()
+    requested_role_str = data.get('requested_role', '').lower()
+    reason = sanitize_text_field(data.get('reason', ''))
+
+    # Validate requested role
+    if requested_role_str not in ['steward', 'admin']:
+        return jsonify({'error': 'Invalid role. Must be steward or admin'}), 400
+
+    requested_role = RequestedRole.STEWARD if requested_role_str == 'steward' else RequestedRole.ADMIN
+
+    # Check if user already has this role or higher
+    current_role = membership.global_role
+    if current_role == GlobalRole.ADMIN:
+        return jsonify({'error': 'You already have admin privileges'}), 400
+    if current_role == GlobalRole.STEWARD and requested_role == RequestedRole.STEWARD:
+        return jsonify({'error': 'You already have steward privileges'}), 400
+
+    # Check for existing pending request
+    existing_request = RoleRequest.query.filter_by(
+        user_id=user.id,
+        tenant_id=tenant.id,
+        status=RequestStatus.PENDING
+    ).first()
+
+    if existing_request:
+        return jsonify({
+            'error': 'You already have a pending role request',
+            'existing_request': existing_request.to_dict()
+        }), 400
+
+    # Create the role request
+    role_request = RoleRequest(
+        user_id=user.id,
+        tenant_id=tenant.id,
+        requested_role=requested_role,
+        reason=reason,
+        status=RequestStatus.PENDING
+    )
+    db.session.add(role_request)
+
+    # Log the request creation
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUEST_CREATED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'requested_role': requested_role.value,
+            'reason': reason
+        }
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Role request submitted successfully',
+        'request': role_request.to_dict()
+    }), 201
+
+
+@app.route('/api/tenant/<domain>/role-requests', methods=['GET'])
+@steward_or_admin_required
+def api_list_role_requests(domain):
+    """List role requests for a tenant (admin/steward only)."""
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Verify domain matches user's domain
+    if user.sso_domain.lower() != domain.lower():
+        return jsonify({'error': 'Access denied'}), 403
+
+    # Get tenant
+    tenant = Tenant.query.filter_by(domain=domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get filter parameter (default to pending)
+    status_filter = request.args.get('status', 'pending').lower()
+
+    # Build query
+    query = RoleRequest.query.filter_by(tenant_id=tenant.id)
+
+    if status_filter == 'pending':
+        query = query.filter_by(status=RequestStatus.PENDING)
+    elif status_filter == 'approved':
+        query = query.filter_by(status=RequestStatus.APPROVED)
+    elif status_filter == 'rejected':
+        query = query.filter_by(status=RequestStatus.REJECTED)
+    elif status_filter != 'all':
+        return jsonify({'error': 'Invalid status filter. Use: all, pending, approved, or rejected'}), 400
+
+    requests = query.order_by(RoleRequest.created_at.desc()).all()
+
+    return jsonify([r.to_dict() for r in requests])
+
+
+@app.route('/api/tenant/<domain>/role-requests/<int:request_id>/approve', methods=['POST'])
+@steward_or_admin_required
+def api_approve_role_request(domain, request_id):
+    """Approve a role request and promote the user."""
+    from governance import can_promote_to_role, check_and_upgrade_provisional_admins
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Verify domain matches user's domain
+    if user.sso_domain.lower() != domain.lower():
+        return jsonify({'error': 'Access denied'}), 403
+
+    # Get tenant
+    tenant = Tenant.query.filter_by(domain=domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get the role request
+    role_request = RoleRequest.query.get_or_404(request_id)
+
+    # Verify request belongs to this tenant
+    if role_request.tenant_id != tenant.id:
+        return jsonify({'error': 'Role request not found in this tenant'}), 404
+
+    # Check if already processed
+    if role_request.status != RequestStatus.PENDING:
+        return jsonify({'error': f'Request is already {role_request.status.value}'}), 400
+
+    # Get reviewer's membership
+    reviewer_membership = user.get_membership(tenant.id)
+    if not reviewer_membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    # Map requested role to GlobalRole
+    target_role = GlobalRole.STEWARD if role_request.requested_role == RequestedRole.STEWARD else GlobalRole.ADMIN
+
+    # Check if reviewer can promote to this role
+    can_promote, reason = can_promote_to_role(reviewer_membership, target_role)
+    if not can_promote:
+        return jsonify({'error': reason}), 403
+
+    # Get the target user's membership
+    target_membership = TenantMembership.query.filter_by(
+        user_id=role_request.user_id,
+        tenant_id=tenant.id
+    ).first()
+
+    if not target_membership:
+        return jsonify({'error': 'User is not a member of this tenant'}), 404
+
+    # Store old role for audit log
+    old_role = target_membership.global_role
+
+    # Update the user's role
+    target_membership.global_role = target_role
+
+    # Update request status
+    role_request.status = RequestStatus.APPROVED
+    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_by_id = user.id
+
+    # Log the approval and promotion
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUEST_APPROVED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'target_user_id': role_request.user_id,
+            'old_role': old_role.value,
+            'new_role': target_role.value,
+            'requested_role': role_request.requested_role.value
+        }
+    )
+
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_PROMOTE_USER,
+        target_entity='user',
+        target_id=role_request.user_id,
+        details={
+            'old_role': old_role.value,
+            'new_role': target_role.value,
+            'via_role_request': True,
+            'request_id': role_request.id
+        }
+    )
+
+    db.session.commit()
+
+    # Check if this promotion triggers maturity upgrade
+    check_and_upgrade_provisional_admins(tenant, trigger_user_id=user.id)
+
+    return jsonify({
+        'message': f'Role request approved. User promoted to {target_role.value}',
+        'request': role_request.to_dict(),
+        'new_role': target_role.value
+    })
+
+
+@app.route('/api/tenant/<domain>/role-requests/<int:request_id>/reject', methods=['POST'])
+@steward_or_admin_required
+def api_reject_role_request(domain, request_id):
+    """Reject a role request."""
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    # Verify domain matches user's domain
+    if user.sso_domain.lower() != domain.lower():
+        return jsonify({'error': 'Access denied'}), 403
+
+    # Get tenant
+    tenant = Tenant.query.filter_by(domain=domain.lower()).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Get the role request
+    role_request = RoleRequest.query.get_or_404(request_id)
+
+    # Verify request belongs to this tenant
+    if role_request.tenant_id != tenant.id:
+        return jsonify({'error': 'Role request not found in this tenant'}), 404
+
+    # Check if already processed
+    if role_request.status != RequestStatus.PENDING:
+        return jsonify({'error': f'Request is already {role_request.status.value}'}), 400
+
+    # Get rejection reason
+    data = request.get_json() or {}
+    rejection_reason = sanitize_text_field(data.get('reason', ''))
+
+    # Update request status
+    role_request.status = RequestStatus.REJECTED
+    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_by_id = user.id
+    role_request.rejection_reason = rejection_reason
+
+    # Log the rejection
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_ROLE_REQUEST_REJECTED,
+        target_entity='role_request',
+        target_id=role_request.id,
+        details={
+            'target_user_id': role_request.user_id,
+            'requested_role': role_request.requested_role.value,
+            'rejection_reason': rejection_reason
+        }
+    )
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Role request rejected',
+        'request': role_request.to_dict()
+    })
+
+
 @app.route('/api/webauthn/register/options', methods=['POST'])
 @rate_limit("10 per minute")
 def api_webauthn_register_options():
@@ -3640,10 +3929,13 @@ def api_list_tenants():
             'domain': approval.domain,
             'user_count': 0,
             'admin_count': 0,
+            'steward_count': 0,
             'has_sso': False,
             'status': 'approved',
             'auto_approved': approval.auto_approved,
-            'created_at': approval.reviewed_at.isoformat() if approval.reviewed_at else (approval.updated_at.isoformat() if approval.updated_at else approval.created_at.isoformat())
+            'created_at': approval.reviewed_at.isoformat() if approval.reviewed_at else (approval.updated_at.isoformat() if approval.updated_at else approval.created_at.isoformat()),
+            'maturity_state': None,
+            'age_days': None
         }
 
     # Get user stats by domain
@@ -3663,19 +3955,323 @@ def api_list_tenants():
                     'domain': domain,
                     'user_count': 0,
                     'admin_count': 0,
+                    'steward_count': 0,
                     'has_sso': False,
                     'status': 'active',  # Mark as active since users exist
                     'auto_approved': False,
-                    'created_at': created_at.isoformat() if created_at else None
+                    'created_at': created_at.isoformat() if created_at else None,
+                    'maturity_state': None,
+                    'age_days': None
                 }
             tenants[domain]['user_count'] = user_count
             tenants[domain]['admin_count'] = int(admin_count) if admin_count else 0
+
+    # Get v1.5 Tenant data (maturity state, member counts)
+    tenant_records = Tenant.query.all()
+    for tenant in tenant_records:
+        if tenant.domain in tenants:
+            # Get member counts by role
+            admin_count = TenantMembership.query.filter_by(
+                tenant_id=tenant.id,
+                global_role=GlobalRole.ADMIN
+            ).count()
+            steward_count = TenantMembership.query.filter_by(
+                tenant_id=tenant.id,
+                global_role=GlobalRole.STEWARD
+            ).count()
+            member_count = TenantMembership.query.filter_by(tenant_id=tenant.id).count()
+
+            # Calculate age
+            age_days = (datetime.utcnow() - tenant.created_at).days
+
+            tenants[tenant.domain]['maturity_state'] = tenant.maturity_state.value
+            tenants[tenant.domain]['admin_count'] = admin_count
+            tenants[tenant.domain]['steward_count'] = steward_count
+            tenants[tenant.domain]['user_count'] = member_count
+            tenants[tenant.domain]['age_days'] = age_days
 
     # Check SSO config for all domains
     for domain in tenants:
         tenants[domain]['has_sso'] = SSOConfig.query.filter_by(domain=domain, enabled=True).first() is not None
 
     return jsonify(sorted(tenants.values(), key=lambda x: x['domain']))
+
+
+@app.route('/api/tenants/<domain>/maturity', methods=['GET'])
+@master_required
+def api_get_tenant_maturity(domain):
+    """Get tenant maturity details (super admin only).
+
+    Returns maturity state, thresholds, and stats for governance analysis.
+    """
+    domain = domain.lower()
+
+    # Get tenant record
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
+
+    # Get member counts by role
+    admin_count = TenantMembership.query.filter_by(
+        tenant_id=tenant.id,
+        global_role=GlobalRole.ADMIN
+    ).count()
+    steward_count = TenantMembership.query.filter_by(
+        tenant_id=tenant.id,
+        global_role=GlobalRole.STEWARD
+    ).count()
+    provisional_admin_count = TenantMembership.query.filter_by(
+        tenant_id=tenant.id,
+        global_role=GlobalRole.PROVISIONAL_ADMIN
+    ).count()
+    user_count = TenantMembership.query.filter_by(
+        tenant_id=tenant.id,
+        global_role=GlobalRole.USER
+    ).count()
+    total_members = TenantMembership.query.filter_by(tenant_id=tenant.id).count()
+
+    # Calculate age
+    age_days = (datetime.utcnow() - tenant.created_at).days
+
+    # Calculate what the computed maturity state would be
+    computed_state = tenant.compute_maturity_state()
+    state_changed = computed_state != tenant.maturity_state
+
+    return jsonify({
+        'domain': tenant.domain,
+        'tenant_id': tenant.id,
+        'maturity_state': tenant.maturity_state.value,
+        'computed_maturity_state': computed_state.value,
+        'state_needs_update': state_changed,
+        'thresholds': {
+            'age_days': tenant.maturity_age_days,
+            'user_threshold': tenant.maturity_user_threshold
+        },
+        'current_stats': {
+            'age_days': age_days,
+            'total_members': total_members,
+            'admin_count': admin_count,
+            'steward_count': steward_count,
+            'provisional_admin_count': provisional_admin_count,
+            'user_count': user_count
+        },
+        'maturity_conditions': {
+            'has_multi_admin': admin_count >= 2 or (admin_count >= 1 and steward_count >= 1),
+            'has_enough_users': total_members >= tenant.maturity_user_threshold,
+            'is_old_enough': age_days >= tenant.maturity_age_days
+        },
+        'created_at': tenant.created_at.isoformat()
+    })
+
+
+@app.route('/api/tenants/<domain>/maturity', methods=['PUT'])
+@master_required
+def api_update_tenant_maturity_thresholds(domain):
+    """Update tenant maturity thresholds (super admin only).
+
+    Allows super admin to customize maturity thresholds for a specific tenant.
+    """
+    domain = domain.lower()
+    data = request.get_json()
+
+    # Get tenant record
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
+
+    # Validate inputs
+    if 'age_days' in data:
+        age_days = data.get('age_days')
+        if not isinstance(age_days, int) or age_days < 0 or age_days > 365:
+            return jsonify({'error': 'age_days must be an integer between 0 and 365'}), 400
+        tenant.maturity_age_days = age_days
+
+    if 'user_threshold' in data:
+        user_threshold = data.get('user_threshold')
+        if not isinstance(user_threshold, int) or user_threshold < 1 or user_threshold > 1000:
+            return jsonify({'error': 'user_threshold must be an integer between 1 and 1000'}), 400
+        tenant.maturity_user_threshold = user_threshold
+
+    # Check if thresholds update would trigger state change
+    old_state = tenant.maturity_state
+    state_changed = tenant.update_maturity()
+
+    try:
+        db.session.commit()
+
+        # Log the action if state changed
+        if state_changed:
+            # Note: Super admin actions don't have a user_id in tenant context
+            # We'll log with tenant_id and note it was a super admin action in details
+            log_admin_action(
+                tenant_id=tenant.id,
+                actor_user_id=None,  # Super admin is not a tenant member
+                action_type=AuditLog.ACTION_MATURITY_CHANGE,
+                target_entity='tenant',
+                target_id=tenant.id,
+                details={
+                    'old_state': old_state.value,
+                    'new_state': tenant.maturity_state.value,
+                    'trigger': 'threshold_update',
+                    'actor': 'super_admin',
+                    'thresholds': {
+                        'age_days': tenant.maturity_age_days,
+                        'user_threshold': tenant.maturity_user_threshold
+                    }
+                }
+            )
+            db.session.commit()
+
+        return jsonify({
+            'message': 'Maturity thresholds updated successfully',
+            'tenant': tenant.to_dict(),
+            'state_changed': state_changed,
+            'old_state': old_state.value if state_changed else None,
+            'new_state': tenant.maturity_state.value if state_changed else None
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to update thresholds: {str(e)}'}), 500
+
+
+@app.route('/api/tenants/<domain>/maturity/force-upgrade', methods=['POST'])
+@master_required
+def api_force_tenant_maturity_upgrade(domain):
+    """Force tenant to MATURE state (super admin only).
+
+    Override automatic maturity calculation and force tenant to mature state.
+    This is useful for manually promoting tenants that need admin capabilities
+    before meeting automatic criteria.
+    """
+    domain = domain.lower()
+
+    # Get tenant record
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
+
+    # Check if already mature
+    if tenant.maturity_state == MaturityState.MATURE:
+        return jsonify({
+            'message': 'Tenant is already in MATURE state',
+            'tenant': tenant.to_dict()
+        })
+
+    # Force upgrade to mature
+    old_state = tenant.maturity_state
+    tenant.maturity_state = MaturityState.MATURE
+
+    try:
+        # Log the forced upgrade
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=None,  # Super admin is not a tenant member
+            action_type=AuditLog.ACTION_MATURITY_CHANGE,
+            target_entity='tenant',
+            target_id=tenant.id,
+            details={
+                'old_state': old_state.value,
+                'new_state': MaturityState.MATURE.value,
+                'trigger': 'forced_upgrade',
+                'actor': 'super_admin',
+                'reason': 'Manual override by super admin'
+            }
+        )
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Tenant forced to MATURE state successfully',
+            'tenant': tenant.to_dict(),
+            'old_state': old_state.value,
+            'new_state': tenant.maturity_state.value
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to force upgrade: {str(e)}'}), 500
+
+
+@app.route('/api/tenants/<domain>', methods=['DELETE'])
+@master_required
+def api_delete_tenant(domain):
+    """Delete a tenant and all associated data (super admin only).
+
+    This is a destructive operation that removes:
+    - Tenant record
+    - All tenant memberships
+    - All spaces
+    - All decisions (soft-deleted)
+    - All audit logs
+    - Tenant settings
+
+    Requires confirmation parameter to prevent accidental deletion.
+    """
+    domain = domain.lower()
+    data = request.get_json() or {}
+
+    # Require explicit confirmation
+    if not data.get('confirm_delete'):
+        return jsonify({
+            'error': 'Deletion requires explicit confirmation',
+            'message': 'Include {"confirm_delete": true} in request body to proceed'
+        }), 400
+
+    # Get tenant record
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': f'Tenant not found for domain: {domain}'}), 404
+
+    tenant_id = tenant.id
+
+    try:
+        # Get counts for reporting
+        member_count = TenantMembership.query.filter_by(tenant_id=tenant_id).count()
+        space_count = Space.query.filter_by(tenant_id=tenant_id).count()
+        decision_count = ArchitectureDecision.query.filter_by(tenant_id=tenant_id).count()
+
+        # Soft delete all decisions (don't actually remove, just mark deleted)
+        decisions = ArchitectureDecision.query.filter_by(tenant_id=tenant_id).all()
+        for decision in decisions:
+            if not decision.deleted_at:
+                decision.deleted_at = datetime.utcnow()
+                decision.deleted_by_id = None  # Super admin deletion
+
+        # Delete all spaces (this will cascade delete DecisionSpace links)
+        Space.query.filter_by(tenant_id=tenant_id).delete()
+
+        # Delete all memberships
+        TenantMembership.query.filter_by(tenant_id=tenant_id).delete()
+
+        # Delete audit logs (optional - you might want to keep these)
+        AuditLog.query.filter_by(tenant_id=tenant_id).delete()
+
+        # Delete tenant settings
+        TenantSettings.query.filter_by(tenant_id=tenant_id).delete()
+
+        # Delete the tenant record itself
+        db.session.delete(tenant)
+
+        # Optionally update domain approval status to 'rejected' so it can't be re-registered
+        domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+        if domain_approval:
+            domain_approval.status = 'rejected'
+            domain_approval.rejection_reason = 'Tenant deleted by super admin'
+            domain_approval.reviewed_at = datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'Tenant {domain} deleted successfully',
+            'deleted': {
+                'domain': domain,
+                'tenant_id': tenant_id,
+                'members': member_count,
+                'spaces': space_count,
+                'decisions_soft_deleted': decision_count
+            }
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Failed to delete tenant: {str(e)}'}), 500
 
 
 # ==================== API Routes - Tenant Auth Config ====================
@@ -4355,7 +4951,7 @@ def set_test_tenant_maturity():
         if not tenant:
             return jsonify({'error': f'Tenant {domain} not found'}), 404
 
-        tenant.maturity_state = state
+        tenant.maturity_state = MaturityState[state]
         db.session.commit()
 
         logger.info(f"Tenant {domain} maturity set to {state}")
@@ -4364,7 +4960,7 @@ def set_test_tenant_maturity():
             'tenant': {
                 'id': tenant.id,
                 'domain': tenant.domain,
-                'maturity_state': tenant.maturity_state
+                'maturity_state': tenant.maturity_state.value if tenant.maturity_state else None
             }
         })
     except Exception as e:

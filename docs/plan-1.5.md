@@ -3,12 +3,12 @@
 This document tracks the implementation of tiered admin permissions, Spaces, and the underlying data model changes required to support them safely.
 
 **Author**: Lead Engineer
-**Last Updated**: December 2025
-**Status**: In Progress
+**Last Updated**: December 11, 2025
+**Status**: Feature Complete (Pending Migration)
 
 ---
 
-## Implementation Status (December 10, 2025)
+## Implementation Status (December 11, 2025)
 
 ### ✅ Phase 0: Data Model Foundation - COMPLETE
 | Item | Status | Notes |
@@ -21,6 +21,7 @@ This document tracks the implementation of tiered admin permissions, Spaces, and
 | 0.6 Modify ArchitectureDecision | ⏸️ Partial | Added `tenant_id` FK, kept `domain` for compatibility |
 | 0.7 Create AuditLog | ✅ Done | `models.py` - Full audit logging |
 | 0.8 Migration Script | ❌ Not Done | Need to run for existing data |
+| 0.9 RoleRequest Model | ✅ Done | `models.py` - Role elevation requests with audit |
 
 ### ✅ Phase 1: Permission Enforcement - COMPLETE
 | Item | Status | Notes |
@@ -30,38 +31,50 @@ This document tracks the implementation of tiered admin permissions, Spaces, and
 | 1.3 Automatic role upgrade | ✅ Done | `governance.py` - `check_and_upgrade_provisional_admin()` |
 | Unit tests | ✅ Done | `tests/test_governance.py` - 23 tests passing |
 
-### ✅ Phase 2: Space Implementation - BACKEND COMPLETE
+### ✅ Phase 2: Space Implementation - COMPLETE
 | Item | Status | Notes |
 |------|--------|-------|
 | 2.1 Space invariants | ✅ Done | Model constraints in `models.py` |
 | 2.2 Space API endpoints | ✅ Done | `app.py` - 8 endpoints (CRUD + decision linking) |
 | Unit tests | ✅ Done | `tests/test_spaces.py` - 15 tests passing |
 
-### 🔄 Phase 3: Frontend Changes - PARTIAL
+### ✅ Phase 3: Frontend Changes - COMPLETE
 | Item | Status | Notes |
 |------|--------|-------|
 | Role badges in user list | ✅ Done | `settings.component.ts` - replaces admin toggle |
-| Provisional admin banner | ✅ Done | Orange warning banner when restricted |
-| Restricted setting tooltips | ✅ Done | Lock icons on allow_registration, require_approval |
-| Space filter in decision list | ❌ Not Done | |
-| Space selector in decision form | ❌ Not Done | |
-| Spaces navigation section | ❌ Not Done | |
+| Provisional admin banner | ✅ Done | Updated to exact microcopy from requirements |
+| Restricted setting tooltips | ✅ Done | Updated to exact microcopy from requirements |
+| Space filter in decision list | ✅ Done | `decision-list.component.ts` - dropdown when multiple spaces |
+| Space selector in decision form | ✅ Done | `decision-detail.component.ts` - multi-select for spaces |
+| Spaces management in settings | ✅ Done | `settings.component.ts` - full CRUD for spaces |
 | Space service | ✅ Done | `space.service.ts` |
 | Role helper | ✅ Done | `role.helper.ts` |
+| SSO tab explainer | ✅ Done | Security & privacy benefits info card |
+| Email tab explainer | ✅ Done | Use cases & privacy benefits info card |
 
-### ❌ Super Admin Features - NOT IMPLEMENTED
+### ✅ Phase 4: Role Request Feature - COMPLETE
 | Item | Status | Notes |
 |------|--------|-------|
-| Tenant maturity threshold config | ❌ Not Done | Super admin should be able to adjust per-tenant |
-| Tenant status overview | ❌ Not Done | Dashboard showing all tenants' maturity states |
-| Force maturity upgrade | ❌ Not Done | Super admin can manually set tenant to MATURE |
-| Tenant deletion | ❌ Not Done | Super admin only capability |
+| Role request API | ✅ Done | `app.py` - POST/GET/approve/reject endpoints |
+| Role request dialog | ✅ Done | `role-request-dialog.component.ts` - steward/admin selection |
+| Request from profile | ✅ Done | `profile.component.ts` - users can request elevated role |
+| Admin review in settings | ✅ Done | `settings.component.ts` - Role Requests tab |
+| Audit logging | ✅ Done | All role requests/approvals logged |
+
+### ✅ Phase 5: Super Admin Features - COMPLETE
+| Item | Status | Notes |
+|------|--------|-------|
+| Tenant maturity threshold config | ✅ Done | `app.py` - PUT /api/tenants/<domain>/maturity |
+| Tenant status overview | ✅ Done | Tenant list shows maturity_state, steward_count, age_days |
+| Force maturity upgrade | ✅ Done | `app.py` - POST /api/tenants/<domain>/maturity/force-upgrade |
+| Tenant deletion | ✅ Done | `app.py` - DELETE /api/tenants/<domain> with confirmation |
+| Tenant details dialog | ✅ Done | `superadmin-tenants.component.ts` - full stats and actions |
+| Delete confirmation dialog | ✅ Done | Requires typing domain name to confirm |
+| E2E tests | ✅ Done | `e2e/tests/superadmin.spec.ts` - comprehensive test suite |
 
 ### Outstanding Work Summary
 1. **Migration script** - Run to populate existing data into new tables
-2. **Super Admin UI** - Tenant management with maturity controls
-3. **Space UI** - Frontend components for space management
-4. **E2E Tests** - Playwright tests for governance flows
+2. **Production deployment** - Deploy v1.5.0+ to production
 
 ---
 

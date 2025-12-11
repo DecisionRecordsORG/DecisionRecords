@@ -28,6 +28,17 @@ class VisibilityPolicy(enum.Enum):
     TENANT_VISIBLE = 'tenant_visible'  # All tenant members see decisions
     SPACE_FOCUSED = 'space_focused'    # Default view scoped to space
 
+class RequestStatus(enum.Enum):
+    """Role request status."""
+    PENDING = 'pending'
+    APPROVED = 'approved'
+    REJECTED = 'rejected'
+
+class RequestedRole(enum.Enum):
+    """Roles that can be requested."""
+    STEWARD = 'steward'
+    ADMIN = 'admin'
+
 # Default master account credentials
 DEFAULT_MASTER_USERNAME = os.environ.get('MASTER_USERNAME', 'admin')
 DEFAULT_MASTER_PASSWORD = os.environ.get('MASTER_PASSWORD', 'changeme')
@@ -485,6 +496,9 @@ class AuditLog(db.Model):
     ACTION_MATURITY_CHANGE = 'maturity_change'
     ACTION_USER_JOINED = 'user_joined'
     ACTION_USER_LEFT = 'user_left'
+    ACTION_ROLE_REQUEST_CREATED = 'role_request_created'
+    ACTION_ROLE_REQUEST_APPROVED = 'role_request_approved'
+    ACTION_ROLE_REQUEST_REJECTED = 'role_request_rejected'
 
     def to_dict(self):
         return {
@@ -1023,6 +1037,48 @@ class AccessRequest(db.Model):
             'updated_at': self.updated_at.isoformat(),
             'processed_by': self.processed_by.to_dict() if self.processed_by else None,
             'processed_at': self.processed_at.isoformat() if self.processed_at else None,
+            'rejection_reason': self.rejection_reason,
+        }
+
+
+class RoleRequest(db.Model):
+    """Role elevation requests from users wanting steward or admin privileges."""
+
+    __tablename__ = 'role_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+    requested_role = db.Column(db.Enum(RequestedRole), nullable=False)
+    reason = db.Column(db.Text, nullable=True)  # Why they need this role
+    status = db.Column(db.Enum(RequestStatus), nullable=False, default=RequestStatus.PENDING)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    rejection_reason = db.Column(db.Text, nullable=True)
+
+    # Relationships
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('role_requests', lazy='dynamic'))
+    tenant = db.relationship('Tenant', backref=db.backref('role_requests', lazy='dynamic'))
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_id])
+
+    # Constraints - one pending request per user per tenant
+    __table_args__ = (
+        db.Index('idx_user_tenant_status', 'user_id', 'tenant_id', 'status'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'user': self.user.to_dict() if self.user else None,
+            'tenant_id': self.tenant_id,
+            'requested_role': self.requested_role.value,
+            'reason': self.reason,
+            'status': self.status.value,
+            'created_at': self.created_at.isoformat(),
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            'reviewed_by': self.reviewed_by.to_dict() if self.reviewed_by else None,
             'rejection_reason': self.rejection_reason,
         }
 

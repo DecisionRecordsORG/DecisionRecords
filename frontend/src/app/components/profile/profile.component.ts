@@ -18,8 +18,10 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
-import { Subscription, User, WebAuthnCredential } from '../../models/decision.model';
+import { AdminService } from '../../services/admin.service';
+import { Subscription, User, WebAuthnCredential, GlobalRole } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { RoleRequestDialogComponent } from '../shared/role-request-dialog.component';
 
 // Password policy constants
 const PASSWORD_MIN_LENGTH = 8;
@@ -46,7 +48,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
     MatDialogModule,
     MatTooltipModule,
     MatFormFieldModule,
-    MatInputModule
+    MatInputModule,
+    RoleRequestDialogComponent
   ],
   template: `
     <div class="profile-container">
@@ -202,14 +205,33 @@ const PASSWORD_REQUIRES_NUMBER = true;
               <div class="info-item">
                 <span class="label">Role</span>
                 <span class="value">
-                  @if (user?.is_admin) {
-                    <mat-chip class="admin-chip" highlighted>Administrator</mat-chip>
+                  @if (user?.global_role === 'admin') {
+                    <mat-chip class="role-chip admin-chip">Administrator</mat-chip>
+                  } @else if (user?.global_role === 'steward') {
+                    <mat-chip class="role-chip steward-chip">Steward</mat-chip>
+                  } @else if (user?.global_role === 'provisional_admin') {
+                    <mat-chip class="role-chip provisional-chip">Provisional Admin</mat-chip>
                   } @else {
-                    User
+                    <mat-chip class="role-chip user-chip">User</mat-chip>
                   }
                 </span>
               </div>
             </div>
+
+            <!-- Role Request Button (only for regular users) -->
+            @if (!setupMode && user?.global_role === 'user') {
+              <div class="role-request-section">
+                <button mat-raised-button color="accent" (click)="requestRole()"
+                        [disabled]="isRequestingRole">
+                  <mat-spinner diameter="20" *ngIf="isRequestingRole"></mat-spinner>
+                  <mat-icon *ngIf="!isRequestingRole">admin_panel_settings</mat-icon>
+                  <span *ngIf="!isRequestingRole">Request Elevated Role</span>
+                </button>
+                <p class="role-request-hint">
+                  Request steward or admin privileges to help manage this organization
+                </p>
+              </div>
+            }
           </mat-card-content>
         </mat-card>
 
@@ -496,8 +518,46 @@ const PASSWORD_REQUIRES_NUMBER = true;
       height: 18px;
     }
 
-    .admin-chip {
+    .role-chip {
       font-size: 12px;
+    }
+
+    .admin-chip {
+      background-color: #e3f2fd !important;
+      color: #1565c0 !important;
+    }
+
+    .steward-chip {
+      background-color: #f3e5f5 !important;
+      color: #7b1fa2 !important;
+    }
+
+    .provisional-chip {
+      background-color: #fff3e0 !important;
+      color: #e65100 !important;
+    }
+
+    .user-chip {
+      background-color: #f5f5f5 !important;
+      color: #616161 !important;
+    }
+
+    .role-request-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+      text-align: center;
+    }
+
+    .role-request-section button {
+      width: 100%;
+      max-width: 300px;
+    }
+
+    .role-request-hint {
+      margin-top: 8px;
+      font-size: 13px;
+      color: #666;
     }
 
     .subscription-card mat-card-title,
@@ -580,6 +640,7 @@ export class ProfileComponent implements OnInit {
   isLoadingCredentials = true;
   isSaving = false;
   isAddingPasskey = false;
+  isRequestingRole = false;
   user: User | null = null;
   setupMode = false;
   pendingDomain = false;
@@ -596,6 +657,7 @@ export class ProfileComponent implements OnInit {
   constructor(
     public authService: AuthService,
     private webAuthnService: WebAuthnService,
+    private adminService: AdminService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
     private route: ActivatedRoute,
@@ -851,6 +913,31 @@ export class ProfileComponent implements OnInit {
           },
           error: (err) => {
             this.snackBar.open(err.error?.error || 'Failed to delete passkey', 'Close', { duration: 3000 });
+          }
+        });
+      }
+    });
+  }
+
+  requestRole(): void {
+    const dialogRef = this.dialog.open(RoleRequestDialogComponent, {
+      data: {
+        currentRole: this.user?.global_role
+      },
+      width: '600px'
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.isRequestingRole = true;
+        this.adminService.createRoleRequest(result.role, result.reason).subscribe({
+          next: () => {
+            this.isRequestingRole = false;
+            this.snackBar.open('Role request submitted successfully. Admins will review your request.', 'Close', { duration: 5000 });
+          },
+          error: (err) => {
+            this.isRequestingRole = false;
+            this.snackBar.open(err.error?.error || 'Failed to submit role request', 'Close', { duration: 3000 });
           }
         });
       }

@@ -260,3 +260,16 @@ export interface VerificationStatus {
   verified?: boolean;
   error?: string;
 }
+
+export interface RoleRequest {
+  id: number;
+  user_id: number;
+  tenant_id: number;
+  requested_role: GlobalRole;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+  reviewed_at: string | null;
+  reviewed_by?: User;
+  user?: User;
+}

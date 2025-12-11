@@ -16,7 +16,7 @@ import { MatChipsModule } from '@angular/material/chips';
 import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space } from '../../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { SetupLinkDialogComponent } from '../shared/setup-link-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
@@ -60,9 +60,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         <div class="provisional-admin-banner" data-testid="provisional-admin-banner">
           <mat-icon>info</mat-icon>
           <div class="banner-content">
-            <strong>Some settings are restricted</strong>
-            <p>To protect your organization, certain settings (like disabling registration) require at least one other admin or steward.
-            Assign another admin or steward to unlock all settings.</p>
+            <strong>You are currently a provisional administrator.</strong>
+            <p>Some settings will unlock once others from your organisation join.</p>
           </div>
         </div>
       }
@@ -71,6 +70,31 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         <!-- SSO Configuration Tab -->
         <mat-tab label="SSO Providers">
           <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Single Sign-On (SSO)
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p><strong>What is SSO?</strong> Single Sign-On allows your team to authenticate using your organisation's identity provider.</p>
+                <h4>Security Benefits</h4>
+                <ul>
+                  <li>Centralised access control</li>
+                  <li>Automatic deprovisioning when users leave</li>
+                  <li>Enforced security policies from your IdP</li>
+                </ul>
+                <h4>Privacy Benefits</h4>
+                <ul>
+                  <li>No passwords stored in this application</li>
+                  <li>Authentication handled by your trusted provider</li>
+                </ul>
+                <h4>Supported Providers</h4>
+                <p>Google Workspace, Microsoft Entra ID (Azure AD), Okta, and any OIDC-compliant provider</p>
+              </mat-card-content>
+            </mat-card>
+
             <mat-card class="form-card">
               <mat-card-header>
                 <mat-card-title>
@@ -181,6 +205,30 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         <!-- Email Configuration Tab -->
         <mat-tab label="Email Settings">
           <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Email Settings
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's architecture decisions.</p>
+                <h4>Use Cases</h4>
+                <ul>
+                  <li>Decision status changes</li>
+                  <li>Comment notifications</li>
+                  <li>Weekly digests</li>
+                </ul>
+                <h4>Benefits</h4>
+                <ul>
+                  <li><strong>Privacy:</strong> Notifications stay on your organisation's mail infrastructure</li>
+                  <li><strong>Branding:</strong> Send from your own domain for better deliverability</li>
+                </ul>
+                <p class="option-hint"><strong>Note:</strong> If not configured, the system will use the platform's default email service</p>
+              </mat-card-content>
+            </mat-card>
+
             <mat-card class="form-card">
               <mat-card-header>
                 <mat-card-title>SMTP Configuration</mat-card-title>
@@ -411,7 +459,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                         </mat-slide-toggle>
                         @if (isRegistrationToggleRestricted) {
                           <mat-icon class="restricted-icon"
-                                    matTooltip="This setting is restricted until another admin or steward is assigned"
+                                    matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                     data-testid="registration-lock-icon">
                             lock
                           </mat-icon>
@@ -430,7 +478,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                             </mat-slide-toggle>
                             @if (isApprovalToggleRestricted) {
                               <mat-icon class="restricted-icon"
-                                        matTooltip="This setting is restricted until another admin or steward is assigned"
+                                        matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                         data-testid="approval-lock-icon">
                                 lock
                               </mat-icon>
@@ -729,6 +777,123 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               </mat-card>
             </div>
           </mat-tab>
+
+        <!-- Role Requests Tab (for non-master admins only) -->
+        <mat-tab *ngIf="!authService.isMasterAccount">
+          <ng-template mat-tab-label>
+            Role Requests
+            <span class="tab-badge" *ngIf="pendingRoleRequestsCount > 0">{{ pendingRoleRequestsCount }}</span>
+          </ng-template>
+          <div class="tab-content">
+            <mat-card class="list-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>admin_panel_settings</mat-icon>
+                  Role Elevation Requests
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <div class="loading-container" *ngIf="loadingRoleRequests">
+                  <mat-spinner diameter="40"></mat-spinner>
+                </div>
+                <p class="empty-message" *ngIf="!loadingRoleRequests && roleRequests.length === 0">No role requests</p>
+                <table mat-table [dataSource]="roleRequests" class="full-width" *ngIf="!loadingRoleRequests && roleRequests.length > 0">
+                  <ng-container matColumnDef="user">
+                    <th mat-header-cell *matHeaderCellDef>User</th>
+                    <td mat-cell *matCellDef="let request">
+                      <div class="user-info">
+                        <strong>{{ request.user?.name || 'Unknown' }}</strong>
+                        <span class="email-text">{{ request.user?.email }}</span>
+                      </div>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="requested_role">
+                    <th mat-header-cell *matHeaderCellDef>Requested Role</th>
+                    <td mat-cell *matCellDef="let request">
+                      <mat-chip [class]="getRoleChipClass(request.requested_role)">
+                        {{ request.requested_role === 'admin' ? 'Administrator' : 'Steward' }}
+                      </mat-chip>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="reason">
+                    <th mat-header-cell *matHeaderCellDef>Reason</th>
+                    <td mat-cell *matCellDef="let request">
+                      <div class="reason-cell">
+                        {{ request.reason || 'No reason provided' }}
+                      </div>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="created_at">
+                    <th mat-header-cell *matHeaderCellDef>Requested</th>
+                    <td mat-cell *matCellDef="let request">
+                      {{ request.created_at | date:'short' }}
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="status">
+                    <th mat-header-cell *matHeaderCellDef>Status</th>
+                    <td mat-cell *matCellDef="let request">
+                      <mat-chip [class]="'status-' + request.status">
+                        {{ request.status | titlecase }}
+                      </mat-chip>
+                    </td>
+                  </ng-container>
+
+                  <ng-container matColumnDef="actions">
+                    <th mat-header-cell *matHeaderCellDef>Actions</th>
+                    <td mat-cell *matCellDef="let request">
+                      <ng-container *ngIf="request.status === 'pending'">
+                        <button mat-icon-button color="primary"
+                                (click)="approveRoleRequest(request)"
+                                [disabled]="processingRoleRequest === request.id"
+                                matTooltip="Approve">
+                          <mat-spinner diameter="20" *ngIf="processingRoleRequest === request.id"></mat-spinner>
+                          <mat-icon *ngIf="processingRoleRequest !== request.id">check_circle</mat-icon>
+                        </button>
+                        <button mat-icon-button color="warn"
+                                (click)="rejectRoleRequest(request)"
+                                [disabled]="processingRoleRequest === request.id"
+                                matTooltip="Reject">
+                          <mat-icon>cancel</mat-icon>
+                        </button>
+                      </ng-container>
+                      <span class="status-text approved" *ngIf="request.status === 'approved'">
+                        <mat-icon>check</mat-icon> Approved
+                      </span>
+                      <span class="status-text rejected" *ngIf="request.status === 'rejected'">
+                        <mat-icon>close</mat-icon> Rejected
+                      </span>
+                    </td>
+                  </ng-container>
+
+                  <tr mat-header-row *matHeaderRowDef="roleRequestColumns"></tr>
+                  <tr mat-row *matRowDef="let row; columns: roleRequestColumns;"></tr>
+                </table>
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Role Requests
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Users can request elevated privileges to help manage the organization.</p>
+                <ul>
+                  <li><strong>Steward:</strong> Can approve access requests, invite users, and help with basic governance</li>
+                  <li><strong>Admin:</strong> Full administrative access to all settings and configurations</li>
+                  <li><strong>Transparency:</strong> All role requests are logged and visible to current admins and stewards</li>
+                </ul>
+                <p>Review each request carefully and consider the user's role and needs before approving.</p>
+              </mat-card-content>
+            </mat-card>
+          </div>
+        </mat-tab>
       </mat-tab-group>
     </div>
   `,
@@ -1180,6 +1345,31 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       margin-left: 8px;
     }
 
+    /* Role request styles */
+    .user-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .user-info strong {
+      font-size: 14px;
+      color: #333;
+    }
+
+    .email-text {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .reason-cell {
+      max-width: 300px;
+      white-space: normal;
+      line-height: 1.4;
+      font-size: 13px;
+      color: #555;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -1212,9 +1402,11 @@ export class SettingsComponent implements OnInit {
   users: User[] = [];
   authConfig: AuthConfig | null = null;
   accessRequests: AccessRequest[] = [];
+  roleRequests: RoleRequest[] = [];
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
   userColumns = ['name', 'email', 'domain', 'auth_type', 'role', 'last_login', 'actions'];
   accessRequestColumns = ['name', 'email', 'reason', 'created_at', 'status', 'actions'];
+  roleRequestColumns = ['user', 'requested_role', 'reason', 'created_at', 'status', 'actions'];
   spaceColumns = ['name', 'description', 'decision_count', 'actions'];
 
   // Spaces
@@ -1232,8 +1424,11 @@ export class SettingsComponent implements OnInit {
   savingAuthConfig = false;
   testingEmail = false;
   loadingRequests = false;
+  loadingRoleRequests = false;
   processingRequest: number | null = null;
+  processingRoleRequest: number | null = null;
   pendingRequestsCount = 0;
+  pendingRoleRequestsCount = 0;
 
   /**
    * Check if current user is a provisional admin
@@ -1262,6 +1457,18 @@ export class SettingsComponent implements OnInit {
    */
   getUserRoleBadge(role: GlobalRole | undefined): RoleBadge {
     return getRoleBadge(role);
+  }
+
+  /**
+   * Get role chip CSS class for role requests
+   */
+  getRoleChipClass(role: string): string {
+    if (role === 'admin') {
+      return 'role-admin';
+    } else if (role === 'steward') {
+      return 'role-steward';
+    }
+    return '';
   }
 
   constructor(
@@ -1313,6 +1520,7 @@ export class SettingsComponent implements OnInit {
     this.loadAuthConfig();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
+      this.loadRoleRequests();
       this.loadSpaces();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
@@ -1805,6 +2013,82 @@ export class SettingsComponent implements OnInit {
           },
           error: (err) => {
             this.snackBar.open(err.error?.error || 'Failed to delete space', 'Close', { duration: 3000 });
+          }
+        });
+      }
+    });
+  }
+
+  // Role Requests Management
+  loadRoleRequests(): void {
+    this.loadingRoleRequests = true;
+    this.adminService.getRoleRequests().subscribe({
+      next: (requests) => {
+        this.roleRequests = requests;
+        this.pendingRoleRequestsCount = requests.filter(r => r.status === 'pending').length;
+        this.loadingRoleRequests = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load role requests', 'Close', { duration: 3000 });
+        this.loadingRoleRequests = false;
+      }
+    });
+  }
+
+  approveRoleRequest(request: RoleRequest): void {
+    const roleLabel = request.requested_role === 'admin' ? 'Administrator' : 'Steward';
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Approve Role Request',
+        message: `Are you sure you want to grant ${roleLabel} privileges to ${request.user?.name || request.user?.email}?`,
+        confirmText: 'Approve'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.processingRoleRequest = request.id;
+        this.adminService.approveRoleRequest(request.id).subscribe({
+          next: () => {
+            this.loadRoleRequests();
+            this.loadUsers();
+            this.processingRoleRequest = null;
+            this.snackBar.open(`Role request approved for ${request.user?.name || request.user?.email}`, 'Close', { duration: 3000 });
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            this.processingRoleRequest = null;
+          }
+        });
+      }
+    });
+  }
+
+  rejectRoleRequest(request: RoleRequest): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Reject Role Request',
+        message: `Are you sure you want to reject the role request from ${request.user?.name || request.user?.email}?`,
+        confirmText: 'Reject',
+        isDanger: true,
+        showInput: true,
+        inputLabel: 'Rejection Reason (optional)',
+        inputPlaceholder: 'Explain why this request was rejected...'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result && result.confirmed) {
+        this.processingRoleRequest = request.id;
+        this.adminService.rejectRoleRequest(request.id, result.inputValue).subscribe({
+          next: () => {
+            this.snackBar.open('Role request rejected', 'Close', { duration: 3000 });
+            this.loadRoleRequests();
+            this.processingRoleRequest = null;
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to reject request', 'Close', { duration: 3000 });
+            this.processingRoleRequest = null;
           }
         });
       }

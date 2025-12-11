@@ -54,8 +54,9 @@ export async function loginAsSuperAdmin(page: Page, username: string = 'admin', 
   const loginButton = page.locator('[data-testid="login-button"]');
   await loginButton.click();
 
-  // Wait for redirect to superadmin dashboard
-  await page.waitForURL('**/superadmin/dashboard**', { timeout: 15000 });
+  // Wait for redirect to any superadmin page (dashboard, tenants, or settings)
+  await page.waitForURL('**/superadmin/**', { timeout: 15000 });
+  await page.waitForLoadState('networkidle');
 }
 
 /**
