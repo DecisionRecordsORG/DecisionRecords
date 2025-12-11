@@ -4821,12 +4821,13 @@ def reset_test_database():
         db.drop_all()
         db.create_all()
 
-        # Create default super admin
-        from werkzeug.security import generate_password_hash
+        # Create default super admin using the same credentials as create_default_master
+        from models import DEFAULT_MASTER_USERNAME, DEFAULT_MASTER_PASSWORD
         admin = MasterAccount(
-            username='admin',
-            password_hash=generate_password_hash('admin')
+            username=DEFAULT_MASTER_USERNAME,
+            name='System Administrator'
         )
+        admin.set_password(DEFAULT_MASTER_PASSWORD)
         db.session.add(admin)
         db.session.commit()
 

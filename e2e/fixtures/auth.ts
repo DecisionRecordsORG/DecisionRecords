@@ -38,7 +38,7 @@ export async function loginAsUser(page: Page, email: string, password: string): 
 /**
  * Login as super admin (master account)
  */
-export async function loginAsSuperAdmin(page: Page, username: string = 'admin', password: string = 'admin'): Promise<void> {
+export async function loginAsSuperAdmin(page: Page, username: string = 'admin', password: string = 'changeme'): Promise<void> {
   // Route is /superadmin (not /superadmin/login)
   await page.goto('/superadmin');
 

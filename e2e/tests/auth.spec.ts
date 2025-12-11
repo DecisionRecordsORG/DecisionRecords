@@ -11,8 +11,8 @@ test.describe('Authentication', () => {
     // Fill username using data-testid
     await page.locator('[data-testid="username-input"]').fill('admin');
 
-    // Fill password (test database uses 'admin' as default password)
-    await page.locator('[data-testid="password-input"]').fill('admin');
+    // Fill password (default master password is 'changeme')
+    await page.locator('[data-testid="password-input"]').fill('changeme');
 
     // Click login
     await page.locator('[data-testid="login-button"]').click();
