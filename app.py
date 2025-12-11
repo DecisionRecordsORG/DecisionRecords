@@ -871,7 +871,7 @@ def api_tenant_login():
     """Handle tenant user password login."""
     log_security_event('auth', f"Tenant login attempt", severity='INFO')
 
-    data = request.get_json()
+    data = request.get_json() or {}
     # Sanitize email input to prevent injection attacks
     email = sanitize_email(data.get('email', ''))
     password = data.get('password', '')
@@ -909,7 +909,7 @@ def api_tenant_login():
 @login_required
 def api_set_password():
     """Set or update password for current user."""
-    data = request.get_json()
+    data = request.get_json() or {}
     password = data.get('password', '')
     current_password = data.get('current_password', '')
 
@@ -1574,7 +1574,7 @@ def api_update_subscription():
     if is_master_account():
         return jsonify({'error': 'Master accounts do not support subscriptions'}), 400
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     subscription = Subscription.query.filter_by(user_id=g.current_user.id).first()
 
@@ -1684,7 +1684,7 @@ def api_update_sso_config(config_id):
         if config.domain != g.current_user.sso_domain:
             return jsonify({'error': 'You can only update SSO for your own domain'}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Sanitize inputs to prevent XSS attacks
     if 'provider_name' in data:
@@ -1967,7 +1967,7 @@ def api_get_session_settings():
 @master_required
 def api_save_session_settings():
     """Update session timeout settings (super admin only)."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     admin_timeout = data.get('admin_session_timeout_hours')
     user_timeout = data.get('user_session_timeout_hours')
@@ -2038,7 +2038,7 @@ def api_toggle_user_admin(user_id):
     else:
         user = User.query.filter_by(id=user_id, sso_domain=g.current_user.sso_domain).first_or_404()
 
-    data = request.get_json()
+    data = request.get_json() or {}
     user.is_admin = bool(data.get('is_admin', False))
 
     db.session.commit()
@@ -2052,7 +2052,7 @@ def api_toggle_user_admin(user_id):
 @master_required
 def api_change_master_password():
     """Change master account password."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     current_password = data.get('current_password')
     new_password = data.get('new_password')
@@ -2283,7 +2283,7 @@ def send_verification_email(email, token, purpose, domain):
 @app.route('/api/auth/send-verification', methods=['POST'])
 def api_send_verification():
     """Send email verification link."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
@@ -2395,7 +2395,7 @@ def api_resend_verification():
     This endpoint allows users to request a new verification email if their
     previous one expired or they didn't receive it.
     """
-    data = request.get_json()
+    data = request.get_json() or {}
     email = data.get('email', '').lower().strip()
 
     if not email or '@' not in email:
@@ -2466,7 +2466,7 @@ def api_direct_signup():
     if verification_required:
         return jsonify({'error': 'Email verification is required. Please use the standard signup flow.'}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
     name = sanitize_name(data.get('name', ''), max_length=255)
@@ -2761,7 +2761,7 @@ def api_verification_status(token):
 @app.route('/api/auth/access-request', methods=['POST'])
 def api_submit_access_request():
     """Submit an access request to join a tenant."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
@@ -2873,7 +2873,7 @@ def api_request_account_recovery():
     from models import SetupToken
     from notifications import send_account_recovery_email
 
-    data = request.get_json()
+    data = request.get_json() or {}
     email = data.get('email', '').lower().strip()
 
     if not email or '@' not in email:
@@ -2951,7 +2951,7 @@ def api_validate_setup_token():
     from models import SetupToken
     import secrets
 
-    data = request.get_json()
+    data = request.get_json() or {}
     token = data.get('token', '')
 
     if not token:
@@ -3027,7 +3027,7 @@ def api_use_setup_token():
     from datetime import datetime
     from models import SetupToken
 
-    data = request.get_json()
+    data = request.get_json() or {}
     token = data.get('token', '')
 
     if not token:
@@ -3059,7 +3059,7 @@ def api_setup_password():
     from datetime import datetime
     from models import SetupToken
 
-    data = request.get_json()
+    data = request.get_json() or {}
     token = data.get('token', '')
     password = data.get('password', '')
 
@@ -3388,7 +3388,7 @@ def api_create_role_request(domain):
         return jsonify({'error': 'You are not a member of this tenant'}), 403
 
     # Sanitize and validate input
-    data = request.get_json()
+    data = request.get_json() or {}
     requested_role_str = data.get('requested_role', '').lower()
     reason = sanitize_text_field(data.get('reason', ''))
 
@@ -3707,7 +3707,7 @@ def api_admin_create_role_request():
         return jsonify({'error': 'You are not a member of this tenant'}), 403
 
     # Sanitize and validate input
-    data = request.get_json()
+    data = request.get_json() or {}
     requested_role_str = data.get('requested_role', '').lower()
     reason = sanitize_text_field(data.get('reason', ''))
 
@@ -3960,7 +3960,7 @@ def api_webauthn_register_options():
     """Generate WebAuthn registration options."""
     from auth import validate_setup_token
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Check for setup token flow (incomplete account setting up first credential)
     setup_user, _ = validate_setup_token()
@@ -4027,7 +4027,7 @@ def api_webauthn_register_verify():
     """Verify WebAuthn registration and create/login user."""
     from auth import validate_setup_token, complete_setup_and_login
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     credential = data.get('credential')
     device_name = data.get('device_name')
@@ -4086,7 +4086,7 @@ def api_webauthn_auth_options():
 @app.route('/api/webauthn/authenticate/verify', methods=['POST'])
 def api_webauthn_auth_verify():
     """Verify WebAuthn authentication and log in user."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     credential = data.get('credential')
 
@@ -4146,7 +4146,7 @@ def api_add_user_credential():
     if g.current_user.auth_type != 'webauthn':
         return jsonify({'error': 'Your account uses SSO authentication'}), 400
 
-    data = request.get_json()
+    data = request.get_json() or {}
     name = data.get('name')
 
     try:
@@ -4189,7 +4189,7 @@ def api_get_auth_config():
 @admin_required
 def api_save_auth_config():
     """Create or update authentication configuration."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Master can specify domain, regular admins use their own domain
     if is_master_account():
@@ -4258,7 +4258,7 @@ def api_get_system_config_key(key):
 @master_required
 def api_set_system_config():
     """Set system configuration settings (super admin only)."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     if not data or 'key' not in data:
         return jsonify({'error': 'Key is required'}), 400
@@ -4282,7 +4282,7 @@ def api_get_email_verification_status():
 @master_required
 def api_set_email_verification():
     """Toggle email verification requirement (super admin only)."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     if 'required' not in data:
         return jsonify({'error': 'required field is required'}), 400
@@ -4312,7 +4312,7 @@ def api_get_super_admin_email():
 @master_required
 def api_set_super_admin_email():
     """Set super admin notification email address."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     email = data.get('email', '').strip()
     if email and '@' not in email:
@@ -4587,7 +4587,7 @@ def api_update_tenant_maturity_thresholds(domain):
     Allows super admin to customize maturity thresholds for a specific tenant.
     """
     domain = domain.lower()
-    data = request.get_json()
+    data = request.get_json() or {}
 
     # Get tenant record
     tenant = Tenant.query.filter_by(domain=domain).first()
@@ -4935,7 +4935,7 @@ def api_update_tenant_auth_config():
         return jsonify({'error': 'Master accounts cannot modify tenant auth configs'}), 403
 
     domain = g.current_user.sso_domain
-    data = request.get_json()
+    data = request.get_json() or {}
 
     auth_config = AuthConfig.query.filter_by(domain=domain).first()
     if not auth_config:
@@ -4990,7 +4990,7 @@ def api_create_infrastructure():
     if is_master_account():
         return jsonify({'error': 'Master accounts cannot create infrastructure items'}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -5055,7 +5055,7 @@ def api_update_infrastructure(item_id):
         domain=g.current_user.sso_domain
     ).first_or_404()
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -5133,7 +5133,7 @@ def api_list_spaces():
 @steward_or_admin_required
 def api_create_space():
     """Create a new space (steward or admin only)."""
-    data = request.get_json()
+    data = request.get_json() or {}
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
@@ -5206,7 +5206,7 @@ def api_update_space(space_id):
     if not space:
         return jsonify({'error': 'Space not found'}), 404
 
-    data = request.get_json()
+    data = request.get_json() or {}
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
@@ -5346,7 +5346,7 @@ def api_update_decision_spaces(decision_id):
     if not decision:
         return jsonify({'error': 'Decision not found'}), 404
 
-    data = request.get_json()
+    data = request.get_json() or {}
     if not data or 'space_ids' not in data:
         return jsonify({'error': 'space_ids is required'}), 400
 
@@ -5556,7 +5556,7 @@ def set_test_tenant_maturity():
     if os.environ.get('FLASK_ENV') != 'testing':
         return jsonify({'error': 'Not available'}), 403
 
-    data = request.get_json()
+    data = request.get_json() or {}
     domain = data.get('domain')
     state = data.get('state', 'BOOTSTRAP').upper()
 
