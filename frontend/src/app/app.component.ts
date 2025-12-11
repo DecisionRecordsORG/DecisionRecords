@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterOutlet } from '@angular/router';
+import { RouterOutlet, RouterModule } from '@angular/router';
 import { NavbarComponent } from './components/shared/navbar.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
@@ -8,7 +8,7 @@ import { VersionService } from './services/version.service';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, NavbarComponent],
+  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent],
   template: `
     @if (authService.isAuthenticated) {
       <app-navbar></app-navbar>
@@ -19,8 +19,9 @@ import { VersionService } from './services/version.service';
     <footer class="app-footer">
       <div class="footer-content">
         <small>
-          Architecture Decision Records - Based on
-          <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
+          Architecture Decision Records
+          <span class="separator">|</span>
+          <a routerLink="/about">About</a>
           <span class="separator">|</span>
           Created by Lawrance Nyakiso
           <span class="separator">|</span>

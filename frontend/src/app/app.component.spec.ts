@@ -80,7 +80,7 @@ describe('AppComponent', () => {
     expect(compiled.querySelector('router-outlet')).toBeTruthy();
   }));
 
-  it('should render footer with arc42 link', fakeAsync(() => {
+  it('should render footer with About link', fakeAsync(() => {
     const fixture = TestBed.createComponent(AppComponent);
 
     httpMock.expectOne('/api/user/me').flush({}, { status: 401, statusText: 'Unauthorized' });
@@ -90,6 +90,6 @@ describe('AppComponent', () => {
     const compiled = fixture.nativeElement as HTMLElement;
     const footer = compiled.querySelector('.app-footer');
     expect(footer).toBeTruthy();
-    expect(footer?.textContent).toContain('arc42');
+    expect(footer?.textContent).toContain('About');
   }));
 });

@@ -748,7 +748,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin: 0 0 16px;
       color: #e0f2fe;
       line-height: 1.6;
-      white-space: nowrap;
     }
 
     .hero-subtitle {
@@ -832,9 +831,17 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     /* Dialog Styles */
     .dialog-container {
       padding: 32px 32px 24px;
-      min-width: 380px;
+      min-width: 320px;
       max-width: 420px;
       position: relative;
+    }
+
+    @media (max-width: 480px) {
+      .dialog-container {
+        min-width: auto;
+        max-width: 100%;
+        padding: 24px 20px 20px;
+      }
     }
 
     .dialog-close {
@@ -1772,7 +1779,57 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     @media (max-width: 600px) {
       .hero {
-        padding: 60px 16px 80px;
+        padding: 60px 16px 40px;
+      }
+
+      .hero-content-centered h1 {
+        font-size: 2rem;
+      }
+
+      .hero-tagline {
+        font-size: 1rem;
+      }
+
+      .hero-subtitle {
+        font-size: 0.95rem;
+      }
+
+      .hero-cta {
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .cta-button,
+      .cta-button-secondary {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .hero-screenshot {
+        margin: 40px auto 0;
+        padding: 0 8px;
+      }
+
+      .browser-frame {
+        border-radius: 8px;
+      }
+
+      .browser-header {
+        padding: 8px 12px;
+        gap: 12px;
+      }
+
+      .browser-dots .dot {
+        width: 8px;
+        height: 8px;
+      }
+
+      .browser-address {
+        padding: 6px 10px;
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .screenshot-section {
@@ -1780,7 +1837,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       }
 
       .section {
-        padding: 80px 16px;
+        padding: 60px 16px;
       }
 
       h2 {
@@ -2178,6 +2235,7 @@ export class HomepageComponent implements OnInit {
     this.isSignInMode = false;
     this.dialogRef = this.dialog.open(this.getStartedDialog, {
       width: '450px',
+      maxWidth: '90vw',
       panelClass: 'get-started-dialog'
     });
   }
@@ -2189,6 +2247,7 @@ export class HomepageComponent implements OnInit {
     this.isSignInMode = true;
     this.dialogRef = this.dialog.open(this.getStartedDialog, {
       width: '450px',
+      maxWidth: '90vw',
       panelClass: 'get-started-dialog'
     });
   }

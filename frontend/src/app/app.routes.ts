@@ -7,6 +7,11 @@ export const routes: Routes = [
     path: '',
     loadComponent: () => import('./components/homepage/homepage.component').then(m => m.HomepageComponent)
   },
+  // About page
+  {
+    path: 'about',
+    loadComponent: () => import('./components/about/about.component').then(m => m.AboutComponent)
+  },
   // Super admin login
   {
     path: 'superadmin',
