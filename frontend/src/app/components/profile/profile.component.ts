@@ -218,8 +218,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
               </div>
             </div>
 
-            <!-- Role Request Button (only for regular users) -->
-            @if (!setupMode && user?.global_role === 'user') {
+            <!-- Role Request Button (only for regular users or users without assigned role) -->
+            @if (!setupMode && canRequestRole) {
               <div class="role-request-section">
                 <button mat-raised-button color="accent" (click)="requestRole()"
                         [disabled]="isRequestingRole">
@@ -644,6 +644,17 @@ export class ProfileComponent implements OnInit {
   user: User | null = null;
   setupMode = false;
   pendingDomain = false;
+
+  /**
+   * Check if user can request a role elevation
+   * Shows button for 'user' role or when role is undefined (legacy users)
+   */
+  get canRequestRole(): boolean {
+    if (!this.user) return false;
+    const role = this.user.global_role;
+    // Show for 'user' role or when role is not set (undefined/null)
+    return !role || role === 'user';
+  }
 
   // Credential setup properties
   checkingPasskeySupport = true;

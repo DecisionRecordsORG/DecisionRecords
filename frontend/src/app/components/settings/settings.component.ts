@@ -400,9 +400,17 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </p>
 
                 <form [formGroup]="authConfigForm" (ngSubmit)="saveAuthConfig()">
-                  <div class="auth-method-options">
+                  <!-- Provisional Admin Auth Method Restriction Notice -->
+                  @if (isProvisionalAdmin) {
+                    <div class="provisional-auth-notice">
+                      <mat-icon>lock</mat-icon>
+                      <span>Authentication method settings are locked until shared administration is established.</span>
+                    </div>
+                  }
+
+                  <div class="auth-method-options" [class.disabled-section]="isProvisionalAdmin">
                     <mat-radio-group formControlName="auth_method" class="auth-method-group">
-                      <mat-radio-button value="both" class="auth-method-option">
+                      <mat-radio-button value="both" class="auth-method-option" [disabled]="isProvisionalAdmin">
                         <div class="option-content">
                           <div class="option-icons">
                             <mat-icon>fingerprint</mat-icon>
@@ -417,7 +425,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                         </div>
                       </mat-radio-button>
 
-                      <mat-radio-button value="webauthn" class="auth-method-option">
+                      <mat-radio-button value="webauthn" class="auth-method-option" [disabled]="isProvisionalAdmin">
                         <div class="option-content">
                           <div class="option-icons">
                             <mat-icon>fingerprint</mat-icon>
@@ -430,7 +438,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       </mat-radio-button>
 
                       <mat-radio-button value="sso" class="auth-method-option"
-                                        [disabled]="!hasSSOConfigForDomain">
+                                        [disabled]="!hasSSOConfigForDomain || isProvisionalAdmin">
                         <div class="option-content">
                           <div class="option-icons">
                             <mat-icon>login</mat-icon>
@@ -1114,25 +1122,43 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       margin: 8px 0 16px 0;
     }
 
+    .info-card {
+      background: #fafafa;
+    }
+
     .info-card mat-card-title {
       display: flex;
       align-items: center;
       gap: 8px;
+      font-size: 14px !important;
+    }
+
+    .info-card mat-card-content {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .info-card mat-card-content p {
+      font-size: 12px;
+      margin: 8px 0;
     }
 
     .info-card h4 {
-      margin: 16px 0 8px 0;
+      margin: 12px 0 6px 0;
       color: #333;
+      font-size: 13px;
     }
 
     .info-card ul {
       margin: 0;
-      padding-left: 20px;
+      padding-left: 16px;
       color: #666;
+      font-size: 12px;
     }
 
     .info-card li {
-      margin-bottom: 4px;
+      margin-bottom: 3px;
+      line-height: 1.4;
     }
 
     .tab-badge {
@@ -1224,6 +1250,50 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       font-size: 13px;
       color: #5d4037;
       line-height: 1.4;
+    }
+
+    /* Provisional Admin Auth Method Restriction */
+    .provisional-auth-notice {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+      border-radius: 8px;
+      border-left: 4px solid #ff9800;
+    }
+
+    .provisional-auth-notice mat-icon {
+      color: #f57c00;
+      flex-shrink: 0;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .provisional-auth-notice span {
+      font-size: 13px;
+      color: #5d4037;
+      line-height: 1.4;
+    }
+
+    .disabled-section {
+      opacity: 0.6;
+      pointer-events: none;
+      position: relative;
+    }
+
+    .disabled-section::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      cursor: not-allowed;
     }
 
     /* Authentication method options styling */

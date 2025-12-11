@@ -424,7 +424,7 @@ class Space(db.Model):
             'is_default': self.is_default,
             'visibility_policy': self.visibility_policy.value,
             'created_by_id': self.created_by_id,
-            'created_at': self.created_at.isoformat(),
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
 
