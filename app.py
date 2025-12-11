@@ -3747,7 +3747,7 @@ def api_admin_create_role_request():
     # Log the request
     log_admin_action(
         tenant_id=tenant.id,
-        performed_by_id=user.id,
+        actor_user_id=user.id,
         action_type=AuditLog.ACTION_ROLE_REQUESTED,
         target_entity='role_request',
         target_id=role_request.id,
