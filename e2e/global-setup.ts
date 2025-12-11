@@ -54,6 +54,96 @@ async function globalSetup() {
       }
     }
 
+    // Login as admin to create test data
+    console.log('Logging in as admin to create test data...');
+    const loginResponse = await apiContext.post('/api/auth/login', {
+      data: {
+        email: 'admin@test-org.com',
+        password: 'TestPass123'
+      }
+    });
+
+    if (!loginResponse.ok()) {
+      console.warn('Warning: Could not login as admin. Response:', await loginResponse.text());
+    } else {
+      console.log('Admin login successful');
+
+      // Create additional spaces (we need at least 2 for space filter tests)
+      // Note: "General" default space is created automatically
+      const testSpaces = [
+        { name: 'Engineering', description: 'Engineering team decisions' },
+        { name: 'Product', description: 'Product team decisions' },
+      ];
+
+      const createdSpaceIds: number[] = [];
+
+      for (const space of testSpaces) {
+        const spaceResponse = await apiContext.post('/api/spaces', {
+          data: space
+        });
+        if (!spaceResponse.ok()) {
+          console.warn(`Warning: Could not create space ${space.name}. Response:`, await spaceResponse.text());
+        } else {
+          const spaceData = await spaceResponse.json();
+          createdSpaceIds.push(spaceData.id);
+          console.log(`Created test space: ${space.name} (ID: ${spaceData.id})`);
+        }
+      }
+
+      // Get the General space ID for decision creation
+      const spacesResponse = await apiContext.get('/api/spaces');
+      let generalSpaceId: number | null = null;
+      if (spacesResponse.ok()) {
+        const spaces = await spacesResponse.json();
+        const generalSpace = spaces.find((s: any) => s.name === 'General');
+        if (generalSpace) {
+          generalSpaceId = generalSpace.id;
+          console.log(`Found General space: ID ${generalSpaceId}`);
+        }
+      }
+
+      // Create test decisions (we need at least 2 for edit/history tests)
+      const testDecisions = [
+        {
+          title: 'Use TypeScript for Frontend Development',
+          context: 'We need to choose a language for our frontend application that provides type safety and good tooling support.',
+          decision: 'We will use TypeScript for all frontend development to benefit from static typing, better IDE support, and improved code quality.',
+          status: 'accepted',
+          consequences: 'Team needs to learn TypeScript syntax. Build process becomes slightly more complex. Code quality and maintainability improve significantly.',
+        },
+        {
+          title: 'Adopt Microservices Architecture',
+          context: 'Our monolithic application is becoming difficult to maintain and scale. We need to evaluate our architectural approach.',
+          decision: 'We will gradually migrate to a microservices architecture, starting with the most isolated modules.',
+          status: 'proposed',
+          consequences: 'Requires investment in DevOps infrastructure. Increases operational complexity. Enables independent scaling and deployment of services.',
+        },
+      ];
+
+      for (const decision of testDecisions) {
+        const decisionResponse = await apiContext.post('/api/decisions', {
+          data: decision
+        });
+        if (!decisionResponse.ok()) {
+          console.warn(`Warning: Could not create decision "${decision.title}". Response:`, await decisionResponse.text());
+        } else {
+          const decisionData = await decisionResponse.json();
+          console.log(`Created test decision: ${decision.title} (ID: ${decisionData.id})`);
+
+          // Associate decision with spaces if we have space IDs
+          if (generalSpaceId && createdSpaceIds.length > 0) {
+            const spaceIds = [generalSpaceId, createdSpaceIds[0]]; // Link to General + first custom space
+            const linkResponse = await apiContext.put(`/api/decisions/${decisionData.id}/spaces`, {
+              data: { space_ids: spaceIds }
+            });
+            if (linkResponse.ok()) {
+              console.log(`  Linked decision to ${spaceIds.length} spaces`);
+            }
+          }
+        }
+      }
+    }
+
     console.log('Global setup complete');
   } catch (error) {
     console.error('Global setup error:', error);

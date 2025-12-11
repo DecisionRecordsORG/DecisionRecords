@@ -19,7 +19,8 @@ import { MatListModule } from '@angular/material/list';
 import { DecisionService, UpdateDecisionRequest } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { InfrastructureService } from '../../services/infrastructure.service';
-import { Decision, DecisionHistory, DecisionStatus, ITInfrastructure, InfrastructureType } from '../../models/decision.model';
+import { SpaceService } from '../../services/space.service';
+import { Decision, DecisionHistory, DecisionStatus, ITInfrastructure, InfrastructureType, Space } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { Observable, map, startWith } from 'rxjs';
 
@@ -50,7 +51,7 @@ import { Observable, map, startWith } from 'rxjs';
   template: `
     <div class="decision-detail-container">
       <div class="header">
-        <button mat-button routerLink="/">
+        <button mat-button [routerLink]="['/', tenant]">
           <mat-icon>arrow_back</mat-icon>
           Back to Decisions
         </button>
@@ -118,6 +119,25 @@ import { Observable, map, startWith } from 'rxjs';
                     <mat-error>Consequences is required</mat-error>
                   }
                 </mat-form-field>
+
+                <!-- Spaces Section -->
+                @if (spaces.length > 0) {
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Spaces</mat-label>
+                    <mat-select [(ngModel)]="selectedSpaceIds" [ngModelOptions]="{standalone: true}" multiple [disabled]="authService.isMasterAccount">
+                      @for (space of spaces; track space.id) {
+                        <mat-option [value]="space.id">
+                          {{ space.name }}
+                          @if (space.is_default) {
+                            <span class="default-space-badge">(Default)</span>
+                          }
+                        </mat-option>
+                      }
+                    </mat-select>
+                    <mat-icon matPrefix>folder</mat-icon>
+                    <mat-hint>Select one or more spaces for this decision</mat-hint>
+                  </mat-form-field>
+                }
 
                 <!-- Infrastructure Section -->
                 <div class="infrastructure-section">
@@ -538,6 +558,12 @@ import { Observable, map, startWith } from 'rxjs';
       width: 100%;
       margin-top: 8px;
     }
+
+    .default-space-badge {
+      font-size: 11px;
+      color: #888;
+      margin-left: 4px;
+    }
   `]
 })
 export class DecisionDetailComponent implements OnInit {
@@ -546,6 +572,11 @@ export class DecisionDetailComponent implements OnInit {
   isNew = false;
   isLoading = true;
   isSaving = false;
+  tenant = '';
+
+  // Spaces
+  spaces: Space[] = [];
+  selectedSpaceIds: number[] = [];
 
   // Infrastructure
   allInfrastructure: ITInfrastructure[] = [];
@@ -563,6 +594,7 @@ export class DecisionDetailComponent implements OnInit {
     private decisionService: DecisionService,
     public authService: AuthService,
     private infrastructureService: InfrastructureService,
+    private spaceService: SpaceService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
@@ -577,8 +609,14 @@ export class DecisionDetailComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    // Get tenant from route params
+    this.tenant = this.route.snapshot.paramMap.get('tenant') || '';
+
     // Load infrastructure items
     this.loadInfrastructure();
+
+    // Load spaces
+    this.loadSpaces();
 
     // Set up infrastructure filter
     this.filteredInfrastructure$ = this.infraSearchControl.valueChanges.pipe(
@@ -606,6 +644,24 @@ export class DecisionDetailComponent implements OnInit {
       },
       error: (err) => {
         console.error('Failed to load infrastructure', err);
+      }
+    });
+  }
+
+  loadSpaces(): void {
+    this.spaceService.getSpaces().subscribe({
+      next: (spaces) => {
+        this.spaces = spaces;
+        // For new decisions, pre-select the default space
+        if (this.isNew && this.selectedSpaceIds.length === 0) {
+          const defaultSpace = spaces.find(s => s.is_default);
+          if (defaultSpace) {
+            this.selectedSpaceIds = [defaultSpace.id];
+          }
+        }
+      },
+      error: (err) => {
+        console.error('Failed to load spaces', err);
       }
     });
   }
@@ -681,6 +737,10 @@ export class DecisionDetailComponent implements OnInit {
         if (decision.infrastructure && decision.infrastructure.length > 0) {
           this.selectedInfrastructure = [...decision.infrastructure];
         }
+        // Load decision's spaces
+        if (decision.spaces && decision.spaces.length > 0) {
+          this.selectedSpaceIds = decision.spaces.map(s => s.id);
+        }
         if (this.authService.isMasterAccount) {
           this.form.disable();
         }
@@ -707,7 +767,8 @@ export class DecisionDetailComponent implements OnInit {
         decision: formValue.decision,
         status: formValue.status,
         consequences: formValue.consequences,
-        infrastructure_ids: infrastructureIds
+        infrastructure_ids: infrastructureIds,
+        space_ids: this.selectedSpaceIds
       }).subscribe({
         next: (decision) => {
           this.snackBar.open('Decision created successfully', 'Close', { duration: 3000 });
@@ -725,7 +786,8 @@ export class DecisionDetailComponent implements OnInit {
         decision: formValue.decision,
         status: formValue.status,
         consequences: formValue.consequences,
-        infrastructure_ids: infrastructureIds
+        infrastructure_ids: infrastructureIds,
+        space_ids: this.selectedSpaceIds
       };
       if (formValue.change_reason) {
         update.change_reason = formValue.change_reason;
@@ -735,6 +797,7 @@ export class DecisionDetailComponent implements OnInit {
         next: (decision) => {
           this.decision = decision;
           this.selectedInfrastructure = decision.infrastructure || [];
+          this.selectedSpaceIds = decision.spaces?.map(s => s.id) || [];
           this.form.get('change_reason')?.reset();
           this.isSaving = false;
           this.snackBar.open('Decision updated successfully', 'Close', { duration: 3000 });

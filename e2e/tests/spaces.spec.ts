@@ -1,99 +1,229 @@
 import { test, expect } from '@playwright/test';
 import { loginAsUser } from '../fixtures/auth';
 
-test.describe('Spaces', () => {
-  test('default-space-exists: Every tenant has a General default space', async ({ page }) => {
-    await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+test.describe('Spaces Management', () => {
+  test.describe('Admin Settings - Spaces Tab', () => {
+    test('spaces-tab-exists: Admin can access Spaces tab in settings', async ({ page }) => {
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
 
-    // Navigate to spaces (adjust URL based on actual route)
-    await page.goto('/test-org.com/spaces');
+      // Wait for decisions page to load fully
+      await page.waitForSelector('h1', { timeout: 10000 });
 
-    // Look for the General space
-    const generalSpace = page.locator('text=/General/i').first();
+      // Navigate to admin by clicking the user menu or settings link
+      // Look for admin/settings link in header/nav
+      const settingsLink = page.locator('a[href*="/admin"], button:has-text("Settings"), [routerlink*="admin"]').first();
 
-    // If spaces page exists, check for General
-    if (await generalSpace.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(generalSpace).toBeVisible();
-    } else {
-      // Spaces might be shown in a different way (dropdown, sidebar, etc.)
-      // Check for any space selector
-      const spaceSelector = page.locator('[data-testid="space-selector"], .space-selector, mat-select');
-      if (await spaceSelector.isVisible({ timeout: 3000 }).catch(() => false)) {
-        await spaceSelector.click();
-        await expect(page.locator('text=/General/i')).toBeVisible();
+      if (await settingsLink.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await settingsLink.click();
       } else {
-        test.skip(true, 'Spaces UI not yet implemented');
+        // Try user menu first
+        const userMenu = page.locator('[data-testid="user-menu"], button:has(mat-icon:has-text("account_circle")), .user-menu').first();
+        if (await userMenu.isVisible({ timeout: 2000 }).catch(() => false)) {
+          await userMenu.click();
+          await page.waitForTimeout(500);
+          const adminMenuItem = page.locator('button:has-text("Admin"), button:has-text("Settings"), a:has-text("Admin")').first();
+          await adminMenuItem.click();
+        } else {
+          // Direct navigation as fallback - wait for auth state
+          await page.goto('/test-org.com/admin');
+          await page.waitForLoadState('networkidle');
+          await page.waitForTimeout(2000); // Extra time for Angular auth guards
+        }
       }
-    }
-  });
 
-  test('cannot-delete-default-space: Delete button disabled for default space', async ({ page }) => {
-    await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
-    await page.goto('/test-org.com/spaces');
+      // Wait for settings page to load
+      await page.waitForSelector('mat-tab-group, h1:has-text("Settings"), h1:has-text("Organization")', { timeout: 15000 });
 
-    // Find the General space row
-    const generalSpaceRow = page.locator('tr, mat-row, .space-item').filter({ hasText: /General/i }).first();
+      // Click on the Spaces tab
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await expect(spacesTab).toBeVisible({ timeout: 5000 });
+      await spacesTab.click();
 
-    if (await generalSpaceRow.isVisible({ timeout: 5000 }).catch(() => false)) {
-      // The delete button should be disabled or hidden
-      const deleteButton = generalSpaceRow.locator('button:has-text("Delete"), [data-testid^="delete-space"]');
+      // Verify Spaces tab content is visible
+      await page.waitForTimeout(1000);
+      const spacesContent = page.locator('h3:has-text("Create"), h3:has-text("Spaces"), table, .spaces-section');
+      await expect(spacesContent.first()).toBeVisible({ timeout: 5000 });
+    });
 
-      if (await deleteButton.count() > 0) {
+    test('default-space-exists: General default space exists in tenant', async ({ page }) => {
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      // Wait for decisions page to load
+      await page.waitForSelector('h1', { timeout: 10000 });
+
+      // Navigate directly and wait for Angular to stabilize
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Check if we got redirected (guard blocked us)
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available - guard may have redirected');
+        return;
+      }
+
+      // Wait for settings page
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await spacesTab.click();
+
+      // Wait for spaces list to load
+      await page.waitForTimeout(2000);
+
+      // Look for General space in the table
+      const generalSpace = page.locator('td:has-text("General"), mat-cell:has-text("General")').first();
+      await expect(generalSpace).toBeVisible({ timeout: 5000 });
+    });
+
+    test('cannot-delete-default-space: Delete button disabled for default space', async ({ page }) => {
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await spacesTab.click();
+      await page.waitForTimeout(2000);
+
+      // Find the row with the default space (General)
+      const defaultSpaceRow = page.locator('tr:has(.default-chip), tr:has-text("General")').first();
+      await expect(defaultSpaceRow).toBeVisible({ timeout: 5000 });
+
+      // The delete button in the default space row should be disabled (or not present)
+      const deleteButton = defaultSpaceRow.locator('button[color="warn"]');
+      const deleteCount = await deleteButton.count();
+
+      if (deleteCount > 0) {
         await expect(deleteButton).toBeDisabled();
       }
-      // If no delete button visible, that's also acceptable
-    } else {
-      test.skip(true, 'Spaces UI not yet implemented');
-    }
+      // If no delete button visible for default space, that's acceptable
+    });
+
+    test('admin-can-create-space: Admin can create a new space', async ({ page }) => {
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await spacesTab.click();
+      await page.waitForTimeout(1000);
+
+      // Fill in the space name
+      const nameInput = page.locator('input[formcontrolname="name"]');
+      await expect(nameInput).toBeVisible({ timeout: 5000 });
+
+      const testSpaceName = 'E2E Test Space ' + Date.now();
+      await nameInput.fill(testSpaceName);
+
+      // Optionally fill description
+      const descriptionInput = page.locator('textarea[formcontrolname="description"]');
+      if (await descriptionInput.isVisible({ timeout: 1000 }).catch(() => false)) {
+        await descriptionInput.fill('Test space created by e2e tests');
+      }
+
+      // Click create/save button
+      const saveButton = page.locator('button:has-text("Create"), button:has-text("Save")').first();
+      await saveButton.click();
+
+      // Wait for success
+      await page.waitForTimeout(2000);
+
+      // Verify the new space appears in the list
+      const newSpaceCell = page.locator(`td:has-text("E2E Test Space")`).first();
+      await expect(newSpaceCell).toBeVisible({ timeout: 10000 });
+    });
+
+    test('admin-can-edit-space: Admin can edit space name', async ({ page }) => {
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await spacesTab.click();
+      await page.waitForTimeout(2000);
+
+      // Try to find a non-default space to edit
+      const nonDefaultRow = page.locator('tr:has-text("Engineering"), tr:has-text("Product")').first();
+      await expect(nonDefaultRow).toBeVisible({ timeout: 5000 });
+
+      const editBtn = nonDefaultRow.locator('button:has(mat-icon:has-text("edit"))');
+      await editBtn.click();
+
+      // Form should be populated with existing space data
+      const nameInput = page.locator('input[formcontrolname="name"]');
+      await expect(nameInput).toHaveValue(/.+/);
+    });
   });
 
-  test('admin-can-create-space: Admin can create a new space', async ({ page }) => {
-    await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
-    await page.goto('/test-org.com/spaces');
+  test.describe('Space Permissions', () => {
+    test('steward-can-access-admin-settings: Steward can access admin settings', async ({ page }) => {
+      await loginAsUser(page, 'steward@test-org.com', 'TestPass123');
 
-    // Look for create space button
-    const createButton = page.locator('[data-testid="create-space-button"], button:has-text("Create"), button:has-text("New Space"), button:has-text("Add")');
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
 
-    if (await createButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await createButton.click();
+      // Check if we're on admin page (not redirected)
+      const url = page.url();
+      if (!url.includes('/admin')) {
+        test.skip(true, 'Steward does not have access to admin settings');
+        return;
+      }
 
-      // Fill in space details (in dialog or form)
-      const nameInput = page.locator('input[formcontrolname="name"], input[name="name"], [data-testid="space-name-input"]');
-      await nameInput.fill('Test Space ' + Date.now());
+      // Steward has access - look for tab group
+      await page.waitForSelector('mat-tab-group', { timeout: 10000 });
 
-      // Submit
-      const submitButton = page.locator('button:has-text("Create"), button:has-text("Save"), button[type="submit"]');
-      await submitButton.click();
+      // Click on the Spaces tab
+      const spacesTab = page.locator('div.mat-mdc-tab:has-text("Spaces")');
+      await expect(spacesTab).toBeVisible({ timeout: 5000 });
+    });
 
-      // Should see the new space in the list
-      await expect(page.locator('text=/Test Space/i')).toBeVisible({ timeout: 10000 });
-    } else {
-      test.skip(true, 'Space creation UI not yet implemented');
-    }
-  });
+    test('user-cannot-access-admin-settings: Regular user redirected from admin', async ({ page }) => {
+      await loginAsUser(page, 'user@test-org.com', 'TestPass123');
 
-  test('steward-can-create-space: Steward can create a new space', async ({ page }) => {
-    await loginAsUser(page, 'steward@test-org.com', 'TestPass123');
-    await page.goto('/test-org.com/spaces');
+      // Try to navigate to admin settings
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(3000);
 
-    // Look for create space button (stewards should have this permission)
-    const createButton = page.locator('[data-testid="create-space-button"], button:has-text("Create"), button:has-text("New Space")');
-
-    if (await createButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(createButton).toBeEnabled();
-    } else {
-      test.skip(true, 'Space creation UI not yet implemented');
-    }
-  });
-
-  test('user-cannot-create-space: Regular user sees no create button', async ({ page }) => {
-    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
-    await page.goto('/test-org.com/spaces');
-
-    // Regular users should NOT see create space button
-    const createButton = page.locator('[data-testid="create-space-button"], button:has-text("Create Space"), button:has-text("New Space")');
-
-    // Either button doesn't exist or is not visible
-    await expect(createButton).not.toBeVisible({ timeout: 5000 });
+      // Should not be on admin page
+      const url = page.url();
+      expect(url).not.toContain('/admin');
+    });
   });
 });

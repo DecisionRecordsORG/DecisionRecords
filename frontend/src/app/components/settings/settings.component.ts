@@ -15,7 +15,8 @@ import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
 import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole } from '../../models/decision.model';
+import { SpaceService } from '../../services/space.service';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { SetupLinkDialogComponent } from '../shared/setup-link-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
@@ -503,6 +504,121 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                     </ul>
                   </div>
                 </div>
+              </mat-card-content>
+            </mat-card>
+          </div>
+        </mat-tab>
+
+        <!-- Spaces Tab (for non-master admins only) -->
+        <mat-tab label="Spaces" *ngIf="!authService.isMasterAccount">
+          <div class="tab-content">
+            <mat-card class="form-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>folder</mat-icon>
+                  {{ editingSpaceId ? 'Edit Space' : 'Create New Space' }}
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <form [formGroup]="spaceForm" (ngSubmit)="saveSpace()">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Space Name</mat-label>
+                    <input matInput formControlName="name" placeholder="e.g., Backend, Frontend, Infrastructure">
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Description (optional)</mat-label>
+                    <textarea matInput formControlName="description" rows="3"
+                              placeholder="Describe this space..."></textarea>
+                  </mat-form-field>
+
+                  <mat-slide-toggle formControlName="is_default" [disabled]="isEditingDefaultSpace()">
+                    Set as default space
+                  </mat-slide-toggle>
+                  <p class="option-hint">New decisions will automatically be assigned to the default space.</p>
+
+                  <div class="form-actions">
+                    <button mat-raised-button color="primary" type="submit"
+                            [disabled]="spaceForm.invalid || savingSpace">
+                      <mat-spinner diameter="20" *ngIf="savingSpace"></mat-spinner>
+                      <mat-icon *ngIf="!savingSpace">save</mat-icon>
+                      <span *ngIf="!savingSpace">{{ editingSpaceId ? 'Update' : 'Create Space' }}</span>
+                    </button>
+                    @if (editingSpaceId) {
+                      <button mat-button type="button" (click)="cancelSpaceEdit()">Cancel</button>
+                    }
+                  </div>
+                </form>
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="list-card">
+              <mat-card-header>
+                <mat-card-title>Spaces</mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                @if (loadingSpaces) {
+                  <div class="loading-container">
+                    <mat-spinner diameter="40"></mat-spinner>
+                  </div>
+                } @else if (spaces.length === 0) {
+                  <p class="empty-message">No spaces configured</p>
+                } @else {
+                  <table mat-table [dataSource]="spaces" class="full-width">
+                    <ng-container matColumnDef="name">
+                      <th mat-header-cell *matHeaderCellDef>Name</th>
+                      <td mat-cell *matCellDef="let space">
+                        {{ space.name }}
+                        @if (space.is_default) {
+                          <mat-chip class="default-chip">Default</mat-chip>
+                        }
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="description">
+                      <th mat-header-cell *matHeaderCellDef>Description</th>
+                      <td mat-cell *matCellDef="let space">{{ space.description || '-' }}</td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="decision_count">
+                      <th mat-header-cell *matHeaderCellDef>Decisions</th>
+                      <td mat-cell *matCellDef="let space">{{ space.decision_count || 0 }}</td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="actions">
+                      <th mat-header-cell *matHeaderCellDef>Actions</th>
+                      <td mat-cell *matCellDef="let space">
+                        <button mat-icon-button (click)="editSpace(space)" matTooltip="Edit">
+                          <mat-icon>edit</mat-icon>
+                        </button>
+                        <button mat-icon-button color="warn" (click)="deleteSpace(space)"
+                                [disabled]="space.is_default" matTooltip="{{ space.is_default ? 'Cannot delete default space' : 'Delete' }}">
+                          <mat-icon>delete</mat-icon>
+                        </button>
+                      </td>
+                    </ng-container>
+
+                    <tr mat-header-row *matHeaderRowDef="spaceColumns"></tr>
+                    <tr mat-row *matRowDef="let row; columns: spaceColumns;"></tr>
+                  </table>
+                }
+              </mat-card-content>
+            </mat-card>
+
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Spaces
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Spaces help organize your architecture decisions into logical groups.</p>
+                <ul>
+                  <li><strong>Default Space:</strong> New decisions are automatically assigned to this space</li>
+                  <li><strong>Multiple Spaces:</strong> Decisions can belong to multiple spaces</li>
+                  <li><strong>Filtering:</strong> Users can filter decisions by space in the decision list</li>
+                </ul>
               </mat-card-content>
             </mat-card>
           </div>
@@ -1054,6 +1170,16 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       line-height: 1.4;
     }
 
+    /* Default space chip */
+    .default-chip {
+      background-color: #e3f2fd !important;
+      color: #1565c0 !important;
+      font-size: 11px;
+      height: 20px;
+      line-height: 20px;
+      margin-left: 8px;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -1089,6 +1215,14 @@ export class SettingsComponent implements OnInit {
   ssoColumns = ['domain', 'provider_name', 'enabled', 'actions'];
   userColumns = ['name', 'email', 'domain', 'auth_type', 'role', 'last_login', 'actions'];
   accessRequestColumns = ['name', 'email', 'reason', 'created_at', 'status', 'actions'];
+  spaceColumns = ['name', 'description', 'decision_count', 'actions'];
+
+  // Spaces
+  spaceForm: FormGroup;
+  spaces: Space[] = [];
+  editingSpaceId: number | null = null;
+  savingSpace = false;
+  loadingSpaces = false;
 
   editingSSOId: number | null = null;
   hasExistingEmailConfig = false;
@@ -1134,9 +1268,16 @@ export class SettingsComponent implements OnInit {
     private fb: FormBuilder,
     private adminService: AdminService,
     public authService: AuthService,
+    private spaceService: SpaceService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
+    this.spaceForm = this.fb.group({
+      name: ['', Validators.required],
+      description: [''],
+      is_default: [false]
+    });
+
     this.ssoForm = this.fb.group({
       domain: ['', Validators.required],
       provider_name: ['', Validators.required],
@@ -1172,6 +1313,7 @@ export class SettingsComponent implements OnInit {
     this.loadAuthConfig();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
+      this.loadSpaces();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -1568,6 +1710,101 @@ export class SettingsComponent implements OnInit {
           error: (err) => {
             this.snackBar.open(err.error?.error || 'Failed to reject request', 'Close', { duration: 3000 });
             this.processingRequest = null;
+          }
+        });
+      }
+    });
+  }
+
+  // Spaces Management
+  loadSpaces(): void {
+    this.loadingSpaces = true;
+    this.spaceService.getSpaces().subscribe({
+      next: (spaces) => {
+        this.spaces = spaces;
+        this.loadingSpaces = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load spaces', 'Close', { duration: 3000 });
+        this.loadingSpaces = false;
+      }
+    });
+  }
+
+  saveSpace(): void {
+    if (this.spaceForm.invalid) return;
+
+    this.savingSpace = true;
+    const formValue = this.spaceForm.value;
+
+    if (this.editingSpaceId) {
+      this.spaceService.updateSpace(this.editingSpaceId, formValue).subscribe({
+        next: () => {
+          this.snackBar.open('Space updated', 'Close', { duration: 3000 });
+          this.loadSpaces();
+          this.cancelSpaceEdit();
+          this.savingSpace = false;
+        },
+        error: (err) => {
+          this.snackBar.open(err.error?.error || 'Failed to update space', 'Close', { duration: 3000 });
+          this.savingSpace = false;
+        }
+      });
+    } else {
+      this.spaceService.createSpace(formValue).subscribe({
+        next: () => {
+          this.snackBar.open('Space created', 'Close', { duration: 3000 });
+          this.loadSpaces();
+          this.spaceForm.reset({ is_default: false });
+          this.savingSpace = false;
+        },
+        error: (err) => {
+          this.snackBar.open(err.error?.error || 'Failed to create space', 'Close', { duration: 3000 });
+          this.savingSpace = false;
+        }
+      });
+    }
+  }
+
+  editSpace(space: Space): void {
+    this.editingSpaceId = space.id;
+    this.spaceForm.patchValue({
+      name: space.name,
+      description: space.description || '',
+      is_default: space.is_default
+    });
+  }
+
+  cancelSpaceEdit(): void {
+    this.editingSpaceId = null;
+    this.spaceForm.reset({ is_default: false });
+  }
+
+  isEditingDefaultSpace(): boolean {
+    if (!this.editingSpaceId) return false;
+    const space = this.spaces.find(s => s.id === this.editingSpaceId);
+    return space?.is_default || false;
+  }
+
+  deleteSpace(space: Space): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Space',
+        message: `Are you sure you want to delete the space "${space.name}"? Decisions in this space will be unassigned from it.`,
+        confirmText: 'Delete',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.spaceService.deleteSpace(space.id).subscribe({
+          next: () => {
+            this.snackBar.open('Space deleted', 'Close', { duration: 3000 });
+            this.loadSpaces();
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to delete space', 'Close', { duration: 3000 });
           }
         });
       }

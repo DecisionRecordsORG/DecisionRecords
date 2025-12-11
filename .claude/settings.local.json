@@ -15,7 +15,13 @@
       "Bash(curl:*)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(./scripts/redeploy.sh:*)",
+      "Bash(npm run start:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(FLASK_ENV=testing python3:*)",
+      "Bash(npx playwright test:*)"
     ],
     "deny": [],
     "ask": []

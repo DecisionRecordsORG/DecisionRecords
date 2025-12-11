@@ -1,4 +1,5 @@
 # Claude Code Instructions
+DO NOT add Claude code branding in commit messages.
 
 This file contains instructions and context for Claude Code when working on this project.
 

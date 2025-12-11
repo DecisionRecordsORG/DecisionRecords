@@ -4,6 +4,7 @@
 *.sqlite3
 instance/
 architecture_decisions.db
+requirements
 
 # Python
 __pycache__/

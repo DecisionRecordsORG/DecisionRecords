@@ -11,11 +11,13 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatInputModule } from '@angular/material/input';
 import { MatFormFieldModule } from '@angular/material/form-field';
+import { MatSelectModule } from '@angular/material/select';
 import { MatDialogModule, MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { FormsModule } from '@angular/forms';
 import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
-import { Decision, User } from '../../models/decision.model';
+import { SpaceService } from '../../services/space.service';
+import { Decision, User, Space } from '../../models/decision.model';
 
 @Component({
   selector: 'app-decision-list',
@@ -33,6 +35,7 @@ import { Decision, User } from '../../models/decision.model';
     MatProgressSpinnerModule,
     MatInputModule,
     MatFormFieldModule,
+    MatSelectModule,
     MatDialogModule
   ],
   template: `
@@ -108,6 +111,26 @@ import { Decision, User } from '../../models/decision.model';
               </mat-chip>
             </mat-chip-set>
           </div>
+
+          @if (spaces.length > 1) {
+            <div class="space-filter">
+              <mat-form-field appearance="outline" class="space-select">
+                <mat-label>Filter by Space</mat-label>
+                <mat-select [(ngModel)]="spaceFilter" (selectionChange)="filterDecisions()">
+                  <mat-option [value]="null">All Spaces</mat-option>
+                  @for (space of spaces; track space.id) {
+                    <mat-option [value]="space.id">
+                      {{ space.name }}
+                      @if (space.is_default) {
+                        <span class="default-badge">(Default)</span>
+                      }
+                    </mat-option>
+                  }
+                </mat-select>
+                <mat-icon matPrefix>folder</mat-icon>
+              </mat-form-field>
+            </div>
+          }
         </mat-card-content>
       </mat-card>
 
@@ -329,6 +352,22 @@ import { Decision, User } from '../../models/decision.model';
       font-size: 18px;
       width: 18px;
       height: 18px;
+    }
+
+    .space-filter {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #eee;
+    }
+
+    .space-select {
+      min-width: 200px;
+    }
+
+    .default-badge {
+      font-size: 11px;
+      color: #888;
+      margin-left: 4px;
     }
 
     .loading-container {
@@ -685,12 +724,15 @@ export class DecisionListComponent implements OnInit {
   isLoading = true;
   searchTerm = '';
   statusFilter = '';
+  spaceFilter: number | null = null;
+  spaces: Space[] = [];
   userDomain = '';
   onboardingDialogRef: MatDialogRef<any> | null = null;
 
   constructor(
     private decisionService: DecisionService,
     public authService: AuthService,
+    private spaceService: SpaceService,
     private route: ActivatedRoute,
     private http: HttpClient,
     private dialog: MatDialog
@@ -698,12 +740,24 @@ export class DecisionListComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadDecisions();
+    this.loadSpaces();
     // Get tenant from route params - this is the reliable source
     this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
     console.log('[DecisionList] userDomain from route:', this.userDomain);
 
     // Check if admin needs to see onboarding modal
     this.checkAdminOnboarding();
+  }
+
+  loadSpaces(): void {
+    this.spaceService.getSpaces().subscribe({
+      next: (spaces) => {
+        this.spaces = spaces;
+      },
+      error: (err) => {
+        console.error('Failed to load spaces', err);
+      }
+    });
   }
 
   private checkAdminOnboarding(): void {
@@ -775,7 +829,10 @@ export class DecisionListComponent implements OnInit {
 
       const matchesStatus = !this.statusFilter || d.status === this.statusFilter;
 
-      return matchesSearch && matchesStatus;
+      const matchesSpace = this.spaceFilter === null ||
+        (d.spaces && d.spaces.some(s => s.id === this.spaceFilter));
+
+      return matchesSearch && matchesStatus && matchesSpace;
     });
   }
 
@@ -813,6 +870,11 @@ export class DecisionListComponent implements OnInit {
   clearFilters(): void {
     this.searchTerm = '';
     this.statusFilter = '';
+    this.spaceFilter = null;
     this.filterDecisions();
+  }
+
+  hasActiveFilters(): boolean {
+    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null;
   }
 }

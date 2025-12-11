@@ -10,17 +10,21 @@ test.describe('Super Admin', () => {
     // Navigate to tenants list
     await page.goto('/superadmin/tenants');
 
+    // Wait for page to load completely
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+
     // Should see the Tenant Management heading
     await page.waitForSelector('h1', { timeout: 10000 });
     await expect(page.locator('h1')).toContainText('Tenant Management');
 
-    // Should see the tabs
-    await expect(page.locator('mat-tab:has-text("Pending Approvals")')).toBeVisible();
-    await expect(page.locator('mat-tab:has-text("All Tenants")')).toBeVisible();
-    await expect(page.locator('mat-tab:has-text("History")')).toBeVisible();
+    // Should see the mat-tab-labels (the clickable tab buttons)
+    await expect(page.locator('div.mat-mdc-tab:has-text("Pending Approvals")').first()).toBeVisible();
+    await expect(page.locator('div.mat-mdc-tab:has-text("All Tenants")').first()).toBeVisible();
+    await expect(page.locator('div.mat-mdc-tab:has-text("History")').first()).toBeVisible();
 
     // Click on All Tenants tab to see registered tenants
-    await page.locator('mat-tab:has-text("All Tenants")').click();
+    await page.locator('div.mat-mdc-tab:has-text("All Tenants")').first().click();
 
     // Wait for tab content to load - should see either a table or empty state
     await page.waitForSelector('mat-card-title', { timeout: 5000 });
