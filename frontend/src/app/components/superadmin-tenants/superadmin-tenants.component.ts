@@ -952,7 +952,7 @@ export class TenantDetailsDialogComponent {
     dialogRef.afterClosed().subscribe(confirmed => {
       if (confirmed) {
         this.isDeleting = true;
-        this.http.delete(`/api/tenants/${domain}`).subscribe({
+        this.http.delete(`/api/tenants/${domain}`, { body: { confirm_delete: true } }).subscribe({
           next: () => {
             this.snackBar.open(`Tenant ${domain} deleted successfully`, 'Close', { duration: 3000 });
             this.isDeleting = false;
