@@ -85,29 +85,35 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection - prevent cross
 # Default max is 24 hours, but actual expiry is stored in session['_expires_at']
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
 
-# Rate limiting configuration
-app.config['RATELIMIT_ENABLED'] = True
-app.config['RATELIMIT_STORAGE_URL'] = os.environ.get('REDIS_URL', 'memory://')
-app.config['RATELIMIT_DEFAULT'] = '200 per minute'  # Default rate limit
-app.config['RATELIMIT_HEADERS_ENABLED'] = True  # Include rate limit info in response headers
-
-# Initialize rate limiter (if available)
-try:
-    from flask_limiter import Limiter
-    from flask_limiter.util import get_remote_address
-
-    limiter = Limiter(
-        key_func=get_remote_address,
-        app=app,
-        default_limits=["200 per minute"],
-        storage_uri=app.config['RATELIMIT_STORAGE_URL'],
-    )
-    RATE_LIMITING_ENABLED = True
-    logger.info("Rate limiting enabled")
-except ImportError:
+# Rate limiting configuration - disabled in testing mode
+if os.environ.get('FLASK_ENV') == 'testing':
+    app.config['RATELIMIT_ENABLED'] = False
     limiter = None
     RATE_LIMITING_ENABLED = False
-    logger.warning("Flask-Limiter not installed, rate limiting disabled")
+    logger.info("TESTING MODE: Rate limiting disabled for E2E tests")
+else:
+    app.config['RATELIMIT_ENABLED'] = True
+    app.config['RATELIMIT_STORAGE_URL'] = os.environ.get('REDIS_URL', 'memory://')
+    app.config['RATELIMIT_DEFAULT'] = '200 per minute'  # Default rate limit
+    app.config['RATELIMIT_HEADERS_ENABLED'] = True  # Include rate limit info in response headers
+
+    # Initialize rate limiter (if available)
+    try:
+        from flask_limiter import Limiter
+        from flask_limiter.util import get_remote_address
+
+        limiter = Limiter(
+            key_func=get_remote_address,
+            app=app,
+            default_limits=["200 per minute"],
+            storage_uri=app.config['RATELIMIT_STORAGE_URL'],
+        )
+        RATE_LIMITING_ENABLED = True
+        logger.info("Rate limiting enabled")
+    except ImportError:
+        limiter = None
+        RATE_LIMITING_ENABLED = False
+        logger.warning("Flask-Limiter not installed, rate limiting disabled")
 
 # Initialize Flask-Talisman for CSP (Content Security Policy)
 try:
@@ -1136,8 +1142,10 @@ def api_create_decision():
     db.session.add(decision)
     db.session.commit()
 
-    # Send notifications
+    # Send notifications - try domain-specific config first, fall back to system config
     email_config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain, enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_new_decision(db, decision, email_config)
 
     return jsonify(decision.to_dict()), 201
@@ -1242,8 +1250,10 @@ def api_update_decision(decision_id):
 
     db.session.commit()
 
-    # Send notifications
+    # Send notifications - try domain-specific config first, fall back to system config
     email_config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain, enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_decision_updated(db, decision, email_config, change_reason, status_changed)
 
     return jsonify(decision.to_dict_with_history())
@@ -1334,6 +1344,8 @@ def api_get_current_user():
                 'global_role': membership.global_role.value,
                 'joined_at': membership.joined_at.isoformat() if membership.joined_at else None
             }
+            # Update is_admin based on membership role for v1.5 governance
+            user_dict['is_admin'] = membership.is_admin
             # Add tenant maturity info for UI to decide what to show
             user_dict['tenant_info'] = {
                 'id': tenant.id,
@@ -1544,7 +1556,13 @@ def api_get_email_config():
 @app.route('/api/admin/email', methods=['POST', 'PUT'])
 @admin_required
 def api_save_email_config():
-    """Create or update email configuration (admin only)."""
+    """Create or update email configuration (admin only).
+
+    Security: SMTP password is encrypted before storage and can never be retrieved.
+    Once saved, the only option is to provide a new password.
+    """
+    from crypto import encrypt_password
+
     data = request.get_json()
 
     required_fields = ['smtp_server', 'smtp_port', 'smtp_username', 'from_email']
@@ -1567,12 +1585,15 @@ def api_save_email_config():
         if not data.get('smtp_password'):
             return jsonify({'error': 'SMTP password is required for new configuration'}), 400
 
+        # Encrypt the password before storing
+        encrypted_password = encrypt_password(data['smtp_password'])
+
         config = EmailConfig(
             domain=g.current_user.sso_domain,
             smtp_server=smtp_server,
             smtp_port=int(data['smtp_port']),
             smtp_username=smtp_username,
-            smtp_password=data['smtp_password'],  # Don't sanitize passwords
+            smtp_password=encrypted_password,
             from_email=from_email_sanitized,
             from_name=from_name,
             use_tls=data.get('use_tls', True),
@@ -1584,7 +1605,8 @@ def api_save_email_config():
         config.smtp_port = int(data['smtp_port'])
         config.smtp_username = smtp_username
         if data.get('smtp_password'):
-            config.smtp_password = data['smtp_password']  # Don't sanitize passwords
+            # Encrypt the new password before storing
+            config.smtp_password = encrypt_password(data['smtp_password'])
         config.from_email = from_email_sanitized
         config.from_name = from_name
         config.use_tls = data.get('use_tls', True)
@@ -4285,8 +4307,11 @@ def api_list_tenants():
             ).count()
             member_count = TenantMembership.query.filter_by(tenant_id=tenant.id).count()
 
-            # Calculate age
-            age_days = (datetime.utcnow() - tenant.created_at).days
+            # Calculate age (handle None created_at for legacy tenants)
+            if tenant.created_at:
+                age_days = (datetime.utcnow() - tenant.created_at).days
+            else:
+                age_days = None
 
             tenants[tenant.domain]['maturity_state'] = tenant.maturity_state.value
             tenants[tenant.domain]['admin_count'] = admin_count

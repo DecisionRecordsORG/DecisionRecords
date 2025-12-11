@@ -477,4 +477,132 @@ az monitor activity-log list \
 
 ---
 
-*Last Updated: December 2024*
+## Tenant Email Configuration Security
+
+### Overview
+
+Tenant administrators can configure their own SMTP settings for custom email notifications. To protect these credentials:
+
+1. **Encrypted Storage**: SMTP passwords are encrypted using Fernet (AES-128-CBC) before storage
+2. **Non-Retrievable**: Passwords can never be retrieved via API - only replaced
+3. **Decrypt at Send Time**: Passwords are only decrypted when actually sending emails
+4. **No Super Admin Access**: Even super admins cannot see tenant SMTP passwords
+
+### Architecture
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Tenant Admin   │────>│  API Endpoint    │────>│  Database       │
+│  (provides      │     │  (encrypts       │     │  (stores        │
+│   password)     │     │   password)      │     │   encrypted)    │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+                                                         │
+                                                         v
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Email Sent     │<────│  Notification    │<────│  Decrypt at     │
+│  to Recipient   │     │  Service         │     │  send time      │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+```
+
+### Setup: Encryption Key
+
+Before tenants can save email configurations, an encryption key must be generated and stored in Key Vault:
+
+#### 1. Generate Encryption Key
+```bash
+# Using Python
+python -c "from crypto import generate_encryption_key; print(generate_encryption_key())"
+
+# Or using the cryptography library directly
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+#### 2. Store in Azure Key Vault
+```bash
+az keyvault secret set \
+  --vault-name adr-keyvault-eu \
+  --name "smtp-encryption-key" \
+  --value "YOUR_GENERATED_KEY_HERE"
+```
+
+### How It Works
+
+#### Saving Email Configuration
+```python
+# When tenant admin saves email config:
+from crypto import encrypt_password
+
+# Password is encrypted before storage
+encrypted = encrypt_password("actual_smtp_password")
+# Result: "encrypted:gAAAAABh..." (Fernet ciphertext)
+
+# Stored in database - original password is never saved
+config.smtp_password = encrypted
+```
+
+#### Sending Emails
+```python
+# When sending notification emails:
+from crypto import decrypt_password
+
+# Password is decrypted only at send time
+actual_password = decrypt_password(config.smtp_password)
+
+# Used for SMTP authentication, then discarded
+server.login(config.smtp_username, actual_password)
+```
+
+#### API Responses
+```python
+# Email config endpoint NEVER returns the actual password
+GET /api/admin/email
+
+{
+  "smtp_server": "smtp.example.com",
+  "smtp_port": 587,
+  "smtp_username": "user@example.com",
+  "smtp_password": "***PROTECTED***",  # Always masked
+  "from_email": "noreply@example.com",
+  ...
+}
+```
+
+### Key Rotation
+
+If the encryption key needs to be rotated:
+
+1. **Generate new key**: Create a new Fernet key
+2. **Re-encrypt existing passwords**:
+   ```python
+   from crypto import decrypt_password, encrypt_password
+
+   # For each email config:
+   old_password = decrypt_password(config.smtp_password)  # Using old key
+   # Update Key Vault with new key
+   config.smtp_password = encrypt_password(old_password)  # Using new key
+   ```
+3. **Update Key Vault**: Replace the old key with the new one
+4. **Deploy**: New key will be used for all future operations
+
+### Fallback Behavior
+
+If encryption is unavailable (key not found):
+- **New configs**: Password stored as plaintext with warning logged
+- **Existing encrypted configs**: Cannot send emails (decryption fails)
+- **System config**: Uses Key Vault SMTP credentials (unaffected)
+
+### Security Considerations
+
+| Aspect | Protection |
+|--------|------------|
+| Storage | Fernet encryption (AES-128-CBC + HMAC-SHA256) |
+| Encryption Key | Stored in Azure Key Vault |
+| API Exposure | Passwords masked as `***PROTECTED***` |
+| Super Admin | Cannot view tenant SMTP passwords |
+| Tenant Admin | Can only replace, never retrieve passwords |
+| Logs | Passwords never logged |
+| Memory | Decrypted only during SMTP send, then discarded |
+
+---
+
+*Last Updated: December 2025*

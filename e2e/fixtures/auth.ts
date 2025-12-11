@@ -8,8 +8,14 @@ const API_URL = 'http://localhost:5001';
 export async function loginAsUser(page: Page, email: string, password: string): Promise<void> {
   const domain = email.split('@')[1];
 
+  // Clear cookies to ensure clean session
+  await page.context().clearCookies();
+
+  // Add delay between login attempts to avoid rate limiting
+  await page.waitForTimeout(500);
+
   // Navigate to tenant login page
-  await page.goto(`/${domain}/login`);
+  await page.goto(`/${domain}/login`, { waitUntil: 'domcontentloaded' });
 
   // Wait for email input and fill
   await page.waitForSelector('[data-testid="email-input"]', { timeout: 10000 });
@@ -32,15 +38,42 @@ export async function loginAsUser(page: Page, email: string, password: string): 
   await loginButton.click();
 
   // Wait for redirect to tenant page (decisions or dashboard)
-  await page.waitForURL(`**/${domain}/**`, { timeout: 15000 });
+  // Use retry logic to handle rate limiting errors
+  try {
+    await page.waitForURL(`**/${domain}/**`, { timeout: 20000 });
+  } catch (error) {
+    // Check if we got a rate limit error
+    const errorMessage = await page.locator('.error-message, mat-error, .mat-error').textContent().catch(() => '');
+    if (errorMessage?.toLowerCase().includes('rate limit') || errorMessage?.toLowerCase().includes('too many')) {
+      // Wait longer and retry once
+      await page.waitForTimeout(3000);
+      await loginButton.click();
+      await page.waitForURL(`**/${domain}/**`, { timeout: 20000 });
+    } else {
+      throw error;
+    }
+  }
+
+  // Ensure page is fully loaded before proceeding
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(500);
 }
 
 /**
  * Login as super admin (master account)
  */
 export async function loginAsSuperAdmin(page: Page, username: string = 'admin', password: string = 'changeme'): Promise<void> {
+  // Clear cookies to ensure clean session
+  await page.context().clearCookies();
+
+  // Add delay between login attempts to avoid rate limiting
+  await page.waitForTimeout(500);
+
   // Route is /superadmin (not /superadmin/login)
-  await page.goto('/superadmin');
+  await page.goto('/superadmin', { waitUntil: 'domcontentloaded' });
+
+  // Wait for login form to be ready
+  await page.waitForSelector('[data-testid="username-input"]', { timeout: 10000 });
 
   // Fill username using data-testid
   const usernameInput = page.locator('[data-testid="username-input"]');
@@ -50,13 +83,19 @@ export async function loginAsSuperAdmin(page: Page, username: string = 'admin', 
   const passwordInput = page.locator('[data-testid="password-input"]');
   await passwordInput.fill(password);
 
-  // Click login
+  // Click login and wait for navigation to complete
   const loginButton = page.locator('[data-testid="login-button"]');
-  await loginButton.click();
 
-  // Wait for redirect to any superadmin page (dashboard, tenants, or settings)
-  await page.waitForURL('**/superadmin/**', { timeout: 15000 });
-  await page.waitForLoadState('networkidle');
+  // Wait for both the navigation and the network to be idle
+  // This ensures the login request completes and redirect happens
+  await Promise.all([
+    page.waitForURL('**/superadmin/dashboard**', { timeout: 30000 }),
+    loginButton.click()
+  ]);
+
+  // Ensure page is fully loaded before proceeding
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(500);
 }
 
 /**
@@ -119,4 +158,21 @@ export async function setTenantMaturity(
   await request.post(`${API_URL}/api/test/set-tenant-maturity`, {
     data: { domain, state },
   });
+}
+
+/**
+ * Dismiss any visible CDK overlays (snackbars, dialogs, etc.)
+ * Call this before clicks that might be blocked by overlay backdrops
+ */
+export async function dismissOverlays(page: Page): Promise<void> {
+  // Try pressing Escape to close any overlays
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+
+  // Check if any overlays are still visible and click backdrop to dismiss
+  const backdrop = page.locator('.cdk-overlay-backdrop');
+  if (await backdrop.isVisible({ timeout: 500 }).catch(() => false)) {
+    await backdrop.click({ force: true });
+    await page.waitForTimeout(300);
+  }
 }

@@ -196,6 +196,29 @@ test.describe('Super Admin - Dashboard', () => {
     }
   });
 
+  test('tenants-api-works: /api/tenants endpoint returns data without error', async ({ page }) => {
+    // Navigate to tenants page which calls /api/tenants
+    await page.goto('/superadmin/tenants');
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(1000);
+
+    // Click on All Tenants tab to trigger API call
+    await page.locator('div.mat-mdc-tab:has-text("All Tenants")').first().click();
+    await page.waitForTimeout(1000);
+
+    // Verify the page loads without error (no 500 error message)
+    const errorMessage = page.locator('text=/500|Internal Server Error|Something went wrong/i');
+    const hasError = await errorMessage.isVisible({ timeout: 2000 }).catch(() => false);
+    expect(hasError).toBe(false);
+
+    // Should see either the tenants table or empty state
+    const tenantsTable = page.locator('table');
+    const emptyState = page.locator('text=/No tenants|No registered tenants/i');
+    const hasContent = await tenantsTable.isVisible({ timeout: 3000 }).catch(() => false) ||
+                       await emptyState.isVisible({ timeout: 1000 }).catch(() => false);
+    expect(hasContent).toBe(true);
+  });
+
   test('navigation-works: Can navigate between super admin pages', async ({ page }) => {
     await page.goto('/superadmin/dashboard');
     await page.waitForLoadState('networkidle');

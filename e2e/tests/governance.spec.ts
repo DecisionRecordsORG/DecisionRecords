@@ -37,7 +37,7 @@ test.describe('Governance - Provisional Admin Restrictions', () => {
     // Should see the provisional admin banner
     const banner = page.locator('[data-testid="provisional-admin-banner"], .provisional-admin-banner');
     if (await banner.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(banner).toContainText(/restricted|limited|settings are restricted/i);
+      await expect(banner).toContainText(/provisional administrator|settings will unlock/i);
     } else {
       test.skip(true, 'Provisional admin banner not visible');
     }

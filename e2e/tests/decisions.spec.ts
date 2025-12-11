@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { loginAsUser } from '../fixtures/auth';
+import { loginAsUser, dismissOverlays } from '../fixtures/auth';
 
 test.describe('Decisions', () => {
   test('create-decision: User can create a new decision', async ({ page }) => {
@@ -47,6 +47,9 @@ test.describe('Decisions', () => {
       test.skip(true, 'Decision cards not visible');
       return;
     }
+
+    // Dismiss any overlays before clicking
+    await dismissOverlays(page);
 
     await decisionCard.click();
 
@@ -99,6 +102,9 @@ test.describe('Decisions', () => {
       return;
     }
 
+    // Dismiss any overlays before clicking
+    await dismissOverlays(page);
+
     await decisionCard.click();
     await page.waitForURL(/.*decision\/\d+.*/, { timeout: 10000 });
 
@@ -106,6 +112,8 @@ test.describe('Decisions', () => {
     const historyButton = page.locator('button:has-text("History"), mat-expansion-panel:has-text("History")').first();
 
     if (await historyButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Dismiss any overlays before clicking history button
+      await dismissOverlays(page);
       await historyButton.click();
       await page.waitForTimeout(1000);
       // Verify history content is shown
@@ -155,7 +163,13 @@ test.describe('Decision List - Space Filter', () => {
 
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('h1', { timeout: 10000 });
-    await page.waitForTimeout(3000);
+
+    // Dismiss any overlays (admin onboarding modal)
+    await dismissOverlays(page);
+    await page.waitForTimeout(1000);
+
+    // Wait for spaces to load
+    await page.waitForTimeout(2000);
 
     const spaceFilter = page.locator('.space-filter mat-select, mat-form-field:has(mat-label:has-text("Filter by Space")) mat-select').first();
 
@@ -164,11 +178,16 @@ test.describe('Decision List - Space Filter', () => {
       return;
     }
 
-    await spaceFilter.click();
+    // Dismiss again in case new overlays appeared
+    await dismissOverlays(page);
     await page.waitForTimeout(500);
 
+    // Use force: true to bypass mat-label overlay interception
+    await spaceFilter.click({ force: true });
+    await page.waitForTimeout(1000);
+
     const allSpacesOption = page.locator('mat-option:has-text("All Spaces")');
-    await expect(allSpacesOption).toBeVisible({ timeout: 3000 });
+    await expect(allSpacesOption).toBeVisible({ timeout: 5000 });
 
     await page.keyboard.press('Escape');
   });
@@ -199,6 +218,8 @@ test.describe('Decision Form - Space Selector', () => {
   test('space-selector-shows-available-spaces: Space selector shows tenant spaces', async ({ page }) => {
     await loginAsUser(page, 'user@test-org.com', 'TestPass123');
 
+    // Wait for page to be fully loaded
+    await page.waitForLoadState('networkidle', { timeout: 15000 });
     await page.waitForSelector('h1', { timeout: 10000 });
 
     const newDecisionBtn = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
@@ -214,7 +235,8 @@ test.describe('Decision Form - Space Selector', () => {
       return;
     }
 
-    await spaceSelector.click();
+    // Use force: true to bypass mat-label overlay interception
+    await spaceSelector.click({ force: true });
     await page.waitForTimeout(500);
 
     const generalOption = page.locator('mat-option:has-text("General")');
@@ -226,6 +248,8 @@ test.describe('Decision Form - Space Selector', () => {
   test('space-selector-is-multi-select: Can select multiple spaces', async ({ page }) => {
     await loginAsUser(page, 'user@test-org.com', 'TestPass123');
 
+    // Wait for page to be fully loaded
+    await page.waitForLoadState('networkidle', { timeout: 15000 });
     await page.waitForSelector('h1', { timeout: 10000 });
 
     const newDecisionBtn = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
@@ -241,7 +265,8 @@ test.describe('Decision Form - Space Selector', () => {
       return;
     }
 
-    await spaceSelector.click();
+    // Use force: true to bypass mat-label overlay interception
+    await spaceSelector.click({ force: true });
     await page.waitForTimeout(500);
 
     const firstOption = page.locator('mat-option').first();
@@ -252,9 +277,11 @@ test.describe('Decision Form - Space Selector', () => {
     await page.keyboard.press('Escape');
   });
 
-  test('decision-form-saves-with-spaces: Can create decision with spaces', async ({ page }) => {
+  test('decision-form-saves-with-spaces: Can create decision with spaces and redirects correctly', async ({ page }) => {
     await loginAsUser(page, 'user@test-org.com', 'TestPass123');
 
+    // Wait for page to be fully loaded
+    await page.waitForLoadState('networkidle', { timeout: 15000 });
     await page.waitForSelector('h1', { timeout: 10000 });
 
     const newDecisionBtn = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
@@ -263,26 +290,39 @@ test.describe('Decision Form - Space Selector', () => {
       return;
     }
 
+    // Dismiss any overlays before clicking
+    await dismissOverlays(page);
+    await page.waitForTimeout(500);
+
     await newDecisionBtn.click();
     await page.waitForSelector('input[formcontrolname="title"]', { timeout: 15000 });
 
+    // Verify we're on the new decision page with tenant prefix
+    expect(page.url()).toContain('test-org.com');
+    expect(page.url()).toContain('decision/new');
+
     // Fill required fields
-    await page.locator('input[formcontrolname="title"]').fill('Test Decision with Spaces ' + Date.now());
+    const uniqueTitle = 'Test Decision with Spaces ' + Date.now();
+    await page.locator('input[formcontrolname="title"]').fill(uniqueTitle);
     await page.locator('textarea[formcontrolname="context"]').fill('Test context for the decision');
     await page.locator('textarea[formcontrolname="decision"]').fill('We decided to test spaces');
 
-    // Select status
+    // Dismiss any overlays that may have appeared during form fill (snackbars, etc.)
+    await dismissOverlays(page);
+    await page.waitForTimeout(300);
+
+    // Select status - use force: true to bypass mat-label overlay
     const statusSelect = page.locator('mat-select[formcontrolname="status"]');
-    await statusSelect.click();
+    await statusSelect.click({ force: true });
     await page.waitForTimeout(300);
     await page.locator('mat-option:has-text("Proposed")').click();
 
     await page.locator('textarea[formcontrolname="consequences"]').fill('Better test coverage');
 
-    // Select a space if available
+    // Select a space if available - use force: true to bypass mat-label overlay
     const spaceSelector = page.locator('mat-form-field:has(mat-label:has-text("Spaces")) mat-select').first();
     if (await spaceSelector.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await spaceSelector.click();
+      await spaceSelector.click({ force: true });
       await page.waitForTimeout(500);
       const generalOption = page.locator('mat-option:has-text("General")');
       if (await generalOption.isVisible({ timeout: 2000 }).catch(() => false)) {
@@ -295,11 +335,23 @@ test.describe('Decision Form - Space Selector', () => {
     const saveButton = page.locator('button:has-text("Create Decision"), button[type="submit"]').first();
     await saveButton.click();
 
-    await page.waitForTimeout(3000);
+    // Wait for redirect to decision detail page
+    await page.waitForURL(/.*test-org\.com\/decision\/\d+.*/, { timeout: 10000 });
+
+    // Verify we're on the decision detail page (not homepage)
+    const currentUrl = page.url();
+    expect(currentUrl).toContain('test-org.com');
+    expect(currentUrl).toMatch(/\/decision\/\d+/);
+    expect(currentUrl).not.toBe('https://architecture-decisions.org');
+    expect(currentUrl).not.toBe('https://architecture-decisions.org/');
 
     // Verify no error
     const errorVisible = await page.locator('.error-message, mat-error:visible').isVisible({ timeout: 1000 }).catch(() => false);
     expect(errorVisible).toBe(false);
+
+    // Verify success message appeared (use .first() to handle multiple matching elements)
+    const successSnackbar = page.locator('simple-snack-bar:has-text("created"), .mat-mdc-snack-bar-label:has-text("created")').first();
+    await expect(successSnackbar).toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -307,7 +359,8 @@ test.describe('Decision Edit - Space Selector', () => {
   test('edit-decision-shows-space-selector: Editing shows space selector', async ({ page }) => {
     await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
 
-    await page.waitForLoadState('networkidle');
+    // Wait for page to be fully loaded
+    await page.waitForLoadState('networkidle', { timeout: 15000 });
     await page.waitForSelector('h1', { timeout: 10000 });
     await page.waitForTimeout(2000);
 
@@ -325,8 +378,15 @@ test.describe('Decision Edit - Space Selector', () => {
       return;
     }
 
+    // Dismiss any overlays before clicking
+    await dismissOverlays(page);
+    await page.waitForTimeout(500);
+
     await decisionCard.click();
     await page.waitForURL(/.*decision\/\d+.*/, { timeout: 10000 });
+
+    // Wait for decision detail page to load
+    await page.waitForTimeout(500);
 
     const editButton = page.locator('button:has-text("Edit")').first();
     if (!(await editButton.isVisible({ timeout: 5000 }).catch(() => false))) {
@@ -334,10 +394,17 @@ test.describe('Decision Edit - Space Selector', () => {
       return;
     }
 
+    // Dismiss any overlays before clicking edit button
+    await dismissOverlays(page);
+    await page.waitForTimeout(500);
+
     await editButton.click();
     await page.waitForSelector('input[formcontrolname="title"]', { timeout: 10000 });
 
-    // Check that space selector exists
+    // Wait for page to fully load and spaces to be fetched
+    await page.waitForTimeout(2000);
+
+    // Check that space selector exists (it shows when spaces.length > 0)
     const spaceSelector = page.locator('mat-form-field:has(mat-label:has-text("Spaces"))').first();
     if (await spaceSelector.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(spaceSelector).toBeVisible();

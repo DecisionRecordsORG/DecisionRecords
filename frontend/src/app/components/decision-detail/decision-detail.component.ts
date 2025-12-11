@@ -772,7 +772,7 @@ export class DecisionDetailComponent implements OnInit {
       }).subscribe({
         next: (decision) => {
           this.snackBar.open('Decision created successfully', 'Close', { duration: 3000 });
-          this.router.navigate(['/decision', decision.id]);
+          this.router.navigate(['/', this.tenant, 'decision', decision.id]);
         },
         error: (err) => {
           this.isSaving = false;

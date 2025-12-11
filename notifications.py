@@ -7,28 +7,42 @@ logger = logging.getLogger(__name__)
 
 
 def send_email(email_config, to_email, subject, html_content, text_content=None):
-    """Send an email using the provided SMTP configuration."""
+    """Send an email using the provided SMTP configuration.
+
+    Security: SMTP passwords are stored encrypted in the database.
+    This function decrypts them only at send time, and credentials
+    are never logged or exposed.
+    """
     if not email_config or not email_config.enabled:
         logger.warning("Email not sent: Email configuration is missing or disabled")
         return False
 
     try:
+        from crypto import decrypt_password
+
         # Determine actual credentials to use
         smtp_username = email_config.smtp_username
         smtp_password = email_config.smtp_password
-        
+
         # If config uses Key Vault placeholders, fetch from Key Vault
         if smtp_username == 'from-keyvault' or smtp_password == 'from-keyvault':
             from keyvault_client import keyvault_client
             kv_username, kv_password = keyvault_client.get_smtp_credentials()
-            
+
             if not kv_username or not kv_password:
                 logger.error("SMTP credentials not available in Key Vault")
                 return False
-                
+
             smtp_username = kv_username
             smtp_password = kv_password
             logger.info("Using SMTP credentials from Key Vault")
+        else:
+            # Decrypt the password if it's encrypted (tenant email configs)
+            decrypted_password = decrypt_password(smtp_password)
+            if decrypted_password is None:
+                logger.error("Failed to decrypt SMTP password")
+                return False
+            smtp_password = decrypted_password
 
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject

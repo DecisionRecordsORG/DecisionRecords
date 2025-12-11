@@ -1,5 +1,9 @@
 # Claude Code Instructions
 DO NOT add Claude code branding in commit messages.
+Always ask approval before deploying to production.
+Always run the redeploy script with required parameters.
+When you add features, add UI tests for them too.
+Make use of Claude code sub agents to write and run tests.
 
 This file contains instructions and context for Claude Code when working on this project.
 
