@@ -3760,7 +3760,7 @@ def api_admin_create_role_request():
     db.session.commit()
 
     # Check if provisional admin should be upgraded
-    check_and_upgrade_provisional_admins(tenant.id)
+    check_and_upgrade_provisional_admins(tenant)
 
     return jsonify({
         'message': 'Role request submitted successfully',
@@ -3830,8 +3830,8 @@ def api_admin_approve_role_request(request_id):
     # Log the approval and role change
     log_admin_action(
         tenant_id=tenant.id,
-        performed_by_id=user.id,
-        action_type=AuditLog.ACTION_ROLE_REQUEST_APPROVED,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_APPROVE_REQUEST,
         target_entity='role_request',
         target_id=role_request.id,
         details={
@@ -3845,7 +3845,7 @@ def api_admin_approve_role_request(request_id):
     db.session.commit()
 
     # Check if any provisional admins should be upgraded
-    check_and_upgrade_provisional_admins(tenant.id)
+    check_and_upgrade_provisional_admins(tenant)
 
     # Get updated user
     target_user = User.query.get(role_request.user_id)
@@ -3894,8 +3894,8 @@ def api_admin_reject_role_request(request_id):
     # Log the rejection
     log_admin_action(
         tenant_id=tenant.id,
-        performed_by_id=user.id,
-        action_type=AuditLog.ACTION_ROLE_REQUEST_REJECTED,
+        actor_user_id=user.id,
+        action_type=AuditLog.ACTION_REJECT_REQUEST,
         target_entity='role_request',
         target_id=role_request.id,
         details={
