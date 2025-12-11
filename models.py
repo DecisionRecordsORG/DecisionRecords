@@ -233,8 +233,12 @@ class Tenant(db.Model):
         member_count = self.get_member_count()
 
         has_multi_admin = admin_count >= 2 or (admin_count >= 1 and steward_count >= 1)
-        has_enough_users = member_count >= self.maturity_user_threshold
-        is_old_enough = (datetime.utcnow() - self.created_at).days >= self.maturity_age_days
+        # Handle None thresholds (use defaults if not set)
+        user_threshold = self.maturity_user_threshold if self.maturity_user_threshold is not None else 5
+        age_days = self.maturity_age_days if self.maturity_age_days is not None else 90
+        has_enough_users = member_count >= user_threshold
+        created_at = self.created_at or datetime.utcnow()
+        is_old_enough = (datetime.utcnow() - created_at).days >= age_days
 
         if has_multi_admin or has_enough_users or is_old_enough:
             return MaturityState.MATURE
@@ -503,6 +507,7 @@ class AuditLog(db.Model):
     ACTION_REJECT_REQUEST = 'reject_request'
     ACTION_CREATE_SPACE = 'create_space'
     ACTION_DELETE_SPACE = 'delete_space'
+    ACTION_ROLE_REQUESTED = 'role_requested'
     ACTION_MATURITY_CHANGE = 'maturity_change'
     ACTION_USER_JOINED = 'user_joined'
     ACTION_USER_LEFT = 'user_left'
