@@ -529,5 +529,5 @@ Message:
 This sponsorship inquiry was submitted through the {app_name} website.
     """
 
-    # Send to the sponsors inbox
-    return send_email(email_config, "sponsors@architecture-decisions.org", subject, html_content, text_content)
+    # Send to the admin inbox
+    return send_email(email_config, "adr-admin@architecture-decisions.org", subject, html_content, text_content)

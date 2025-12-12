@@ -59,6 +59,17 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <span>Sign In</span>
               </button>
             </div>
+
+            <!-- Limited Preview Notice -->
+            <div class="preview-notice">
+              <div class="preview-badge">
+                <mat-icon>new_releases</mat-icon>
+                <span>Limited Preview</span>
+              </div>
+              <p class="preview-text">
+                Free for early users while we stabilise features and grow the community.
+              </p>
+            </div>
           </div>
 
           <!-- Screenshot inside hero -->
@@ -158,6 +169,23 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
               <div class="tenant-info">
                 <mat-icon>domain</mat-icon>
                 <span>Setting up <strong>{{ tenantDomain }}</strong></span>
+              </div>
+
+              <!-- Limited Preview Info Card -->
+              <div class="preview-info-card">
+                <div class="preview-info-header">
+                  <mat-icon>celebration</mat-icon>
+                  <span>Limited Preview</span>
+                </div>
+                <ul class="preview-features">
+                  <li><mat-icon>group</mat-icon> Up to 5 users</li>
+                  <li><mat-icon>check_circle</mat-icon> All features</li>
+                  <li><mat-icon>lock_open</mat-icon> Free to use</li>
+                  <li><mat-icon>verified</mat-icon> Your data forever</li>
+                </ul>
+                <p class="preview-reach-out">
+                  Need more users? <a href="javascript:void(0)" (click)="closeDialog(); openSponsorshipDialog()">Get in touch</a>
+                </p>
               </div>
 
               <form [formGroup]="signupForm" (ngSubmit)="sendVerification()">
@@ -622,9 +650,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   and we do not monetise user data or sell access.
                 </p>
                 <p>
-                  To cover infrastructure and operational costs, the project is supported through sponsorships.
-                  Sponsorship does not grant control, influence over content, or preferential treatment.
-                  It simply helps ensure the platform remains <strong>stable, independent, and available</strong> over the long term.
+                  Use this form to <strong>support the project</strong> through sponsorship, or to <strong>discuss extended limits</strong>
+                  if your organisation needs more users or wants to explore enterprise features.
+                </p>
+                <p>
+                  We'd love to hear from you and will respond directly.
                 </p>
               </div>
 
@@ -652,7 +682,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                     <mat-label>Area of Interest</mat-label>
                     <mat-select formControlName="area_of_interest">
                       <mat-option value="">Select an option...</mat-option>
+                      <mat-option value="Extended limits / More users">Extended limits / More users</mat-option>
                       <mat-option value="General sponsorship">General sponsorship</mat-option>
+                      <mat-option value="Enterprise features">Enterprise features</mat-option>
                       <mat-option value="Public sector use">Public sector use</mat-option>
                       <mat-option value="Research">Research</mat-option>
                       <mat-option value="Internal adoption">Internal adoption</mat-option>
@@ -768,7 +800,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       padding: 14px 32px !important;
       font-size: 16px !important;
       font-weight: 500 !important;
-      border-radius: 100px !important;
+      border-radius: 8px !important;
       background: white !important;
       color: #1e40af !important;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
@@ -789,7 +821,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       padding: 14px 32px !important;
       font-size: 16px !important;
       font-weight: 500 !important;
-      border-radius: 100px !important;
+      border-radius: 8px !important;
       border-color: rgba(255, 255, 255, 0.4) !important;
       color: white !important;
     }
@@ -802,6 +834,137 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .cta-button-secondary span,
     .cta-button-secondary mat-icon {
       color: white !important;
+    }
+
+    /* Limited Preview Notice - Hero */
+    .preview-notice {
+      margin-top: 32px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      animation: fadeInUp 0.6s ease-out 0.3s both;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .preview-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.2) 0%, rgba(245, 158, 11, 0.15) 100%);
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      border-radius: 100px;
+      backdrop-filter: blur(8px);
+    }
+
+    .preview-badge mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #fbbf24;
+    }
+
+    .preview-badge span {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fef3c7;
+      letter-spacing: 0.5px;
+    }
+
+    .preview-text {
+      font-size: 0.9rem;
+      color: rgba(191, 219, 254, 0.8);
+      margin: 0;
+    }
+
+    /* Preview Info Card - Signup Dialog */
+    .preview-info-card {
+      background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+      border: 1px solid #fde047;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .preview-info-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .preview-info-header mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: #ca8a04;
+    }
+
+    .preview-info-header span {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #854d0e;
+    }
+
+    .preview-features {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .preview-features li {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: #713f12;
+    }
+
+    .preview-features li mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      color: #a16207;
+    }
+
+    .preview-reach-out {
+      margin: 12px 0 0;
+      padding-top: 12px;
+      border-top: 1px solid rgba(202, 138, 4, 0.2);
+      font-size: 0.8rem;
+      color: #92400e;
+      text-align: center;
+    }
+
+    .preview-reach-out a {
+      color: #b45309;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+    }
+
+    .preview-reach-out a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 400px) {
+      .preview-features {
+        grid-template-columns: 1fr;
+      }
     }
 
     .hero-initiative {
