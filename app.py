@@ -4646,7 +4646,8 @@ def api_update_tenant_maturity_thresholds(domain):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to update thresholds: {str(e)}'}), 500
+        app.logger.error(f'Failed to update thresholds for {domain}: {str(e)}')
+        return jsonify({'error': 'Failed to update thresholds. Please try again or contact support.'}), 500
 
 
 @app.route('/api/tenants/<domain>/maturity/force-upgrade', methods=['POST'])
@@ -4702,7 +4703,8 @@ def api_force_tenant_maturity_upgrade(domain):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to force upgrade: {str(e)}'}), 500
+        app.logger.error(f'Failed to force upgrade for {domain}: {str(e)}')
+        return jsonify({'error': 'Failed to force upgrade. Please try again or contact support.'}), 500
 
 
 @app.route('/api/tenants/<domain>', methods=['DELETE'])
@@ -4767,26 +4769,8 @@ def api_delete_tenant(domain):
         tenant.deletion_expires_at = deletion_expires_at
         tenant.status = 'deleted'
 
-        # Log the deletion action (audit logs are immutable and never deleted)
-        log_admin_action(
-            tenant_id=tenant_id,
-            actor_user_id=None,  # Super admin
-            action_type=AuditLog.ACTION_DELETE,
-            target_entity='tenant',
-            target_id=tenant_id,
-            details={
-                'domain': domain,
-                'actor': 'super_admin',
-                'deletion_type': 'soft_delete',
-                'retention_days': retention_days,
-                'deletion_expires_at': deletion_expires_at.isoformat(),
-                'affected_counts': {
-                    'members': member_count,
-                    'spaces': space_count,
-                    'decisions': decision_count
-                }
-            }
-        )
+        # Note: Skipping audit log for super admin actions as there's no user_id
+        # Super admin actions are logged via session username in tenant.deleted_by_admin
 
         # Update domain approval status
         domain_approval = DomainApproval.query.filter_by(domain=domain).first()
@@ -4815,7 +4799,8 @@ def api_delete_tenant(domain):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to delete tenant: {str(e)}'}), 500
+        app.logger.error(f'Failed to delete tenant {domain}: {str(e)}')
+        return jsonify({'error': 'Failed to delete tenant. Please try again or contact support.'}), 500
 
 
 @app.route('/api/tenants/<domain>/restore', methods=['POST'])
@@ -4890,7 +4875,8 @@ def api_restore_tenant(domain):
         })
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': f'Failed to restore tenant: {str(e)}'}), 500
+        app.logger.error(f'Failed to restore tenant {domain}: {str(e)}')
+        return jsonify({'error': 'Failed to restore tenant. Please try again or contact support.'}), 500
 
 
 # ==================== API Routes - Tenant Auth Config ====================
