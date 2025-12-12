@@ -224,6 +224,7 @@ class TestAuditLogModel:
         assert hasattr(AuditLog, 'ACTION_REJECT_REQUEST')
         assert hasattr(AuditLog, 'ACTION_CREATE_SPACE')
         assert hasattr(AuditLog, 'ACTION_DELETE_SPACE')
+        assert hasattr(AuditLog, 'ACTION_DELETE')
         assert hasattr(AuditLog, 'ACTION_ROLE_REQUESTED')
         assert hasattr(AuditLog, 'ACTION_MATURITY_CHANGE')
 

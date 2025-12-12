@@ -507,6 +507,7 @@ class AuditLog(db.Model):
     ACTION_REJECT_REQUEST = 'reject_request'
     ACTION_CREATE_SPACE = 'create_space'
     ACTION_DELETE_SPACE = 'delete_space'
+    ACTION_DELETE = 'delete'  # Generic delete action (for decisions, tenants, etc.)
     ACTION_ROLE_REQUESTED = 'role_requested'
     ACTION_MATURITY_CHANGE = 'maturity_change'
     ACTION_USER_JOINED = 'user_joined'
