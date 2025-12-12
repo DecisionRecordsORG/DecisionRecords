@@ -20,6 +20,13 @@ interface SessionSettings {
   };
 }
 
+interface LicensingSettings {
+  max_users_per_tenant: number;
+  defaults: {
+    max_users_per_tenant: number;
+  };
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
@@ -42,6 +49,58 @@ interface SessionSettings {
         System Settings
       </h1>
 
+      <!-- Licensing Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>business</mat-icon>
+            Licensing & Limits
+          </mat-card-title>
+          <mat-card-subtitle>
+            Configure tenant limits and licensing thresholds
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (licensingLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <form [formGroup]="licensingForm" (ngSubmit)="saveLicensingSettings()">
+              <div class="form-section">
+                <h3>User Limits</h3>
+                <p class="hint">Control the maximum number of users per tenant (0 = unlimited)</p>
+                <mat-form-field appearance="outline">
+                  <mat-label>Max Users Per Tenant</mat-label>
+                  <input matInput type="number" formControlName="max_users_per_tenant" min="0" max="10000">
+                  <mat-hint>0-10000 (default: {{ licensingDefaults.max_users_per_tenant }}, 0 = unlimited)</mat-hint>
+                </mat-form-field>
+                <div class="limit-info">
+                  @if (licensingForm.get('max_users_per_tenant')?.value === 0) {
+                    <span class="unlimited"><mat-icon>all_inclusive</mat-icon> Unlimited users allowed</span>
+                  } @else {
+                    <span class="limited"><mat-icon>group</mat-icon> Each tenant can have up to {{ licensingForm.get('max_users_per_tenant')?.value }} users</span>
+                  }
+                </div>
+              </div>
+
+              <div class="actions">
+                <button mat-raised-button color="primary" type="submit" [disabled]="licensingSaving || !licensingForm.valid">
+                  <mat-spinner diameter="20" *ngIf="licensingSaving"></mat-spinner>
+                  <mat-icon *ngIf="!licensingSaving">save</mat-icon>
+                  <span *ngIf="!licensingSaving">Save Licensing Settings</span>
+                </button>
+                <button mat-button type="button" (click)="resetLicensingToDefaults()">
+                  <mat-icon>restore</mat-icon>
+                  Reset to Defaults
+                </button>
+              </div>
+            </form>
+          }
+        </mat-card-content>
+      </mat-card>
+
+      <!-- Session Settings Card -->
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -159,6 +218,36 @@ interface SessionSettings {
       width: 200px;
     }
 
+    .limit-info {
+      margin-top: 16px;
+      padding: 12px;
+      background: #e3f2fd;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+    }
+
+    .limit-info span {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .limit-info .unlimited {
+      color: #2e7d32;
+    }
+
+    .limit-info .limited {
+      color: #1565c0;
+    }
+
+    .limit-info mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
     .actions {
       display: flex;
       gap: 12px;
@@ -178,11 +267,17 @@ interface SessionSettings {
 })
 export class SuperadminSettingsComponent implements OnInit {
   sessionForm: FormGroup;
+  licensingForm: FormGroup;
   loading = true;
   saving = false;
+  licensingLoading = true;
+  licensingSaving = false;
   defaults = {
     admin_session_timeout_hours: 1,
     user_session_timeout_hours: 8
+  };
+  licensingDefaults = {
+    max_users_per_tenant: 5
   };
 
   constructor(
@@ -194,10 +289,14 @@ export class SuperadminSettingsComponent implements OnInit {
       admin_session_timeout_hours: [1, [Validators.required, Validators.min(1), Validators.max(24)]],
       user_session_timeout_hours: [8, [Validators.required, Validators.min(1), Validators.max(168)]]
     });
+    this.licensingForm = this.fb.group({
+      max_users_per_tenant: [5, [Validators.required, Validators.min(0), Validators.max(10000)]]
+    });
   }
 
   ngOnInit() {
     this.loadSettings();
+    this.loadLicensingSettings();
   }
 
   loadSettings() {
@@ -218,6 +317,23 @@ export class SuperadminSettingsComponent implements OnInit {
     });
   }
 
+  loadLicensingSettings() {
+    this.licensingLoading = true;
+    this.http.get<LicensingSettings>('/api/admin/settings/licensing').subscribe({
+      next: (settings) => {
+        this.licensingForm.patchValue({
+          max_users_per_tenant: settings.max_users_per_tenant
+        });
+        this.licensingDefaults = settings.defaults;
+        this.licensingLoading = false;
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to load licensing settings', 'Close', { duration: 3000 });
+        this.licensingLoading = false;
+      }
+    });
+  }
+
   saveSettings() {
     if (!this.sessionForm.valid) return;
 
@@ -234,10 +350,32 @@ export class SuperadminSettingsComponent implements OnInit {
     });
   }
 
+  saveLicensingSettings() {
+    if (!this.licensingForm.valid) return;
+
+    this.licensingSaving = true;
+    this.http.post('/api/admin/settings/licensing', this.licensingForm.value).subscribe({
+      next: () => {
+        this.snackBar.open('Licensing settings saved successfully', 'Close', { duration: 3000 });
+        this.licensingSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save licensing settings', 'Close', { duration: 3000 });
+        this.licensingSaving = false;
+      }
+    });
+  }
+
   resetToDefaults() {
     this.sessionForm.patchValue({
       admin_session_timeout_hours: this.defaults.admin_session_timeout_hours,
       user_session_timeout_hours: this.defaults.user_session_timeout_hours
+    });
+  }
+
+  resetLicensingToDefaults() {
+    this.licensingForm.patchValue({
+      max_users_per_tenant: this.licensingDefaults.max_users_per_tenant
     });
   }
 }

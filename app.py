@@ -2012,6 +2012,114 @@ def api_save_session_settings():
     })
 
 
+@app.route('/api/admin/settings/licensing', methods=['GET'])
+@master_required
+def api_get_licensing_settings():
+    """Get licensing settings (super admin only)."""
+    return jsonify({
+        'max_users_per_tenant': SystemConfig.get_int(
+            SystemConfig.KEY_MAX_USERS_PER_TENANT,
+            default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+        ),
+        'defaults': {
+            'max_users_per_tenant': SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+        }
+    })
+
+
+@app.route('/api/admin/settings/licensing', methods=['POST', 'PUT'])
+@master_required
+def api_save_licensing_settings():
+    """Update licensing settings (super admin only)."""
+    data = request.get_json() or {}
+
+    max_users = data.get('max_users_per_tenant')
+
+    if max_users is not None:
+        try:
+            max_users = int(max_users)
+            if max_users < 0 or max_users > 10000:
+                return jsonify({'error': 'Max users per tenant must be between 0 and 10000 (0 = unlimited)'}), 400
+            SystemConfig.set(
+                SystemConfig.KEY_MAX_USERS_PER_TENANT,
+                max_users,
+                description='Maximum users allowed per tenant (0 = unlimited)'
+            )
+        except (ValueError, TypeError):
+            return jsonify({'error': 'Invalid max users value'}), 400
+
+    return jsonify({
+        'message': 'Licensing settings updated successfully',
+        'max_users_per_tenant': SystemConfig.get_int(
+            SystemConfig.KEY_MAX_USERS_PER_TENANT,
+            default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+        )
+    })
+
+
+def get_tenant_user_count(domain):
+    """Get the current user count for a tenant."""
+    # Try v1.5 model first (TenantMembership)
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if tenant:
+        return tenant.get_member_count()
+
+    # Fallback to legacy model (User.sso_domain)
+    return User.query.filter_by(sso_domain=domain).count()
+
+
+def can_tenant_accept_users(domain, count=1):
+    """Check if a tenant can accept more users.
+
+    Args:
+        domain: The tenant domain
+        count: Number of users to add (default 1)
+
+    Returns:
+        tuple: (can_accept: bool, message: str, current_count: int, max_allowed: int)
+    """
+    max_users = SystemConfig.get_int(
+        SystemConfig.KEY_MAX_USERS_PER_TENANT,
+        default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+    )
+
+    # 0 means unlimited
+    if max_users == 0:
+        return (True, 'Unlimited users allowed', 0, 0)
+
+    current_count = get_tenant_user_count(domain)
+
+    if current_count + count > max_users:
+        return (
+            False,
+            f'Tenant has reached the maximum user limit of {max_users}. Current users: {current_count}.',
+            current_count,
+            max_users
+        )
+
+    return (True, 'User limit not reached', current_count, max_users)
+
+
+@app.route('/api/tenants/<domain>/limits', methods=['GET'])
+@master_required
+def api_get_tenant_limits(domain):
+    """Get tenant limit status (super admin only)."""
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    can_accept, message, current_count, max_allowed = can_tenant_accept_users(domain)
+
+    return jsonify({
+        'domain': domain,
+        'user_count': current_count,
+        'max_users_per_tenant': max_allowed,
+        'can_accept_users': can_accept,
+        'message': message,
+        'remaining_slots': max(0, max_allowed - current_count) if max_allowed > 0 else -1
+    })
+
+
 # ==================== API Routes - Admin (Users) ====================
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -2802,6 +2910,16 @@ def api_submit_access_request():
         from models import SetupToken
         from notifications import send_account_setup_email
 
+        # Check user limit before auto-approving
+        can_accept, limit_message, current_count, max_allowed = can_tenant_accept_users(domain)
+        if not can_accept:
+            return jsonify({
+                'error': 'User limit reached',
+                'message': f'{limit_message} Please contact your organization administrator.',
+                'current_users': current_count,
+                'max_users': max_allowed
+            }), 403
+
         # Create the user account
         new_user = User(
             email=email,
@@ -3264,6 +3382,18 @@ def api_approve_access_request(request_id):
 
     if access_request.status != 'pending':
         return jsonify({'error': f'Request is already {access_request.status}'}), 400
+
+    # Check user limit before approving (only if creating a new user)
+    existing_user_check = User.query.filter_by(email=access_request.email).first()
+    if not existing_user_check:
+        can_accept, limit_message, current_count, max_allowed = can_tenant_accept_users(access_request.domain)
+        if not can_accept:
+            return jsonify({
+                'error': 'User limit reached',
+                'message': limit_message,
+                'current_users': current_count,
+                'max_users': max_allowed
+            }), 403
 
     # Check if user already exists (could have been created via another path)
     existing_user = User.query.filter_by(email=access_request.email).first()

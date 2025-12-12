@@ -1,1 +1,1 @@
-# Test package for Architecture Decisions
+# Tests package for architecture-decisions

@@ -61,9 +61,13 @@ class SystemConfig(db.Model):
     KEY_ADMIN_SESSION_TIMEOUT_HOURS = 'admin_session_timeout_hours'
     KEY_USER_SESSION_TIMEOUT_HOURS = 'user_session_timeout_hours'
 
+    # Licensing configuration keys
+    KEY_MAX_USERS_PER_TENANT = 'max_users_per_tenant'
+
     # Default values
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
     DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
+    DEFAULT_MAX_USERS_PER_TENANT = 5   # Free tier limit (0 = unlimited)
 
     @staticmethod
     def get(key, default=None):
