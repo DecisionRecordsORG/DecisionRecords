@@ -12,6 +12,11 @@ export const routes: Routes = [
     path: 'about',
     loadComponent: () => import('./components/about/about.component').then(m => m.AboutComponent)
   },
+  // Licensing page
+  {
+    path: 'licensing',
+    loadComponent: () => import('./components/licensing/licensing.component').then(m => m.LicensingComponent)
+  },
   // Super admin login
   {
     path: 'superadmin',

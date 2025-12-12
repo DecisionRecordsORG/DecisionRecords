@@ -581,7 +581,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 Architecture-Decisions.org is an open initiative to make architectural decision-making
                 transparent, durable, and reusable.
               </p>
-              <small class="footer-copyright">&copy; {{ currentYear }} Architecture-Decisions.org</small>
+              <small class="footer-copyright">&copy; {{ currentYear }} Architecture-Decisions.org <span class="footer-separator">|</span> <a routerLink="/licensing" class="footer-link">License Model</a></small>
             </div>
             <div class="footer-support-col">
               <h4>Support the Initiative</h4>
@@ -1589,6 +1589,21 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .footer-copyright {
       color: #64748b;
+    }
+
+    .footer-separator {
+      margin: 0 8px;
+      color: #475569;
+    }
+
+    .footer-link {
+      color: #64748b;
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-link:hover {
+      color: #93c5fd;
     }
 
     .footer-support-col {
