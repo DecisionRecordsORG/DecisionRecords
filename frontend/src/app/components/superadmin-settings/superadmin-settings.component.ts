@@ -46,6 +46,14 @@ interface AnalyticsSettings {
   categories: { [key: string]: EndpointCategory };
 }
 
+interface CloudflareSettings {
+  origin_check_enabled: boolean;
+  access_enabled: boolean;
+  access_team_domain: string;
+  access_aud_configured: boolean;
+  protected_paths: string[];
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
@@ -363,6 +371,146 @@ interface AnalyticsSettings {
           }
         </mat-card-content>
       </mat-card>
+
+      <!-- Cloudflare Security Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>security</mat-icon>
+            Cloudflare Security
+          </mat-card-title>
+          <mat-card-subtitle>
+            Configure Cloudflare origin protection and Access authentication
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (cloudflareLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <div class="form-section">
+              <h3>Origin Protection</h3>
+              <p class="hint">Block direct access to Azure IP - only allow requests through Cloudflare</p>
+
+              <div class="toggle-row">
+                <mat-slide-toggle
+                  [(ngModel)]="cfOriginCheckEnabled"
+                  (change)="saveCloudflareSettings()"
+                  color="primary">
+                  Enable Origin Check
+                </mat-slide-toggle>
+                <span class="status-badge" [class.enabled]="cfOriginCheckEnabled">
+                  {{ cfOriginCheckEnabled ? 'Protected' : 'Disabled' }}
+                </span>
+              </div>
+
+              <div class="security-info" [class.active]="cfOriginCheckEnabled">
+                <mat-icon>{{ cfOriginCheckEnabled ? 'verified_user' : 'warning' }}</mat-icon>
+                @if (cfOriginCheckEnabled) {
+                  <span>Direct IP access is blocked. All requests must come through Cloudflare.</span>
+                } @else {
+                  <span>Warning: Direct IP access is allowed. Anyone with the Azure IP can bypass Cloudflare.</span>
+                }
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h3>Cloudflare Access (Zero Trust)</h3>
+              <p class="hint">Require Cloudflare Access authentication for protected paths (e.g., /superadmin)</p>
+
+              <div class="toggle-row">
+                <mat-slide-toggle
+                  [(ngModel)]="cfAccessEnabled"
+                  (change)="saveCloudflareSettings()"
+                  color="primary">
+                  Enable Cloudflare Access
+                </mat-slide-toggle>
+                <span class="status-badge" [class.enabled]="cfAccessEnabled">
+                  {{ cfAccessEnabled ? 'Active' : 'Disabled' }}
+                </span>
+              </div>
+
+              @if (cfAccessEnabled) {
+                <div class="cloudflare-config">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Team Domain</mat-label>
+                    <input matInput
+                           [(ngModel)]="cfAccessTeamDomain"
+                           placeholder="yourteam.cloudflareaccess.com">
+                    <mat-hint>Your Cloudflare Access team domain</mat-hint>
+                  </mat-form-field>
+
+                  <div class="aud-section">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Access AUD (Audience Tag)</mat-label>
+                      <input matInput
+                             [type]="showAccessAud ? 'text' : 'password'"
+                             [(ngModel)]="cfAccessAud"
+                             placeholder="32+ character hex string">
+                      <button mat-icon-button matSuffix
+                              (click)="showAccessAud = !showAccessAud"
+                              type="button"
+                              matTooltip="{{ showAccessAud ? 'Hide' : 'Show' }} AUD">
+                        <mat-icon>{{ showAccessAud ? 'visibility_off' : 'visibility' }}</mat-icon>
+                      </button>
+                      <mat-hint>
+                        @if (cfAccessAudConfigured && !cfAccessAud) {
+                          AUD is configured (hidden for security)
+                        } @else {
+                          Find this in your Cloudflare Access application settings
+                        }
+                      </mat-hint>
+                    </mat-form-field>
+                    <button mat-stroked-button
+                            (click)="saveCloudflareAccessAud()"
+                            [disabled]="!cfAccessAud || cfSavingAud">
+                      <mat-spinner diameter="18" *ngIf="cfSavingAud"></mat-spinner>
+                      <mat-icon *ngIf="!cfSavingAud">vpn_key</mat-icon>
+                      Save AUD
+                    </button>
+                  </div>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Protected Paths</mat-label>
+                    <input matInput
+                           [(ngModel)]="cfProtectedPathsStr"
+                           placeholder="/superadmin, /superadmin/*">
+                    <mat-hint>Comma-separated paths that require Cloudflare Access authentication</mat-hint>
+                  </mat-form-field>
+
+                  <div class="test-section">
+                    <button mat-stroked-button
+                            color="primary"
+                            (click)="testCloudflareConnection()"
+                            [disabled]="cfTesting || !cfAccessAudConfigured">
+                      <mat-spinner diameter="18" *ngIf="cfTesting"></mat-spinner>
+                      <mat-icon *ngIf="!cfTesting">verified</mat-icon>
+                      Test Configuration
+                    </button>
+                    @if (cfTestResult) {
+                      <span class="test-result" [class.success]="cfTestSuccess">
+                        <mat-icon>{{ cfTestSuccess ? 'check_circle' : 'error' }}</mat-icon>
+                        {{ cfTestResult }}
+                      </span>
+                    }
+                  </div>
+
+                  <div class="actions">
+                    <button mat-raised-button color="primary"
+                            (click)="saveCloudflareSettings()"
+                            [disabled]="cfSaving">
+                      <mat-spinner diameter="20" *ngIf="cfSaving"></mat-spinner>
+                      <mat-icon *ngIf="!cfSaving">save</mat-icon>
+                      <span *ngIf="!cfSaving">Save Cloudflare Settings</span>
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </mat-card-content>
+      </mat-card>
     </div>
   `,
   styles: [`
@@ -615,6 +763,48 @@ interface AnalyticsSettings {
       border-top: 1px solid #e0e0e0;
       margin-top: 16px;
     }
+
+    /* Cloudflare styles */
+    .security-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #fff3e0;
+      border-radius: 4px;
+      margin-top: 16px;
+      color: #e65100;
+    }
+
+    .security-info.active {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .security-info mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+
+    .cloudflare-config {
+      margin-top: 16px;
+    }
+
+    .aud-section {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin: 16px 0;
+    }
+
+    .aud-section mat-form-field {
+      flex: 1;
+    }
+
+    .aud-section button {
+      margin-top: 4px;
+    }
   `]
 })
 export class SuperadminSettingsComponent implements OnInit {
@@ -651,6 +841,21 @@ export class SuperadminSettingsComponent implements OnInit {
   analyticsCategories: { [key: string]: EndpointCategory } | null = null;
   analyticsDefaultMappings: { [key: string]: string } = {};
 
+  // Cloudflare settings
+  cloudflareLoading = true;
+  cfSaving = false;
+  cfSavingAud = false;
+  cfTesting = false;
+  cfOriginCheckEnabled = true;
+  cfAccessEnabled = false;
+  cfAccessTeamDomain = '';
+  cfAccessAud = '';
+  cfAccessAudConfigured = false;
+  cfProtectedPathsStr = '/superadmin, /superadmin/*';
+  showAccessAud = false;
+  cfTestResult = '';
+  cfTestSuccess = false;
+
   constructor(
     private http: HttpClient,
     private fb: FormBuilder,
@@ -669,6 +874,7 @@ export class SuperadminSettingsComponent implements OnInit {
     this.loadSettings();
     this.loadLicensingSettings();
     this.loadAnalyticsSettings();
+    this.loadCloudflareSettings();
   }
 
   loadSettings() {
@@ -868,6 +1074,83 @@ export class SuperadminSettingsComponent implements OnInit {
       },
       error: (error) => {
         this.snackBar.open(error.error?.error || 'Failed to reset mappings', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  // Cloudflare methods
+  loadCloudflareSettings() {
+    this.cloudflareLoading = true;
+    this.http.get<CloudflareSettings>('/api/admin/settings/cloudflare').subscribe({
+      next: (settings) => {
+        this.cfOriginCheckEnabled = settings.origin_check_enabled;
+        this.cfAccessEnabled = settings.access_enabled;
+        this.cfAccessTeamDomain = settings.access_team_domain;
+        this.cfAccessAudConfigured = settings.access_aud_configured;
+        this.cfProtectedPathsStr = settings.protected_paths.join(', ');
+        this.cloudflareLoading = false;
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to load Cloudflare settings', 'Close', { duration: 3000 });
+        this.cloudflareLoading = false;
+      }
+    });
+  }
+
+  saveCloudflareSettings() {
+    this.cfSaving = true;
+    const protectedPaths = this.cfProtectedPathsStr.split(',').map(p => p.trim()).filter(p => p);
+
+    this.http.post('/api/admin/settings/cloudflare', {
+      origin_check_enabled: this.cfOriginCheckEnabled,
+      access_enabled: this.cfAccessEnabled,
+      access_team_domain: this.cfAccessTeamDomain,
+      protected_paths: protectedPaths
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Cloudflare settings saved', 'Close', { duration: 3000 });
+        this.cfSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save Cloudflare settings', 'Close', { duration: 3000 });
+        this.cfSaving = false;
+      }
+    });
+  }
+
+  saveCloudflareAccessAud() {
+    if (!this.cfAccessAud) return;
+
+    this.cfSavingAud = true;
+    this.http.put('/api/admin/settings/cloudflare/access-aud', {
+      access_aud: this.cfAccessAud
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Access AUD saved', 'Close', { duration: 3000 });
+        this.cfAccessAudConfigured = true;
+        this.cfAccessAud = ''; // Clear for security
+        this.cfSavingAud = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save Access AUD', 'Close', { duration: 3000 });
+        this.cfSavingAud = false;
+      }
+    });
+  }
+
+  testCloudflareConnection() {
+    this.cfTesting = true;
+    this.cfTestResult = '';
+    this.http.post<{ success: boolean; message: string }>('/api/admin/settings/cloudflare/test', {}).subscribe({
+      next: (response) => {
+        this.cfTestResult = response.message;
+        this.cfTestSuccess = response.success;
+        this.cfTesting = false;
+      },
+      error: (error) => {
+        this.cfTestResult = error.error?.message || 'Connection test failed';
+        this.cfTestSuccess = false;
+        this.cfTesting = false;
       }
     });
   }

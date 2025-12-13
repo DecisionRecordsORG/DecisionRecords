@@ -25,6 +25,7 @@ from security import (
 )
 from keyvault_client import keyvault_client
 from analytics import track_endpoint
+from cloudflare_security import setup_cloudflare_security, require_cloudflare_access, get_cloudflare_config_for_api, invalidate_cloudflare_cache
 
 # Configure logging
 logging.basicConfig(
@@ -160,6 +161,16 @@ except ImportError:
     talisman = None
     CSP_ENABLED = False
     logger.warning("Flask-Talisman not installed, CSP disabled")
+
+# ==================== Cloudflare Security ====================
+# Validates requests come through Cloudflare (blocks direct IP access)
+# Production only - disabled in testing mode
+
+if os.environ.get('FLASK_ENV') != 'testing':
+    setup_cloudflare_security(app)
+    logger.info("Cloudflare origin validation enabled")
+else:
+    logger.info("TESTING MODE: Cloudflare security checks disabled")
 
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
@@ -2245,6 +2256,169 @@ def api_reset_analytics_mappings():
         'message': 'Event mappings reset to defaults',
         'event_mappings': DEFAULT_EVENT_MAPPINGS
     })
+
+
+# ==================== API Routes - Cloudflare Security Settings ====================
+
+@app.route('/api/admin/settings/cloudflare', methods=['GET'])
+@master_required
+def api_get_cloudflare_settings():
+    """Get Cloudflare security settings (super admin only)."""
+    from cloudflare_security import get_cloudflare_config_for_api
+    return jsonify(get_cloudflare_config_for_api())
+
+
+@app.route('/api/admin/settings/cloudflare', methods=['POST', 'PUT'])
+@master_required
+def api_save_cloudflare_settings():
+    """Update Cloudflare security settings (super admin only)."""
+    from cloudflare_security import invalidate_cloudflare_cache
+
+    data = request.get_json() or {}
+
+    # Update origin check setting
+    if 'origin_check_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_CLOUDFLARE_ORIGIN_CHECK_ENABLED,
+            'true' if data['origin_check_enabled'] else 'false',
+            description='Enable Cloudflare origin IP validation'
+        )
+
+    # Update access settings
+    if 'access_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_CLOUDFLARE_ACCESS_ENABLED,
+            'true' if data['access_enabled'] else 'false',
+            description='Enable Cloudflare Access JWT validation for protected paths'
+        )
+
+    if 'access_team_domain' in data:
+        team_domain = sanitize_string(data['access_team_domain'], max_length=200)
+        # Validate domain format (should end with .cloudflareaccess.com or similar)
+        if team_domain and not team_domain.endswith('.cloudflareaccess.com'):
+            # Allow custom domains but log a warning
+            logger.warning(f"Non-standard Cloudflare Access domain: {team_domain}")
+        SystemConfig.set(
+            SystemConfig.KEY_CLOUDFLARE_ACCESS_TEAM_DOMAIN,
+            team_domain,
+            description='Cloudflare Access team domain (e.g., myteam.cloudflareaccess.com)'
+        )
+
+    if 'protected_paths' in data:
+        # Validate and normalize paths
+        if isinstance(data['protected_paths'], list):
+            paths = [sanitize_string(p.strip(), max_length=100) for p in data['protected_paths'] if p.strip()]
+            paths_str = ','.join(paths)
+        else:
+            paths_str = sanitize_string(data['protected_paths'], max_length=500)
+        SystemConfig.set(
+            SystemConfig.KEY_CLOUDFLARE_ACCESS_PROTECTED_PATHS,
+            paths_str,
+            description='Comma-separated paths protected by Cloudflare Access'
+        )
+
+    # Invalidate cache to apply changes immediately
+    invalidate_cloudflare_cache()
+
+    return jsonify({'message': 'Cloudflare settings updated'})
+
+
+@app.route('/api/admin/settings/cloudflare/access-aud', methods=['PUT'])
+@master_required
+def api_save_cloudflare_access_aud():
+    """Save Cloudflare Access AUD (super admin only).
+
+    The AUD (audience) tag is sensitive and stored separately.
+    """
+    from cloudflare_security import invalidate_cloudflare_cache
+
+    data = request.get_json() or {}
+    aud = data.get('access_aud', '').strip()
+
+    if not aud:
+        return jsonify({'error': 'Access AUD is required'}), 400
+
+    # Validate AUD format (should be a hex string, typically 64 chars)
+    if len(aud) < 32 or not all(c in '0123456789abcdef' for c in aud.lower()):
+        return jsonify({'error': 'Invalid AUD format. Expected a 32+ character hex string'}), 400
+
+    SystemConfig.set(
+        SystemConfig.KEY_CLOUDFLARE_ACCESS_AUD,
+        aud,
+        description='Cloudflare Access application audience tag (AUD)'
+    )
+
+    # Invalidate cache
+    invalidate_cloudflare_cache()
+
+    return jsonify({'message': 'Cloudflare Access AUD saved'})
+
+
+@app.route('/api/admin/settings/cloudflare/test', methods=['POST'])
+@master_required
+def api_test_cloudflare_settings():
+    """Test Cloudflare Access configuration (super admin only).
+
+    Tests:
+    1. Can fetch public keys from the team domain
+    2. Configuration is complete
+    """
+    from cloudflare_security import get_cloudflare_access_keys, _get_cloudflare_config
+
+    config = _get_cloudflare_config()
+
+    # Check if Access is configured
+    if not config['access_enabled']:
+        return jsonify({
+            'success': False,
+            'message': 'Cloudflare Access is not enabled',
+            'details': {
+                'access_enabled': False
+            }
+        })
+
+    if not config['access_team_domain']:
+        return jsonify({
+            'success': False,
+            'message': 'Team domain is not configured',
+            'details': {
+                'team_domain_configured': False
+            }
+        })
+
+    if not config['access_aud']:
+        return jsonify({
+            'success': False,
+            'message': 'Access AUD is not configured',
+            'details': {
+                'access_aud_configured': False
+            }
+        })
+
+    # Try to fetch public keys
+    try:
+        keys = get_cloudflare_access_keys(config['access_team_domain'])
+        key_count = len(keys.get('keys', []))
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully fetched {key_count} public key(s) from Cloudflare Access',
+            'details': {
+                'team_domain': config['access_team_domain'],
+                'key_count': key_count,
+                'protected_paths': config['protected_paths']
+            }
+        })
+    except Exception as e:
+        logger.error(f"Failed to test Cloudflare Access: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Failed to fetch keys: {str(e)}',
+            'details': {
+                'team_domain': config['access_team_domain'],
+                'error': str(e)
+            }
+        }), 400
 
 
 def get_tenant_user_count(domain):

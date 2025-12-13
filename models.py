@@ -83,6 +83,18 @@ class SystemConfig(db.Model):
     DEFAULT_ANALYTICS_PERSON_PROFILING = False  # Privacy-first
     DEFAULT_ANALYTICS_EXCEPTION_CAPTURE = False  # OFF by default
 
+    # Cloudflare security configuration keys
+    KEY_CLOUDFLARE_ORIGIN_CHECK_ENABLED = 'cloudflare_origin_check_enabled'
+    KEY_CLOUDFLARE_ACCESS_ENABLED = 'cloudflare_access_enabled'
+    KEY_CLOUDFLARE_ACCESS_TEAM_DOMAIN = 'cloudflare_access_team_domain'
+    KEY_CLOUDFLARE_ACCESS_AUD = 'cloudflare_access_aud'
+    KEY_CLOUDFLARE_ACCESS_PROTECTED_PATHS = 'cloudflare_access_protected_paths'
+
+    # Cloudflare defaults
+    DEFAULT_CLOUDFLARE_ORIGIN_CHECK_ENABLED = True  # ON by default - block direct IP access
+    DEFAULT_CLOUDFLARE_ACCESS_ENABLED = False  # OFF by default until configured
+    DEFAULT_CLOUDFLARE_ACCESS_PROTECTED_PATHS = '/superadmin,/superadmin/*'  # Comma-separated
+
     @staticmethod
     def get(key, default=None):
         """Get a configuration value."""

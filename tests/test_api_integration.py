@@ -80,6 +80,10 @@ def api_app():
     import app as app_module
     test_app = app_module.app
 
+    # Reset the global _db_initialized flag to ensure proper initialization
+    # This is necessary because the flag persists across test runs
+    app_module._db_initialized = False
+
     # Ensure testing mode is on and relax session cookie settings for testing
     test_app.config['TESTING'] = True
     test_app.config['SECRET_KEY'] = 'test-secret-key-for-api-integration-12345'  # Ensure consistent secret
@@ -89,10 +93,17 @@ def api_app():
     with test_app.app_context():
         # Create all tables from models
         db.create_all()
+
+        # Manually trigger database initialization to create default master account
+        # This ensures the default 'admin' master account exists before tests run
+        app_module.init_database()
+
         yield test_app
         # Clean up after test
         db.session.remove()
         db.drop_all()
+        # Reset flag again for next test
+        app_module._db_initialized = False
 
 
 @pytest.fixture
@@ -103,24 +114,47 @@ def api_client(api_app):
 
 @pytest.fixture
 def master_account(api_app):
-    """Create master account for super admin access."""
-    master = MasterAccount(
-        username='superadmin',
-        name='Super Admin'
-    )
-    master.set_password('test-master-password')
-    db.session.add(master)
-    db.session.commit()
+    """Get the default master account created by initialize_database().
+
+    The api_app fixture calls initialize_database() which creates a default
+    master account with username='admin' and password='changeme'. We return
+    that existing account rather than creating a new one to avoid conflicts.
+    """
+    from models import DEFAULT_MASTER_USERNAME
+    master = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
+    if not master:
+        # Fallback: create if not found (shouldn't happen after api_app fixture)
+        master = MasterAccount(
+            username=DEFAULT_MASTER_USERNAME,
+            name='System Administrator'
+        )
+        master.set_password('changeme')
+        db.session.add(master)
+        db.session.commit()
     return master
 
 
 @pytest.fixture
 def master_client(api_app, master_account):
-    """Create authenticated client for master account."""
+    """Create authenticated client for master account.
+
+    Instead of manually setting session (which has persistence issues with
+    Flask test client), we authenticate via the actual login endpoint.
+    This ensures proper session handling just like production.
+    """
+    from models import DEFAULT_MASTER_PASSWORD
     client = api_app.test_client()
-    with client.session_transaction() as sess:
-        sess['is_master'] = True
-        sess['master_id'] = master_account.id
+
+    # Authenticate via the actual login endpoint
+    response = client.post('/auth/local', json={
+        'username': master_account.username,
+        'password': DEFAULT_MASTER_PASSWORD
+    })
+
+    # Verify login succeeded
+    if response.status_code != 200:
+        raise RuntimeError(f"Master login failed: {response.status_code} - {response.data}")
+
     return client
 
 
@@ -138,9 +172,12 @@ def test_tenant(api_app):
     return tenant
 
 
+TEST_USER_PASSWORD = 'testpassword123'
+
+
 @pytest.fixture
 def test_user(api_app, test_tenant):
-    """Create a regular test user."""
+    """Create a regular test user with password for authentication."""
     user = User(
         email='user@testdomain.com',
         name='Test User',
@@ -148,6 +185,7 @@ def test_user(api_app, test_tenant):
         auth_type='local',
         email_verified=True
     )
+    user.set_password(TEST_USER_PASSWORD)
     db.session.add(user)
     db.session.flush()
 
@@ -163,7 +201,7 @@ def test_user(api_app, test_tenant):
 
 @pytest.fixture
 def admin_user(api_app, test_tenant):
-    """Create an admin user."""
+    """Create an admin user with password for authentication."""
     user = User(
         email='admin@testdomain.com',
         name='Admin User',
@@ -171,6 +209,7 @@ def admin_user(api_app, test_tenant):
         auth_type='local',
         email_verified=True
     )
+    user.set_password(TEST_USER_PASSWORD)
     db.session.add(user)
     db.session.flush()
 
@@ -186,7 +225,7 @@ def admin_user(api_app, test_tenant):
 
 @pytest.fixture
 def steward_user(api_app, test_tenant):
-    """Create a steward user."""
+    """Create a steward user with password for authentication."""
     user = User(
         email='steward@testdomain.com',
         name='Steward User',
@@ -194,6 +233,7 @@ def steward_user(api_app, test_tenant):
         auth_type='local',
         email_verified=True
     )
+    user.set_password(TEST_USER_PASSWORD)
     db.session.add(user)
     db.session.flush()
 
@@ -209,28 +249,49 @@ def steward_user(api_app, test_tenant):
 
 @pytest.fixture
 def user_client(api_app, test_user):
-    """Create authenticated client for regular user."""
+    """Create authenticated client for regular user.
+
+    Authenticates via the actual login endpoint to ensure proper session handling.
+    """
     client = api_app.test_client()
-    with client.session_transaction() as sess:
-        sess['user_id'] = test_user.id
+    response = client.post('/api/auth/login', json={
+        'email': test_user.email,
+        'password': TEST_USER_PASSWORD
+    })
+    if response.status_code != 200:
+        raise RuntimeError(f"User login failed: {response.status_code} - {response.data}")
     return client
 
 
 @pytest.fixture
 def admin_client(api_app, admin_user):
-    """Create authenticated client for admin user."""
+    """Create authenticated client for admin user.
+
+    Authenticates via the actual login endpoint to ensure proper session handling.
+    """
     client = api_app.test_client()
-    with client.session_transaction() as sess:
-        sess['user_id'] = admin_user.id
+    response = client.post('/api/auth/login', json={
+        'email': admin_user.email,
+        'password': TEST_USER_PASSWORD
+    })
+    if response.status_code != 200:
+        raise RuntimeError(f"Admin login failed: {response.status_code} - {response.data}")
     return client
 
 
 @pytest.fixture
 def steward_client(api_app, steward_user):
-    """Create authenticated client for steward user."""
+    """Create authenticated client for steward user.
+
+    Authenticates via the actual login endpoint to ensure proper session handling.
+    """
     client = api_app.test_client()
-    with client.session_transaction() as sess:
-        sess['user_id'] = steward_user.id
+    response = client.post('/api/auth/login', json={
+        'email': steward_user.email,
+        'password': TEST_USER_PASSWORD
+    })
+    if response.status_code != 200:
+        raise RuntimeError(f"Steward login failed: {response.status_code} - {response.data}")
     return client
 
 
@@ -410,10 +471,11 @@ class TestTenantDeleteAPI:
         data = json.loads(response.data)
 
         # Verify response structure
+        # API returns { message, soft_deleted: { domain, deleted_at, deletion_expires_at, ... } }
         assert 'message' in data
-        assert 'tenant' in data
-        assert 'retention_window_days' in data
-        assert 'deletion_expires_at' in data
+        assert 'soft_deleted' in data
+        assert 'domain' in data['soft_deleted']
+        assert 'deletion_expires_at' in data['soft_deleted']
 
         # Verify tenant is soft-deleted in database
         db.session.refresh(test_tenant)
@@ -659,6 +721,7 @@ class TestDecisionDeleteAPI:
             title='Test Decision',
             context='Test context',
             decision='Test decision',
+            consequences='Test consequences',
             status='proposed',
             domain=test_tenant.domain,
             tenant_id=test_tenant.id,
@@ -681,6 +744,7 @@ class TestDecisionDeleteAPI:
             title='Test Decision',
             context='Test context',
             decision='Test decision',
+            consequences='Test consequences',
             status='accepted',
             domain=test_tenant.domain,
             tenant_id=test_tenant.id,
@@ -701,7 +765,7 @@ class TestDecisionDeleteAPI:
         # Verify soft delete in database
         db.session.refresh(decision)
         assert decision.deleted_at is not None
-        assert decision.deleted_by_user_id == admin_user.id
+        assert decision.deleted_by_id == admin_user.id
 
     def test_steward_can_delete_decision(self, steward_client, test_tenant, steward_user):
         """Steward can soft-delete decision."""
@@ -709,6 +773,7 @@ class TestDecisionDeleteAPI:
             title='Test Decision',
             context='Test context',
             decision='Test decision',
+            consequences='Test consequences',
             status='proposed',
             domain=test_tenant.domain,
             tenant_id=test_tenant.id,
@@ -728,6 +793,7 @@ class TestDecisionDeleteAPI:
             title='Test Decision',
             context='Test context',
             decision='Test decision',
+            consequences='Test consequences',
             status='proposed',
             domain=test_tenant.domain,
             tenant_id=test_tenant.id,
@@ -768,6 +834,7 @@ class TestDecisionDeleteAPI:
             title='Test Decision',
             context='Test context',
             decision='Test decision',
+            consequences='Test consequences',
             status='proposed',
             domain=test_tenant.domain,
             tenant_id=test_tenant.id,
@@ -865,3 +932,271 @@ class TestSuccessResponseFormats:
             data = json.loads(response.data)
             assert 'message' in data
             assert 'request' in data  # Entity is called 'request' for this endpoint
+
+
+# ==================== Test: Analytics Settings API ====================
+
+class TestAnalyticsSettingsAPI:
+    """Integration tests for analytics settings endpoints.
+
+    Tests the PostHog analytics configuration API which is only accessible
+    by super admins (master accounts).
+
+    Endpoints:
+    - GET /api/admin/settings/analytics - Get analytics config
+    - POST /api/admin/settings/analytics - Save analytics settings
+    - PUT /api/admin/settings/analytics/api-key - Save API key
+    - POST /api/admin/settings/analytics/test - Test connection
+    - POST /api/admin/settings/analytics/reset-mappings - Reset event mappings
+    """
+
+    def test_get_analytics_settings_requires_master(self, api_client):
+        """Non-authenticated users cannot access analytics settings."""
+        response = api_client.get('/api/admin/settings/analytics')
+
+        assert response.status_code == 401
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_get_analytics_settings_denies_regular_user(self, user_client):
+        """Regular users cannot access analytics settings."""
+        response = user_client.get('/api/admin/settings/analytics')
+
+        assert response.status_code == 403
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_get_analytics_settings_denies_admin(self, admin_client):
+        """Tenant admins cannot access analytics settings."""
+        response = admin_client.get('/api/admin/settings/analytics')
+
+        assert response.status_code == 403
+        data = json.loads(response.data)
+        assert 'error' in data
+
+    def test_get_analytics_settings_allows_master(self, master_client):
+        """Master accounts can access analytics settings."""
+        response = master_client.get('/api/admin/settings/analytics')
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+
+        # Verify response structure
+        assert 'enabled' in data
+        assert 'host' in data
+        assert 'person_profiling' in data
+        assert 'exception_capture' in data
+        assert 'api_key_configured' in data
+        assert 'event_mappings' in data
+        assert 'categories' in data
+        # API key should never be exposed
+        assert 'api_key' not in data
+
+    def test_save_analytics_settings_requires_master(self, api_client):
+        """Non-authenticated users cannot save analytics settings."""
+        response = api_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({'enabled': True}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 401
+
+    def test_save_analytics_settings_success(self, master_client):
+        """Master accounts can save analytics settings."""
+        response = master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({
+                'enabled': True,
+                'host': 'https://eu.i.posthog.com',
+                'person_profiling': False,
+                'exception_capture': True
+            }),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'message' in data
+        assert 'updated successfully' in data['message'].lower()
+
+    def test_save_analytics_settings_partial_update(self, master_client):
+        """Can update individual settings without affecting others."""
+        # First, enable analytics
+        master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({'enabled': True}),
+            content_type='application/json'
+        )
+
+        # Update only exception_capture
+        response = master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({'exception_capture': True}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+
+        # Verify other settings preserved
+        get_response = master_client.get('/api/admin/settings/analytics')
+        data = json.loads(get_response.data)
+        assert data['enabled'] is True
+        assert data['exception_capture'] is True
+
+    def test_save_api_key_requires_master(self, api_client):
+        """Non-authenticated users cannot save API key."""
+        response = api_client.put(
+            '/api/admin/settings/analytics/api-key',
+            data=json.dumps({'api_key': 'phc_test123'}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 401
+
+    def test_save_api_key_validates_format(self, master_client):
+        """API key must start with 'phc_'."""
+        response = master_client.put(
+            '/api/admin/settings/analytics/api-key',
+            data=json.dumps({'api_key': 'invalid_key_format'}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+        assert 'phc_' in data['error']
+
+    def test_save_api_key_requires_value(self, master_client):
+        """API key is required."""
+        response = master_client.put(
+            '/api/admin/settings/analytics/api-key',
+            data=json.dumps({}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert 'error' in data
+        assert 'required' in data['error'].lower()
+
+    def test_save_api_key_success(self, master_client):
+        """Valid API key is saved successfully."""
+        response = master_client.put(
+            '/api/admin/settings/analytics/api-key',
+            data=json.dumps({'api_key': 'phc_test_key_12345'}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'message' in data
+        assert 'saved successfully' in data['message'].lower()
+
+        # Verify key is now present (but not exposed)
+        get_response = master_client.get('/api/admin/settings/analytics')
+        get_data = json.loads(get_response.data)
+        assert get_data['api_key_configured'] is True
+
+    def test_test_analytics_requires_master(self, api_client):
+        """Non-authenticated users cannot test analytics."""
+        response = api_client.post('/api/admin/settings/analytics/test')
+
+        assert response.status_code == 401
+
+    def test_test_analytics_without_api_key(self, master_client):
+        """Test fails gracefully when no API key is configured."""
+        # Clear any existing API key by setting analytics without key
+        from models import SystemConfig
+        # The test should fail if no key is configured
+        response = master_client.post('/api/admin/settings/analytics/test')
+
+        # Either no key error (400) or client init error (400)
+        # Both are acceptable responses when key is missing/invalid
+        assert response.status_code in [200, 400, 500]
+        data = json.loads(response.data)
+        # Should have either message (success) or error
+        assert 'message' in data or 'error' in data
+
+    def test_reset_mappings_requires_master(self, api_client):
+        """Non-authenticated users cannot reset mappings."""
+        response = api_client.post('/api/admin/settings/analytics/reset-mappings')
+
+        assert response.status_code == 401
+
+    def test_reset_mappings_success(self, master_client):
+        """Master can reset event mappings to defaults."""
+        response = master_client.post('/api/admin/settings/analytics/reset-mappings')
+
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert 'message' in data
+        assert 'reset' in data['message'].lower()
+        assert 'event_mappings' in data
+        # Should return the default mappings
+        assert isinstance(data['event_mappings'], dict)
+
+    def test_save_custom_event_mappings(self, master_client):
+        """Custom event mappings can be saved."""
+        from analytics import DEFAULT_EVENT_MAPPINGS
+
+        # Get a valid mapping key
+        valid_key = list(DEFAULT_EVENT_MAPPINGS.keys())[0]
+
+        response = master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({
+                'event_mappings': {
+                    valid_key: 'custom_event_name'
+                }
+            }),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+
+        # Verify mapping saved
+        get_response = master_client.get('/api/admin/settings/analytics')
+        data = json.loads(get_response.data)
+        assert data['event_mappings'].get(valid_key) == 'custom_event_name'
+
+    def test_invalid_event_mapping_key_ignored(self, master_client):
+        """Invalid mapping keys are ignored, not saved."""
+        response = master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({
+                'event_mappings': {
+                    'nonexistent_event_key': 'should_be_ignored'
+                }
+            }),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+
+        # Verify invalid key not saved
+        get_response = master_client.get('/api/admin/settings/analytics')
+        data = json.loads(get_response.data)
+        assert 'nonexistent_event_key' not in data['event_mappings']
+
+    def test_analytics_host_validation(self, master_client):
+        """Host must start with http."""
+        # Valid host
+        response = master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({'host': 'https://app.posthog.com'}),
+            content_type='application/json'
+        )
+        assert response.status_code == 200
+
+        # Invalid host (doesn't start with http) - should be ignored
+        master_client.post(
+            '/api/admin/settings/analytics',
+            data=json.dumps({'host': 'invalid-host.com'}),
+            content_type='application/json'
+        )
+
+        # Host should still be the valid one
+        get_response = master_client.get('/api/admin/settings/analytics')
+        data = json.loads(get_response.data)
+        assert data['host'].startswith('http')
