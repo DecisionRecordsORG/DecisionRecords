@@ -95,6 +95,24 @@ class SystemConfig(db.Model):
     DEFAULT_CLOUDFLARE_ACCESS_ENABLED = False  # OFF by default until configured
     DEFAULT_CLOUDFLARE_ACCESS_PROTECTED_PATHS = '/superadmin,/superadmin/*'  # Comma-separated
 
+    # Log forwarding configuration keys (OpenTelemetry/OTLP)
+    KEY_LOG_FORWARDING_ENABLED = 'log_forwarding_enabled'
+    KEY_LOG_FORWARDING_ENDPOINT_URL = 'log_forwarding_endpoint_url'
+    KEY_LOG_FORWARDING_AUTH_TYPE = 'log_forwarding_auth_type'
+    KEY_LOG_FORWARDING_AUTH_HEADER_NAME = 'log_forwarding_auth_header_name'
+    KEY_LOG_FORWARDING_API_KEY = 'log_forwarding_api_key'  # Fallback storage (prefer Key Vault)
+    KEY_LOG_FORWARDING_LOG_LEVEL = 'log_forwarding_log_level'
+    KEY_LOG_FORWARDING_SERVICE_NAME = 'log_forwarding_service_name'
+    KEY_LOG_FORWARDING_ENVIRONMENT = 'log_forwarding_environment'
+    KEY_LOG_FORWARDING_CUSTOM_HEADERS = 'log_forwarding_custom_headers'
+
+    # Log forwarding defaults
+    DEFAULT_LOG_FORWARDING_ENABLED = False
+    DEFAULT_LOG_FORWARDING_AUTH_TYPE = 'api_key'  # api_key, bearer, header, none
+    DEFAULT_LOG_FORWARDING_LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
+    DEFAULT_LOG_FORWARDING_SERVICE_NAME = 'architecture-decisions'
+    DEFAULT_LOG_FORWARDING_ENVIRONMENT = 'production'
+
     @staticmethod
     def get(key, default=None):
         """Get a configuration value."""

@@ -172,6 +172,17 @@ if os.environ.get('FLASK_ENV') != 'testing':
 else:
     logger.info("TESTING MODE: Cloudflare security checks disabled")
 
+# ==================== Log Forwarding (OpenTelemetry) ====================
+# Forwards logs to configured OTLP endpoint (Grafana, Datadog, etc.)
+
+try:
+    from log_forwarding import setup_log_forwarding
+    setup_log_forwarding(app)
+except ImportError as e:
+    logger.warning(f"Log forwarding module not available: {e}")
+except Exception as e:
+    logger.error(f"Failed to initialize log forwarding: {e}")
+
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
@@ -2418,6 +2429,165 @@ def api_test_cloudflare_settings():
                 'team_domain': config['access_team_domain'],
                 'error': str(e)
             }
+        }), 400
+
+
+# ==================== API Routes - Log Forwarding Settings ====================
+
+@app.route('/api/admin/settings/log-forwarding', methods=['GET'])
+@master_required
+def api_get_log_forwarding_settings():
+    """Get log forwarding settings (super admin only)."""
+    from log_forwarding import get_config_for_api
+    return jsonify(get_config_for_api())
+
+
+@app.route('/api/admin/settings/log-forwarding', methods=['POST', 'PUT'])
+@master_required
+def api_save_log_forwarding_settings():
+    """Update log forwarding settings (super admin only)."""
+    from log_forwarding import validate_settings, invalidate_cache, reconfigure
+
+    data = request.get_json() or {}
+
+    # Validate settings
+    is_valid, errors = validate_settings(data)
+    if not is_valid:
+        return jsonify({'error': 'Validation failed', 'details': errors}), 400
+
+    # Update enabled setting
+    if 'enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_ENABLED,
+            'true' if data['enabled'] else 'false',
+            description='Enable OpenTelemetry log forwarding'
+        )
+
+    # Update endpoint URL
+    if 'endpoint_url' in data:
+        endpoint_url = sanitize_string(data['endpoint_url'], max_length=500)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_ENDPOINT_URL,
+            endpoint_url,
+            description='OTLP endpoint URL'
+        )
+
+    # Update auth type
+    if 'auth_type' in data:
+        auth_type = sanitize_string(data['auth_type'], max_length=20)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_AUTH_TYPE,
+            auth_type,
+            description='Authentication type (api_key, bearer, header, none)'
+        )
+
+    # Update auth header name
+    if 'auth_header_name' in data:
+        auth_header_name = sanitize_string(data['auth_header_name'], max_length=100)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_AUTH_HEADER_NAME,
+            auth_header_name,
+            description='Custom auth header name'
+        )
+
+    # Update log level
+    if 'log_level' in data:
+        log_level = sanitize_string(data['log_level'], max_length=10)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_LOG_LEVEL,
+            log_level.upper(),
+            description='Minimum log level to forward'
+        )
+
+    # Update service name
+    if 'service_name' in data:
+        service_name = sanitize_string(data['service_name'], max_length=100)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_SERVICE_NAME,
+            service_name,
+            description='Service identifier in logs'
+        )
+
+    # Update environment
+    if 'environment' in data:
+        environment = sanitize_string(data['environment'], max_length=50)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_ENVIRONMENT,
+            environment,
+            description='Environment tag in logs'
+        )
+
+    # Update custom headers
+    if 'custom_headers' in data:
+        custom_headers = data['custom_headers']
+        # Validate JSON if string
+        if isinstance(custom_headers, str):
+            try:
+                import json
+                json.loads(custom_headers)
+            except json.JSONDecodeError:
+                return jsonify({'error': 'Custom headers must be valid JSON'}), 400
+        else:
+            import json
+            custom_headers = json.dumps(custom_headers)
+        SystemConfig.set(
+            SystemConfig.KEY_LOG_FORWARDING_CUSTOM_HEADERS,
+            custom_headers,
+            description='Additional HTTP headers (JSON)'
+        )
+
+    # Invalidate cache and reconfigure
+    reconfigure(app)
+
+    return jsonify({'message': 'Log forwarding settings updated'})
+
+
+@app.route('/api/admin/settings/log-forwarding/api-key', methods=['PUT'])
+@master_required
+def api_save_log_forwarding_api_key():
+    """Save log forwarding API key (super admin only).
+
+    For cloud deployments, API keys should be stored in Key Vault.
+    This endpoint stores in SystemConfig as fallback for self-hosted.
+    """
+    from log_forwarding import invalidate_cache
+
+    data = request.get_json() or {}
+    api_key = data.get('api_key', '').strip()
+
+    if not api_key:
+        return jsonify({'error': 'API key is required'}), 400
+
+    # Store in SystemConfig (for self-hosted deployments)
+    # In cloud deployments, prefer Key Vault via Azure portal
+    SystemConfig.set(
+        SystemConfig.KEY_LOG_FORWARDING_API_KEY,
+        api_key,
+        description='OTLP API key/token (prefer Key Vault for cloud deployments)'
+    )
+
+    invalidate_cache()
+
+    return jsonify({'message': 'Log forwarding API key saved'})
+
+
+@app.route('/api/admin/settings/log-forwarding/test', methods=['POST'])
+@master_required
+def api_test_log_forwarding():
+    """Test log forwarding connection (super admin only)."""
+    from log_forwarding import test_connection
+
+    success, message = test_connection()
+
+    if success:
+        return jsonify({
+            'success': True,
+            'message': message
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': message
         }), 400
 
 

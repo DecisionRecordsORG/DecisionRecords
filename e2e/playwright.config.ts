@@ -28,7 +28,7 @@ export default defineConfig({
   // Run backend and frontend before tests
   webServer: [
     {
-      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing python3 app.py',
+      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing FLASK_RUN_PORT=5001 python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5001, debug=False)"',
       url: 'http://localhost:5001/api/version',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,

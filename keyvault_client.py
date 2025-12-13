@@ -155,6 +155,17 @@ class KeyVaultClient:
             default='default-analytics-salt-change-in-production'
         )
 
+    def get_log_forwarding_api_key(self):
+        """
+        Get log forwarding (OTLP) API key from Key Vault or environment.
+
+        Priority:
+        1. Key Vault 'log-forwarding-api-key'
+        2. Environment variable 'LOG_FORWARDING_API_KEY'
+        3. None (log forwarding will check SystemConfig as fallback)
+        """
+        return self.get_secret('log-forwarding-api-key', fallback_env_var='LOG_FORWARDING_API_KEY')
+
 
 # Global instance
 keyvault_client = KeyVaultClient()

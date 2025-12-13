@@ -54,6 +54,18 @@ interface CloudflareSettings {
   protected_paths: string[];
 }
 
+interface LogForwardingSettings {
+  enabled: boolean;
+  endpoint_url: string;
+  auth_type: 'api_key' | 'bearer' | 'header' | 'none';
+  auth_header_name: string;
+  has_api_key: boolean;
+  log_level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+  service_name: string;
+  environment: string;
+  custom_headers: string;
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
@@ -511,6 +523,167 @@ interface CloudflareSettings {
           }
         </mat-card-content>
       </mat-card>
+
+      <!-- Log Forwarding Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>forward_to_inbox</mat-icon>
+            Log Forwarding (OpenTelemetry)
+          </mat-card-title>
+          <mat-card-subtitle>
+            Forward application logs to external logging services via OTLP
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (logForwardingLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <div class="form-section">
+              <h3>Log Forwarding Configuration</h3>
+              <p class="hint">Send logs to Grafana Loki, Datadog, New Relic, or any OTLP-compatible backend</p>
+
+              <div class="toggle-row">
+                <mat-slide-toggle
+                  [(ngModel)]="lfEnabled"
+                  (change)="saveLogForwardingSettings()"
+                  color="primary">
+                  Enable Log Forwarding
+                </mat-slide-toggle>
+                <span class="status-badge" [class.enabled]="lfEnabled">
+                  {{ lfEnabled ? 'Active' : 'Disabled' }}
+                </span>
+              </div>
+
+              @if (lfEnabled) {
+                <div class="log-forwarding-config">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>OTLP Endpoint URL</mat-label>
+                    <input matInput [(ngModel)]="lfEndpointUrl" placeholder="https://otlp-gateway-prod-eu-west-2.grafana.net/otlp">
+                    <mat-hint>OTLP endpoint (e.g., Grafana: otlp-gateway-*.grafana.net/otlp)</mat-hint>
+                  </mat-form-field>
+
+                  <div class="form-row">
+                    <mat-form-field appearance="outline">
+                      <mat-label>Auth Type</mat-label>
+                      <select matNativeControl [(ngModel)]="lfAuthType">
+                        <option value="api_key">API Key</option>
+                        <option value="bearer">Bearer Token</option>
+                        <option value="header">Custom Header</option>
+                        <option value="none">None</option>
+                      </select>
+                      <mat-hint>Authentication method</mat-hint>
+                    </mat-form-field>
+
+                    @if (lfAuthType === 'header') {
+                      <mat-form-field appearance="outline">
+                        <mat-label>Auth Header Name</mat-label>
+                        <input matInput [(ngModel)]="lfAuthHeaderName" placeholder="Authorization">
+                        <mat-hint>Custom header name for auth</mat-hint>
+                      </mat-form-field>
+                    }
+                  </div>
+
+                  @if (lfAuthType !== 'none') {
+                    <div class="api-key-section">
+                      <mat-form-field appearance="outline" class="full-width">
+                        <mat-label>API Key / Token</mat-label>
+                        <input matInput
+                               [type]="showLfApiKey ? 'text' : 'password'"
+                               [(ngModel)]="lfApiKey"
+                               placeholder="Enter API key or token">
+                        <button mat-icon-button matSuffix
+                                (click)="showLfApiKey = !showLfApiKey"
+                                type="button"
+                                matTooltip="{{ showLfApiKey ? 'Hide' : 'Show' }} API Key">
+                          <mat-icon>{{ showLfApiKey ? 'visibility_off' : 'visibility' }}</mat-icon>
+                        </button>
+                        <mat-hint>
+                          @if (lfApiKeyConfigured && !lfApiKey) {
+                            API key is configured (hidden for security)
+                          } @else {
+                            Enter your OTLP endpoint API key/token
+                          }
+                        </mat-hint>
+                      </mat-form-field>
+                      <button mat-stroked-button
+                              (click)="saveLogForwardingApiKey()"
+                              [disabled]="!lfApiKey || lfSavingKey">
+                        <mat-spinner diameter="18" *ngIf="lfSavingKey"></mat-spinner>
+                        <mat-icon *ngIf="!lfSavingKey">vpn_key</mat-icon>
+                        Save Key
+                      </button>
+                    </div>
+                  }
+
+                  <div class="form-row">
+                    <mat-form-field appearance="outline">
+                      <mat-label>Log Level</mat-label>
+                      <select matNativeControl [(ngModel)]="lfLogLevel">
+                        <option value="DEBUG">DEBUG (All logs)</option>
+                        <option value="INFO">INFO (Default)</option>
+                        <option value="WARNING">WARNING</option>
+                        <option value="ERROR">ERROR only</option>
+                      </select>
+                      <mat-hint>Minimum level to forward</mat-hint>
+                    </mat-form-field>
+
+                    <mat-form-field appearance="outline">
+                      <mat-label>Service Name</mat-label>
+                      <input matInput [(ngModel)]="lfServiceName" placeholder="architecture-decisions">
+                      <mat-hint>Service identifier in logs</mat-hint>
+                    </mat-form-field>
+
+                    <mat-form-field appearance="outline">
+                      <mat-label>Environment</mat-label>
+                      <input matInput [(ngModel)]="lfEnvironment" placeholder="production">
+                      <mat-hint>Environment tag</mat-hint>
+                    </mat-form-field>
+                  </div>
+
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Custom Headers (JSON)</mat-label>
+                    <textarea matInput
+                              [(ngModel)]="lfCustomHeaders"
+                              placeholder='{"X-Scope-OrgID": "my-org"}'
+                              rows="2"></textarea>
+                    <mat-hint>Additional HTTP headers as JSON object</mat-hint>
+                  </mat-form-field>
+
+                  <div class="test-section">
+                    <button mat-stroked-button
+                            color="primary"
+                            (click)="testLogForwardingConnection()"
+                            [disabled]="lfTesting || !lfEndpointUrl">
+                      <mat-spinner diameter="18" *ngIf="lfTesting"></mat-spinner>
+                      <mat-icon *ngIf="!lfTesting">send</mat-icon>
+                      Test Connection
+                    </button>
+                    @if (lfTestResult) {
+                      <span class="test-result" [class.success]="lfTestSuccess">
+                        <mat-icon>{{ lfTestSuccess ? 'check_circle' : 'error' }}</mat-icon>
+                        {{ lfTestResult }}
+                      </span>
+                    }
+                  </div>
+
+                  <div class="actions">
+                    <button mat-raised-button color="primary"
+                            (click)="saveLogForwardingSettings()"
+                            [disabled]="lfSaving">
+                      <mat-spinner diameter="20" *ngIf="lfSaving"></mat-spinner>
+                      <mat-icon *ngIf="!lfSaving">save</mat-icon>
+                      <span *ngIf="!lfSaving">Save Log Forwarding Settings</span>
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </mat-card-content>
+      </mat-card>
     </div>
   `,
   styles: [`
@@ -805,6 +978,32 @@ interface CloudflareSettings {
     .aud-section button {
       margin-top: 4px;
     }
+
+    /* Log forwarding styles */
+    .log-forwarding-config {
+      margin-top: 16px;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 16px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+
+    .form-row mat-form-field {
+      flex: 1;
+      min-width: 150px;
+    }
+
+    select[matNativeControl] {
+      height: 24px;
+    }
+
+    textarea {
+      font-family: monospace;
+      font-size: 13px;
+    }
   `]
 })
 export class SuperadminSettingsComponent implements OnInit {
@@ -856,6 +1055,25 @@ export class SuperadminSettingsComponent implements OnInit {
   cfTestResult = '';
   cfTestSuccess = false;
 
+  // Log forwarding settings
+  logForwardingLoading = true;
+  lfSaving = false;
+  lfSavingKey = false;
+  lfTesting = false;
+  lfEnabled = false;
+  lfEndpointUrl = '';
+  lfAuthType: 'api_key' | 'bearer' | 'header' | 'none' = 'api_key';
+  lfAuthHeaderName = 'Authorization';
+  lfApiKey = '';
+  lfApiKeyConfigured = false;
+  showLfApiKey = false;
+  lfLogLevel: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' = 'INFO';
+  lfServiceName = 'architecture-decisions';
+  lfEnvironment = 'production';
+  lfCustomHeaders = '{}';
+  lfTestResult = '';
+  lfTestSuccess = false;
+
   constructor(
     private http: HttpClient,
     private fb: FormBuilder,
@@ -875,6 +1093,7 @@ export class SuperadminSettingsComponent implements OnInit {
     this.loadLicensingSettings();
     this.loadAnalyticsSettings();
     this.loadCloudflareSettings();
+    this.loadLogForwardingSettings();
   }
 
   loadSettings() {
@@ -1151,6 +1370,89 @@ export class SuperadminSettingsComponent implements OnInit {
         this.cfTestResult = error.error?.message || 'Connection test failed';
         this.cfTestSuccess = false;
         this.cfTesting = false;
+      }
+    });
+  }
+
+  // Log forwarding methods
+  loadLogForwardingSettings() {
+    this.logForwardingLoading = true;
+    this.http.get<LogForwardingSettings>('/api/admin/settings/log-forwarding').subscribe({
+      next: (settings) => {
+        this.lfEnabled = settings.enabled;
+        this.lfEndpointUrl = settings.endpoint_url;
+        this.lfAuthType = settings.auth_type;
+        this.lfAuthHeaderName = settings.auth_header_name;
+        this.lfApiKeyConfigured = settings.has_api_key;
+        this.lfLogLevel = settings.log_level;
+        this.lfServiceName = settings.service_name;
+        this.lfEnvironment = settings.environment;
+        this.lfCustomHeaders = settings.custom_headers;
+        this.logForwardingLoading = false;
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to load log forwarding settings', 'Close', { duration: 3000 });
+        this.logForwardingLoading = false;
+      }
+    });
+  }
+
+  saveLogForwardingSettings() {
+    this.lfSaving = true;
+    this.http.post('/api/admin/settings/log-forwarding', {
+      enabled: this.lfEnabled,
+      endpoint_url: this.lfEndpointUrl,
+      auth_type: this.lfAuthType,
+      auth_header_name: this.lfAuthHeaderName,
+      log_level: this.lfLogLevel,
+      service_name: this.lfServiceName,
+      environment: this.lfEnvironment,
+      custom_headers: this.lfCustomHeaders
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Log forwarding settings saved', 'Close', { duration: 3000 });
+        this.lfSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save log forwarding settings', 'Close', { duration: 3000 });
+        this.lfSaving = false;
+      }
+    });
+  }
+
+  saveLogForwardingApiKey() {
+    if (!this.lfApiKey) return;
+
+    this.lfSavingKey = true;
+    this.http.put('/api/admin/settings/log-forwarding/api-key', {
+      api_key: this.lfApiKey
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('API key saved successfully', 'Close', { duration: 3000 });
+        this.lfApiKeyConfigured = true;
+        this.lfApiKey = ''; // Clear for security
+        this.lfSavingKey = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save API key', 'Close', { duration: 3000 });
+        this.lfSavingKey = false;
+      }
+    });
+  }
+
+  testLogForwardingConnection() {
+    this.lfTesting = true;
+    this.lfTestResult = '';
+    this.http.post<{ success: boolean; message: string }>('/api/admin/settings/log-forwarding/test', {}).subscribe({
+      next: (response) => {
+        this.lfTestResult = response.message;
+        this.lfTestSuccess = response.success;
+        this.lfTesting = false;
+      },
+      error: (error) => {
+        this.lfTestResult = error.error?.message || 'Connection test failed';
+        this.lfTestSuccess = false;
+        this.lfTesting = false;
       }
     });
   }
