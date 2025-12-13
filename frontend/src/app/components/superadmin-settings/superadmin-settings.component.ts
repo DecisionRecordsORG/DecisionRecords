@@ -548,7 +548,6 @@ interface LogForwardingSettings {
               <div class="toggle-row">
                 <mat-slide-toggle
                   [(ngModel)]="lfEnabled"
-                  (change)="saveLogForwardingSettings()"
                   color="primary">
                   Enable Log Forwarding
                 </mat-slide-toggle>
@@ -557,7 +556,8 @@ interface LogForwardingSettings {
                 </span>
               </div>
 
-              @if (lfEnabled) {
+              <!-- Always show config options so user can configure before enabling -->
+              @if (true) {
                 <div class="log-forwarding-config">
                   <mat-form-field appearance="outline" class="full-width">
                     <mat-label>OTLP Endpoint URL</mat-label>
