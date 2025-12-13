@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import os
+import traceback
 from functools import wraps
 from datetime import datetime, timedelta
 from threading import Lock
@@ -24,6 +25,7 @@ _config_cache = {
     'host': None,
     'api_key': None,
     'person_profiling': None,
+    'exception_capture': None,
     'event_mappings': {},
     'last_refresh': None,
     'posthog_client': None
@@ -341,6 +343,10 @@ def _get_analytics_config():
             SystemConfig.KEY_ANALYTICS_PERSON_PROFILING,
             default=SystemConfig.DEFAULT_ANALYTICS_PERSON_PROFILING
         )
+        _config_cache['exception_capture'] = SystemConfig.get_bool(
+            SystemConfig.KEY_ANALYTICS_EXCEPTION_CAPTURE,
+            default=SystemConfig.DEFAULT_ANALYTICS_EXCEPTION_CAPTURE
+        )
 
         # Load event mappings (JSON from SystemConfig or defaults)
         mappings_json = SystemConfig.get(SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS)
@@ -556,6 +562,94 @@ def shutdown():
             _config_cache['posthog_client'] = None
 
 
+def capture_exception(exception, endpoint_name=None, extra_properties=None):
+    """
+    Capture an exception to PostHog for error monitoring.
+
+    Args:
+        exception: The exception object to capture
+        endpoint_name: Optional name of the endpoint where the error occurred
+        extra_properties: Optional dict of additional properties
+
+    Usage:
+        try:
+            risky_operation()
+        except Exception as e:
+            capture_exception(e, 'api_decisions_create')
+            raise
+    """
+    from flask import g, request, session
+
+    config = _get_analytics_config()
+
+    # Check if exception capture is enabled
+    if not config['enabled'] or not config['exception_capture'] or not config['posthog_client']:
+        return
+
+    # Generate distinct_id (same logic as track_event)
+    distinct_id = 'anonymous'
+    user_type = 'anonymous'
+    tenant_domain = None
+
+    if session.get('is_master'):
+        distinct_id = 'master_admin'
+        user_type = 'master_admin'
+    elif hasattr(g, 'current_user') and g.current_user:
+        tenant_domain = getattr(g.current_user, 'sso_domain', None)
+        distinct_id = generate_distinct_id(g.current_user.id, tenant_domain)
+        user_type = 'authenticated'
+
+    # Build exception properties following PostHog's exception format
+    exception_type = type(exception).__name__
+    exception_message = str(exception)
+    exception_traceback = traceback.format_exc()
+
+    # Parse traceback into structured format
+    tb_lines = exception_traceback.strip().split('\n')
+
+    event_properties = {
+        # PostHog standard exception properties
+        '$exception_type': exception_type,
+        '$exception_message': exception_message,
+        '$exception_list': [{
+            'type': exception_type,
+            'value': exception_message,
+            'stacktrace': {
+                'type': 'raw',
+                'frames': tb_lines[-10:] if len(tb_lines) > 10 else tb_lines  # Last 10 lines
+            }
+        }],
+        # Custom properties
+        'user_type': user_type,
+        'endpoint': endpoint_name,
+        'path': request.path if request else None,
+        'method': request.method if request else None,
+    }
+
+    if tenant_domain:
+        event_properties['tenant_hash'] = hashlib.sha256(
+            tenant_domain.encode()
+        ).hexdigest()[:16]
+
+    if extra_properties:
+        event_properties.update(extra_properties)
+
+    # Optionally disable person profile creation
+    if not config['person_profiling']:
+        event_properties['$process_person_profile'] = False
+
+    try:
+        config['posthog_client'].capture(
+            distinct_id=distinct_id,
+            event='$exception',
+            properties=event_properties
+        )
+        logger.debug(f"Captured exception: {exception_type} for {distinct_id}")
+    except Exception as e:
+        # Never let exception capture cause additional errors
+        logger.warning(f"Failed to capture exception: {e}")
+
+
 def get_config_for_api():
     """Get analytics configuration for API response (without sensitive data)."""
     config = _get_analytics_config()
@@ -564,6 +658,7 @@ def get_config_for_api():
         'enabled': config['enabled'],
         'host': config['host'],
         'person_profiling': config['person_profiling'],
+        'exception_capture': config['exception_capture'],
         'api_key_configured': bool(config['api_key']),
         'event_mappings': config['event_mappings'],
         'categories': ENDPOINT_CATEGORIES

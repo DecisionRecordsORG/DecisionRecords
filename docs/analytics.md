@@ -36,6 +36,31 @@ Person profiling can be disabled to prevent PostHog from creating user profiles:
 - When **OFF** (default): Events are tracked but no user profiles are created in PostHog
 - When **ON**: PostHog will create and maintain user profiles
 
+### Exception Capture
+
+Exception capture enables production error monitoring through PostHog. When enabled, unhandled exceptions are automatically sent to PostHog as `$exception` events.
+
+- When **OFF** (default): Errors are logged locally but not sent to PostHog
+- When **ON**: Unhandled exceptions are captured and sent to PostHog
+
+**What gets captured:**
+- Exception type (e.g., `ValueError`, `KeyError`)
+- Exception message (sanitized, no user data)
+- Stack trace (file paths and line numbers only)
+- Request path and HTTP method
+- Hashed user ID (same privacy as event tracking)
+
+**What errors are captured:**
+
+| Error Type | Captured | Notes |
+|------------|----------|-------|
+| Unhandled exceptions | Yes | Critical bugs |
+| 500 Internal Server Error | Yes | Server errors |
+| 404 Not Found | No | Expected behavior |
+| 403 Forbidden | No | Security working as intended |
+| 401 Unauthorized | No | Auth working as intended |
+| 400 Bad Request | No | Client errors |
+
 ## Configuration
 
 ### Super Admin Settings
@@ -48,6 +73,7 @@ Navigate to **Super Admin > System Settings > Product Analytics** to configure:
 | PostHog Host URL | PostHog server address | `https://eu.i.posthog.com` |
 | API Key | PostHog project API key | - |
 | Person Profiling | Create user profiles in PostHog | OFF |
+| Exception Capture | Send unhandled errors to PostHog | OFF |
 
 ### API Key Storage
 
@@ -121,6 +147,7 @@ Content-Type: application/json
   "enabled": true,
   "host": "https://eu.i.posthog.com",
   "person_profiling": false,
+  "exception_capture": true,
   "event_mappings": {
     "api_decisions_list": "custom_event_name"
   }
@@ -177,6 +204,27 @@ track_event('custom_event', properties={
     'value': 42
 })
 ```
+
+### Capturing Exceptions
+
+For caught exceptions that should be monitored:
+
+```python
+from analytics import capture_exception
+
+try:
+    risky_operation()
+except Exception as e:
+    logger.error(f"Operation failed: {e}")
+    capture_exception(e, endpoint_name='risky_operation')
+    # Handle the error gracefully
+```
+
+The `capture_exception` function:
+- Only sends if exception capture is enabled in settings
+- Uses the same privacy-preserving hashed user ID
+- Includes endpoint name, request path, and method automatically
+- Can accept extra properties for additional context
 
 ### Event Properties
 
@@ -252,6 +300,7 @@ az keyvault secret set \
 3. **Tenant isolation**: Tenant domains are hashed in event properties
 4. **GDPR compliance**: Person profiling is off by default
 5. **Data minimization**: Only necessary event data is collected
+6. **Exception privacy**: Stack traces contain only file paths, no variable values or user data
 
 ---
 

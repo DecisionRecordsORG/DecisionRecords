@@ -172,6 +172,10 @@ def handle_exception(e):
     logger.error(f"Unhandled exception: {str(e)}")
     logger.error(traceback.format_exc())
 
+    # Capture to PostHog if enabled
+    from analytics import capture_exception
+    capture_exception(e, endpoint_name='unhandled_exception')
+
     # Return generic error to client - NEVER expose internal details
     if request.path.startswith('/api/'):
         return jsonify({'error': 'An internal server error occurred'}), 500
@@ -182,6 +186,11 @@ def handle_exception(e):
 def handle_500(e):
     """Handle 500 Internal Server Error."""
     logger.error(f"500 Error: {str(e)}")
+
+    # Capture to PostHog if enabled
+    from analytics import capture_exception
+    capture_exception(e, endpoint_name='http_500_error')
+
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Internal server error'}), 500
     return "Internal server error", 500
@@ -2105,6 +2114,15 @@ def api_save_analytics_settings():
             SystemConfig.KEY_ANALYTICS_PERSON_PROFILING,
             'true' if person_profiling else 'false',
             description='Enable/disable person profile creation in PostHog'
+        )
+
+    # Update exception capture
+    if 'exception_capture' in data:
+        exception_capture = bool(data['exception_capture'])
+        SystemConfig.set(
+            SystemConfig.KEY_ANALYTICS_EXCEPTION_CAPTURE,
+            'true' if exception_capture else 'false',
+            description='Enable/disable exception capture to PostHog'
         )
 
     # Update event mappings

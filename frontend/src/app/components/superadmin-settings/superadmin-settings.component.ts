@@ -40,6 +40,7 @@ interface AnalyticsSettings {
   enabled: boolean;
   host: string;
   person_profiling: boolean;
+  exception_capture: boolean;
   api_key_configured: boolean;
   event_mappings: { [key: string]: string };
   categories: { [key: string]: EndpointCategory };
@@ -257,6 +258,19 @@ interface AnalyticsSettings {
                     <span class="privacy-hint">
                       <mat-icon>privacy_tip</mat-icon>
                       {{ analyticsPersonProfiling ? 'User profiles will be created in PostHog' : 'Privacy mode: No user profiles created' }}
+                    </span>
+                  </div>
+
+                  <div class="toggle-row">
+                    <mat-slide-toggle
+                      [(ngModel)]="analyticsExceptionCapture"
+                      (change)="saveAnalyticsSettings()"
+                      color="primary">
+                      Exception Capture
+                    </mat-slide-toggle>
+                    <span class="privacy-hint">
+                      <mat-icon>{{ analyticsExceptionCapture ? 'bug_report' : 'bug_report' }}</mat-icon>
+                      {{ analyticsExceptionCapture ? 'Unhandled errors sent to PostHog for monitoring' : 'Error capture disabled' }}
                     </span>
                   </div>
 
@@ -629,6 +643,7 @@ export class SuperadminSettingsComponent implements OnInit {
   analyticsApiKey = '';
   analyticsApiKeyConfigured = false;
   analyticsPersonProfiling = false;
+  analyticsExceptionCapture = false;
   showApiKey = false;
   analyticsTestResult = '';
   analyticsTestSuccess = false;
@@ -744,6 +759,7 @@ export class SuperadminSettingsComponent implements OnInit {
         this.analyticsEnabled = settings.enabled;
         this.analyticsHost = settings.host;
         this.analyticsPersonProfiling = settings.person_profiling;
+        this.analyticsExceptionCapture = settings.exception_capture;
         this.analyticsApiKeyConfigured = settings.api_key_configured;
         this.analyticsEventMappings = { ...settings.event_mappings };
         this.analyticsDefaultMappings = { ...settings.event_mappings };
@@ -762,7 +778,8 @@ export class SuperadminSettingsComponent implements OnInit {
     this.http.post('/api/admin/settings/analytics', {
       enabled: this.analyticsEnabled,
       host: this.analyticsHost,
-      person_profiling: this.analyticsPersonProfiling
+      person_profiling: this.analyticsPersonProfiling,
+      exception_capture: this.analyticsExceptionCapture
     }).subscribe({
       next: () => {
         this.snackBar.open('Analytics settings saved', 'Close', { duration: 3000 });

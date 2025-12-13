@@ -332,6 +332,76 @@ This project uses these response patterns:
 3. **Don't guess endpoint names** - Always verify against `app.py`
 4. **Don't skip error response handling** - Backend errors use `{ error: '...' }` format
 
+## Analytics & Error Capture Guidelines
+
+When writing code for this project, follow these guidelines for analytics and error tracking.
+
+### Adding Analytics to New Endpoints
+
+All API endpoints should be instrumented with analytics tracking:
+
+```python
+from analytics import track_endpoint
+
+@app.route('/api/my-endpoint', methods=['GET'])
+@login_required
+@track_endpoint('api_my_endpoint')  # Add after auth decorators
+def my_endpoint():
+    ...
+```
+
+When adding new endpoints:
+1. Add the `@track_endpoint('endpoint_name')` decorator after authentication decorators
+2. Use a descriptive endpoint name following the pattern: `api_<resource>_<action>`
+3. Register the endpoint in `analytics.py` in the appropriate category
+
+### Handling Errors with Exception Capture
+
+For operations that might fail unexpectedly, capture exceptions:
+
+```python
+from analytics import capture_exception
+
+try:
+    risky_external_call()
+except Exception as e:
+    logger.error(f"External call failed: {e}")
+    capture_exception(e, endpoint_name='external_integration')
+    return jsonify({'error': 'Service temporarily unavailable'}), 503
+```
+
+Guidelines for exception capture:
+1. **Always log first**: Use `logger.error()` before calling `capture_exception()`
+2. **Never expose internals**: Return generic error messages to users
+3. **Include context**: Pass the `endpoint_name` to help identify where errors occur
+4. **Don't capture expected errors**: Only capture unexpected/bug-type exceptions
+
+### What NOT to Capture
+
+Do not capture these as exceptions (they're expected behavior):
+- 400 Bad Request (client validation errors)
+- 401 Unauthorized (auth working correctly)
+- 403 Forbidden (authorization working correctly)
+- 404 Not Found (normal behavior)
+
+### Flask Error Handling Best Practices
+
+Global error handlers in `app.py` already capture unhandled exceptions automatically:
+
+```python
+@app.errorhandler(Exception)
+def handle_exception(e):
+    logger.error(f"Unhandled exception: {str(e)}")
+    capture_exception(e, endpoint_name='unhandled_exception')
+    return jsonify({'error': 'An internal server error occurred'}), 500
+```
+
+For route-specific error handling:
+1. Log the error with details
+2. Capture to PostHog if it's unexpected
+3. Return a user-friendly error message
+4. Use appropriate HTTP status codes
+
 ## Troubleshooting
 
 ### Login Issues

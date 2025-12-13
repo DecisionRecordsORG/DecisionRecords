@@ -70,6 +70,7 @@ class SystemConfig(db.Model):
     KEY_ANALYTICS_API_KEY = 'analytics_api_key'  # For self-hosted (fallback storage)
     KEY_ANALYTICS_PERSON_PROFILING = 'analytics_person_profiling'
     KEY_ANALYTICS_EVENT_MAPPINGS = 'analytics_event_mappings'
+    KEY_ANALYTICS_EXCEPTION_CAPTURE = 'analytics_exception_capture'
 
     # Default values
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
@@ -80,6 +81,7 @@ class SystemConfig(db.Model):
     DEFAULT_ANALYTICS_ENABLED = False  # OFF by default (opt-in)
     DEFAULT_ANALYTICS_HOST = 'https://eu.i.posthog.com'
     DEFAULT_ANALYTICS_PERSON_PROFILING = False  # Privacy-first
+    DEFAULT_ANALYTICS_EXCEPTION_CAPTURE = False  # OFF by default
 
     @staticmethod
     def get(key, default=None):
