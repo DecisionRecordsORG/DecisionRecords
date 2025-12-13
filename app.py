@@ -2099,7 +2099,7 @@ def api_save_analytics_settings():
 
     # Update host
     if 'host' in data:
-        host = sanitize_input(data['host'], max_length=200)
+        host = sanitize_text_field(data['host'], max_length=200)
         if host and host.startswith('http'):
             SystemConfig.set(
                 SystemConfig.KEY_ANALYTICS_HOST,
@@ -2133,7 +2133,7 @@ def api_save_analytics_settings():
             valid_mappings = {}
             for key, value in mappings.items():
                 if key in DEFAULT_EVENT_MAPPINGS:
-                    valid_mappings[key] = sanitize_input(value, max_length=100) if value else DEFAULT_EVENT_MAPPINGS[key]
+                    valid_mappings[key] = sanitize_text_field(value, max_length=100) if value else DEFAULT_EVENT_MAPPINGS[key]
             SystemConfig.set(
                 SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
                 json_lib.dumps(valid_mappings),
