@@ -21,7 +21,7 @@ from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
     generate_csrf_token, apply_security_headers,
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
-    sanitize_request_data
+    sanitize_request_data, sanitize_string
 )
 from keyvault_client import keyvault_client
 from analytics import track_endpoint
