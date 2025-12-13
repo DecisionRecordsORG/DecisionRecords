@@ -436,7 +436,8 @@ def setup_cloudflare_security(app):
     def check_cloudflare_security():
         """Validate Cloudflare origin and Access tokens."""
         # Skip for health checks and static files
-        if request.path in ['/health', '/api/version', '/favicon.ico']:
+        # /ping is used by Azure Application Gateway health probes
+        if request.path in ['/health', '/api/version', '/favicon.ico', '/ping']:
             return None
 
         # Skip for static assets
