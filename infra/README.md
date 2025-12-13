@@ -27,7 +27,16 @@ az deployment group create \
                postgresPassword="dbpassword" \
                secretKey="your-secret-key" \
                masterUsername="admin" \
-               masterPassword="password"
+               masterPassword="password" \
+               logAnalyticsWorkspaceId="workspace-id" \
+               logAnalyticsWorkspaceKey="workspace-key"
+```
+
+**Log Analytics Integration (Optional):**
+When `logAnalyticsWorkspaceId` and `logAnalyticsWorkspaceKey` are provided, container logs are automatically forwarded to Azure Log Analytics. Get these values with:
+```bash
+az monitor log-analytics workspace show --resource-group adr-resources-eu --workspace-name adr-logs-workspace --query customerId -o tsv
+az monitor log-analytics workspace get-shared-keys --resource-group adr-resources-eu --workspace-name adr-logs-workspace --query primarySharedKey -o tsv
 ```
 
 ### `azure-deploy.json`

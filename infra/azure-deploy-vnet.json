@@ -97,6 +97,20 @@
       "metadata": {
         "description": "Subnet name for container instances"
       }
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Log Analytics workspace ID for container logs (optional)"
+      }
+    },
+    "logAnalyticsWorkspaceKey": {
+      "type": "secureString",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Log Analytics workspace primary key (optional)"
+      }
     }
   },
   "variables": {
@@ -188,12 +202,7 @@
         ],
         "osType": "Linux",
         "restartPolicy": "Always",
-        "diagnostics": {
-          "logAnalytics": {
-            "workspaceId": "530e6d76-7ce8-41d4-95b1-82aa1f2f2210",
-            "workspaceKey": "LKNgc+Mk68bJ2hZ3R6KV/QfmUsJvlFOmchRN7Q78FzFVq1aXp2dK2G5hA0cevvw72kBz68tE/pdAW2NzQk0tSg=="
-          }
-        }
+        "diagnostics": "[if(empty(parameters('logAnalyticsWorkspaceId')), null(), createObject('logAnalytics', createObject('workspaceId', parameters('logAnalyticsWorkspaceId'), 'workspaceKey', parameters('logAnalyticsWorkspaceKey'))))]"
       }
     }
   ],
