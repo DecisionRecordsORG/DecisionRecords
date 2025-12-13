@@ -1,6 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -9,6 +9,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatSlideToggleModule } from '@angular/material/slide-toggle';
+import { MatExpansionModule } from '@angular/material/expansion';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { RouterModule } from '@angular/router';
 
 interface SessionSettings {
@@ -27,12 +30,28 @@ interface LicensingSettings {
   };
 }
 
+interface EndpointCategory {
+  name: string;
+  icon: string;
+  endpoints: string[];
+}
+
+interface AnalyticsSettings {
+  enabled: boolean;
+  host: string;
+  person_profiling: boolean;
+  api_key_configured: boolean;
+  event_mappings: { [key: string]: string };
+  categories: { [key: string]: EndpointCategory };
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     RouterModule,
     MatCardModule,
     MatFormFieldModule,
@@ -40,7 +59,10 @@ interface LicensingSettings {
     MatButtonModule,
     MatIconModule,
     MatProgressSpinnerModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    MatSlideToggleModule,
+    MatExpansionModule,
+    MatTooltipModule
   ],
   template: `
     <div class="settings-container">
@@ -150,6 +172,180 @@ interface LicensingSettings {
                 </button>
               </div>
             </form>
+          }
+        </mat-card-content>
+      </mat-card>
+
+      <!-- Analytics Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>analytics</mat-icon>
+            Product Analytics
+          </mat-card-title>
+          <mat-card-subtitle>
+            Configure PostHog analytics for tracking platform usage
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (analyticsLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <div class="form-section">
+              <h3>Analytics Configuration</h3>
+              <p class="hint">Enable analytics to track platform usage patterns</p>
+
+              <div class="toggle-row">
+                <mat-slide-toggle
+                  [(ngModel)]="analyticsEnabled"
+                  (change)="saveAnalyticsSettings()"
+                  color="primary">
+                  Enable Analytics
+                </mat-slide-toggle>
+                <span class="status-badge" [class.enabled]="analyticsEnabled">
+                  {{ analyticsEnabled ? 'Active' : 'Disabled' }}
+                </span>
+              </div>
+
+              @if (analyticsEnabled) {
+                <div class="analytics-config">
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>PostHog Host URL</mat-label>
+                    <input matInput [(ngModel)]="analyticsHost" placeholder="https://eu.i.posthog.com">
+                    <mat-hint>PostHog server URL (e.g., https://eu.i.posthog.com or self-hosted URL)</mat-hint>
+                  </mat-form-field>
+
+                  <div class="api-key-section">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>API Key</mat-label>
+                      <input matInput
+                             [type]="showApiKey ? 'text' : 'password'"
+                             [(ngModel)]="analyticsApiKey"
+                             placeholder="phc_...">
+                      <button mat-icon-button matSuffix
+                              (click)="showApiKey = !showApiKey"
+                              type="button"
+                              matTooltip="{{ showApiKey ? 'Hide' : 'Show' }} API Key">
+                        <mat-icon>{{ showApiKey ? 'visibility_off' : 'visibility' }}</mat-icon>
+                      </button>
+                      <mat-hint>
+                        @if (analyticsApiKeyConfigured && !analyticsApiKey) {
+                          API key is configured (hidden for security)
+                        } @else {
+                          Enter your PostHog project API key
+                        }
+                      </mat-hint>
+                    </mat-form-field>
+                    <button mat-stroked-button
+                            (click)="saveAnalyticsApiKey()"
+                            [disabled]="!analyticsApiKey || analyticsSavingKey">
+                      <mat-spinner diameter="18" *ngIf="analyticsSavingKey"></mat-spinner>
+                      <mat-icon *ngIf="!analyticsSavingKey">vpn_key</mat-icon>
+                      Save Key
+                    </button>
+                  </div>
+
+                  <div class="toggle-row">
+                    <mat-slide-toggle
+                      [(ngModel)]="analyticsPersonProfiling"
+                      (change)="saveAnalyticsSettings()"
+                      color="primary">
+                      Person Profiling
+                    </mat-slide-toggle>
+                    <span class="privacy-hint">
+                      <mat-icon>privacy_tip</mat-icon>
+                      {{ analyticsPersonProfiling ? 'User profiles will be created in PostHog' : 'Privacy mode: No user profiles created' }}
+                    </span>
+                  </div>
+
+                  <div class="test-section">
+                    <button mat-stroked-button
+                            color="primary"
+                            (click)="testAnalyticsConnection()"
+                            [disabled]="analyticsTesting || !analyticsApiKeyConfigured">
+                      <mat-spinner diameter="18" *ngIf="analyticsTesting"></mat-spinner>
+                      <mat-icon *ngIf="!analyticsTesting">send</mat-icon>
+                      Test Connection
+                    </button>
+                    @if (analyticsTestResult) {
+                      <span class="test-result" [class.success]="analyticsTestSuccess">
+                        <mat-icon>{{ analyticsTestSuccess ? 'check_circle' : 'error' }}</mat-icon>
+                        {{ analyticsTestResult }}
+                      </span>
+                    }
+                  </div>
+
+                  <div class="actions">
+                    <button mat-raised-button color="primary"
+                            (click)="saveAnalyticsSettings()"
+                            [disabled]="analyticsSaving">
+                      <mat-spinner diameter="20" *ngIf="analyticsSaving"></mat-spinner>
+                      <mat-icon *ngIf="!analyticsSaving">save</mat-icon>
+                      <span *ngIf="!analyticsSaving">Save Analytics Settings</span>
+                    </button>
+                  </div>
+                </div>
+              }
+            </div>
+
+            @if (analyticsEnabled && analyticsCategories) {
+              <div class="form-section">
+                <h3>Event Mappings</h3>
+                <p class="hint">Customize event names sent to PostHog by category</p>
+
+                <mat-accordion multi>
+                  @for (categoryKey of getCategoryKeys(); track categoryKey) {
+                    <mat-expansion-panel>
+                      <mat-expansion-panel-header>
+                        <mat-panel-title>
+                          <mat-icon>{{ analyticsCategories[categoryKey].icon }}</mat-icon>
+                          {{ analyticsCategories[categoryKey].name }}
+                        </mat-panel-title>
+                        <mat-panel-description>
+                          {{ analyticsCategories[categoryKey].endpoints.length }} events
+                        </mat-panel-description>
+                      </mat-expansion-panel-header>
+
+                      <div class="event-list">
+                        @for (endpoint of analyticsCategories[categoryKey].endpoints; track endpoint) {
+                          <div class="event-item">
+                            <span class="endpoint-name" matTooltip="{{ endpoint }}">{{ endpoint }}</span>
+                            <mat-form-field appearance="outline" class="event-name-field">
+                              <input matInput
+                                     [(ngModel)]="analyticsEventMappings[endpoint]"
+                                     placeholder="{{ endpoint }}">
+                            </mat-form-field>
+                          </div>
+                        }
+                      </div>
+
+                      <div class="panel-actions">
+                        <button mat-button (click)="resetCategoryMappings(categoryKey)">
+                          <mat-icon>restore</mat-icon>
+                          Reset Category to Defaults
+                        </button>
+                      </div>
+                    </mat-expansion-panel>
+                  }
+                </mat-accordion>
+
+                <div class="actions">
+                  <button mat-raised-button color="primary"
+                          (click)="saveEventMappings()"
+                          [disabled]="analyticsSavingMappings">
+                    <mat-spinner diameter="20" *ngIf="analyticsSavingMappings"></mat-spinner>
+                    <mat-icon *ngIf="!analyticsSavingMappings">save</mat-icon>
+                    <span *ngIf="!analyticsSavingMappings">Save Event Mappings</span>
+                  </button>
+                  <button mat-button (click)="resetAllMappings()">
+                    <mat-icon>restore</mat-icon>
+                    Reset All to Defaults
+                  </button>
+                </div>
+              </div>
+            }
           }
         </mat-card-content>
       </mat-card>
@@ -263,6 +459,148 @@ interface LicensingSettings {
     .actions mat-spinner {
       margin-right: 8px;
     }
+
+    /* Analytics styles */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    .status-badge {
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 12px;
+      font-weight: 500;
+      background: #f5f5f5;
+      color: #666;
+    }
+
+    .status-badge.enabled {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .analytics-config {
+      margin-top: 16px;
+    }
+
+    .full-width {
+      width: 100%;
+    }
+
+    .api-key-section {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin: 16px 0;
+    }
+
+    .api-key-section mat-form-field {
+      flex: 1;
+    }
+
+    .api-key-section button {
+      margin-top: 4px;
+    }
+
+    .privacy-hint {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .privacy-hint mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    .test-section {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 16px 0;
+      padding: 16px;
+      background: #fff;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .test-result {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      color: #f44336;
+    }
+
+    .test-result.success {
+      color: #2e7d32;
+    }
+
+    mat-accordion {
+      display: block;
+      margin-top: 16px;
+    }
+
+    mat-expansion-panel {
+      margin-bottom: 8px;
+    }
+
+    mat-panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    mat-panel-title mat-icon {
+      color: #1976d2;
+    }
+
+    .event-list {
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .event-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .event-item:last-child {
+      border-bottom: none;
+    }
+
+    .endpoint-name {
+      min-width: 200px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #666;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .event-name-field {
+      flex: 1;
+      min-width: 150px;
+    }
+
+    .event-name-field input {
+      font-family: monospace;
+    }
+
+    .panel-actions {
+      padding-top: 16px;
+      border-top: 1px solid #e0e0e0;
+      margin-top: 16px;
+    }
   `]
 })
 export class SuperadminSettingsComponent implements OnInit {
@@ -279,6 +617,24 @@ export class SuperadminSettingsComponent implements OnInit {
   licensingDefaults = {
     max_users_per_tenant: 5
   };
+
+  // Analytics settings
+  analyticsLoading = true;
+  analyticsSaving = false;
+  analyticsSavingKey = false;
+  analyticsSavingMappings = false;
+  analyticsTesting = false;
+  analyticsEnabled = false;
+  analyticsHost = 'https://eu.i.posthog.com';
+  analyticsApiKey = '';
+  analyticsApiKeyConfigured = false;
+  analyticsPersonProfiling = false;
+  showApiKey = false;
+  analyticsTestResult = '';
+  analyticsTestSuccess = false;
+  analyticsEventMappings: { [key: string]: string } = {};
+  analyticsCategories: { [key: string]: EndpointCategory } | null = null;
+  analyticsDefaultMappings: { [key: string]: string } = {};
 
   constructor(
     private http: HttpClient,
@@ -297,6 +653,7 @@ export class SuperadminSettingsComponent implements OnInit {
   ngOnInit() {
     this.loadSettings();
     this.loadLicensingSettings();
+    this.loadAnalyticsSettings();
   }
 
   loadSettings() {
@@ -376,6 +733,125 @@ export class SuperadminSettingsComponent implements OnInit {
   resetLicensingToDefaults() {
     this.licensingForm.patchValue({
       max_users_per_tenant: this.licensingDefaults.max_users_per_tenant
+    });
+  }
+
+  // Analytics methods
+  loadAnalyticsSettings() {
+    this.analyticsLoading = true;
+    this.http.get<AnalyticsSettings>('/api/admin/settings/analytics').subscribe({
+      next: (settings) => {
+        this.analyticsEnabled = settings.enabled;
+        this.analyticsHost = settings.host;
+        this.analyticsPersonProfiling = settings.person_profiling;
+        this.analyticsApiKeyConfigured = settings.api_key_configured;
+        this.analyticsEventMappings = { ...settings.event_mappings };
+        this.analyticsDefaultMappings = { ...settings.event_mappings };
+        this.analyticsCategories = settings.categories;
+        this.analyticsLoading = false;
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to load analytics settings', 'Close', { duration: 3000 });
+        this.analyticsLoading = false;
+      }
+    });
+  }
+
+  saveAnalyticsSettings() {
+    this.analyticsSaving = true;
+    this.http.post('/api/admin/settings/analytics', {
+      enabled: this.analyticsEnabled,
+      host: this.analyticsHost,
+      person_profiling: this.analyticsPersonProfiling
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Analytics settings saved', 'Close', { duration: 3000 });
+        this.analyticsSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save analytics settings', 'Close', { duration: 3000 });
+        this.analyticsSaving = false;
+      }
+    });
+  }
+
+  saveAnalyticsApiKey() {
+    if (!this.analyticsApiKey) return;
+
+    this.analyticsSavingKey = true;
+    this.http.put('/api/admin/settings/analytics/api-key', {
+      api_key: this.analyticsApiKey
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('API key saved successfully', 'Close', { duration: 3000 });
+        this.analyticsApiKeyConfigured = true;
+        this.analyticsApiKey = ''; // Clear for security
+        this.analyticsSavingKey = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save API key', 'Close', { duration: 3000 });
+        this.analyticsSavingKey = false;
+      }
+    });
+  }
+
+  testAnalyticsConnection() {
+    this.analyticsTesting = true;
+    this.analyticsTestResult = '';
+    this.http.post<{ message: string }>('/api/admin/settings/analytics/test', {}).subscribe({
+      next: (response) => {
+        this.analyticsTestResult = response.message;
+        this.analyticsTestSuccess = true;
+        this.analyticsTesting = false;
+      },
+      error: (error) => {
+        this.analyticsTestResult = error.error?.error || 'Connection test failed';
+        this.analyticsTestSuccess = false;
+        this.analyticsTesting = false;
+      }
+    });
+  }
+
+  saveEventMappings() {
+    this.analyticsSavingMappings = true;
+    this.http.post('/api/admin/settings/analytics', {
+      event_mappings: this.analyticsEventMappings
+    }).subscribe({
+      next: () => {
+        this.snackBar.open('Event mappings saved', 'Close', { duration: 3000 });
+        this.analyticsSavingMappings = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save event mappings', 'Close', { duration: 3000 });
+        this.analyticsSavingMappings = false;
+      }
+    });
+  }
+
+  getCategoryKeys(): string[] {
+    return this.analyticsCategories ? Object.keys(this.analyticsCategories) : [];
+  }
+
+  resetCategoryMappings(categoryKey: string) {
+    if (!this.analyticsCategories) return;
+
+    const category = this.analyticsCategories[categoryKey];
+    for (const endpoint of category.endpoints) {
+      this.analyticsEventMappings[endpoint] = this.analyticsDefaultMappings[endpoint];
+    }
+    this.snackBar.open(`${category.name} mappings reset to defaults`, 'Close', { duration: 2000 });
+  }
+
+  resetAllMappings() {
+    this.http.post<{ message: string; event_mappings: { [key: string]: string } }>('/api/admin/settings/analytics/reset-mappings', {}).subscribe({
+      next: (response) => {
+        this.analyticsEventMappings = { ...response.event_mappings };
+        this.analyticsDefaultMappings = { ...response.event_mappings };
+        this.snackBar.open('All event mappings reset to defaults', 'Close', { duration: 3000 });
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to reset mappings', 'Close', { duration: 3000 });
+      }
     });
   }
 }

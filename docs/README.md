@@ -9,6 +9,7 @@ Welcome to the comprehensive documentation for the Architecture Decisions multi-
 - [**Multi-Tenant Architecture**](./multi-tenant.md) - Domain-based tenant isolation and management
 - [**Email Configuration**](./email-configuration.md) - SMTP setup with Azure Key Vault integration
 - [**Security Features**](./security.md) - Comprehensive security implementation
+- [**Product Analytics**](./analytics.md) - PostHog integration with privacy-respecting tracking
 
 ### Deployment & Infrastructure
 - [**Azure Deployment Guide**](./azure-deployment.md) - Complete Azure Container Instances deployment
@@ -127,8 +128,3 @@ For issues or questions:
 ---
 
 *Last Updated: December 2024*
-
-DEMO
- The backend is running on port 5001. Now you should be able to log in at http://localhost:4200/brandnewcorp.com/login with:
-  - Email: demo@brandnewcorp.com
-  - Password: demo123!

@@ -129,6 +129,32 @@ class KeyVaultClient:
 
         return username, password
 
+    def get_posthog_api_key(self):
+        """
+        Get PostHog API key from Key Vault or environment.
+
+        Priority:
+        1. Key Vault 'posthog-api-key'
+        2. Environment variable 'POSTHOG_API_KEY'
+        3. None (analytics will fall back to SystemConfig or be disabled)
+        """
+        return self.get_secret('posthog-api-key', fallback_env_var='POSTHOG_API_KEY')
+
+    def get_analytics_salt(self):
+        """
+        Get analytics salt for hashing user IDs.
+
+        Priority:
+        1. Key Vault 'analytics-salt'
+        2. Environment variable 'ANALYTICS_SALT'
+        3. Default salt (for development only)
+        """
+        return self.get_secret(
+            'analytics-salt',
+            fallback_env_var='ANALYTICS_SALT',
+            default='default-analytics-salt-change-in-production'
+        )
+
 
 # Global instance
 keyvault_client = KeyVaultClient()

@@ -24,6 +24,7 @@ from security import (
     sanitize_request_data
 )
 from keyvault_client import keyvault_client
+from analytics import track_endpoint
 
 # Configure logging
 logging.basicConfig(
@@ -768,7 +769,7 @@ def _api_submit_sponsorship_impl():
 
     if success:
         logger.info(f"Sponsorship inquiry submitted from {org_name} ({contact_email})")
-        return jsonify({'message': 'Thank you for your interest in sponsoring Architecture Decisions! We will be in touch shortly.'})
+        return jsonify({'message': 'Thank you for reaching out! We will be in touch shortly.'})
     else:
         logger.error(f"Failed to send sponsorship inquiry email from {contact_email}")
         return jsonify({'error': 'Failed to submit inquiry. Please try again later.'}), 500
@@ -816,6 +817,7 @@ def rate_limit(limit_string):
 
 @app.route('/auth/local', methods=['POST'])
 @rate_limit("5 per minute")  # Strict limit on login attempts
+@track_endpoint('auth_local')
 def local_login():
     """Handle local master account login."""
     # Log login attempt for security auditing
@@ -1130,6 +1132,7 @@ if not SERVE_ANGULAR:
 
 @app.route('/api/decisions', methods=['GET'])
 @login_required
+@track_endpoint('api_decisions_list')
 def api_list_decisions():
     """List all architecture decisions for the user's domain."""
     # SECURITY: Master accounts should NOT access tenant data
@@ -1146,6 +1149,7 @@ def api_list_decisions():
 
 @app.route('/api/decisions', methods=['POST'])
 @login_required
+@track_endpoint('api_decisions_create')
 def api_create_decision():
     """Create a new architecture decision."""
     # Master accounts cannot create decisions (they don't belong to any domain)
@@ -1485,6 +1489,7 @@ def api_get_decision_history(decision_id):
 # ==================== API Routes - User ====================
 
 @app.route('/api/user/me', methods=['GET'])
+@track_endpoint('api_user_me')
 def api_get_current_user():
     """Get current user info. Supports both full sessions and setup tokens."""
     from auth import validate_setup_token
@@ -2054,6 +2059,173 @@ def api_save_licensing_settings():
             SystemConfig.KEY_MAX_USERS_PER_TENANT,
             default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
         )
+    })
+
+
+@app.route('/api/admin/settings/analytics', methods=['GET'])
+@master_required
+def api_get_analytics_settings():
+    """Get analytics settings (super admin only)."""
+    from analytics import get_config_for_api
+    return jsonify(get_config_for_api())
+
+
+@app.route('/api/admin/settings/analytics', methods=['POST', 'PUT'])
+@master_required
+def api_save_analytics_settings():
+    """Update analytics settings (super admin only)."""
+    import json as json_lib
+    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+
+    data = request.get_json() or {}
+
+    # Update enabled flag
+    if 'enabled' in data:
+        enabled = bool(data['enabled'])
+        SystemConfig.set(
+            SystemConfig.KEY_ANALYTICS_ENABLED,
+            'true' if enabled else 'false',
+            description='Enable/disable PostHog analytics'
+        )
+
+    # Update host
+    if 'host' in data:
+        host = sanitize_input(data['host'], max_length=200)
+        if host and host.startswith('http'):
+            SystemConfig.set(
+                SystemConfig.KEY_ANALYTICS_HOST,
+                host,
+                description='PostHog host URL'
+            )
+
+    # Update person profiling
+    if 'person_profiling' in data:
+        person_profiling = bool(data['person_profiling'])
+        SystemConfig.set(
+            SystemConfig.KEY_ANALYTICS_PERSON_PROFILING,
+            'true' if person_profiling else 'false',
+            description='Enable/disable person profile creation in PostHog'
+        )
+
+    # Update event mappings
+    if 'event_mappings' in data:
+        mappings = data['event_mappings']
+        if isinstance(mappings, dict):
+            # Validate all keys exist in defaults
+            valid_mappings = {}
+            for key, value in mappings.items():
+                if key in DEFAULT_EVENT_MAPPINGS:
+                    valid_mappings[key] = sanitize_input(value, max_length=100) if value else DEFAULT_EVENT_MAPPINGS[key]
+            SystemConfig.set(
+                SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
+                json_lib.dumps(valid_mappings),
+                description='Custom event name mappings for PostHog'
+            )
+
+    # Invalidate cache to pick up new settings
+    invalidate_cache()
+
+    return jsonify({
+        'message': 'Analytics settings updated successfully'
+    })
+
+
+@app.route('/api/admin/settings/analytics/api-key', methods=['PUT'])
+@master_required
+def api_save_analytics_api_key():
+    """Save analytics API key (super admin only).
+
+    For self-hosted deployments that don't use Key Vault.
+    In cloud deployments, the key should be in Key Vault.
+    """
+    from analytics import invalidate_cache
+
+    data = request.get_json() or {}
+    api_key = data.get('api_key')
+
+    if not api_key:
+        return jsonify({'error': 'API key is required'}), 400
+
+    # Basic validation (PostHog keys start with 'phc_')
+    if not api_key.startswith('phc_'):
+        return jsonify({'error': 'Invalid PostHog API key format. Keys should start with "phc_"'}), 400
+
+    # Store in SystemConfig (for self-hosted deployments)
+    SystemConfig.set(
+        SystemConfig.KEY_ANALYTICS_API_KEY,
+        api_key,
+        description='PostHog API key (for self-hosted deployments)'
+    )
+
+    # Invalidate cache to pick up new key
+    invalidate_cache()
+
+    return jsonify({
+        'message': 'Analytics API key saved successfully'
+    })
+
+
+@app.route('/api/admin/settings/analytics/test', methods=['POST'])
+@master_required
+def api_test_analytics():
+    """Send a test event to PostHog (super admin only)."""
+    from analytics import _get_analytics_config, invalidate_cache
+
+    # Force config refresh
+    invalidate_cache()
+    config = _get_analytics_config()
+
+    if not config['api_key']:
+        return jsonify({'error': 'No API key configured. Please set an API key first.'}), 400
+
+    if not config['posthog_client']:
+        return jsonify({'error': 'PostHog client not initialized. Check API key and host configuration.'}), 400
+
+    try:
+        # Send a test event
+        config['posthog_client'].capture(
+            distinct_id='master_admin',
+            event='analytics_test_event',
+            properties={
+                'test': True,
+                'source': 'admin_settings_test',
+                'timestamp': datetime.utcnow().isoformat()
+            }
+        )
+
+        # Flush to ensure event is sent immediately
+        config['posthog_client'].flush()
+
+        return jsonify({
+            'message': 'Test event sent successfully! Check your PostHog dashboard.',
+            'event_name': 'analytics_test_event',
+            'host': config['host']
+        })
+    except Exception as e:
+        logger.error(f"Failed to send test analytics event: {e}")
+        return jsonify({'error': f'Failed to send test event: {str(e)}'}), 500
+
+
+@app.route('/api/admin/settings/analytics/reset-mappings', methods=['POST'])
+@master_required
+def api_reset_analytics_mappings():
+    """Reset event mappings to defaults (super admin only)."""
+    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+    import json as json_lib
+
+    # Clear the custom mappings
+    SystemConfig.set(
+        SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
+        json_lib.dumps(DEFAULT_EVENT_MAPPINGS),
+        description='Custom event name mappings for PostHog'
+    )
+
+    # Invalidate cache
+    invalidate_cache()
+
+    return jsonify({
+        'message': 'Event mappings reset to defaults',
+        'event_mappings': DEFAULT_EVENT_MAPPINGS
     })
 
 
