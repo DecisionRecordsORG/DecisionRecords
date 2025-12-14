@@ -36,8 +36,8 @@
       "location": "[variables('location')]",
       "properties": {
         "sku": {
-          "name": "Standard_v2",
-          "tier": "Standard_v2",
+          "name": "Basic",
+          "tier": "Basic",
           "capacity": 1
         },
         "gatewayIPConfigurations": [
