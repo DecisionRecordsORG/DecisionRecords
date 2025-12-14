@@ -9,28 +9,50 @@ This folder contains Azure Resource Manager (ARM) templates for deploying the Ar
 ### `azure-deploy-vnet.json`
 **Primary deployment template** - Deploys the application with private networking:
 - Azure Container Instance with VNet integration
+- **SystemAssigned Managed Identity** for Key Vault access
+- **Automatic RBAC role assignment** for Key Vault Secrets User
 - Private IP addressing (10.0.1.0/24 subnet)
 - Log Analytics integration for container monitoring
 - Environment variables for database and application configuration
 
+**Key Features:**
+- Secrets (SECRET_KEY, MASTER_PASSWORD) are retrieved from Azure Key Vault
+- The container's managed identity is automatically granted "Key Vault Secrets User" role
+- No credentials stored in environment variables for sensitive data
+
 **Usage:**
 ```bash
+# Get the database URL from Key Vault
+DATABASE_URL=$(az keyvault secret show --vault-name adr-keyvault-eu --name database-url --query value -o tsv)
+
+# Get registry password
+REGISTRY_PASSWORD=$(az acr credential show --name adrregistry2024eu --query "passwords[0].value" -o tsv)
+
+# Get Log Analytics workspace info
+WORKSPACE_ID=$(az monitor log-analytics workspace show --resource-group adr-resources-eu --workspace-name adr-logs-workspace --query customerId -o tsv)
+WORKSPACE_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group adr-resources-eu --workspace-name adr-logs-workspace --query primarySharedKey -o tsv)
+
+# Deploy
 az deployment group create \
   --resource-group adr-resources-eu \
   --template-file azure-deploy-vnet.json \
-  --parameters containerName="adr-app-eu" \
-               registryLoginServer="yourregistry.azurecr.io" \
-               registryUsername="yourregistry" \
-               registryPassword="password" \
-               postgresHost="your-postgres.postgres.database.azure.com" \
-               postgresUser="dbuser" \
-               postgresPassword="dbpassword" \
-               secretKey="your-secret-key" \
-               masterUsername="admin" \
-               masterPassword="password" \
-               logAnalyticsWorkspaceId="workspace-id" \
-               logAnalyticsWorkspaceKey="workspace-key"
+  --parameters \
+    registryPassword="$REGISTRY_PASSWORD" \
+    databaseUrl="$DATABASE_URL" \
+    logAnalyticsWorkspaceId="$WORKSPACE_ID" \
+    logAnalyticsWorkspaceKey="$WORKSPACE_KEY"
 ```
+
+**Default Parameters:**
+| Parameter | Default Value |
+|-----------|---------------|
+| containerName | adr-app-eu |
+| keyVaultName | adr-keyvault-eu |
+| registryLoginServer | adrregistry2024eu.azurecr.io |
+| registryUsername | adrregistry2024eu |
+| masterUsername | admin |
+| virtualNetworkName | adr-vnet |
+| subnetName | container-subnet |
 
 **Log Analytics Integration (Optional):**
 When `logAnalyticsWorkspaceId` and `logAnalyticsWorkspaceKey` are provided, container logs are automatically forwarded to Azure Log Analytics. Get these values with:
@@ -127,4 +149,22 @@ az network application-gateway show-backend-health \
 - Network Security Groups controlling traffic flow
 - SSL/TLS encryption for database connections
 - Secure value parameters for sensitive data
-- Managed Identity for DNS updates (no stored credentials)
+- **SystemAssigned Managed Identity** for Key Vault and DNS access (no stored credentials)
+- **Key Vault Secrets User** role automatically assigned to container identity
+- Secrets (SECRET_KEY, MASTER_PASSWORD, API keys) retrieved from Key Vault at runtime
+
+### Key Vault Integration
+
+The container uses Azure Managed Identity to access secrets from Key Vault:
+
+| Secret | Purpose |
+|--------|---------|
+| `flask-secret-key` | Flask session signing (persistent across restarts) |
+| `smtp-username` | Email SMTP authentication |
+| `smtp-password` | Email SMTP authentication |
+| `posthog-api-key` | Analytics API key |
+
+The ARM template automatically:
+1. Creates a SystemAssigned managed identity for the container
+2. Assigns "Key Vault Secrets User" role to the identity on the Key Vault
+3. Sets `AZURE_KEYVAULT_URL` environment variable for the application

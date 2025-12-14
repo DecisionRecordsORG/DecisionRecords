@@ -4,25 +4,28 @@
   "parameters": {
     "containerName": {
       "type": "string",
-      "defaultValue": "architecture-decisions",
+      "defaultValue": "adr-app-eu",
       "metadata": {
         "description": "Name of the container instance"
       }
     },
-    "dnsNameLabel": {
+    "keyVaultName": {
       "type": "string",
+      "defaultValue": "adr-keyvault-eu",
       "metadata": {
-        "description": "DNS name label for the container instance"
+        "description": "Name of the Key Vault for secrets"
       }
     },
     "registryLoginServer": {
       "type": "string",
+      "defaultValue": "adrregistry2024eu.azurecr.io",
       "metadata": {
         "description": "Azure Container Registry login server (e.g., myregistry.azurecr.io)"
       }
     },
     "registryUsername": {
       "type": "string",
+      "defaultValue": "adrregistry2024eu",
       "metadata": {
         "description": "Azure Container Registry username"
       }
@@ -40,35 +43,10 @@
         "description": "Container image name and tag"
       }
     },
-    "postgresHost": {
-      "type": "string",
-      "metadata": {
-        "description": "PostgreSQL server hostname"
-      }
-    },
-    "postgresUser": {
-      "type": "string",
-      "metadata": {
-        "description": "PostgreSQL username"
-      }
-    },
-    "postgresPassword": {
+    "databaseUrl": {
       "type": "secureString",
       "metadata": {
-        "description": "PostgreSQL password"
-      }
-    },
-    "postgresDb": {
-      "type": "string",
-      "defaultValue": "architecture_decisions",
-      "metadata": {
-        "description": "PostgreSQL database name"
-      }
-    },
-    "secretKey": {
-      "type": "secureString",
-      "metadata": {
-        "description": "Flask secret key for session management"
+        "description": "Full PostgreSQL connection string (retrieved from Key Vault)"
       }
     },
     "masterUsername": {
@@ -76,12 +54,6 @@
       "defaultValue": "admin",
       "metadata": {
         "description": "Master account username"
-      }
-    },
-    "masterPassword": {
-      "type": "secureString",
-      "metadata": {
-        "description": "Master account password"
       }
     },
     "virtualNetworkName": {
@@ -116,14 +88,19 @@
   "variables": {
     "location": "[resourceGroup().location]",
     "containerImage": "[concat(parameters('registryLoginServer'), '/', parameters('imageName'))]",
-    "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('virtualNetworkName'), parameters('subnetName'))]"
+    "subnetId": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('virtualNetworkName'), parameters('subnetName'))]",
+    "keyVaultSecretsUserRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+    "keyVaultId": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
   },
   "resources": [
     {
       "type": "Microsoft.ContainerInstance/containerGroups",
-      "apiVersion": "2021-07-01",
+      "apiVersion": "2023-05-01",
       "name": "[parameters('containerName')]",
       "location": "[variables('location')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
       "properties": {
         "containers": [
           {
@@ -139,11 +116,7 @@
               "environmentVariables": [
                 {
                   "name": "DATABASE_URL",
-                  "value": "[concat('postgresql://', parameters('postgresUser'), ':', parameters('postgresPassword'), '@', parameters('postgresHost'), ':5432/', parameters('postgresDb'), '?sslmode=require')]"
-                },
-                {
-                  "name": "SECRET_KEY",
-                  "secureValue": "[parameters('secretKey')]"
+                  "secureValue": "[parameters('databaseUrl')]"
                 },
                 {
                   "name": "ENVIRONMENT",
@@ -158,16 +131,16 @@
                   "value": "[parameters('masterUsername')]"
                 },
                 {
-                  "name": "MASTER_PASSWORD",
-                  "secureValue": "[parameters('masterPassword')]"
-                },
-                {
                   "name": "EMAIL_VERIFICATION_REQUIRED",
                   "value": "true"
                 },
                 {
                   "name": "USE_HTTPS",
                   "value": "true"
+                },
+                {
+                  "name": "AZURE_KEYVAULT_URL",
+                  "value": "[concat('https://', parameters('keyVaultName'), '.vault.azure.net/')]"
                 }
               ],
               "resources": {
@@ -204,12 +177,30 @@
         "restartPolicy": "Always",
         "diagnostics": "[if(empty(parameters('logAnalyticsWorkspaceId')), null(), createObject('logAnalytics', createObject('workspaceId', parameters('logAnalyticsWorkspaceId'), 'workspaceKey', parameters('logAnalyticsWorkspaceKey'))))]"
       }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceGroup().id, parameters('containerName'), 'KeyVaultSecretsUser')]",
+      "scope": "[variables('keyVaultId')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[variables('keyVaultSecretsUserRoleId')]",
+        "principalId": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerName')), '2023-05-01', 'Full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      }
     }
   ],
   "outputs": {
     "containerIPAddress": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerName'))).ipAddress.ip]"
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.ContainerInstance/containerGroups', parameters('containerName')), '2023-05-01', 'Full').identity.principalId]"
     }
   }
 }
