@@ -409,9 +409,19 @@ def _init_posthog_client():
         _config_cache['posthog_client'] = Posthog(
             project_api_key=_config_cache['api_key'],
             host=_config_cache['host'],
-            on_error=lambda e, items: logger.error(f"PostHog error: {e}")
+            # Timeout configuration - fail fast to avoid blocking requests
+            timeout=5,  # Reduced from default 15s to fail faster
+            feature_flags_request_timeout_seconds=3,
+            # Performance optimizations
+            gzip=True,  # Compress payloads to reduce bandwidth
+            max_retries=2,  # Retry failed requests (default is 3)
+            # Async batching settings
+            flush_at=50,  # Flush after 50 events (default is 100)
+            flush_interval=1.0,  # Flush every 1 second (default is 0.5)
+            # Error handling
+            on_error=lambda e, items: logger.warning(f"PostHog error (non-blocking): {e}")
         )
-        logger.info(f"PostHog client initialized for host: {_config_cache['host']}")
+        logger.info(f"PostHog client initialized for host: {_config_cache['host']} (timeout=5s, gzip=true)")
     except ImportError:
         logger.warning("PostHog package not installed. Analytics disabled.")
         _config_cache['posthog_client'] = None
