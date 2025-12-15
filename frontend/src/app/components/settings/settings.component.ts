@@ -13,7 +13,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest } from '../../models/decision.model';
@@ -902,6 +902,123 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
             </mat-card>
           </div>
         </mat-tab>
+
+        <!-- Slack Integration Tab (only for tenant admins) -->
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="Slack">
+          <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Slack Integration
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Connect Slack to enable your team to:</p>
+                <ul>
+                  <li><strong>Slash Commands:</strong> Use <code>/adr create</code>, <code>/adr list</code>, <code>/adr view</code> directly in Slack</li>
+                  <li><strong>Notifications:</strong> Get notified when decisions are created or updated</li>
+                  <li><strong>Quick Access:</strong> View and manage decisions without leaving Slack</li>
+                </ul>
+              </mat-card-content>
+            </mat-card>
+
+            @if (loadingSlackSettings) {
+              <div class="loading-spinner">
+                <mat-spinner diameter="40"></mat-spinner>
+              </div>
+            } @else if (!slackSettings?.installed) {
+              <!-- Not Connected -->
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>link_off</mat-icon>
+                    Slack Not Connected
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>Connect your Slack workspace to enable slash commands and notifications.</p>
+                </mat-card-content>
+                <mat-card-actions>
+                  <a mat-raised-button color="primary" href="/api/slack/install" data-testid="slack-install-button">
+                    <mat-icon>add</mat-icon>
+                    Add to Slack
+                  </a>
+                </mat-card-actions>
+              </mat-card>
+            } @else if (slackSettings) {
+              <!-- Connected -->
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>check_circle</mat-icon>
+                    Connected to {{ slackSettings.workspace_name || 'Slack' }}
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="slack-status">
+                    <p><strong>Workspace:</strong> {{ slackSettings.workspace_name || 'Unknown' }}</p>
+                    <p><strong>Installed:</strong> {{ slackSettings.installed_at ? (slackSettings.installed_at | date:'medium') : 'Unknown' }}</p>
+                    @if (slackSettings.last_activity_at) {
+                      <p><strong>Last activity:</strong> {{ slackSettings.last_activity_at | date:'medium' }}</p>
+                    }
+                  </div>
+
+                  <h4>Notification Settings</h4>
+                  <form [formGroup]="slackForm" class="slack-form">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Notification Channel</mat-label>
+                      <mat-select formControlName="default_channel_id" data-testid="slack-channel-select">
+                        <mat-option value="">-- Select a channel --</mat-option>
+                        @for (channel of slackChannels; track channel.id) {
+                          <mat-option [value]="channel.id">
+                            {{ channel.is_private ? '🔒 ' : '#' }}{{ channel.name }}
+                          </mat-option>
+                        }
+                      </mat-select>
+                    </mat-form-field>
+
+                    <div class="toggle-group">
+                      <mat-slide-toggle formControlName="notifications_enabled" data-testid="slack-notifications-toggle">
+                        Enable notifications
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!slackForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_create" [disabled]="!slackForm.get('notifications_enabled')?.value" data-testid="slack-notify-create-toggle">
+                        Notify when decisions are created
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!slackForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_status_change" [disabled]="!slackForm.get('notifications_enabled')?.value" data-testid="slack-notify-status-toggle">
+                        Notify when decision status changes
+                      </mat-slide-toggle>
+                    </div>
+                  </form>
+                </mat-card-content>
+                <mat-card-actions>
+                  <button mat-raised-button color="primary" (click)="saveSlackSettings()" [disabled]="savingSlackSettings" data-testid="slack-save-button">
+                    <mat-spinner diameter="20" *ngIf="savingSlackSettings"></mat-spinner>
+                    <mat-icon *ngIf="!savingSlackSettings">save</mat-icon>
+                    <span *ngIf="!savingSlackSettings">Save Settings</span>
+                  </button>
+                  <button mat-stroked-button (click)="testSlackNotification()" [disabled]="testingSlack || !slackSettings.default_channel_id" data-testid="slack-test-button">
+                    <mat-spinner diameter="20" *ngIf="testingSlack"></mat-spinner>
+                    <mat-icon *ngIf="!testingSlack">send</mat-icon>
+                    <span *ngIf="!testingSlack">Send Test</span>
+                  </button>
+                  <button mat-stroked-button color="warn" (click)="disconnectSlack()" data-testid="slack-disconnect-button">
+                    <mat-icon>link_off</mat-icon>
+                    Disconnect
+                  </button>
+                </mat-card-actions>
+              </mat-card>
+            }
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -1440,6 +1557,55 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       color: #555;
     }
 
+    /* Slack Integration Styles */
+    .loading-spinner {
+      display: flex;
+      justify-content: center;
+      padding: 48px;
+    }
+
+    .slack-status {
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .slack-status p {
+      margin: 8px 0;
+      font-size: 14px;
+    }
+
+    .slack-form {
+      margin-top: 16px;
+    }
+
+    .slack-form .toggle-group {
+      margin: 16px 0;
+    }
+
+    .slack-form .toggle-group.nested {
+      margin-left: 24px;
+    }
+
+    .slack-form .toggle-group.disabled {
+      opacity: 0.5;
+    }
+
+    mat-card-actions {
+      display: flex;
+      gap: 12px;
+      padding: 16px !important;
+    }
+
+    code {
+      background: #e8e8e8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -1460,6 +1626,10 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
       .option-icons {
         margin-bottom: 8px;
+      }
+
+      mat-card-actions {
+        flex-wrap: wrap;
       }
     }
   `]
@@ -1499,6 +1669,14 @@ export class SettingsComponent implements OnInit {
   processingRoleRequest: number | null = null;
   pendingRequestsCount = 0;
   pendingRoleRequestsCount = 0;
+
+  // Slack Integration
+  slackForm: FormGroup;
+  slackSettings: SlackSettings | null = null;
+  slackChannels: SlackChannel[] = [];
+  loadingSlackSettings = false;
+  savingSlackSettings = false;
+  testingSlack = false;
 
   /**
    * Check if current user is a provisional admin
@@ -1581,6 +1759,13 @@ export class SettingsComponent implements OnInit {
       auto_approve_users: [false],  // Inverted from require_approval for better UX
       rp_name: ['Architecture Decisions']
     });
+
+    this.slackForm = this.fb.group({
+      default_channel_id: [''],
+      notifications_enabled: [true],
+      notify_on_create: [true],
+      notify_on_status_change: [true]
+    });
   }
 
   ngOnInit(): void {
@@ -1592,6 +1777,7 @@ export class SettingsComponent implements OnInit {
       this.loadAccessRequests();
       this.loadRoleRequests();
       this.loadSpaces();
+      this.loadSlackSettings();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -2159,6 +2345,118 @@ export class SettingsComponent implements OnInit {
           error: (err) => {
             this.snackBar.open(err.error?.error || 'Failed to reject request', 'Close', { duration: 3000 });
             this.processingRoleRequest = null;
+          }
+        });
+      }
+    });
+  }
+
+  // Slack Integration Methods
+  loadSlackSettings(): void {
+    this.loadingSlackSettings = true;
+    this.adminService.getSlackSettings().subscribe({
+      next: (settings) => {
+        this.slackSettings = settings;
+        if (settings.installed) {
+          // Populate the form with existing settings
+          this.slackForm.patchValue({
+            default_channel_id: settings.default_channel_id || '',
+            notifications_enabled: settings.notifications_enabled ?? true,
+            notify_on_create: settings.notify_on_create ?? true,
+            notify_on_status_change: settings.notify_on_status_change ?? true
+          });
+          // Load available channels
+          this.loadSlackChannels();
+        }
+        this.loadingSlackSettings = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load Slack settings', 'Close', { duration: 3000 });
+        this.loadingSlackSettings = false;
+      }
+    });
+  }
+
+  loadSlackChannels(): void {
+    this.adminService.getSlackChannels().subscribe({
+      next: (response) => {
+        this.slackChannels = response.channels || [];
+      },
+      error: () => {
+        // Silently fail - channels list is optional
+        this.slackChannels = [];
+      }
+    });
+  }
+
+  saveSlackSettings(): void {
+    this.savingSlackSettings = true;
+    const formValue = this.slackForm.value;
+
+    // Find the channel name if a channel is selected
+    const selectedChannel = this.slackChannels.find(c => c.id === formValue.default_channel_id);
+
+    const settings = {
+      default_channel_id: formValue.default_channel_id || undefined,
+      default_channel_name: selectedChannel?.name,
+      notifications_enabled: formValue.notifications_enabled,
+      notify_on_create: formValue.notify_on_create,
+      notify_on_status_change: formValue.notify_on_status_change
+    };
+
+    this.adminService.updateSlackSettings(settings).subscribe({
+      next: (response) => {
+        this.slackSettings = response.settings;
+        this.snackBar.open('Slack settings saved', 'Close', { duration: 3000 });
+        this.savingSlackSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to save Slack settings', 'Close', { duration: 3000 });
+        this.savingSlackSettings = false;
+      }
+    });
+  }
+
+  testSlackNotification(): void {
+    this.testingSlack = true;
+    this.adminService.testSlackNotification().subscribe({
+      next: () => {
+        this.snackBar.open('Test notification sent to Slack', 'Close', { duration: 3000 });
+        this.testingSlack = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to send test notification', 'Close', { duration: 3000 });
+        this.testingSlack = false;
+      }
+    });
+  }
+
+  disconnectSlack(): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Disconnect Slack',
+        message: `Are you sure you want to disconnect Slack from your organization? This will disable all Slack commands and notifications.`,
+        confirmText: 'Disconnect',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.adminService.disconnectSlack().subscribe({
+          next: () => {
+            this.slackSettings = { installed: false };
+            this.slackChannels = [];
+            this.slackForm.reset({
+              default_channel_id: '',
+              notifications_enabled: true,
+              notify_on_create: true,
+              notify_on_status_change: true
+            });
+            this.snackBar.open('Slack disconnected successfully', 'Close', { duration: 3000 });
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to disconnect Slack', 'Close', { duration: 3000 });
           }
         });
       }
