@@ -40,14 +40,14 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <div class="hero-content-centered">
             <p class="hero-initiative">
               <span class="initiative-badge">Open Initiative</span>
-              Architecture-Decisions.org
+              DecisionRecords.org
             </p>
-            <h1>Architecture <span class="highlight">Decisions</span></h1>
+            <h1><span class="typewriter-text">{{ displayedDecisionType }}</span> <span class="highlight">Records</span></h1>
             <p class="hero-tagline">
-              Decisions shape systems for years — but the reasons behind them are rarely preserved.
+              Long-term decision memory for organisations
             </p>
             <p class="hero-subtitle">
-              Make your architectural decisions explicit, durable, and reusable across your organisation.
+              Organisations make decisions every day. Most are forgotten. The important ones deserve better.
             </p>
             <div class="hero-cta">
               <button mat-raised-button class="cta-button" (click)="openGetStartedDialog()">
@@ -82,7 +82,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <span class="dot green"></span>
                 </div>
                 <div class="browser-address">
-                  <span>architecture-decisions.org/brandnewcorp.com</span>
+                  <span>decisionrecords.org/brandnewcorp.com</span>
                 </div>
               </div>
               <div class="browser-content">
@@ -391,123 +391,276 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <!-- Problem Statement -->
       <section class="section problem-section">
         <div class="container">
-          <h2>The Problem: Decisions Without Memory</h2>
+          <div class="problem-layout">
+            <div class="problem-illustration">
+              <img src="/assets/doubt-blue.svg" alt="Decisions without memory" class="doubt-svg" />
+            </div>
+            <div class="problem-content">
+              <h2>Decisions Without Memory</h2>
+              <p class="problem-lead">
+                Every organisation runs on decisions. But most are never written down. When questions arise later — "Why did we do this?" — the answers have walked out the door.
+              </p>
+              <ul class="problem-list">
+                <li>Agreed in meetings, lost in inboxes</li>
+                <li>Made for reasons that no longer apply</li>
+                <li>Repeated because no one remembers the last attempt</li>
+              </ul>
+              <p class="problem-conclusion">Over time, organisations don't just lose documents — they lose judgement.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sample Decision Records Carousel -->
+      <section class="section examples-section">
+        <div class="container">
+          <h2>Simple format. Any decision.</h2>
           <p class="section-intro">
-            Anyone tasked with fixing, evolving, securing, or modernising systems suffers from the loss of decision context.
+            Context. Decision. Consequences. That's it. Here's what real records look like:
           </p>
 
-          <div class="problem-grid">
-            <div class="problem-card">
-              <mat-icon>meeting_room</mat-icon>
-              <h3>Made in Meetings</h3>
-              <p>Critical decisions buried in emails, slide decks, or conversations</p>
+          <div class="carousel-container">
+            <button class="carousel-btn prev" (click)="prevSlide()" [disabled]="currentSlide === 0">
+              <mat-icon>chevron_left</mat-icon>
+            </button>
+
+            <div class="carousel-track" [style.transform]="'translateX(-' + (currentSlide * 50) + '%)'">
+              <!-- Decision Record 1: Technology -->
+              <div class="decision-record-card">
+                <div class="card-inner">
+                  <span class="example-ribbon">Example</span>
+                  <div class="card-header">
+                    <div class="card-meta">
+                      <span class="card-category">Technology</span>
+                      <span class="card-id">DR-042</span>
+                    </div>
+                    <span class="card-status accepted">Accepted</span>
+                  </div>
+                  <h3>Use PostgreSQL as the primary database</h3>
+                  <div class="card-section">
+                    <h4>Context</h4>
+                    <p>We need a database that can handle our expected growth over the next five years while keeping operational complexity manageable for a small team.</p>
+                  </div>
+                  <div class="card-section">
+                    <h4>Decision</h4>
+                    <p>We will use PostgreSQL for all structured data storage. Cloud-managed options like Azure Database for PostgreSQL or AWS RDS will be preferred.</p>
+                  </div>
+                  <div class="card-footer">
+                    <div class="card-author">
+                      <div class="author-avatar" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">MK</div>
+                      <div class="author-info">
+                        <span class="author-name">Marcus Kim</span>
+                        <span class="author-date">15 Nov 2024</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Decision Record 2: Operations -->
+              <div class="decision-record-card">
+                <div class="card-inner">
+                  <span class="example-ribbon">Example</span>
+                  <div class="card-header">
+                    <div class="card-meta">
+                      <span class="card-category">Operations</span>
+                      <span class="card-id">DR-038</span>
+                    </div>
+                    <span class="card-status accepted">Accepted</span>
+                  </div>
+                  <h3>Shift to four-day work week for support teams</h3>
+                  <div class="card-section">
+                    <h4>Context</h4>
+                    <p>Support team burnout has increased over the past year. Exit interviews cite work-life balance as a primary concern.</p>
+                  </div>
+                  <div class="card-section">
+                    <h4>Decision</h4>
+                    <p>Support staff will work four ten-hour days instead of five eight-hour days. Teams will stagger schedules to maintain coverage.</p>
+                  </div>
+                  <div class="card-footer">
+                    <div class="card-author">
+                      <div class="author-avatar" style="background: linear-gradient(135deg, #10b981, #059669);">SR</div>
+                      <div class="author-info">
+                        <span class="author-name">Sarah Roberts</span>
+                        <span class="author-date">3 Oct 2024</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Decision Record 3: Retail -->
+              <div class="decision-record-card">
+                <div class="card-inner">
+                  <span class="example-ribbon">Example</span>
+                  <div class="card-header">
+                    <div class="card-meta">
+                      <span class="card-category">Retail</span>
+                      <span class="card-id">DR-019</span>
+                    </div>
+                    <span class="card-status superseded">Superseded</span>
+                  </div>
+                  <h3>Accept returns without receipt for loyalty members</h3>
+                  <div class="card-section">
+                    <h4>Context</h4>
+                    <p>Loyalty members account for 70% of revenue but cite our strict return policy as a top frustration.</p>
+                  </div>
+                  <div class="card-section">
+                    <h4>Decision</h4>
+                    <p>Loyalty members can return items without a receipt within 60 days. The system will match purchases to their account.</p>
+                  </div>
+                  <div class="card-footer">
+                    <div class="card-author">
+                      <div class="author-avatar" style="background: linear-gradient(135deg, #f59e0b, #d97706);">JT</div>
+                      <div class="author-info">
+                        <span class="author-name">James Thompson</span>
+                        <span class="author-date">22 Jun 2024</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Decision Record 4: Governance -->
+              <div class="decision-record-card">
+                <div class="card-inner">
+                  <span class="example-ribbon">Example</span>
+                  <div class="card-header">
+                    <div class="card-meta">
+                      <span class="card-category">Governance</span>
+                      <span class="card-id">DR-051</span>
+                    </div>
+                    <span class="card-status accepted">Accepted</span>
+                  </div>
+                  <h3>Require two approvals for vendor contracts over £50k</h3>
+                  <div class="card-section">
+                    <h4>Context</h4>
+                    <p>Recent audit flagged inconsistent approval processes for vendor contracts. Some high-value agreements had only one approver.</p>
+                  </div>
+                  <div class="card-section">
+                    <h4>Decision</h4>
+                    <p>All vendor contracts exceeding £50,000 require sign-off from both the budget owner and the procurement lead.</p>
+                  </div>
+                  <div class="card-footer">
+                    <div class="card-author">
+                      <div class="author-avatar" style="background: linear-gradient(135deg, #ec4899, #db2777);">LP</div>
+                      <div class="author-info">
+                        <span class="author-name">Lisa Patel</span>
+                        <span class="author-date">8 Dec 2024</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="problem-card">
-              <mat-icon>hourglass_empty</mat-icon>
-              <h3>Temporary Assumptions</h3>
-              <p>Justified by constraints that no longer exist or were never documented</p>
-            </div>
-            <div class="problem-card">
-              <mat-icon>psychology</mat-icon>
-              <h3>Forgotten Intent</h3>
-              <p>Original reasoning lost once implementation starts</p>
-            </div>
-            <div class="problem-card">
-              <mat-icon>loop</mat-icon>
-              <h3>Repeated Mistakes</h3>
-              <p>Teams rediscover problems that were already solved</p>
-            </div>
+
+            <button class="carousel-btn next" (click)="nextSlide()" [disabled]="currentSlide >= 2">
+              <mat-icon>chevron_right</mat-icon>
+            </button>
+          </div>
+
+          <div class="carousel-dots">
+            <span class="dot" [class.active]="currentSlide === 0" (click)="goToSlide(0)"></span>
+            <span class="dot" [class.active]="currentSlide === 1" (click)="goToSlide(1)"></span>
+            <span class="dot" [class.active]="currentSlide === 2" (click)="goToSlide(2)"></span>
           </div>
         </div>
       </section>
 
-      <!-- Architecture Decisions Section -->
-      <section class="section decisions-section">
+      <!-- In Practice -->
+      <section class="section usage-section">
         <div class="container">
-          <div class="decisions-content">
-            <div class="decisions-text">
-              <h2>Architecture Decisions Across Your Organisation</h2>
-              <p>
-                Every organisation makes long-lasting technical and operational decisions — most of them are never written down.
-                These decisions shape IT landscapes, digital platforms, cloud strategies, security postures, and integration models.
-              </p>
-              <p>
-                These decisions often span years or decades, outlive the people who made them,
-                and affect cost, risk, resilience, and compliance. Yet most are <strong>never formally recorded</strong>.
-              </p>
+          <h2>In practice</h2>
+          <div class="usage-timeline">
+            <div class="usage-item">
+              <span class="usage-trigger">After the meeting</span>
+              <span class="usage-outcome">One person writes it down before everyone forgets.</span>
             </div>
-            <div class="decisions-list">
-              <div class="decision-item">
-                <mat-icon>schedule</mat-icon>
-                <span>Decisions that span years or decades</span>
-              </div>
-              <div class="decision-item">
-                <mat-icon>groups</mat-icon>
-                <span>Outlive the people who made them</span>
-              </div>
-              <div class="decision-item">
-                <mat-icon>trending_up</mat-icon>
-                <span>Affect cost, risk, resilience, and compliance</span>
-              </div>
-              <div class="decision-item">
-                <mat-icon>warning</mat-icon>
-                <span>Revisited only when something breaks</span>
-              </div>
+            <div class="usage-item">
+              <span class="usage-trigger">Someone new joins</span>
+              <span class="usage-outcome">Three records. Six months of context.</span>
+            </div>
+            <div class="usage-item">
+              <span class="usage-trigger">Priorities shift</span>
+              <span class="usage-outcome">Old decisions get marked superseded. The reasoning stays.</span>
+            </div>
+            <div class="usage-item">
+              <span class="usage-trigger">Auditors ask "why"</span>
+              <span class="usage-outcome">You show them the record, not a search through emails.</span>
             </div>
           </div>
+          <p class="usage-note">Most teams add 2-3 records a month. Enough to matter. Not enough to slow down.</p>
         </div>
       </section>
 
-      <!-- Core Idea -->
-      <section class="section core-section">
+      <!-- Security, Trust & Governance -->
+      <section class="section trust-section">
         <div class="container">
-          <div class="core-section-grid">
-            <div class="core-idea">
-              <h2>Our Core Idea</h2>
-              <p class="big-statement">
-                Architecture decisions should be treated as <strong>first-class records</strong>.
+          <div class="trust-grid">
+            <div class="trust-intro">
+              <h2>Security, Trust & Governance</h2>
+              <p class="trust-statement">
+                Decision Records is a <strong>non-profit, independent initiative</strong>. No organisation owns or controls the platform.
               </p>
-              <p>
-                Just like financial records, legal documents, or policies — architecture decisions
-                deserve structure, traceability, and survival across personnel and technology changes.
+              <p class="trust-subtext">
+                Your decision records may contain sensitive strategic information. We take security seriously and operate with full transparency.
               </p>
-              <blockquote>
-                "Well-documented decisions enable better future decisions."
-              </blockquote>
             </div>
-            <div class="security-commitment">
-              <h2>Security & Trust</h2>
-              <p class="security-intro">
-                Your architecture decisions contain sensitive strategic information. We take security seriously.
-              </p>
-              <div class="security-features">
-                <div class="security-item">
-                  <mat-icon>apartment</mat-icon>
-                  <div>
-                    <strong>Tenant Isolation</strong>
-                    <span>Complete data separation between organizations</span>
-                  </div>
+            <div class="trust-features">
+              <div class="trust-item">
+                <mat-icon>apartment</mat-icon>
+                <div>
+                  <strong>Tenant Isolation</strong>
+                  <span>Complete data separation between organizations</span>
                 </div>
-                <div class="security-item">
-                  <mat-icon>lock</mat-icon>
-                  <div>
-                    <strong>Encryption at Rest</strong>
-                    <span>All data encrypted using industry standards</span>
-                  </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>lock</mat-icon>
+                <div>
+                  <strong>Encryption at Rest</strong>
+                  <span>All data encrypted using industry standards</span>
                 </div>
-                <div class="security-item">
-                  <mat-icon>fingerprint</mat-icon>
-                  <div>
-                    <strong>Passwordless Auth</strong>
-                    <span>WebAuthn/Passkeys for phishing-resistant login</span>
-                  </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>fingerprint</mat-icon>
+                <div>
+                  <strong>Passwordless Auth</strong>
+                  <span>WebAuthn/Passkeys for phishing-resistant login</span>
                 </div>
-                <div class="security-item">
-                  <img src="/assets/european-union-europe-svgrepo-com.svg" alt="EU" class="eu-icon" />
-                  <div>
-                    <strong>EU Data Residency</strong>
-                    <span>Data stored in European Azure datacenters</span>
-                  </div>
+              </div>
+              <div class="trust-item">
+                <img src="/assets/european-union-europe-svgrepo-com.svg" alt="EU" class="eu-icon" />
+                <div>
+                  <strong>EU Data Residency</strong>
+                  <span>Data stored in European Azure datacenters</span>
+                </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>person</mat-icon>
+                <div>
+                  <strong>Users own their data</strong>
+                  <span>You retain ownership of all decision records and content you create</span>
+                </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>block</mat-icon>
+                <div>
+                  <strong>No data sales, no advertising</strong>
+                  <span>We do not sell user data, analytics, or insights — now or in the future</span>
+                </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>volunteer_activism</mat-icon>
+                <div>
+                  <strong>Sustainable, transparent funding</strong>
+                  <span>The project covers operating costs through sponsorships and community support</span>
+                </div>
+              </div>
+              <div class="trust-item">
+                <mat-icon>balance</mat-icon>
+                <div>
+                  <strong>Neutral by design</strong>
+                  <span>Not tied to any vendor, consultancy, framework, or certification scheme</span>
                 </div>
               </div>
             </div>
@@ -518,84 +671,56 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <!-- Who Is This For -->
       <section class="section audience-section">
         <div class="container">
-          <h2>Who Is This For?</h2>
+          <div class="audience-header">
+            <h2>Sound Familiar?</h2>
+            <p class="audience-intro">If any of these resonate, you're in the right place.</p>
+          </div>
 
-          <div class="audience-grid">
-            <div class="audience-card">
-              <mat-icon>architecture</mat-icon>
-              <h3>Architects & Engineers</h3>
-              <p>Document and evolve architectural decisions for long-lived systems</p>
+          <div class="needs-grid">
+            <div class="need-card need-card-1">
+              <div class="need-icon">
+                <mat-icon>help_outline</mat-icon>
+              </div>
+              <div class="need-content">
+                <h3>"Why did we decide this?"</h3>
+                <p>Teams tired of rehashing old debates — from boardrooms to project standups.</p>
+              </div>
             </div>
 
-            <div class="audience-card">
-              <mat-icon>business</mat-icon>
-              <h3>IT Leaders</h3>
-              <p>Create institutional memory for strategic technology decisions</p>
+            <div class="need-card need-card-2">
+              <div class="need-icon">
+                <mat-icon>directions_walk</mat-icon>
+              </div>
+              <div class="need-content">
+                <h3>Knowledge walks out the door</h3>
+                <p>Organizations losing context when people move on — especially growing teams.</p>
+              </div>
             </div>
 
-            <div class="audience-card">
-              <mat-icon>engineering</mat-icon>
-              <h3>Operators & Maintainers</h3>
-              <p>Understand original intent before changing systems</p>
+            <div class="need-card need-card-3">
+              <div class="need-icon">
+                <mat-icon>description</mat-icon>
+              </div>
+              <div class="need-content">
+                <h3>Decisions need a paper trail</h3>
+                <p>Regulated industries and client work requiring audit trails and accountability.</p>
+              </div>
             </div>
 
-            <div class="audience-card">
-              <mat-icon>gavel</mat-icon>
-              <h3>Auditors & Regulators</h3>
-              <p>Improve traceability and accountability of decisions</p>
+            <div class="need-card need-card-4">
+              <div class="need-icon">
+                <mat-icon>public</mat-icon>
+              </div>
+              <div class="need-content">
+                <h3>Alignment across distance</h3>
+                <p>Distributed teams and async collaborators staying in sync on what matters.</p>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- Trust & Governance -->
-      <section class="section governance-section">
-        <div class="container">
-          <div class="governance-content">
-            <div class="governance-illustration">
-              <img src="/assets/collaborative-combine-hand-svgrepo-com.svg" alt="Collaborative hands" class="governance-svg" />
-            </div>
-            <div class="governance-text">
-              <h2>Trust & Governance</h2>
-              <p class="governance-intro">
-                Architecture Decisions is a <strong>non-profit, independent initiative</strong>.
-                No organisation owns or controls the platform.
-              </p>
-              <div class="governance-list">
-                <div class="governance-item">
-                  <mat-icon>person</mat-icon>
-                  <div>
-                    <strong>Users own their data</strong>
-                    <span>You retain ownership of all decision records and content you create.</span>
-                  </div>
-                </div>
-                <div class="governance-item">
-                  <mat-icon>block</mat-icon>
-                  <div>
-                    <strong>No data sales, no advertising</strong>
-                    <span>We do not sell user data, analytics, or insights — now or in the future.</span>
-                  </div>
-                </div>
-                <div class="governance-item">
-                  <mat-icon>volunteer_activism</mat-icon>
-                  <div>
-                    <strong>Sustainable, transparent funding</strong>
-                    <span>The project covers operating costs through sponsorships and community support.</span>
-                  </div>
-                </div>
-                <div class="governance-item">
-                  <mat-icon>balance</mat-icon>
-                  <div>
-                    <strong>Neutral by design</strong>
-                    <span>Not tied to any vendor, consultancy, framework, or certification scheme.</span>
-                  </div>
-                </div>
-              </div>
-              <p class="governance-goal">
-                Our goal is simple: to provide durable infrastructure for capturing and preserving
-                architectural decisions — without hidden incentives.
-              </p>
-            </div>
+          <div class="audience-cta">
+            <img src="/assets/brain-memory.svg" alt="Connected thinking" class="floating-brain" />
+            <p>Decision records give your team a shared memory that outlasts any individual.</p>
           </div>
         </div>
       </section>
@@ -606,10 +731,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <div class="footer-grid">
             <div class="footer-mission-col">
               <p class="footer-mission">
-                Architecture-Decisions.org is an open initiative to make architectural decision-making
-                transparent, durable, and reusable.
+                DecisionRecords.org is an open initiative to make decision-making
+                transparent, durable, and reusable across organisations.
               </p>
-              <small class="footer-copyright">&copy; {{ currentYear }} Architecture-Decisions.org <span class="footer-separator">|</span> <a routerLink="/licensing" class="footer-link">License Model</a></small>
+              <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org <span class="footer-separator">|</span> <a routerLink="/licensing" class="footer-link">License Model</a></small>
             </div>
             <div class="footer-support-col">
               <h4>Support the Initiative</h4>
@@ -646,7 +771,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             <div class="sponsorship-content">
               <div class="sponsorship-text">
                 <p>
-                  Architecture Decisions is a <strong>non-profit initiative</strong>. The platform is free to use,
+                  Decision Records is a <strong>non-profit initiative</strong>. The platform is free to use,
                   and we do not monetise user data or sell access.
                 </p>
                 <p>
@@ -756,16 +881,16 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .hero-content-centered {
       text-align: center;
-      max-width: 800px;
+      max-width: 1000px;
       margin: 0 auto;
     }
 
     .hero-content-centered h1 {
-      font-size: 3.5rem;
+      font-size: 4.5rem;
       font-weight: 700;
       margin: 0 0 24px;
-      letter-spacing: -0.02em;
-      line-height: 1.1;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
       color: white;
     }
 
@@ -775,18 +900,40 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-tagline {
-      font-size: 1.25rem;
+      font-size: 1.75rem;
       font-weight: 400;
-      margin: 0 0 16px;
+      margin: 0 0 20px;
       color: #e0f2fe;
-      line-height: 1.6;
+      line-height: 1.5;
     }
 
     .hero-subtitle {
-      font-size: 1.1rem;
+      font-size: 1.25rem;
       color: #bfdbfe;
       line-height: 1.7;
       margin: 0 0 32px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* Typewriter animation */
+    .typewriter-text {
+      display: inline-block;
+      min-width: 200px;
+      text-align: right;
+    }
+
+    .typewriter-text::after {
+      content: '|';
+      animation: blink 0.7s infinite;
+      margin-left: 2px;
+      color: #93c5fd;
+    }
+
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
     }
 
     .hero-cta {
@@ -1330,111 +1477,451 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     /* Problem Section */
     .problem-section {
       background: #f8fafc;
-      text-align: center;
-      padding-bottom: 60px;
     }
 
-    .problem-grid {
+    .problem-layout {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 24px;
-    }
-
-    .problem-card {
-      padding: 28px 24px;
-      border-radius: 24px;
-      background: #fff;
-      box-shadow: 0 1px 3px 1px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3);
-      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-      border: 1px solid rgba(0, 0, 0, 0.05);
-    }
-
-    .problem-card:hover {
-      box-shadow: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
-      transform: translateY(-4px);
-    }
-
-    .problem-card mat-icon {
-      font-size: 36px;
-      width: 36px;
-      height: 36px;
-      color: #b3261e;
-      margin-bottom: 16px;
-      background: #f9dedc;
-      padding: 10px;
-      border-radius: 12px;
-      box-sizing: content-box;
-    }
-
-    .problem-card h3 {
-      margin: 0 0 12px;
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: #0f172a;
-    }
-
-    .problem-card p {
-      margin: 0;
-      color: #64748b;
-      font-size: 0.95rem;
-      line-height: 1.6;
-    }
-
-    /* Decisions Section */
-    .decisions-section {
-      background: #f8fafc;
-      padding-top: 60px;
-    }
-
-    .decisions-content {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 80px;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 64px;
       align-items: center;
     }
 
-    .decisions-text h2 {
+    .problem-illustration {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .doubt-svg {
+      max-width: 240px;
+      width: 100%;
+      height: auto;
+      opacity: 0.9;
+    }
+
+    .problem-content {
+      text-align: left;
+    }
+
+    .problem-content h2 {
+      text-align: left;
       margin-bottom: 24px;
     }
 
-    .decisions-text p {
+    .problem-lead {
+      font-size: 1.1rem;
+      color: #475569;
+      line-height: 1.7;
+      margin-bottom: 28px;
+    }
+
+    .problem-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 28px;
+    }
+
+    .problem-list li {
+      position: relative;
+      padding-left: 24px;
+      margin-bottom: 12px;
       color: #64748b;
-      line-height: 1.8;
-      margin: 0 0 20px;
+      font-size: 1rem;
+      line-height: 1.5;
+    }
+
+    .problem-list li::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      width: 8px;
+      height: 2px;
+      background: #94a3b8;
+    }
+
+    .problem-conclusion {
       font-size: 1.05rem;
+      color: #1e293b;
+      font-weight: 500;
+      font-style: italic;
+      margin: 0;
     }
 
-    .decisions-list {
+    /* Examples Section - Decision Records Carousel */
+    .examples-section {
+      background: linear-gradient(180deg, #eef2ff 0%, #e0e7ff 100%);
+      text-align: center;
+      border-top: 1px solid #c7d2fe;
+      border-bottom: 1px solid #c7d2fe;
+    }
+
+    .carousel-container {
+      position: relative;
+      overflow: hidden;
+      margin: 0 auto;
+      max-width: 900px;
+      padding: 0 50px;
+    }
+
+    .carousel-track {
       display: flex;
-      flex-direction: column;
-      gap: 16px;
+      transition: transform 0.4s ease-out;
     }
 
-    .decision-item {
+    .decision-record-card {
+      flex: 0 0 50%;
+      padding: 0 12px;
+      box-sizing: border-box;
+      text-align: left;
+    }
+
+    .card-inner {
+      position: relative;
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+      border: 1px solid #e2e8f0;
+      transition: all 0.3s ease;
+      overflow: hidden;
+    }
+
+    .example-ribbon {
+      position: absolute;
+      top: 12px;
+      right: -32px;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      color: white;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 4px 40px;
+      transform: rotate(45deg);
+      box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+      z-index: 10;
+    }
+
+    .card-inner:hover {
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.06);
+      transform: translateY(-4px);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid #e2e8f0;
+      background: #fafbfc;
+    }
+
+    .card-meta {
       display: flex;
       align-items: center;
-      gap: 16px;
-      padding: 20px 24px;
-      background: #fff;
+      gap: 12px;
+    }
+
+    .card-category {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #1e40af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: #dbeafe;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    .card-id {
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: #94a3b8;
+      font-family: monospace;
+    }
+
+    .card-status {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 4px 10px;
       border-radius: 12px;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-      border-left: 4px solid #2563eb;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
 
-    .decision-item mat-icon {
-      color: #2563eb;
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
+    .card-status.accepted {
+      background: #dcfce7;
+      color: #166534;
     }
 
-    .decision-item span {
-      color: #334155;
+    .card-status.superseded {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .decision-record-card h3 {
       font-size: 1rem;
+      font-weight: 600;
+      color: #1e293b;
+      margin: 0;
+      padding: 16px 20px 12px;
+      line-height: 1.4;
+    }
+
+    .card-section {
+      padding: 0 20px 12px;
+    }
+
+    .card-section h4 {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 0 0 6px;
+    }
+
+    .card-section p {
+      font-size: 0.85rem;
+      color: #475569;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    .card-footer {
+      padding: 16px 20px;
+      border-top: 1px solid #e2e8f0;
+      background: #fafbfc;
+    }
+
+    .card-author {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .author-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .author-info {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .author-name {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #1e293b;
+    }
+
+    .author-date {
+      font-size: 0.75rem;
+      color: #94a3b8;
+    }
+
+    .carousel-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: white;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      cursor: pointer;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .carousel-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .carousel-btn.prev {
+      left: 0;
+    }
+
+    .carousel-btn.next {
+      right: 0;
+    }
+
+    .carousel-btn mat-icon {
+      color: #64748b;
+    }
+
+    .carousel-dots {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .carousel-dots .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #cbd5e1;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .carousel-dots .dot.active {
+      background: #2563eb;
+    }
+
+    /* Usage Section */
+    .usage-section {
+      background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    }
+
+    .usage-section h2 {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .usage-timeline {
+      max-width: 680px;
+      margin: 0 auto 48px;
+      position: relative;
+      padding-left: 0;
+    }
+
+    .usage-timeline::before {
+      content: '';
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      top: 12px;
+      bottom: 12px;
+      width: 1px;
+      background: #cbd5e1;
+    }
+
+    .usage-item {
+      display: flex;
+      align-items: baseline;
+      padding: 18px 0;
+    }
+
+    .usage-trigger {
+      width: 50%;
+      text-align: right;
+      font-weight: 600;
+      color: #1e293b;
+      font-size: 0.95rem;
+      padding-right: 32px;
+    }
+
+    .usage-outcome {
+      width: 50%;
+      color: #64748b;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      padding-left: 32px;
+    }
+
+    .usage-note {
+      font-size: 1rem;
+      color: #475569;
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto;
+      line-height: 1.6;
       font-weight: 500;
     }
 
-    /* Core Section - Dark slate like Salient */
+    /* Trust Section */
+    .trust-section {
+      background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+      color: white;
+    }
+
+    .trust-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+
+    .trust-intro h2 {
+      color: white;
+      margin-bottom: 20px;
+    }
+
+    .trust-statement {
+      font-size: 1.2rem;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.95);
+      margin-bottom: 16px;
+    }
+
+    .trust-subtext {
+      font-size: 1rem;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.6;
+    }
+
+    .trust-features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .trust-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .trust-item mat-icon {
+      color: #60a5fa;
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .trust-item .eu-icon {
+      width: 22px;
+      height: 22px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .trust-item div {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .trust-item strong {
+      color: white;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .trust-item span {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 0.8rem;
+      line-height: 1.4;
+    }
+
+    /* Legacy styles kept for compatibility */
     .core-section {
       background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
       color: white;
@@ -1567,61 +2054,142 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     /* Audience Section */
     .audience-section {
-      background: #f8fafc;
-      text-align: center;
-      padding-bottom: 60px;
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+      padding-bottom: 80px;
     }
 
-    .audience-section h2 {
+    .audience-header {
+      text-align: center;
       margin-bottom: 48px;
     }
 
-    .audience-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 24px;
+    .audience-header h2 {
+      margin-bottom: 12px;
     }
 
-    .audience-card {
-      padding: 32px 24px;
-      border-radius: 28px;
-      background: #fff;
-      box-shadow: 0 1px 3px 1px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.3);
-      text-align: center;
-      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
-      border: 1px solid rgba(0, 0, 0, 0.05);
-    }
-
-    .audience-card:hover {
-      box-shadow: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
-      transform: translateY(-4px);
-    }
-
-    .audience-card mat-icon {
-      font-size: 44px;
-      width: 44px;
-      height: 44px;
-      color: #2563eb;
-      margin-bottom: 16px;
-      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-      padding: 12px;
-      border-radius: 16px;
-      box-sizing: content-box;
-    }
-
-    .audience-card h3 {
-      margin: 0 0 8px;
-      color: #1c1b1f;
+    .audience-intro {
       font-size: 1.1rem;
-      font-weight: 500;
-      letter-spacing: 0.1px;
+      color: #64748b;
     }
 
-    .audience-card p {
-      color: #49454f;
+    .needs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    .need-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding: 28px;
+      background: white;
+      border-radius: 16px;
+      border: 1px solid #e2e8f0;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .need-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+
+    .need-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+    }
+
+    .need-card:hover::before {
+      width: 6px;
+    }
+
+    .need-card-1::before { background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%); }
+    .need-card-2::before { background: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%); }
+    .need-card-3::before { background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%); }
+    .need-card-4::before { background: linear-gradient(180deg, #10b981 0%, #059669 100%); }
+
+    .need-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .need-card-1 .need-icon { background: #eff6ff; }
+    .need-card-2 .need-icon { background: #f5f3ff; }
+    .need-card-3 .need-icon { background: #ecfeff; }
+    .need-card-4 .need-icon { background: #ecfdf5; }
+
+    .need-card-1 .need-icon mat-icon { color: #2563eb; }
+    .need-card-2 .need-icon mat-icon { color: #7c3aed; }
+    .need-card-3 .need-icon mat-icon { color: #0891b2; }
+    .need-card-4 .need-icon mat-icon { color: #059669; }
+
+    .need-icon mat-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+
+    .need-content h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #0f172a;
+      margin: 0 0 8px;
+      line-height: 1.4;
+    }
+
+    .need-content p {
+      font-size: 0.95rem;
+      color: #64748b;
+      line-height: 1.6;
       margin: 0;
-      font-size: 0.9rem;
-      line-height: 1.5;
+    }
+
+    .audience-cta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 48px;
+      padding: 32px;
+      background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
+      border-radius: 16px;
+      max-width: 700px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .floating-brain {
+      width: 80px;
+      height: 80px;
+      flex-shrink: 0;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+
+    .audience-cta p {
+      font-size: 1.1rem;
+      color: #1e293b;
+      line-height: 1.6;
+      margin: 0;
+      font-weight: 500;
     }
 
     /* Governance Section */
@@ -1903,12 +2471,13 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         text-align: center;
       }
 
-      .hero-content h1 {
-        font-size: 2.5rem;
+      .hero-content h1,
+      .hero-content-centered h1 {
+        font-size: 3rem;
       }
 
       .hero-tagline {
-        font-size: 1.1rem;
+        font-size: 1.35rem;
       }
 
       .decisions-content {
@@ -1953,23 +2522,89 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         margin: 0 -8px;
         border-radius: 12px;
       }
+
+      .usage-timeline {
+        max-width: 100%;
+      }
+
+      .problem-layout {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .problem-illustration {
+        display: none;
+      }
+
+      .problem-content {
+        text-align: center;
+      }
+
+      .problem-content h2 {
+        text-align: center;
+      }
+
+      .problem-list {
+        text-align: left;
+        max-width: 400px;
+        margin: 0 auto 28px;
+      }
+
+      .needs-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .need-card {
+        padding: 24px;
+      }
+
+      .audience-cta {
+        flex-direction: column;
+        text-align: center;
+      }
     }
 
     @media (max-width: 600px) {
+      .usage-timeline::before {
+        display: none;
+      }
+
+      .usage-item {
+        flex-direction: column;
+        gap: 6px;
+        padding: 16px 0;
+        border-bottom: 1px solid #e2e8f0;
+      }
+
+      .usage-item:last-child {
+        border-bottom: none;
+      }
+
+      .usage-trigger {
+        width: 100%;
+        text-align: left;
+        padding-right: 0;
+      }
+
+      .usage-outcome {
+        width: 100%;
+        padding-left: 0;
+      }
       .hero {
         padding: 60px 16px 40px;
       }
 
       .hero-content-centered h1 {
-        font-size: 2rem;
+        font-size: 2.25rem;
       }
 
       .hero-tagline {
-        font-size: 1rem;
+        font-size: 1.15rem;
       }
 
       .hero-subtitle {
-        font-size: 0.95rem;
+        font-size: 1rem;
       }
 
       .hero-cta {
@@ -2023,15 +2658,64 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       }
 
       .hero-content h1 {
-        font-size: 2rem;
+        font-size: 2.25rem;
       }
 
-      .audience-grid {
-        grid-template-columns: repeat(2, 1fr);
+      .need-card {
+        padding: 20px;
+        gap: 16px;
+      }
+
+      .need-icon {
+        width: 40px;
+        height: 40px;
+      }
+
+      .need-content h3 {
+        font-size: 1rem;
+      }
+
+      .floating-brain {
+        width: 60px;
+        height: 60px;
+      }
+
+      .audience-cta {
+        padding: 24px;
+      }
+
+      .audience-cta p {
+        font-size: 1rem;
       }
 
       .problem-grid {
         grid-template-columns: 1fr;
+      }
+
+      .problem-illustration {
+        display: none;
+      }
+
+      .problem-content {
+        text-align: center;
+      }
+
+      .problem-content h2 {
+        text-align: center;
+      }
+
+      .problem-lead {
+        font-size: 1rem;
+      }
+
+      .problem-list {
+        text-align: left;
+        max-width: 100%;
+        padding: 0 8px;
+      }
+
+      .problem-conclusion {
+        font-size: 0.95rem;
       }
 
       .signup-card {
@@ -2068,6 +2752,22 @@ export class HomepageComponent implements OnInit {
   sponsorshipLoading = false;
   sponsorshipError = '';
   sponsorshipSuccess = '';
+
+  // Carousel state
+  currentSlide = 0;
+
+  // Typewriter animation state
+  decisionTypes = [
+    'pricing Decision',
+    'supplier Decision',
+    'policy Decision',
+    'technology Decision',
+    'architecture Decision',
+    'Decision'
+  ];
+  currentTypeIndex = 0;
+  displayedDecisionType = '';
+  private typewriterTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private cooldownInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -2112,6 +2812,58 @@ export class HomepageComponent implements OnInit {
         this.error = 'Verification link has expired. Please request a new one.';
       }
     });
+
+    // Start typewriter animation
+    this.startTypewriterAnimation();
+  }
+
+  private startTypewriterAnimation(): void {
+    this.typeNextWord();
+  }
+
+  private typeNextWord(): void {
+    const currentWord = this.decisionTypes[this.currentTypeIndex];
+    const isLastWord = this.currentTypeIndex === this.decisionTypes.length - 1;
+
+    // Type each character
+    let charIndex = 0;
+    const typeChar = () => {
+      if (charIndex <= currentWord.length) {
+        this.displayedDecisionType = currentWord.substring(0, charIndex);
+        charIndex++;
+        this.typewriterTimeout = setTimeout(typeChar, 80);
+      } else {
+        // Word complete
+        if (isLastWord) {
+          // Final word - stop animation (stays on "Decision Records")
+          return;
+        } else {
+          // Wait, then erase and move to next word
+          this.typewriterTimeout = setTimeout(() => {
+            this.eraseWord(currentWord.length);
+          }, 1200);
+        }
+      }
+    };
+    typeChar();
+  }
+
+  private eraseWord(length: number): void {
+    let charIndex = length;
+    const eraseChar = () => {
+      if (charIndex >= 0) {
+        this.displayedDecisionType = this.decisionTypes[this.currentTypeIndex].substring(0, charIndex);
+        charIndex--;
+        this.typewriterTimeout = setTimeout(eraseChar, 40);
+      } else {
+        // Move to next word
+        this.currentTypeIndex++;
+        this.typewriterTimeout = setTimeout(() => {
+          this.typeNextWord();
+        }, 300);
+      }
+    };
+    eraseChar();
   }
 
   checkEmail(): void {
@@ -2404,6 +3156,23 @@ export class HomepageComponent implements OnInit {
     this.tenantStatus = null;
     this.verificationEmail = '';
     this.usePasswordSignup = false;
+  }
+
+  // Carousel methods
+  prevSlide(): void {
+    if (this.currentSlide > 0) {
+      this.currentSlide--;
+    }
+  }
+
+  nextSlide(): void {
+    if (this.currentSlide < 2) {
+      this.currentSlide++;
+    }
+  }
+
+  goToSlide(index: number): void {
+    this.currentSlide = index;
   }
 
   openGetStartedDialog(): void {

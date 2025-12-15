@@ -32,115 +32,49 @@ import { MatIconModule } from '@angular/material/icon';
         <div class="container">
           <article class="prose">
             <p class="lead">
-              This project is built on the belief that architecture decisions should be open, portable, and preserved for the long term. To stay true to this mission, we operate with a simple and transparent licensing approach.
+              Decision records deserve to be preserved for the long term. We operate with transparency so you can adopt the platform with confidence.
             </p>
 
             <section class="license-section">
-              <h2><span class="section-number">1</span> The core platform will always be free and open</h2>
+              <h2><span class="section-number">1</span> Free to use, free to self-host</h2>
               <p>
-                The foundational capabilities of the platform — the ability to create, store, browse, and share architecture decisions — will remain available at no cost.
-              </p>
-              <p>Our intention is that:</p>
-              <ul>
-                <li>Anyone can use the platform without paying</li>
-                <li>The open-source version will remain free to self-host</li>
-                <li>No one will lose access to their existing decisions or data</li>
-              </ul>
-            </section>
-
-            <section class="license-section">
-              <h2><span class="section-number">2</span> A self-hosted version will always be available</h2>
-              <p>
-                We believe organisations should never be locked into a single hosting provider.
-              </p>
-              <p>
-                We will release and maintain an open-source, self-hosted edition that includes the essential features needed to run the platform privately.
-              </p>
-              <p>This ensures:</p>
-              <ul>
-                <li>Full control over your own data</li>
-                <li>No dependency on us for hosting</li>
-                <li>The ability to operate the platform independently, forever</li>
-              </ul>
-            </section>
-
-            <section class="license-section">
-              <h2><span class="section-number">3</span> The hosted cloud service may introduce paid plans</h2>
-              <p>
-                To sustain the project and fund infrastructure, the cloud-hosted version may introduce:
-              </p>
-              <ul>
-                <li>A free tier for individuals, students, and small teams</li>
-                <li>Usage-based paid plans for larger teams and enterprises</li>
-                <li>Optional upgrades (e.g., SSO, advanced audit logs, increased storage)</li>
-              </ul>
-              <p>
-                This allows us to grow sustainably without taking anything away from existing users.
+                The core platform remains free. We will maintain an open-source, self-hosted edition so you're never locked in.
               </p>
             </section>
 
             <section class="license-section">
-              <h2><span class="section-number">4</span> Free tiers will remain free</h2>
-              <p>If you sign up under a free tier, you will:</p>
-              <ul>
-                <li>Keep access to your data</li>
-                <li>Keep access to the platform</li>
-                <li>Never be forced into a paid plan to avoid losing your work</li>
-              </ul>
-              <p>Any future changes will be:</p>
-              <ul>
-                <li>Transparent</li>
-                <li>Well-communicated</li>
-                <li>Respectful of the commitments we make today</li>
-              </ul>
+              <h2><span class="section-number">2</span> Paid plans may come, but free stays free</h2>
+              <p>
+                The cloud service may introduce paid tiers for larger teams. If you sign up under a free tier, you keep access — we won't force you into a paid plan.
+              </p>
             </section>
 
             <section class="license-section">
-              <h2><span class="section-number">5</span> Your data always belongs to you</h2>
-              <p>Regardless of hosting model or pricing:</p>
-              <ul>
-                <li>You always own your data</li>
-                <li>Your data will never be sold</li>
-                <li>You can export your data at any time</li>
-                <li>You can migrate to a self-hosted edition without penalty</li>
-              </ul>
-              <p class="emphasis">This is central to the purpose of the platform.</p>
+              <h2><span class="section-number">3</span> Your data is yours</h2>
+              <p>
+                You own your data. It will never be sold. You can export or migrate to self-hosting at any time.
+              </p>
             </section>
 
             <section class="license-section">
-              <h2><span class="section-number">6</span> No retroactive restrictions — ever</h2>
-              <p>Any future licensing or pricing changes:</p>
-              <ul>
-                <li>Will not retroactively restrict existing free users</li>
-                <li>Will not remove features you already rely on</li>
-                <li>Will not lock or hide your data behind new paywalls</li>
-              </ul>
-              <p class="emphasis">We are committed to fairness and continuity.</p>
+              <h2><span class="section-number">4</span> No retroactive restrictions</h2>
+              <p>
+                Future changes won't restrict existing users, remove features you rely on, or lock data behind paywalls.
+              </p>
             </section>
 
             <section class="license-section">
-              <h2><span class="section-number">7</span> We will communicate openly before any major change</h2>
-              <p>If we introduce a paid service or licensing update:</p>
-              <ul>
-                <li>You will be informed in advance</li>
-                <li>Changes will be documented openly</li>
-                <li>We will provide clear migration options, including self-hosting</li>
-              </ul>
-              <p class="emphasis">Transparency is part of our trust model.</p>
+              <h2><span class="section-number">5</span> Transparent communication</h2>
+              <p>
+                Any major changes will be communicated in advance with clear options, including self-hosting.
+              </p>
             </section>
 
             <section class="why-section">
-              <h2>Why are we sharing this now?</h2>
-              <p class="lead">Because trust is foundational.</p>
+              <h2>Why share this now?</h2>
               <p>
-                We are building a platform that organisations may rely on for years. Being open about our future intentions — even before the business model is fully defined — ensures that:
+                Organisations may rely on this platform for years. We believe in being upfront about our intentions so you can adopt it confidently.
               </p>
-              <ul>
-                <li>Users are not surprised later</li>
-                <li>Contributions are made with full awareness</li>
-                <li>Organisations can adopt the platform confidently</li>
-                <li>We stay aligned with our mission of openness</li>
-              </ul>
             </section>
           </article>
 
@@ -156,7 +90,7 @@ import { MatIconModule } from '@angular/material/icon';
       <!-- Footer -->
       <footer class="licensing-footer">
         <div class="container">
-          <p>&copy; {{ currentYear }} Architecture-Decisions.org</p>
+          <p>&copy; {{ currentYear }} DecisionRecords.org</p>
         </div>
       </footer>
     </div>
