@@ -1385,3 +1385,93 @@ def save_history(decision, change_reason=None, changed_by=None):
     )
     db.session.add(history_entry)
     return history_entry
+
+
+# ============================================================================
+# SLACK INTEGRATION MODELS
+# ============================================================================
+
+class SlackWorkspace(db.Model):
+    """Slack workspace installation for a tenant."""
+
+    __tablename__ = 'slack_workspaces'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, unique=True, index=True)
+    workspace_id = db.Column(db.String(50), nullable=False, unique=True, index=True)  # Slack team_id
+    workspace_name = db.Column(db.String(255), nullable=True)
+
+    # Encrypted bot token (xoxb-...)
+    bot_token_encrypted = db.Column(db.Text, nullable=False)
+
+    # Notification settings
+    default_channel_id = db.Column(db.String(50), nullable=True)
+    default_channel_name = db.Column(db.String(255), nullable=True)
+    notifications_enabled = db.Column(db.Boolean, default=True)
+    notify_on_create = db.Column(db.Boolean, default=True)
+    notify_on_status_change = db.Column(db.Boolean, default=True)
+
+    # Status
+    is_active = db.Column(db.Boolean, default=True)
+    installed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref=db.backref('slack_workspace', uselist=False))
+    user_mappings = db.relationship('SlackUserMapping', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'workspace_id': self.workspace_id,
+            'workspace_name': self.workspace_name,
+            'default_channel_id': self.default_channel_id,
+            'default_channel_name': self.default_channel_name,
+            'notifications_enabled': self.notifications_enabled,
+            'notify_on_create': self.notify_on_create,
+            'notify_on_status_change': self.notify_on_status_change,
+            'is_active': self.is_active,
+            'installed_at': self.installed_at.isoformat() if self.installed_at else None,
+            'last_activity_at': self.last_activity_at.isoformat() if self.last_activity_at else None,
+        }
+
+
+class SlackUserMapping(db.Model):
+    """Maps Slack users to ADR platform users."""
+
+    __tablename__ = 'slack_user_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slack_workspace_id = db.Column(db.Integer, db.ForeignKey('slack_workspaces.id'), nullable=False, index=True)
+    slack_user_id = db.Column(db.String(50), nullable=False, index=True)  # Slack user ID (U...)
+    slack_email = db.Column(db.String(320), nullable=True)  # Email from Slack profile
+
+    # Linked ADR user (nullable - may not be linked yet)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # How the user was linked
+    link_method = db.Column(db.String(20), nullable=True)  # 'auto_email', 'browser_auth'
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    linked_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('slack_mappings', lazy='dynamic'))
+
+    # Unique constraint: one mapping per slack user per workspace
+    __table_args__ = (
+        db.UniqueConstraint('slack_workspace_id', 'slack_user_id', name='uq_slack_user_workspace'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slack_workspace_id': self.slack_workspace_id,
+            'slack_user_id': self.slack_user_id,
+            'slack_email': self.slack_email,
+            'user_id': self.user_id,
+            'link_method': self.link_method,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'linked_at': self.linked_at.isoformat() if self.linked_at else None,
+        }

@@ -148,4 +148,53 @@ export class AdminService {
   getTenantAdmins(): Observable<{ admins: { name: string; role: string }[]; total: number }> {
     return this.http.get<{ admins: { name: string; role: string }[]; total: number }>(`${this.apiUrl}/tenant-admins`);
   }
+
+  // Slack Integration
+  getSlackSettings(): Observable<SlackSettings> {
+    return this.http.get<SlackSettings>('/api/slack/settings');
+  }
+
+  updateSlackSettings(settings: SlackSettingsUpdate): Observable<{ message: string; settings: SlackSettings }> {
+    return this.http.put<{ message: string; settings: SlackSettings }>('/api/slack/settings', settings);
+  }
+
+  disconnectSlack(): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>('/api/slack/disconnect', {});
+  }
+
+  testSlackNotification(): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>('/api/slack/test', {});
+  }
+
+  getSlackChannels(): Observable<{ channels: SlackChannel[] }> {
+    return this.http.get<{ channels: SlackChannel[] }>('/api/slack/channels');
+  }
+}
+
+export interface SlackSettings {
+  installed: boolean;
+  install_url?: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  default_channel_id?: string;
+  default_channel_name?: string;
+  notifications_enabled?: boolean;
+  notify_on_create?: boolean;
+  notify_on_status_change?: boolean;
+  installed_at?: string;
+  last_activity_at?: string;
+}
+
+export interface SlackSettingsUpdate {
+  default_channel_id?: string;
+  default_channel_name?: string;
+  notifications_enabled?: boolean;
+  notify_on_create?: boolean;
+  notify_on_status_change?: boolean;
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  is_private: boolean;
 }

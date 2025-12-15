@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -1255,6 +1255,13 @@ def api_create_decision():
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_new_decision(db, decision, email_config)
 
+    # Send Slack notification if configured
+    try:
+        from slack_service import notify_decision_created
+        notify_decision_created(decision)
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for new decision: {e}")
+
     return jsonify(decision.to_dict()), 201
 
 
@@ -1362,6 +1369,14 @@ def api_update_decision(decision_id):
     if not email_config:
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_decision_updated(db, decision, email_config, change_reason, status_changed)
+
+    # Send Slack notification if status changed
+    if status_changed:
+        try:
+            from slack_service import notify_decision_status_changed
+            notify_decision_status_changed(decision)
+        except Exception as e:
+            logger.warning(f"Failed to send Slack notification for status change: {e}")
 
     return jsonify(decision.to_dict_with_history())
 
@@ -6343,6 +6358,427 @@ def create_incomplete_test_user():
         db.session.rollback()
         logger.error(f"Create incomplete test user failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# SLACK INTEGRATION ENDPOINTS
+# =============================================================================
+
+@app.route('/api/slack/install')
+@login_required
+@admin_required
+@track_endpoint('api_slack_install')
+def slack_install():
+    """Start Slack OAuth installation flow."""
+    from keyvault_client import keyvault_client
+    from slack_security import generate_oauth_state
+
+    client_id = keyvault_client.get_slack_client_id()
+    if not client_id:
+        return jsonify({'error': 'Slack integration not configured'}), 500
+
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Generate state with tenant_id
+    state = generate_oauth_state(tenant.id, user.id)
+
+    # Slack OAuth scopes
+    scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
+
+    redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
+
+    auth_url = (
+        f"https://slack.com/oauth/v2/authorize"
+        f"?client_id={client_id}"
+        f"&scope={scopes}"
+        f"&redirect_uri={redirect_uri}"
+        f"&state={state}"
+    )
+
+    return redirect(auth_url)
+
+
+@app.route('/api/slack/oauth/callback')
+@track_endpoint('api_slack_oauth_callback')
+def slack_oauth_callback():
+    """Handle Slack OAuth callback."""
+    from keyvault_client import keyvault_client
+    from slack_security import verify_oauth_state, encrypt_token
+    from slack_sdk import WebClient
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+
+    if error:
+        logger.error(f"Slack OAuth error: {error}")
+        return redirect('/settings?slack_error=' + error)
+
+    if not code or not state:
+        return redirect('/settings?slack_error=missing_params')
+
+    # Verify state
+    state_data = verify_oauth_state(state)
+    if not state_data:
+        return redirect('/settings?slack_error=invalid_state')
+
+    tenant_id = state_data.get('tenant_id')
+
+    client_id = keyvault_client.get_slack_client_id()
+    client_secret = keyvault_client.get_slack_client_secret()
+
+    if not client_id or not client_secret:
+        return redirect('/settings?slack_error=not_configured')
+
+    try:
+        # Exchange code for token
+        client = WebClient()
+        redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
+
+        response = client.oauth_v2_access(
+            client_id=client_id,
+            client_secret=client_secret,
+            code=code,
+            redirect_uri=redirect_uri
+        )
+
+        if not response['ok']:
+            logger.error(f"Slack OAuth failed: {response.get('error')}")
+            return redirect('/settings?slack_error=oauth_failed')
+
+        # Extract workspace info
+        workspace_id = response['team']['id']
+        workspace_name = response['team']['name']
+        bot_token = response['access_token']
+
+        # Encrypt and store
+        encrypted_token = encrypt_token(bot_token)
+
+        # Check for existing workspace
+        existing = SlackWorkspace.query.filter_by(tenant_id=tenant_id).first()
+        if existing:
+            existing.workspace_id = workspace_id
+            existing.workspace_name = workspace_name
+            existing.bot_token_encrypted = encrypted_token
+            existing.is_active = True
+            existing.installed_at = datetime.utcnow()
+        else:
+            workspace = SlackWorkspace(
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                bot_token_encrypted=encrypted_token,
+                is_active=True
+            )
+            db.session.add(workspace)
+
+        db.session.commit()
+        logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
+
+        return redirect('/settings?slack_success=true')
+
+    except Exception as e:
+        logger.error(f"Slack OAuth callback error: {str(e)}")
+        db.session.rollback()
+        return redirect('/settings?slack_error=callback_failed')
+
+
+@app.route('/api/slack/webhook/commands', methods=['POST'])
+@track_endpoint('api_slack_command')
+def slack_commands():
+    """Handle Slack slash commands."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    # Parse form data (Slack sends form-encoded data)
+    team_id = request.form.get('team_id')
+    user_id = request.form.get('user_id')
+    text = request.form.get('text', '').strip()
+    trigger_id = request.form.get('trigger_id')
+
+    # Find workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+    if not workspace:
+        return jsonify({
+            'response_type': 'ephemeral',
+            'text': 'This workspace is not connected to Decision Records.'
+        })
+
+    # Update last activity
+    workspace.last_activity_at = datetime.utcnow()
+    db.session.commit()
+
+    # Create service and handle command
+    service = SlackService(workspace)
+    response = service.handle_command(user_id, text, trigger_id)
+
+    return jsonify(response)
+
+
+@app.route('/api/slack/webhook/interactions', methods=['POST'])
+@track_endpoint('api_slack_interaction')
+def slack_interactions():
+    """Handle Slack interactive components (modals, buttons)."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+    import json
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    # Parse payload
+    payload = json.loads(request.form.get('payload', '{}'))
+    payload_type = payload.get('type')
+    team_id = payload.get('team', {}).get('id')
+
+    # Find workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+    if not workspace:
+        return '', 200
+
+    # Update last activity
+    workspace.last_activity_at = datetime.utcnow()
+    db.session.commit()
+
+    service = SlackService(workspace)
+
+    if payload_type == 'view_submission':
+        return service.handle_modal_submission(payload)
+    elif payload_type == 'block_actions':
+        return service.handle_block_action(payload)
+    elif payload_type == 'message_action':
+        return service.handle_message_action(payload)
+
+    return '', 200
+
+
+@app.route('/api/slack/settings', methods=['GET'])
+@login_required
+@admin_required
+@track_endpoint('api_slack_get_settings')
+def slack_get_settings():
+    """Get Slack integration settings."""
+    from keyvault_client import keyvault_client
+
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+
+    if not workspace:
+        client_id = keyvault_client.get_slack_client_id()
+        return jsonify({
+            'installed': False,
+            'install_url': '/api/slack/install' if client_id else None
+        })
+
+    return jsonify({
+        'installed': True,
+        'workspace_id': workspace.workspace_id,
+        'workspace_name': workspace.workspace_name,
+        'default_channel_id': workspace.default_channel_id,
+        'default_channel_name': workspace.default_channel_name,
+        'notifications_enabled': workspace.notifications_enabled,
+        'notify_on_create': workspace.notify_on_create,
+        'notify_on_status_change': workspace.notify_on_status_change,
+        'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None,
+        'last_activity_at': workspace.last_activity_at.isoformat() if workspace.last_activity_at else None
+    })
+
+
+@app.route('/api/slack/settings', methods=['PUT'])
+@login_required
+@admin_required
+@track_endpoint('api_slack_update_settings')
+def slack_update_settings():
+    """Update Slack integration settings."""
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    data = request.get_json()
+
+    if 'default_channel_id' in data:
+        workspace.default_channel_id = data['default_channel_id']
+    if 'default_channel_name' in data:
+        workspace.default_channel_name = data['default_channel_name']
+    if 'notifications_enabled' in data:
+        workspace.notifications_enabled = data['notifications_enabled']
+    if 'notify_on_create' in data:
+        workspace.notify_on_create = data['notify_on_create']
+    if 'notify_on_status_change' in data:
+        workspace.notify_on_status_change = data['notify_on_status_change']
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Settings updated',
+        'settings': {
+            'default_channel_id': workspace.default_channel_id,
+            'default_channel_name': workspace.default_channel_name,
+            'notifications_enabled': workspace.notifications_enabled,
+            'notify_on_create': workspace.notify_on_create,
+            'notify_on_status_change': workspace.notify_on_status_change
+        }
+    })
+
+
+@app.route('/api/slack/disconnect', methods=['POST'])
+@login_required
+@admin_required
+@track_endpoint('api_slack_disconnect')
+def slack_disconnect():
+    """Disconnect Slack workspace."""
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    workspace.is_active = False
+    workspace.bot_token_encrypted = ''
+    db.session.commit()
+
+    logger.info(f"Slack workspace disconnected from tenant {tenant.id}")
+
+    return jsonify({'message': 'Slack disconnected successfully'})
+
+
+@app.route('/api/slack/test', methods=['POST'])
+@login_required
+@admin_required
+@track_endpoint('api_slack_test')
+def slack_test():
+    """Send a test notification to Slack."""
+    from slack_service import SlackService
+
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    if not workspace.default_channel_id:
+        return jsonify({'error': 'No notification channel configured'}), 400
+
+    try:
+        service = SlackService(workspace)
+        service.send_test_notification(user.name or user.email)
+        return jsonify({'message': 'Test notification sent'})
+    except Exception as e:
+        logger.error(f"Slack test notification failed: {str(e)}")
+        return jsonify({'error': 'Failed to send test notification'}), 500
+
+
+@app.route('/api/slack/channels', methods=['GET'])
+@login_required
+@admin_required
+@track_endpoint('api_slack_channels')
+def slack_channels():
+    """Get list of Slack channels for channel selection."""
+    from slack_service import SlackService
+
+    user = get_current_user()
+    tenant = get_user_tenant(user)
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    try:
+        service = SlackService(workspace)
+        channels = service.get_channels()
+        return jsonify({'channels': channels})
+    except Exception as e:
+        logger.error(f"Failed to get Slack channels: {str(e)}")
+        return jsonify({'error': 'Failed to get channels'}), 500
+
+
+@app.route('/api/slack/link/initiate', methods=['GET'])
+@track_endpoint('api_slack_link_initiate')
+def slack_link_initiate():
+    """Initiate user linking from Slack to ADR."""
+    from slack_security import verify_link_token
+
+    token = request.args.get('token')
+    if not token:
+        return redirect('/login?error=missing_token')
+
+    link_data = verify_link_token(token)
+    if not link_data:
+        return redirect('/login?error=invalid_token')
+
+    # Store link data in session for completion after login
+    session['slack_link_data'] = link_data
+
+    # Redirect to login/signup
+    return redirect('/login?slack_link=true')
+
+
+@app.route('/api/slack/link/complete', methods=['POST'])
+@login_required
+@track_endpoint('api_slack_link_complete')
+def slack_link_complete():
+    """Complete user linking after login."""
+    link_data = session.pop('slack_link_data', None)
+    if not link_data:
+        return jsonify({'error': 'No pending link'}), 400
+
+    workspace_id = link_data.get('workspace_id')
+    slack_user_id = link_data.get('slack_user_id')
+
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    user = get_current_user()
+
+    # Create or update mapping
+    mapping = SlackUserMapping.query.filter_by(
+        slack_workspace_id=workspace.id,
+        slack_user_id=slack_user_id
+    ).first()
+
+    if mapping:
+        mapping.user_id = user.id
+        mapping.link_method = 'browser_auth'
+        mapping.linked_at = datetime.utcnow()
+    else:
+        mapping = SlackUserMapping(
+            slack_workspace_id=workspace.id,
+            slack_user_id=slack_user_id,
+            user_id=user.id,
+            link_method='browser_auth',
+            linked_at=datetime.utcnow()
+        )
+        db.session.add(mapping)
+
+    db.session.commit()
+
+    return jsonify({'message': 'Account linked successfully'})
 
 
 if __name__ == '__main__':
