@@ -86,7 +86,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </div>
               </div>
               <div class="browser-content">
-                <img src="/assets/screenshot-dashboard.png" alt="Architecture Decisions Dashboard" />
+                <img src="/assets/screenshot-dashboard.png" alt="Decision Records Dashboard" />
               </div>
             </div>
           </div>

@@ -335,7 +335,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
                 <div class="notification-option">
                   <div class="option-info">
                     <h3>New Decisions</h3>
-                    <p>Get notified when new architecture decisions are created</p>
+                    <p>Get notified when new decision records are created</p>
                   </div>
                   <mat-slide-toggle [(ngModel)]="subscription.notify_on_create"
                                     (change)="saveSubscription()">

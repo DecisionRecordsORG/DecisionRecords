@@ -42,8 +42,8 @@ import { Decision, User, Space } from '../../models/decision.model';
     <div class="decision-list-container">
       <div class="header">
         <div class="header-content">
-          <h1>Architecture Decisions</h1>
-          <p class="subtitle">Track and manage your architecture decision records</p>
+          <h1>Decision Records</h1>
+          <p class="subtitle">Track and manage your decision records</p>
         </div>
         @if (!authService.isMasterAccount && userDomain) {
           <button mat-flat-button color="primary" class="new-decision-btn" [routerLink]="['/' + userDomain + '/decision/new']">
@@ -146,7 +146,7 @@ import { Decision, User, Space } from '../../models/decision.model';
               <mat-icon>{{ searchTerm || statusFilter ? 'search_off' : 'architecture' }}</mat-icon>
             </div>
             <h2>{{ searchTerm || statusFilter ? 'No matching decisions' : 'No decisions yet' }}</h2>
-            <p>{{ searchTerm || statusFilter ? 'Try adjusting your search or filters' : 'Create your first architecture decision to start documenting your technical choices' }}</p>
+            <p>{{ searchTerm || statusFilter ? 'Try adjusting your search or filters' : 'Create your first decision record to start documenting choices that matter' }}</p>
             @if (!searchTerm && !statusFilter && !authService.isMasterAccount && userDomain) {
               <button mat-flat-button color="primary" class="create-btn" [routerLink]="['/' + userDomain + '/decision/new']">
                 <mat-icon>add</mat-icon>

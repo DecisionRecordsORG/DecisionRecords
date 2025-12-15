@@ -130,7 +130,7 @@ interface SuperAdminEmail {
 
               <mat-form-field appearance="outline">
                 <mat-label>From Name</mat-label>
-                <input matInput formControlName="from_name" placeholder="Architecture Decisions">
+                <input matInput formControlName="from_name" placeholder="Decision Records">
               </mat-form-field>
             </div>
 
@@ -418,7 +418,7 @@ export class SuperadminEmailComponent implements OnInit {
       smtp_username: [''], // Will be validated conditionally based on Key Vault availability
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
-      from_name: ['Architecture Decisions'],
+      from_name: ['Decision Records'],
       use_tls: [true],
       enabled: [true]
     });

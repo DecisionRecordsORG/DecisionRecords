@@ -213,7 +213,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's architecture decisions.</p>
+                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's decision records.</p>
                 <h4>Use Cases</h4>
                 <ul>
                   <li>Decision status changes</li>
@@ -268,7 +268,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
                     <mat-form-field appearance="outline">
                       <mat-label>From Name</mat-label>
-                      <input matInput formControlName="from_name" placeholder="Architecture Decisions">
+                      <input matInput formControlName="from_name" placeholder="Decision Records">
                     </mat-form-field>
                   </div>
 
@@ -505,7 +505,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="app-name-section">
                         <mat-form-field appearance="outline" class="full-width">
                           <mat-label>Application Name</mat-label>
-                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
+                          <input matInput formControlName="rp_name" placeholder="Decision Records">
                           <mat-hint>Shown to users during passkey setup</mat-hint>
                         </mat-form-field>
                       </div>
@@ -669,7 +669,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p>Spaces help organize your architecture decisions into logical groups.</p>
+                <p>Spaces help organize your decision records into logical groups.</p>
                 <ul>
                   <li><strong>Default Space:</strong> New decisions are automatically assigned to this space</li>
                   <li><strong>Multiple Spaces:</strong> Decisions can belong to multiple spaces</li>
@@ -1570,7 +1570,7 @@ export class SettingsComponent implements OnInit {
       smtp_username: ['', Validators.required],
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
-      from_name: ['Architecture Decisions'],
+      from_name: ['Decision Records'],
       use_tls: [true],
       enabled: [true]
     });
@@ -1579,7 +1579,7 @@ export class SettingsComponent implements OnInit {
       auth_method: ['both', Validators.required],  // 'both', 'webauthn', or 'sso'
       allow_registration: [true],
       auto_approve_users: [false],  // Inverted from require_approval for better UX
-      rp_name: ['Architecture Decisions']
+      rp_name: ['Decision Records']
     });
   }
 
@@ -1823,7 +1823,7 @@ export class SettingsComponent implements OnInit {
           auto_approve_users: false,  // Default to requiring approval
           auth_method: 'webauthn',
           allow_registration: true,
-          rp_name: 'Architecture Decisions'
+          rp_name: 'Decision Records'
         });
       }
     });

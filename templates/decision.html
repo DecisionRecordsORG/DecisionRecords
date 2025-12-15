@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{% if decision_id %}ADR-{{ decision_id }}{% else %}New Decision{% endif %} - Architecture Decisions{% endblock %}
+{% block title %}{% if decision_id %}DR-{{ decision_id }}{% else %}New Decision{% endif %} - Decision Records{% endblock %}
 
 {% block content %}
 <div class="row">
@@ -21,7 +21,7 @@
                     <span class="badge bg-secondary me-2">ADR-{{ decision_id }}</span>
                     <span id="decisionTitleDisplay">Loading...</span>
                     {% else %}
-                    <i class="bi bi-plus-circle"></i> New Architecture Decision
+                    <i class="bi bi-plus-circle"></i> New Decision Record
                     {% endif %}
                 </h4>
                 {% if decision_id %}

@@ -40,8 +40,8 @@ import { User, MasterAccount } from '../../models/decision.model';
   template: `
     <mat-toolbar color="primary" class="navbar">
       <a [routerLink]="homeLink" class="brand">
-        <mat-icon>architecture</mat-icon>
-        <span class="brand-text">Architecture Decisions</span>
+        <mat-icon>article</mat-icon>
+        <span class="brand-text">Decision Records</span>
         @if (!authService.isMasterAccount && userDomain) {
           <span class="tenant-badge">{{ userDomain }}</span>
         }

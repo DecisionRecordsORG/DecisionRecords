@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Settings - Architecture Decisions{% endblock %}
+{% block title %}Settings - Decision Records{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -73,7 +73,7 @@
                         <div class="col-md-6">
                             <div class="mb-3">
                                 <label for="fromName" class="form-label">From Name</label>
-                                <input type="text" class="form-control" id="fromName" value="Architecture Decisions">
+                                <input type="text" class="form-control" id="fromName" value="Decision Records">
                             </div>
                         </div>
                     </div>
@@ -338,7 +338,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.getElementById('smtpPort').value = config.smtp_port || 587;
                 document.getElementById('smtpUsername').value = config.smtp_username || '';
                 document.getElementById('fromEmail').value = config.from_email || '';
-                document.getElementById('fromName').value = config.from_name || 'Architecture Decisions';
+                document.getElementById('fromName').value = config.from_name || 'Decision Records';
                 document.getElementById('useTls').checked = config.use_tls !== false;
                 document.getElementById('emailEnabled').checked = config.enabled !== false;
             }

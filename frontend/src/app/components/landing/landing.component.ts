@@ -32,11 +32,11 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     <div class="landing-container">
       <div class="hero-section">
         <div class="hero-content">
-          <mat-icon class="hero-icon">architecture</mat-icon>
-          <h1>Architecture Decisions</h1>
+          <mat-icon class="hero-icon">article</mat-icon>
+          <h1>Decision Records</h1>
           <p class="hero-subtitle">
-            Document and track your architecture decisions using the arc42 format.
-            Collaborate with your team and maintain a clear record of technical choices.
+            Document and track your important decisions.
+            Collaborate with your team and maintain a clear record of choices that matter.
           </p>
         </div>
       </div>
@@ -352,8 +352,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
       <footer class="landing-footer">
         <small>
-          Architecture Decision Records - Based on
-          <a href="https://docs.arc42.org/section-9/" target="_blank" rel="noopener">arc42 Section 9</a>
+          Decision Records - Capture and preserve important decisions
           <span class="separator">|</span>
           Created by Lawrance Nyakiso
         </small>
