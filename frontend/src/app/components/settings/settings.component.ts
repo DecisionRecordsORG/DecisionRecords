@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatTabsModule } from '@angular/material/tabs';
@@ -903,8 +904,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
           </div>
         </mat-tab>
 
-        <!-- Slack Integration Tab (only for tenant admins) -->
-        @if (!authService.isMasterAccount) {
+        <!-- Slack Integration Tab (only for tenant admins and when feature enabled) -->
+        @if (!authService.isMasterAccount && slackFeatureEnabled) {
         <mat-tab label="Slack">
           <div class="tab-content">
             <mat-card class="info-card">
@@ -1820,6 +1821,9 @@ export class SettingsComponent implements OnInit {
   savingSlackSettings = false;
   testingSlack = false;
 
+  // Feature flags
+  slackFeatureEnabled = false;
+
   /**
    * Check if current user is a provisional admin
    */
@@ -1867,7 +1871,8 @@ export class SettingsComponent implements OnInit {
     public authService: AuthService,
     private spaceService: SpaceService,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private http: HttpClient
   ) {
     this.spaceForm = this.fb.group({
       name: ['', Validators.required],
@@ -1911,6 +1916,7 @@ export class SettingsComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.loadFeatureFlags();
     this.loadSSOConfigs();
     this.loadEmailConfig();
     this.loadUsers();
@@ -1928,6 +1934,18 @@ export class SettingsComponent implements OnInit {
         }
       }
     }
+  }
+
+  loadFeatureFlags(): void {
+    this.http.get<{ commercial: boolean; slack: boolean }>('/api/features').subscribe({
+      next: (features) => {
+        this.slackFeatureEnabled = features.slack;
+      },
+      error: () => {
+        // Default to disabled if can't load features
+        this.slackFeatureEnabled = false;
+      }
+    });
   }
 
   loadSSOConfigs(): void {

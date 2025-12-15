@@ -26,6 +26,7 @@ from security import (
 from keyvault_client import keyvault_client
 from analytics import track_endpoint
 from cloudflare_security import setup_cloudflare_security, require_cloudflare_access, get_cloudflare_config_for_api, invalidate_cloudflare_cache
+from feature_flags import require_slack, get_enabled_features, is_slack_enabled
 
 # Configure logging
 logging.basicConfig(
@@ -680,6 +681,12 @@ def get_version():
     """Get application version information."""
     from version import get_build_info
     return jsonify(get_build_info()), 200
+
+
+@app.route('/api/features')
+def get_features():
+    """Get enabled feature flags for frontend UI conditional rendering."""
+    return jsonify(get_enabled_features()), 200
 
 
 # ==================== Feedback & Sponsorship ====================
@@ -6365,6 +6372,7 @@ def create_incomplete_test_user():
 # =============================================================================
 
 @app.route('/api/slack/install')
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_install')
@@ -6402,6 +6410,7 @@ def slack_install():
 
 
 @app.route('/api/slack/oauth/callback')
+@require_slack
 @track_endpoint('api_slack_oauth_callback')
 def slack_oauth_callback():
     """Handle Slack OAuth callback."""
@@ -6487,6 +6496,7 @@ def slack_oauth_callback():
 
 
 @app.route('/api/slack/webhook/commands', methods=['POST'])
+@require_slack
 @track_endpoint('api_slack_command')
 def slack_commands():
     """Handle Slack slash commands."""
@@ -6523,6 +6533,7 @@ def slack_commands():
 
 
 @app.route('/api/slack/webhook/interactions', methods=['POST'])
+@require_slack
 @track_endpoint('api_slack_interaction')
 def slack_interactions():
     """Handle Slack interactive components (modals, buttons)."""
@@ -6561,6 +6572,7 @@ def slack_interactions():
 
 
 @app.route('/api/slack/settings', methods=['GET'])
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_get_settings')
@@ -6597,6 +6609,7 @@ def slack_get_settings():
 
 
 @app.route('/api/slack/settings', methods=['PUT'])
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_update_settings')
@@ -6639,6 +6652,7 @@ def slack_update_settings():
 
 
 @app.route('/api/slack/disconnect', methods=['POST'])
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_disconnect')
@@ -6663,6 +6677,7 @@ def slack_disconnect():
 
 
 @app.route('/api/slack/test', methods=['POST'])
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_test')
@@ -6692,6 +6707,7 @@ def slack_test():
 
 
 @app.route('/api/slack/channels', methods=['GET'])
+@require_slack
 @login_required
 @admin_required
 @track_endpoint('api_slack_channels')
@@ -6718,6 +6734,7 @@ def slack_channels():
 
 
 @app.route('/api/slack/link/initiate', methods=['GET'])
+@require_slack
 @track_endpoint('api_slack_link_initiate')
 def slack_link_initiate():
     """Initiate user linking from Slack to ADR."""
@@ -6739,6 +6756,7 @@ def slack_link_initiate():
 
 
 @app.route('/api/slack/link/complete', methods=['POST'])
+@require_slack
 @login_required
 @track_endpoint('api_slack_link_complete')
 def slack_link_complete():

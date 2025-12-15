@@ -1,0 +1,54 @@
+display_information:
+  name: Decision Records
+  description: Create and manage Decision Records directly from Slack
+  background_color: "#1a1a2e"
+  long_description: |
+    Decision Records integrates your team's decision-making process with Slack.
+
+    Features:
+    - Create new Decision Records with /adr create
+    - List recent decisions with /adr list
+    - View decision details with /adr view <id>
+    - Search decisions with /adr search <query>
+    - Save Slack messages as decisions using message shortcuts
+    - Get notified when decisions are created or updated
+
+    Each team member's Slack account is automatically linked to their Decision Records account by email.
+
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: false
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Decision Records
+    always_online: true
+  shortcuts:
+    - name: Save as Decision
+      type: message
+      callback_id: save_as_decision
+      description: Create a Decision Record from this message
+  slash_commands:
+    - command: /adr
+      url: https://decisionrecords.org/api/slack/webhook/commands
+      description: Manage Decision Records
+      usage_hint: "[create | list | view <id> | search <query> | help]"
+      should_escape: false
+
+oauth_config:
+  redirect_urls:
+    - https://decisionrecords.org/api/slack/oauth/callback
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - users:read
+      - users:read.email
+
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://decisionrecords.org/api/slack/webhook/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

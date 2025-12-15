@@ -113,7 +113,6 @@ def slack_workspace(session_fixture, sample_tenant):
         workspace_id='T12345678',
         workspace_name='Test Workspace',
         bot_token_encrypted=encrypted_token,
-        bot_user_id='U12345678',
         is_active=True,
         notifications_enabled=True,
         notify_on_create=True,

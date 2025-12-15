@@ -2,7 +2,7 @@
 Slack integration service module.
 
 Handles Slack API calls, message formatting, user linking, and business logic
-for the Architecture Decisions Slack app.
+for the Decision Records Slack app.
 """
 import logging
 import os
@@ -113,7 +113,7 @@ class SlackService:
         )
 
         # Build the link URL
-        base_url = os.environ.get('APP_BASE_URL', 'https://architecture-decisions.org')
+        base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         link_url = f"{base_url}/api/slack/link/initiate?token={link_token}"
 
         blocks = [
@@ -121,7 +121,7 @@ class SlackService:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": ":wave: Welcome! To use Architecture Decisions from Slack, you need to link your account."
+                    "text": ":wave: Welcome! To use Decision Records from Slack, you need to link your account."
                 }
             },
             {
@@ -185,7 +185,7 @@ class SlackService:
         blocks = [
             {
                 "type": "header",
-                "text": {"type": "plain_text", "text": "Architecture Decisions - Help"}
+                "text": {"type": "plain_text", "text": "Decision Records - Help"}
             },
             {
                 "type": "section",
@@ -199,7 +199,7 @@ class SlackService:
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        "`/adr create` - Create a new architecture decision\n"
+                        "`/adr create` - Create a new decision record\n"
                         "`/adr list [status]` - List recent decisions (optionally filter by status)\n"
                         "`/adr view <id>` - View a specific decision by ID\n"
                         "`/adr search <query>` - Search decisions\n"
@@ -770,7 +770,7 @@ class SlackService:
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"Sent from Architecture Decisions at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}
+                    {"type": "mrkdwn", "text": f"Sent from Decision Records at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}
                 ]
             }
         ]
@@ -778,7 +778,7 @@ class SlackService:
         self.client.chat_postMessage(
             channel=channel,
             blocks=blocks,
-            text="Test notification from Architecture Decisions"
+            text="Test notification from Decision Records"
         )
         self.update_activity()
 
@@ -800,7 +800,7 @@ class SlackService:
         status_emoji = self._get_status_emoji(decision.status)
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
 
-        base_url = os.environ.get('APP_BASE_URL', 'https://architecture-decisions.org')
+        base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         tenant = self.workspace.tenant
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
 
@@ -849,12 +849,12 @@ class SlackService:
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
 
         event_text = {
-            'created': ':sparkles: New architecture decision created',
-            'updated': ':pencil2: Architecture decision updated',
+            'created': ':sparkles: New decision record created',
+            'updated': ':pencil2: Decision record updated',
             'status_changed': ':arrows_counterclockwise: Decision status changed'
         }.get(event_type, 'Decision updated')
 
-        base_url = os.environ.get('APP_BASE_URL', 'https://architecture-decisions.org')
+        base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         tenant = self.workspace.tenant
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
 
