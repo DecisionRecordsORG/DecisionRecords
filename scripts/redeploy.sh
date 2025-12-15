@@ -78,6 +78,37 @@ check_git_status() {
     success "Git status clean"
 }
 
+# Check for insecure Cloudflare settings in code
+check_cloudflare_security() {
+    log "Checking Cloudflare security settings..."
+
+    # Check Dockerfile for insecure environment variables
+    local dockerfile="deployment/Dockerfile.production"
+    if [ -f "$dockerfile" ]; then
+        # Check for FLASK_ENV=testing (bypasses Cloudflare check)
+        if grep -q "FLASK_ENV.*testing" "$dockerfile"; then
+            error "SECURITY: $dockerfile contains FLASK_ENV=testing which bypasses Cloudflare security!"
+        fi
+
+        # Check for SKIP_CLOUDFLARE_CHECK=true
+        if grep -q "SKIP_CLOUDFLARE_CHECK.*true" "$dockerfile"; then
+            error "SECURITY: $dockerfile contains SKIP_CLOUDFLARE_CHECK=true which bypasses Cloudflare security!"
+        fi
+    fi
+
+    # Check run_local.py isn't accidentally being imported in production code
+    if grep -rq "import run_local\|from run_local" app.py models.py 2>/dev/null; then
+        error "SECURITY: Production code imports run_local.py which has dev-only settings!"
+    fi
+
+    # Check cloudflare_security.py doesn't have hardcoded bypasses
+    if grep -q "return True.*# BYPASS\|# DISABLE" cloudflare_security.py 2>/dev/null; then
+        error "SECURITY: cloudflare_security.py contains hardcoded bypass!"
+    fi
+
+    success "Cloudflare security settings OK"
+}
+
 # Check Azure login
 check_azure_login() {
     log "Checking Azure login..."
@@ -226,6 +257,7 @@ main() {
 
     bump_version
     check_git_status
+    check_cloudflare_security
     check_azure_login
     build_image
     push_image

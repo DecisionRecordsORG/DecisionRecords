@@ -1108,12 +1108,142 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       color: #616161 !important;
     }
 
-    .tab-content {
-      padding: 24px 0;
+    /* Tab Styling */
+    ::ng-deep .mat-mdc-tab-group {
+      margin-top: 16px;
+      background: #f8fafc;
+      border-radius: 12px;
+      overflow: hidden;
     }
 
-    .form-card, .list-card {
+    ::ng-deep .mat-mdc-tab-header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: none;
+    }
+
+    ::ng-deep .mat-mdc-tab-labels {
+      gap: 0;
+    }
+
+    ::ng-deep .mat-mdc-tab {
+      min-width: 100px;
+      padding: 0 20px;
+      opacity: 1;
+      height: 48px;
+    }
+
+    ::ng-deep .mat-mdc-tab .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.7);
+      font-weight: 500;
+      font-size: 13px;
+      letter-spacing: 0.3px;
+    }
+
+    ::ng-deep .mat-mdc-tab:hover .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    ::ng-deep .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label {
+      color: white;
+    }
+
+    ::ng-deep .mat-mdc-tab-body-wrapper {
+      background: #f8fafc;
+      min-height: 400px;
+    }
+
+    ::ng-deep .mat-mdc-tab-body-content {
+      padding: 24px;
+    }
+
+    ::ng-deep .mdc-tab-indicator__content--underline {
+      border-color: #60a5fa !important;
+      border-width: 3px !important;
+    }
+
+    .tab-content {
+      padding: 0;
+    }
+
+    /* Info Card Styling */
+    .info-card {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
       margin-bottom: 24px;
+      box-shadow: none;
+    }
+
+    .info-card mat-card-header {
+      padding: 16px 20px 0;
+    }
+
+    .info-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1e40af;
+    }
+
+    .info-card mat-card-title mat-icon {
+      color: #3b82f6;
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+
+    .info-card mat-card-content {
+      padding: 16px 20px 20px;
+      color: #1e3a5f;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .info-card h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e40af;
+      margin: 16px 0 8px;
+    }
+
+    .info-card ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .info-card li {
+      margin-bottom: 4px;
+    }
+
+    /* Form Card Styling */
+    .form-card, .list-card {
+      background: white;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .form-card mat-card-header,
+    .list-card mat-card-header {
+      padding: 20px 24px 0;
+      border-bottom: 1px solid #f1f5f9;
+      margin-bottom: 0;
+    }
+
+    .form-card mat-card-title,
+    .list-card mat-card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1e293b;
+      padding-bottom: 16px;
+    }
+
+    .form-card mat-card-content,
+    .list-card mat-card-content {
+      padding: 24px;
     }
 
     .form-row {
@@ -1145,8 +1275,20 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
     .form-actions {
       display: flex;
-      gap: 16px;
+      gap: 12px;
       margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    .form-actions button[color="primary"] {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+      border-radius: 8px;
+      padding: 0 24px;
+    }
+
+    .form-actions button[mat-button] {
+      border-radius: 8px;
     }
 
     .empty-message {
