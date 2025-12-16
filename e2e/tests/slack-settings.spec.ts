@@ -500,4 +500,323 @@ test.describe('Slack Settings', () => {
       await expect(testButton).toBeDisabled({ timeout: 5000 });
     });
   });
+
+  test.describe('Workspace Claiming', () => {
+    test('shows-claim-workspace-form: Shows claim workspace form when not connected', async ({ page }) => {
+      // Mock API to return not installed
+      await page.route('/api/slack/settings', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            installed: false,
+            install_url: '/api/slack/install'
+          })
+        });
+      });
+
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+      await dismissOverlays(page);
+
+      // Click on the Slack tab
+      const slackTab = page.locator('div.mat-mdc-tab:has-text("Slack")');
+      await slackTab.click({ force: true });
+      await page.waitForTimeout(1000);
+
+      // Verify claim workspace form is visible
+      const claimHeading = page.locator('h4:has-text("Claim Existing Installation")');
+      await expect(claimHeading).toBeVisible({ timeout: 5000 });
+
+      // Verify workspace ID input is present
+      const workspaceIdInput = page.locator('[data-testid="slack-workspace-id-input"]');
+      await expect(workspaceIdInput).toBeVisible();
+
+      // Verify claim button is present
+      const claimButton = page.locator('[data-testid="slack-claim-button"]');
+      await expect(claimButton).toBeVisible();
+    });
+
+    test('can-claim-unclaimed-workspace: Can claim an unclaimed workspace', async ({ page }) => {
+      // Mock API to return not installed initially
+      await page.route('/api/slack/settings', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            installed: false,
+            install_url: '/api/slack/install'
+          })
+        });
+      });
+
+      // Mock claim endpoint
+      await page.route('/api/slack/claim', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            message: 'Workspace claimed successfully',
+            workspace: {
+              installed: true,
+              workspace_id: 'T0A36UYCYLX',
+              workspace_name: 'Claimed Workspace'
+            }
+          })
+        });
+      });
+
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+      await dismissOverlays(page);
+
+      // Click on the Slack tab
+      const slackTab = page.locator('div.mat-mdc-tab:has-text("Slack")');
+      await slackTab.click({ force: true });
+      await page.waitForTimeout(1000);
+
+      // Fill in workspace ID
+      const workspaceIdInput = page.locator('[data-testid="slack-workspace-id-input"]');
+      await workspaceIdInput.fill('T0A36UYCYLX');
+
+      // Click claim button
+      const claimButton = page.locator('[data-testid="slack-claim-button"]');
+      await claimButton.click();
+
+      // Verify success message
+      await page.waitForTimeout(1000);
+      const successMessage = page.locator('text=Workspace claimed successfully');
+      await expect(successMessage).toBeVisible({ timeout: 5000 });
+    });
+
+    test('shows-error-for-invalid-workspace-id: Shows error for invalid workspace ID', async ({ page }) => {
+      // Mock API to return not installed
+      await page.route('/api/slack/settings', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            installed: false,
+            install_url: '/api/slack/install'
+          })
+        });
+      });
+
+      // Mock claim endpoint with error
+      await page.route('/api/slack/claim', async route => {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'Invalid workspace ID format. Slack workspace IDs start with T.'
+          })
+        });
+      });
+
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+      await dismissOverlays(page);
+
+      // Click on the Slack tab
+      const slackTab = page.locator('div.mat-mdc-tab:has-text("Slack")');
+      await slackTab.click({ force: true });
+      await page.waitForTimeout(1000);
+
+      // Fill in invalid workspace ID
+      const workspaceIdInput = page.locator('[data-testid="slack-workspace-id-input"]');
+      await workspaceIdInput.fill('INVALID123');
+
+      // Click claim button
+      const claimButton = page.locator('[data-testid="slack-claim-button"]');
+      await claimButton.click();
+
+      // Verify error message
+      await page.waitForTimeout(1000);
+      const errorMessage = page.locator('text=Invalid workspace ID format');
+      await expect(errorMessage).toBeVisible({ timeout: 5000 });
+    });
+
+    test('shows-error-for-already-claimed-workspace: Shows error for already claimed workspace', async ({ page }) => {
+      // Mock API to return not installed
+      await page.route('/api/slack/settings', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            installed: false,
+            install_url: '/api/slack/install'
+          })
+        });
+      });
+
+      // Mock claim endpoint with already claimed error
+      await page.route('/api/slack/claim', async route => {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: 'This workspace is already claimed by another organization'
+          })
+        });
+      });
+
+      await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+
+      await page.waitForLoadState('networkidle', { timeout: 15000 });
+      await page.waitForSelector('h1', { timeout: 10000 });
+      await page.goto('/test-org.com/admin');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      const currentUrl = page.url();
+      if (!currentUrl.includes('/admin')) {
+        test.skip(true, 'Admin access not available');
+        return;
+      }
+
+      await page.waitForSelector('mat-tab-group', { timeout: 15000 });
+      await dismissOverlays(page);
+
+      // Click on the Slack tab
+      const slackTab = page.locator('div.mat-mdc-tab:has-text("Slack")');
+      await slackTab.click({ force: true });
+      await page.waitForTimeout(1000);
+
+      // Fill in workspace ID that's already claimed
+      const workspaceIdInput = page.locator('[data-testid="slack-workspace-id-input"]');
+      await workspaceIdInput.fill('T123456ABC');
+
+      // Click claim button
+      const claimButton = page.locator('[data-testid="slack-claim-button"]');
+      await claimButton.click();
+
+      // Verify error message
+      await page.waitForTimeout(1000);
+      const errorMessage = page.locator('text=already claimed');
+      await expect(errorMessage).toBeVisible({ timeout: 5000 });
+    });
+  });
+
+  test.describe('Slack Installed Landing Page', () => {
+    test('shows-unclaimed-workspace-info: Shows unclaimed workspace info on landing page', async ({ page }) => {
+      // Mock workspace info API
+      await page.route('/api/slack/workspace/T0A36UYCYLX', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            workspace_id: 'T0A36UYCYLX',
+            workspace_name: 'Acme Corp',
+            is_claimed: false,
+            status: 'pending_claim',
+            installed_at: '2025-01-15T10:00:00Z'
+          })
+        });
+      });
+
+      // Navigate to slack installed page
+      await page.goto('/slack/installed?workspace=T0A36UYCYLX');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify page title
+      const title = page.locator('mat-card-title:has-text("Decision Records App Installed")');
+      await expect(title).toBeVisible({ timeout: 5000 });
+
+      // Verify workspace name is shown
+      const workspaceName = page.locator('text=Acme Corp');
+      await expect(workspaceName).toBeVisible();
+
+      // Verify workspace ID is shown
+      const workspaceId = page.locator('code:has-text("T0A36UYCYLX")');
+      await expect(workspaceId).toBeVisible();
+
+      // Verify next steps section
+      const nextSteps = page.locator('h3:has-text("Next Steps")');
+      await expect(nextSteps).toBeVisible();
+    });
+
+    test('shows-already-claimed-message: Shows already claimed message for claimed workspace', async ({ page }) => {
+      // Mock workspace info API - already claimed
+      await page.route('/api/slack/workspace/T123CLAIMED', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            workspace_id: 'T123CLAIMED',
+            workspace_name: 'Already Claimed Workspace',
+            is_claimed: true,
+            status: 'active',
+            installed_at: '2025-01-10T10:00:00Z'
+          })
+        });
+      });
+
+      // Navigate to slack installed page
+      await page.goto('/slack/installed?workspace=T123CLAIMED&already_claimed=true');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify already connected message
+      const alreadyConnected = page.locator('mat-card-title:has-text("Already Connected")');
+      await expect(alreadyConnected).toBeVisible({ timeout: 5000 });
+
+      // Verify workspace name is shown
+      const workspaceName = page.locator('text=Already Claimed Workspace');
+      await expect(workspaceName).toBeVisible();
+    });
+
+    test('shows-error-for-missing-workspace-id: Shows error when no workspace ID provided', async ({ page }) => {
+      // Navigate to slack installed page without workspace ID
+      await page.goto('/slack/installed');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify error message
+      const errorTitle = page.locator('mat-card-title:has-text("Error")');
+      await expect(errorTitle).toBeVisible({ timeout: 5000 });
+
+      const errorMessage = page.locator('text=No workspace ID provided');
+      await expect(errorMessage).toBeVisible();
+    });
+  });
 });

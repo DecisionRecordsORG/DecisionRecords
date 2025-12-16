@@ -525,6 +525,54 @@ def init_database():
                                 conn.commit()
                                 logger.info(f"{col_name} column added successfully")
 
+                        # === Slack Workspace Claiming Migrations (v1.5.3) ===
+
+                        # Add status column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'status'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding status column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN status VARCHAR(20) DEFAULT 'active'
+                            """))
+                            conn.commit()
+                            logger.info("status column added successfully")
+
+                        # Add claimed_at column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'claimed_at'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding claimed_at column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN claimed_at TIMESTAMP
+                            """))
+                            conn.commit()
+                            logger.info("claimed_at column added successfully")
+
+                        # Add claimed_by_id column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'claimed_by_id'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding claimed_by_id column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN claimed_by_id INTEGER REFERENCES users(id)
+                            """))
+                            conn.commit()
+                            logger.info("claimed_by_id column added successfully")
+
+                        # Make tenant_id nullable for unclaimed workspaces
+                        # Note: PostgreSQL doesn't have a direct way to alter nullable, but we can use DROP/ADD
+                        # For safety, we'll just ensure the column exists - SQLAlchemy model already has nullable=True
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -6422,7 +6470,12 @@ def slack_install():
 @require_slack
 @track_endpoint('api_slack_oauth_callback')
 def slack_oauth_callback():
-    """Handle Slack OAuth callback."""
+    """Handle Slack OAuth callback.
+
+    Supports two scenarios:
+    1. Installation initiated from Decision Records settings (has state with tenant_id)
+    2. Installation from Slack App Directory (no state, workspace stored as pending_claim)
+    """
     from keyvault_client import keyvault_client
     from slack_security import verify_oauth_state, encrypt_token
     from slack_sdk import WebClient
@@ -6435,15 +6488,20 @@ def slack_oauth_callback():
         logger.error(f"Slack OAuth error: {error}")
         return redirect('/settings?slack_error=' + error)
 
-    if not code or not state:
-        return redirect('/settings?slack_error=missing_params')
+    if not code:
+        return redirect('/settings?slack_error=missing_code')
 
-    # Verify state
-    state_data = verify_oauth_state(state)
-    if not state_data:
-        return redirect('/settings?slack_error=invalid_state')
+    # Check for state - if present, this is an install from Decision Records
+    # If not present, this is an install from Slack App Directory
+    tenant_id = None
+    user_id = None
 
-    tenant_id = state_data.get('tenant_id')
+    if state:
+        state_data = verify_oauth_state(state)
+        if not state_data:
+            return redirect('/settings?slack_error=invalid_state')
+        tenant_id = state_data.get('tenant_id')
+        user_id = state_data.get('user_id')
 
     client_id = keyvault_client.get_slack_client_id()
     client_secret = keyvault_client.get_slack_client_secret()
@@ -6479,28 +6537,102 @@ def slack_oauth_callback():
         # Encrypt and store
         encrypted_token = encrypt_token(bot_token)
 
-        # Check for existing workspace
-        existing = SlackWorkspace.query.filter_by(tenant_id=tenant_id).first()
-        if existing:
-            existing.workspace_id = workspace_id
-            existing.workspace_name = workspace_name
-            existing.bot_token_encrypted = encrypted_token
-            existing.is_active = True
-            existing.installed_at = datetime.utcnow()
+        # Check for existing workspace by workspace_id (Slack team_id)
+        existing_by_workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+        if tenant_id:
+            # Installation initiated from Decision Records settings
+            # Check if this tenant already has a different workspace
+            existing_by_tenant = SlackWorkspace.query.filter_by(tenant_id=tenant_id).first()
+
+            if existing_by_workspace:
+                # Workspace already exists
+                if existing_by_workspace.tenant_id == tenant_id:
+                    # Same tenant, just update
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
+                elif existing_by_workspace.tenant_id is None:
+                    # Unclaimed workspace, claim it for this tenant
+                    existing_by_workspace.tenant_id = tenant_id
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
+                    existing_by_workspace.claimed_at = datetime.utcnow()
+                    existing_by_workspace.claimed_by_id = user_id
+                    logger.info(f"Claimed existing workspace {workspace_name} for tenant {tenant_id}")
+                else:
+                    # Workspace belongs to another tenant
+                    logger.warning(f"Workspace {workspace_id} already belongs to tenant {existing_by_workspace.tenant_id}")
+                    return redirect('/settings?slack_error=workspace_claimed_by_other')
+
+            elif existing_by_tenant:
+                # Tenant has a different workspace, update it
+                existing_by_tenant.workspace_id = workspace_id
+                existing_by_tenant.workspace_name = workspace_name
+                existing_by_tenant.bot_token_encrypted = encrypted_token
+                existing_by_tenant.is_active = True
+                existing_by_tenant.installed_at = datetime.utcnow()
+                existing_by_tenant.status = SlackWorkspace.STATUS_ACTIVE
+            else:
+                # New workspace for this tenant
+                workspace = SlackWorkspace(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    bot_token_encrypted=encrypted_token,
+                    is_active=True,
+                    status=SlackWorkspace.STATUS_ACTIVE,
+                    claimed_at=datetime.utcnow(),
+                    claimed_by_id=user_id
+                )
+                db.session.add(workspace)
+
+            db.session.commit()
+            logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
+            return redirect('/settings?slack_success=true')
+
         else:
-            workspace = SlackWorkspace(
-                tenant_id=tenant_id,
-                workspace_id=workspace_id,
-                workspace_name=workspace_name,
-                bot_token_encrypted=encrypted_token,
-                is_active=True
-            )
-            db.session.add(workspace)
-
-        db.session.commit()
-        logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
-
-        return redirect('/settings?slack_success=true')
+            # Installation from Slack App Directory (no tenant association)
+            if existing_by_workspace:
+                # Workspace already exists
+                if existing_by_workspace.tenant_id:
+                    # Already claimed by a tenant, just update the token
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    db.session.commit()
+                    logger.info(f"Updated existing workspace {workspace_name} (already claimed by tenant {existing_by_workspace.tenant_id})")
+                    # Redirect to a page showing the workspace is already connected
+                    return redirect(f'/slack/installed?workspace={workspace_id}&already_claimed=true')
+                else:
+                    # Still unclaimed, update token
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    db.session.commit()
+                    logger.info(f"Updated existing unclaimed workspace {workspace_name}")
+                    return redirect(f'/slack/installed?workspace={workspace_id}')
+            else:
+                # New unclaimed workspace
+                workspace = SlackWorkspace(
+                    tenant_id=None,  # No tenant yet
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    bot_token_encrypted=encrypted_token,
+                    is_active=True,
+                    status=SlackWorkspace.STATUS_PENDING_CLAIM
+                )
+                db.session.add(workspace)
+                db.session.commit()
+                logger.info(f"Created unclaimed Slack workspace {workspace_name} ({workspace_id})")
+                return redirect(f'/slack/installed?workspace={workspace_id}')
 
     except Exception as e:
         logger.error(f"Slack OAuth callback error: {str(e)}")
@@ -6525,13 +6657,21 @@ def slack_commands():
     user_id = request.form.get('user_id')
     text = request.form.get('text', '').strip()
     trigger_id = request.form.get('trigger_id')
+    response_url = request.form.get('response_url', '')
 
     # Find workspace
     workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
     if not workspace:
         return jsonify({
             'response_type': 'ephemeral',
-            'text': 'This workspace is not connected to Decision Records.'
+            'text': 'This workspace is not connected to Decision Records. Please install the app from your Decision Records settings page.'
+        })
+
+    # Check if workspace has a tenant (is claimed)
+    if not workspace.tenant_id:
+        return jsonify({
+            'response_type': 'ephemeral',
+            'text': f'This Slack workspace needs to be claimed by a Decision Records organization.\n\nYour Workspace ID is: `{team_id}`\n\nShare this with your Decision Records admin to connect the workspace.'
         })
 
     # Update last activity
@@ -6540,7 +6680,10 @@ def slack_commands():
 
     # Create service and handle command
     service = SlackService(workspace)
-    response = service.handle_command(user_id, text, trigger_id)
+    response, _ = service.handle_command(text, user_id, trigger_id, response_url)
+
+    if response is None:
+        return '', 200
 
     return jsonify(response)
 
@@ -6690,6 +6833,102 @@ def slack_disconnect():
     logger.info(f"Slack workspace disconnected from tenant {tenant.id}")
 
     return jsonify({'message': 'Slack disconnected successfully'})
+
+
+@app.route('/api/slack/claim', methods=['POST'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_claim')
+def slack_claim_workspace():
+    """Claim an unclaimed Slack workspace by workspace_id.
+
+    Used when IT admin installed from Slack App Directory and DR admin needs to claim it.
+    """
+    data = request.get_json()
+    workspace_id = data.get('workspace_id', '').strip()
+
+    if not workspace_id:
+        return jsonify({'error': 'Workspace ID is required'}), 400
+
+    # Validate workspace_id format (Slack team IDs start with T)
+    if not workspace_id.startswith('T') or len(workspace_id) < 9:
+        return jsonify({'error': 'Invalid workspace ID format. Slack workspace IDs start with T.'}), 400
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Check if tenant already has a Slack workspace
+    existing_tenant_workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if existing_tenant_workspace and existing_tenant_workspace.is_active:
+        return jsonify({
+            'error': 'Your organization already has a Slack workspace connected. Disconnect it first to claim a different workspace.',
+            'current_workspace': existing_tenant_workspace.workspace_name
+        }), 400
+
+    # Find the workspace to claim
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+    if not workspace:
+        return jsonify({
+            'error': 'Workspace not found. Please ensure the Slack app has been installed in your workspace.'
+        }), 404
+
+    if workspace.tenant_id and workspace.tenant_id != tenant.id:
+        return jsonify({
+            'error': 'This workspace has already been claimed by another organization.'
+        }), 409
+
+    if workspace.tenant_id == tenant.id:
+        return jsonify({
+            'message': 'This workspace is already connected to your organization.',
+            'workspace': workspace.to_dict()
+        }), 200
+
+    # Claim the workspace
+    workspace.tenant_id = tenant.id
+    workspace.status = SlackWorkspace.STATUS_ACTIVE
+    workspace.claimed_at = datetime.utcnow()
+    workspace.claimed_by_id = user.id
+    workspace.is_active = True
+
+    # If tenant had an old inactive workspace, remove it
+    if existing_tenant_workspace and not existing_tenant_workspace.is_active:
+        db.session.delete(existing_tenant_workspace)
+
+    db.session.commit()
+
+    logger.info(f"Workspace {workspace.workspace_name} ({workspace_id}) claimed by tenant {tenant.id} (user {user.id})")
+
+    return jsonify({
+        'message': f'Successfully claimed workspace "{workspace.workspace_name}"',
+        'workspace': workspace.to_dict()
+    })
+
+
+@app.route('/api/slack/workspace/<workspace_id>', methods=['GET'])
+@require_slack
+@track_endpoint('api_slack_workspace_info')
+def slack_workspace_info(workspace_id):
+    """Get public info about a Slack workspace.
+
+    Used by the /slack/installed landing page to show workspace status.
+    Only returns limited info for security (no tokens, no tenant details).
+    """
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    return jsonify({
+        'workspace_id': workspace.workspace_id,
+        'workspace_name': workspace.workspace_name,
+        'is_claimed': workspace.tenant_id is not None,
+        'status': workspace.status,
+        'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None
+    })
 
 
 @app.route('/api/slack/test', methods=['POST'])

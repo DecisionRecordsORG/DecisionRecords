@@ -162,6 +162,10 @@ export class AdminService {
     return this.http.post<{ message: string }>('/api/slack/disconnect', {});
   }
 
+  claimSlackWorkspace(workspaceId: string): Observable<{ message: string; workspace?: SlackSettings }> {
+    return this.http.post<{ message: string; workspace?: SlackSettings }>('/api/slack/claim', { workspace_id: workspaceId });
+  }
+
   testSlackNotification(): Observable<{ message: string }> {
     return this.http.post<{ message: string }>('/api/slack/test', {});
   }

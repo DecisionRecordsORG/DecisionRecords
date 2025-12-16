@@ -1396,13 +1396,23 @@ class SlackWorkspace(db.Model):
 
     __tablename__ = 'slack_workspaces'
 
+    # Status values
+    STATUS_PENDING_CLAIM = 'pending_claim'
+    STATUS_ACTIVE = 'active'
+    STATUS_DISCONNECTED = 'disconnected'
+
     id = db.Column(db.Integer, primary_key=True)
-    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, unique=True, index=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True, unique=True, index=True)
     workspace_id = db.Column(db.String(50), nullable=False, unique=True, index=True)  # Slack team_id
     workspace_name = db.Column(db.String(255), nullable=True)
 
     # Encrypted bot token (xoxb-...)
     bot_token_encrypted = db.Column(db.Text, nullable=False)
+
+    # Claim tracking
+    status = db.Column(db.String(20), default=STATUS_PENDING_CLAIM)
+    claimed_at = db.Column(db.DateTime, nullable=True)
+    claimed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
     # Notification settings
     default_channel_id = db.Column(db.String(50), nullable=True)
@@ -1418,6 +1428,7 @@ class SlackWorkspace(db.Model):
 
     # Relationships
     tenant = db.relationship('Tenant', backref=db.backref('slack_workspace', uselist=False))
+    claimed_by = db.relationship('User', foreign_keys=[claimed_by_id])
     user_mappings = db.relationship('SlackUserMapping', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
 
     def to_dict(self):
@@ -1426,6 +1437,8 @@ class SlackWorkspace(db.Model):
             'tenant_id': self.tenant_id,
             'workspace_id': self.workspace_id,
             'workspace_name': self.workspace_name,
+            'status': self.status,
+            'claimed_at': self.claimed_at.isoformat() if self.claimed_at else None,
             'default_channel_id': self.default_channel_id,
             'default_channel_name': self.default_channel_name,
             'notifications_enabled': self.notifications_enabled,

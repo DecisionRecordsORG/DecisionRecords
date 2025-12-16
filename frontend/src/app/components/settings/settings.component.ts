@@ -1,8 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
+import { MatDividerModule } from '@angular/material/divider';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -31,7 +32,9 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     MatCardModule,
+    MatDividerModule,
     MatTabsModule,
     MatFormFieldModule,
     MatInputModule,
@@ -940,13 +943,38 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-header>
                 <mat-card-content>
                   <p>Connect your Slack workspace to enable slash commands and notifications.</p>
+
+                  <div class="slack-connect-options">
+                    <div class="connect-option">
+                      <h4>Option A: Install Fresh</h4>
+                      <p>Install Decision Records to your Slack workspace</p>
+                      <a mat-flat-button color="primary" href="/api/slack/install" target="_blank" rel="noopener noreferrer" data-testid="slack-install-button">
+                        <mat-icon>add</mat-icon>
+                        Add to Slack
+                      </a>
+                    </div>
+
+                    <mat-divider></mat-divider>
+
+                    <div class="connect-option">
+                      <h4>Option B: Claim Existing Installation</h4>
+                      <p>If your IT team already installed the app from the Slack App Directory, enter your Workspace ID to claim it:</p>
+                      <div class="claim-form">
+                        <mat-form-field appearance="outline">
+                          <mat-label>Slack Workspace ID</mat-label>
+                          <input matInput [(ngModel)]="slackClaimWorkspaceId" placeholder="e.g., T0A36UYCYLX" data-testid="slack-workspace-id-input">
+                          <mat-hint>Workspace IDs start with T</mat-hint>
+                        </mat-form-field>
+                        <button mat-stroked-button color="primary" (click)="claimSlackWorkspace()" [disabled]="claimingSlackWorkspace || !slackClaimWorkspaceId" data-testid="slack-claim-button">
+                          <mat-spinner diameter="20" *ngIf="claimingSlackWorkspace"></mat-spinner>
+                          <mat-icon *ngIf="!claimingSlackWorkspace">verified</mat-icon>
+                          <span>{{ claimingSlackWorkspace ? 'Claiming...' : 'Claim Workspace' }}</span>
+                        </button>
+                      </div>
+                      <p class="note"><mat-icon>info</mat-icon> Note: You need Slack admin permissions to install apps. If you're not a Slack admin, ask your IT team to install "Decision Records" and share the Workspace ID with you.</p>
+                    </div>
+                  </div>
                 </mat-card-content>
-                <mat-card-actions>
-                  <a mat-flat-button color="primary" href="/api/slack/install" target="_blank" rel="noopener noreferrer" data-testid="slack-install-button">
-                    <mat-icon>add</mat-icon>
-                    Add to Slack
-                  </a>
-                </mat-card-actions>
               </mat-card>
             } @else if (slackSettings) {
               <!-- Connected -->
@@ -1783,6 +1811,63 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       opacity: 0.5;
     }
 
+    .slack-connect-options {
+      margin-top: 24px;
+    }
+
+    .slack-connect-options .connect-option {
+      padding: 16px 0;
+    }
+
+    .slack-connect-options .connect-option h4 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .slack-connect-options .connect-option p {
+      margin: 0 0 12px 0;
+      color: #666;
+    }
+
+    .slack-connect-options mat-divider {
+      margin: 16px 0;
+    }
+
+    .claim-form {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .claim-form mat-form-field {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .claim-form button {
+      margin-top: 6px;
+    }
+
+    .note {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 12px;
+      background: #e3f2fd;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+
+    .note mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
     mat-card-actions {
       display: flex;
       gap: 12px;
@@ -1868,6 +1953,8 @@ export class SettingsComponent implements OnInit {
   loadingSlackSettings = false;
   savingSlackSettings = false;
   testingSlack = false;
+  slackClaimWorkspaceId = '';
+  claimingSlackWorkspace = false;
 
   // Feature flags
   slackFeatureEnabled = false;
@@ -2667,6 +2754,28 @@ export class SettingsComponent implements OnInit {
             this.snackBar.open(err.error?.error || 'Failed to disconnect Slack', 'Close', { duration: 3000 });
           }
         });
+      }
+    });
+  }
+
+  claimSlackWorkspace(): void {
+    if (!this.slackClaimWorkspaceId?.trim()) {
+      this.snackBar.open('Please enter a Workspace ID', 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.claimingSlackWorkspace = true;
+    this.adminService.claimSlackWorkspace(this.slackClaimWorkspaceId.trim()).subscribe({
+      next: (response) => {
+        this.snackBar.open(response.message || 'Workspace claimed successfully', 'Close', { duration: 5000 });
+        this.slackClaimWorkspaceId = '';
+        this.claimingSlackWorkspace = false;
+        // Reload slack settings to show the connected state
+        this.loadSlackSettings();
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to claim workspace', 'Close', { duration: 5000 });
+        this.claimingSlackWorkspace = false;
       }
     });
   }

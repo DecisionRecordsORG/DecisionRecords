@@ -47,6 +47,11 @@ export const routes: Routes = [
     loadComponent: () => import('./components/superadmin-settings/superadmin-settings.component').then(m => m.SuperadminSettingsComponent),
     canActivate: [masterGuard]
   },
+  // Slack installation landing page (for unclaimed workspace installs)
+  {
+    path: 'slack/installed',
+    loadComponent: () => import('./components/slack-installed/slack-installed.component').then(m => m.SlackInstalledComponent)
+  },
   // Tenant-specific routes
   // NOTE: Order matters! More specific routes must come BEFORE less specific ones.
   // The ':tenant' route must be LAST among tenant routes because it matches any single segment.
