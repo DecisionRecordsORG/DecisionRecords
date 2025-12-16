@@ -942,7 +942,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <p>Connect your Slack workspace to enable slash commands and notifications.</p>
                 </mat-card-content>
                 <mat-card-actions>
-                  <a mat-flat-button color="primary" href="/api/slack/install" data-testid="slack-install-button">
+                  <a mat-flat-button color="primary" href="/api/slack/install" target="_blank" rel="noopener noreferrer" data-testid="slack-install-button">
                     <mat-icon>add</mat-icon>
                     Add to Slack
                   </a>
@@ -1170,6 +1170,10 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     ::ng-deep .mat-mdc-tab-body-content {
       padding: 24px;
       overflow: hidden !important;
+    }
+
+    ::ng-deep .mat-mdc-tab-body.mat-mdc-tab-body-active {
+      overflow-y: hidden !important;
     }
 
     ::ng-deep .mdc-tab-indicator__content--underline {

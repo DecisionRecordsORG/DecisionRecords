@@ -6398,7 +6398,11 @@ def slack_install():
         # Slack OAuth scopes
         scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
 
-        redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
+        # Force https for production (request.host_url may be http behind proxy)
+        base_url = request.host_url.rstrip('/')
+        if not base_url.startswith('https://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = f"{base_url}/api/slack/oauth/callback"
 
         auth_url = (
             f"https://slack.com/oauth/v2/authorize"
@@ -6450,7 +6454,11 @@ def slack_oauth_callback():
     try:
         # Exchange code for token
         client = WebClient()
-        redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
+        # Force https for production (request.host_url may be http behind proxy)
+        base_url = request.host_url.rstrip('/')
+        if not base_url.startswith('https://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = f"{base_url}/api/slack/oauth/callback"
 
         response = client.oauth_v2_access(
             client_id=client_id,
@@ -6586,14 +6594,17 @@ def slack_get_settings():
     from keyvault_client import keyvault_client
 
     user = get_current_user()
-    tenant = get_user_tenant(user)
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
 
     workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
 
     if not workspace:
-        client_id = keyvault_client.get_slack_client_id()
+        try:
+            client_id = keyvault_client.get_slack_client_id()
+        except Exception:
+            client_id = None
         return jsonify({
             'installed': False,
             'install_url': '/api/slack/install' if client_id else None
@@ -6621,7 +6632,7 @@ def slack_get_settings():
 def slack_update_settings():
     """Update Slack integration settings."""
     user = get_current_user()
-    tenant = get_user_tenant(user)
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
 
