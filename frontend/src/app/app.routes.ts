@@ -52,6 +52,11 @@ export const routes: Routes = [
     path: 'slack/installed',
     loadComponent: () => import('./components/slack-installed/slack-installed.component').then(m => m.SlackInstalledComponent)
   },
+  // Slack account linking page (when user clicks "Link Account" from Slack)
+  {
+    path: 'slack/link',
+    loadComponent: () => import('./components/slack-link-account/slack-link-account.component').then(m => m.SlackLinkAccountComponent)
+  },
   // Tenant-specific routes
   // NOTE: Order matters! More specific routes must come BEFORE less specific ones.
   // The ':tenant' route must be LAST among tenant routes because it matches any single segment.

@@ -6730,6 +6730,11 @@ def slack_oauth_callback():
 
             db.session.commit()
             logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
+
+            # Get tenant domain for redirect
+            tenant = Tenant.query.get(tenant_id)
+            if tenant:
+                return redirect(f'/{tenant.domain}/admin?tab=slack&slack_success=true')
             return redirect('/settings?slack_success=true')
 
         else:
@@ -7137,33 +7142,89 @@ def slack_channels():
 @require_slack
 @track_endpoint('api_slack_link_initiate')
 def slack_link_initiate():
-    """Initiate user linking from Slack to ADR."""
-    from slack_security import verify_link_token
+    """Initiate user linking from Slack to ADR.
 
+    Redirects to the dedicated Slack link account page.
+    """
     token = request.args.get('token')
     if not token:
-        return redirect('/login?error=missing_token')
+        return redirect('/slack/link?error=missing_token')
+
+    # Redirect to the dedicated link account page with the token
+    return redirect(f'/slack/link?token={token}')
+
+
+@app.route('/api/slack/link/validate', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_link_validate')
+def slack_link_validate():
+    """Validate a Slack link token and return info for the link page."""
+    from slack_security import verify_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    if not token:
+        return jsonify({'valid': False, 'error': 'No token provided'}), 400
 
     link_data = verify_link_token(token)
     if not link_data:
-        return redirect('/login?error=invalid_token')
+        return jsonify({'valid': False, 'error': 'Invalid or expired link token'}), 400
 
-    # Store link data in session for completion after login
-    session['slack_link_data'] = link_data
+    workspace_id = link_data.get('workspace_id')
+    slack_user_id = link_data.get('slack_user_id')
+    slack_email = link_data.get('slack_email')
 
-    # Redirect to login/signup
-    return redirect('/login?slack_link=true')
+    # Get workspace info
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id, is_active=True).first()
+    if not workspace:
+        return jsonify({'valid': False, 'error': 'Workspace not found'}), 404
+
+    # Check if user is already logged in
+    user = get_current_user()
+    is_logged_in = user is not None
+
+    response = {
+        'valid': True,
+        'workspace_name': workspace.workspace_name or 'Slack Workspace',
+        'workspace_id': workspace_id,
+        'slack_user_id': slack_user_id,
+        'slack_email': slack_email,
+        'is_logged_in': is_logged_in
+    }
+
+    if is_logged_in:
+        response['user_email'] = user.email
+        response['user_name'] = user.name or user.email
+        response['tenant_domain'] = user.sso_domain
+
+    return jsonify(response)
 
 
 @app.route('/api/slack/link/complete', methods=['POST'])
 @require_slack
-@login_required
 @track_endpoint('api_slack_link_complete')
 def slack_link_complete():
-    """Complete user linking after login."""
-    link_data = session.pop('slack_link_data', None)
+    """Complete user linking after login.
+
+    Accepts token in request body (for new flow) or from session (legacy).
+    """
+    from slack_security import verify_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    # Try to get link data from token first (new flow)
+    link_data = None
+    if token:
+        link_data = verify_link_token(token)
+
+    # Fall back to session (legacy flow)
     if not link_data:
-        return jsonify({'error': 'No pending link'}), 400
+        link_data = session.pop('slack_link_data', None)
+
+    if not link_data:
+        return jsonify({'error': 'No valid link token or session data'}), 400
 
     workspace_id = link_data.get('workspace_id')
     slack_user_id = link_data.get('slack_user_id')
@@ -7173,6 +7234,8 @@ def slack_link_complete():
         return jsonify({'error': 'Workspace not found'}), 404
 
     user = get_current_user()
+    if not user:
+        return jsonify({'error': 'You must be logged in to link your account'}), 401
 
     # Create or update mapping
     mapping = SlackUserMapping.query.filter_by(
@@ -7195,6 +7258,8 @@ def slack_link_complete():
         db.session.add(mapping)
 
     db.session.commit()
+
+    logger.info(f"User {user.id} linked Slack account {slack_user_id} in workspace {workspace_id}")
 
     return jsonify({'message': 'Account linked successfully'})
 

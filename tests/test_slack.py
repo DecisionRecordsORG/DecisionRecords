@@ -847,7 +847,7 @@ class TestSlackHelpers:
 
             assert service._get_status_emoji('proposed') == ':memo:'
             assert service._get_status_emoji('accepted') == ':white_check_mark:'
-            assert service._get_status_emoji('deprecated') == ':warning:'
+            assert service._get_status_emoji('archived') == ':file_folder:'
             assert service._get_status_emoji('superseded') == ':arrows_counterclockwise:'
 
     def test_format_decision_detail_blocks(self, app, slack_workspace, sample_decision):

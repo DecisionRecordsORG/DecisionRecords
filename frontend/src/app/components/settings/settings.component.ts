@@ -16,6 +16,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
 import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel } from '../../services/admin.service';
+import { ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest } from '../../models/decision.model';
@@ -70,7 +71,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         </div>
       }
 
-      <mat-tab-group>
+      <mat-tab-group [(selectedIndex)]="selectedTabIndex">
         <!-- SSO Configuration Tab -->
         <mat-tab label="SSO Providers">
           <div class="tab-content">
@@ -947,11 +948,27 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <div class="slack-connect-options">
                     <div class="connect-option">
                       <h4>Option A: Install Fresh</h4>
-                      <p>Install Decision Records to your Slack workspace</p>
+                      <p>Install Decision Records to your Slack workspace. You need Slack admin permissions for this option.</p>
+
+                      <div class="slack-install-guidance">
+                        <h5>What happens when you click "Add to Slack":</h5>
+                        <ol>
+                          <li>You'll be redirected to Slack to authorize the app</li>
+                          <li>Select which workspace to install it to</li>
+                          <li>After installation, you'll be redirected back here</li>
+                          <li>The integration will be automatically connected</li>
+                        </ol>
+                      </div>
+
                       <a mat-flat-button color="primary" href="/api/slack/install" target="_blank" rel="noopener noreferrer" data-testid="slack-install-button">
                         <mat-icon>add</mat-icon>
                         Add to Slack
                       </a>
+
+                      <p class="slack-install-note">
+                        <mat-icon>info</mat-icon>
+                        <span>After installing, return to this page and refresh to see the connection status.</span>
+                      </p>
                     </div>
 
                     <mat-divider></mat-divider>
@@ -1834,6 +1851,47 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       margin: 16px 0;
     }
 
+    .slack-install-guidance {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    .slack-install-guidance h5 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .slack-install-guidance ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .slack-install-guidance li {
+      margin: 6px 0;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .slack-install-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .slack-install-note mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #ff9800;
+    }
+
     .claim-form {
       display: flex;
       gap: 12px;
@@ -1959,6 +2017,18 @@ export class SettingsComponent implements OnInit {
   // Feature flags
   slackFeatureEnabled = false;
 
+  // Tab index for navigation
+  selectedTabIndex = 0;
+  private tabMap: { [key: string]: number } = {
+    'sso': 0,
+    'email': 1,
+    'auth': 2,
+    'users': 3,
+    'requests': 4,
+    'spaces': 5,
+    'slack': 6
+  };
+
   /**
    * Check if current user is a provisional admin
    */
@@ -2007,7 +2077,8 @@ export class SettingsComponent implements OnInit {
     private spaceService: SpaceService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
-    private http: HttpClient
+    private http: HttpClient,
+    private route: ActivatedRoute
   ) {
     this.spaceForm = this.fb.group({
       name: ['', Validators.required],
@@ -2069,6 +2140,20 @@ export class SettingsComponent implements OnInit {
         }
       }
     }
+
+    // Handle query params for tab navigation and success messages
+    this.route.queryParams.subscribe(params => {
+      const tab = params['tab'];
+      if (tab && this.tabMap[tab] !== undefined) {
+        this.selectedTabIndex = this.tabMap[tab];
+      }
+
+      if (params['slack_success'] === 'true') {
+        this.snackBar.open('Slack connected successfully!', 'Close', { duration: 5000 });
+        // Reload Slack settings to show the connected state
+        this.loadSlackSettings();
+      }
+    });
   }
 
   loadFeatureFlags(): void {

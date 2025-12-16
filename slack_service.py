@@ -138,19 +138,39 @@ class SlackService:
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         link_url = f"{base_url}/api/slack/link/initiate?token={link_token}"
 
+        # Get tenant info for context
+        tenant = self.workspace.tenant
+        tenant_name = tenant.name if tenant and tenant.name else tenant.domain if tenant else 'your organization'
+
         blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Link Your Decision Records Account"}
+            },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": ":wave: Welcome! To use Decision Records from Slack, you need to link your account."
+                    "text": f":wave: Welcome! To use Decision Records commands in this workspace, you need to link your Slack account to your Decision Records account."
                 }
             },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*Your Slack email:* {slack_email or 'Not available'}\n\nClick the button below to link your account or create a new one."
+                    "text": f"*This workspace is connected to:* {tenant_name}"
+                }
+            },
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*What happens when you click the button:*\n" +
+                            "1. A new browser window will open\n" +
+                            "2. If you're not logged in, you'll sign in to Decision Records\n" +
+                            "3. Your accounts will be linked automatically\n" +
+                            "4. You can then use all /adr commands in Slack"
                 }
             },
             {
@@ -158,10 +178,28 @@ class SlackService:
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Link Account"},
+                        "text": {"type": "plain_text", "text": "Link My Account"},
                         "url": link_url,
                         "style": "primary",
                         "action_id": "link_account"
+                    }
+                ]
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f":email: Your Slack email: {slack_email or 'Not available'}"
+                    }
+                ]
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": ":question: Don't have an account? The link above will help you create one or contact your organization admin for an invite."
                     }
                 ]
             }
@@ -234,7 +272,7 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "Valid statuses: proposed, accepted, deprecated, superseded"
+                        "text": "Valid statuses: proposed, accepted, archived, superseded"
                     }
                 ]
             }
@@ -249,7 +287,7 @@ class SlackService:
 
         # Parse optional status filter
         status_filter = args.strip().lower() if args else None
-        valid_statuses = ['proposed', 'accepted', 'deprecated', 'superseded']
+        valid_statuses = ['proposed', 'accepted', 'archived', 'superseded']
 
         query = ArchitectureDecision.query.filter_by(
             tenant_id=tenant.id,
@@ -472,7 +510,7 @@ class SlackService:
                         "options": [
                             {"text": {"type": "plain_text", "text": "Proposed"}, "value": "proposed"},
                             {"text": {"type": "plain_text", "text": "Accepted"}, "value": "accepted"},
-                            {"text": {"type": "plain_text", "text": "Deprecated"}, "value": "deprecated"},
+                            {"text": {"type": "plain_text", "text": "Archived"}, "value": "archived"},
                             {"text": {"type": "plain_text", "text": "Superseded"}, "value": "superseded"}
                         ]
                     },
@@ -822,7 +860,7 @@ class SlackService:
         return {
             'proposed': ':memo:',
             'accepted': ':white_check_mark:',
-            'deprecated': ':warning:',
+            'archived': ':file_folder:',
             'superseded': ':arrows_counterclockwise:'
         }.get(status, ':memo:')
 
