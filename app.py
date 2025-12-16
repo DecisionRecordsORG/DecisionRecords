@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -1196,6 +1196,268 @@ def api_get_csrf_token():
     """
     token = generate_csrf_token()
     return jsonify({'csrf_token': token})
+
+
+# ==================== Slack OIDC Authentication ====================
+# Sign in with Slack using OpenID Connect (OIDC)
+# This provides a frictionless signup/login experience for Slack users
+
+@app.route('/api/auth/slack-oidc-status', methods=['GET'])
+@track_endpoint('api_auth_slack_oidc_status')
+def slack_oidc_status():
+    """Check if Slack OIDC sign-in is enabled.
+
+    Returns whether Slack sign-in is available for the frontend to show/hide the button.
+    This is a public endpoint (no login required) since users need to see it before login.
+    """
+    # Check if Slack feature is enabled globally
+    if not is_slack_enabled():
+        return jsonify({'enabled': False, 'reason': 'slack_disabled'})
+
+    # Check if Slack credentials are configured
+    try:
+        from slack_security import get_slack_client_id
+        client_id = get_slack_client_id()
+        if not client_id:
+            return jsonify({'enabled': False, 'reason': 'not_configured'})
+    except Exception as e:
+        logger.error(f"Error checking Slack OIDC status: {e}")
+        return jsonify({'enabled': False, 'reason': 'configuration_error'})
+
+    return jsonify({'enabled': True})
+
+
+@app.route('/auth/slack/oidc')
+@track_endpoint('auth_slack_oidc_initiate')
+def slack_oidc_initiate():
+    """Initiate Slack OIDC login flow.
+
+    Redirects the user to Slack's authorization page to sign in.
+    After authentication, Slack redirects back to /auth/slack/oidc/callback
+    with the authorization code.
+    """
+    from slack_security import (
+        get_slack_client_id,
+        generate_slack_oidc_state,
+        SLACK_OIDC_AUTHORIZE_URL,
+        SLACK_OIDC_SCOPES
+    )
+
+    # Check if Slack sign-in is enabled
+    if not is_slack_enabled():
+        logger.warning("Slack OIDC attempted but Slack is disabled")
+        return redirect('/?error=slack_disabled')
+
+    # Get Slack client ID
+    client_id = get_slack_client_id()
+    if not client_id:
+        logger.error("Slack client ID not configured for OIDC")
+        return redirect('/?error=slack_not_configured')
+
+    # Get optional return_url from query params (where to redirect after login)
+    return_url = request.args.get('return_url', '/')
+
+    # Generate encrypted state for CSRF protection
+    try:
+        state = generate_slack_oidc_state(return_url=return_url)
+    except Exception as e:
+        logger.error(f"Failed to generate Slack OIDC state: {e}")
+        return redirect('/?error=internal_error')
+
+    # Build redirect URI (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/slack/oidc/callback"
+
+    # Build Slack authorization URL
+    import urllib.parse
+    auth_params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': SLACK_OIDC_SCOPES,
+        'redirect_uri': redirect_uri,
+        'state': state,
+        'nonce': secrets.token_urlsafe(16)  # Required by OIDC spec
+    }
+    auth_url = f"{SLACK_OIDC_AUTHORIZE_URL}?{urllib.parse.urlencode(auth_params)}"
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/slack/oidc/callback')
+@track_endpoint('auth_slack_oidc_callback')
+def slack_oidc_callback():
+    """Handle Slack OIDC callback.
+
+    This endpoint receives the authorization code from Slack after the user
+    authenticates. It exchanges the code for tokens, fetches user info,
+    and creates/logs in the user based on their email domain.
+
+    The tenant is derived from the email domain (existing logic).
+    First user of a domain becomes provisional admin (existing logic).
+    """
+    import requests
+    from slack_security import (
+        get_slack_client_id,
+        get_slack_client_secret,
+        verify_slack_oidc_state,
+        SLACK_OIDC_TOKEN_URL,
+        SLACK_OIDC_USERINFO_URL
+    )
+
+    # Get callback parameters
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description', '')
+
+    # Handle Slack errors
+    if error:
+        logger.warning(f"Slack OIDC error: {error} - {error_description}")
+        return redirect(f'/?error=slack_auth_error&message={error}')
+
+    if not code:
+        logger.warning("Slack OIDC callback missing code")
+        return redirect('/?error=missing_code')
+
+    # Verify state parameter (CSRF protection)
+    state_data = verify_slack_oidc_state(state)
+    if not state_data:
+        logger.warning("Invalid or expired Slack OIDC state")
+        return redirect('/?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Get Slack credentials
+    client_id = get_slack_client_id()
+    client_secret = get_slack_client_secret()
+
+    if not client_id or not client_secret:
+        logger.error("Slack credentials not configured for OIDC callback")
+        return redirect('/?error=slack_not_configured')
+
+    # Build redirect URI (must match the one used in authorization)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/slack/oidc/callback"
+
+    try:
+        # Exchange code for tokens
+        token_response = requests.post(
+            SLACK_OIDC_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'grant_type': 'authorization_code'
+            },
+            timeout=30
+        )
+
+        if not token_response.ok:
+            logger.error(f"Slack token exchange failed: {token_response.status_code}")
+            return redirect('/?error=token_exchange_failed')
+
+        token_data = token_response.json()
+        if not token_data.get('ok', True) or 'error' in token_data:
+            logger.error(f"Slack token error: {token_data.get('error')}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            logger.error("No access token in Slack OIDC response")
+            return redirect('/?error=no_access_token')
+
+        # Fetch user info
+        userinfo_response = requests.get(
+            SLACK_OIDC_USERINFO_URL,
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=30
+        )
+
+        if not userinfo_response.ok:
+            logger.error(f"Slack userinfo failed: {userinfo_response.status_code}")
+            return redirect('/?error=userinfo_failed')
+
+        userinfo = userinfo_response.json()
+        if not userinfo.get('ok', True) or 'error' in userinfo:
+            logger.error(f"Slack userinfo error: {userinfo.get('error')}")
+            return redirect('/?error=userinfo_failed')
+
+        # Extract user details
+        email = userinfo.get('email')
+        name = userinfo.get('name') or userinfo.get('given_name', '')
+        slack_user_id = userinfo.get('sub')  # Slack user ID from OIDC
+
+        if not email:
+            logger.warning("No email in Slack OIDC userinfo")
+            return redirect('/?error=no_email')
+
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+
+        # Check for public email domains (gmail, yahoo, etc.)
+        if DomainApproval.is_public_domain(domain):
+            logger.warning(f"Public email domain rejected for Slack OIDC: {domain}")
+            return redirect('/?error=public_email&message=Please use your work email address')
+
+        # Check for disposable email domains
+        if DomainApproval.is_disposable_domain(domain):
+            logger.warning(f"Disposable email domain rejected for Slack OIDC: {domain}")
+            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
+
+        # Get or create user (existing logic handles tenant creation, admin assignment)
+        user = get_or_create_user(email, name, slack_user_id, domain)
+
+        # Ensure TenantMembership exists (v1.5 governance)
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if tenant:
+            membership = TenantMembership.query.filter_by(
+                user_id=user.id,
+                tenant_id=tenant.id
+            ).first()
+
+            if not membership:
+                # Create membership with appropriate role
+                from models import GlobalRole
+                role = GlobalRole.ADMIN if user.is_admin else GlobalRole.MEMBER
+                membership = TenantMembership(
+                    user_id=user.id,
+                    tenant_id=tenant.id,
+                    role=role,
+                    is_active=True
+                )
+                db.session.add(membership)
+                db.session.commit()
+                logger.info(f"Created TenantMembership for Slack OIDC user {email} in tenant {domain}")
+
+        # Update auth_type to indicate Slack OIDC login
+        if not user.auth_type or user.auth_type == 'local':
+            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+            db.session.commit()
+
+        # Set session
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=user.is_admin)
+
+        logger.info(f"Slack OIDC login successful for {email}")
+
+        # Redirect to return URL or tenant home
+        if return_url and return_url != '/':
+            return redirect(return_url)
+
+        # Redirect to tenant dashboard
+        return redirect(f'/{domain}/decisions')
+
+    except requests.RequestException as e:
+        logger.error(f"Slack OIDC request error: {e}")
+        return redirect('/?error=network_error')
+    except Exception as e:
+        logger.error(f"Slack OIDC callback error: {e}")
+        return redirect('/?error=internal_error')
 
 
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
@@ -3306,6 +3568,84 @@ def api_resend_verification():
     return jsonify({'message': success_message})
 
 
+@app.route('/api/auth/request-setup-link', methods=['POST'])
+@track_endpoint('api_auth_request_setup_link')
+def api_request_setup_link():
+    """Request a new setup link for users who haven't set up their credentials yet.
+
+    This endpoint allows users to request a new setup link if their previous one
+    expired or they didn't receive it. This is for users who have verified their
+    email but haven't completed credential setup.
+    """
+    data = request.get_json() or {}
+    email = data.get('email', '').lower().strip()
+
+    if not email or '@' not in email:
+        return jsonify({'error': 'Valid email address is required'}), 400
+
+    # Generic success message (always return this to prevent email enumeration)
+    success_message = 'If your account exists and needs setup, a link has been sent to your email.'
+
+    # Find user by email
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        # Don't reveal that no user exists
+        logger.info(f"Setup link requested for non-existent email: {email}")
+        return jsonify({'message': success_message})
+
+    # Check if user already has credentials
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        # User already has credentials - don't send setup link
+        logger.info(f"Setup link requested for user with existing credentials: {email}")
+        return jsonify({'message': success_message})
+
+    # Rate limiting: Check for recent setup tokens (5 minutes)
+    recent_token = SetupToken.query.filter(
+        SetupToken.user_id == user.id,
+        SetupToken.created_at > datetime.utcnow() - timedelta(minutes=5)
+    ).first()
+
+    if recent_token:
+        logger.info(f"Rate limited setup link request for: {email}")
+        return jsonify({'message': success_message})
+
+    # Get email config for sending
+    email_config = EmailConfig.query.filter_by(domain=user.sso_domain, enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(enabled=True).first()
+
+    if not email_config:
+        logger.warning(f"No email config available to send setup link for: {email}")
+        return jsonify({'message': success_message})
+
+    # Generate new setup token
+    setup_token = SetupToken.create_for_user(user)
+    setup_token_str = setup_token._token_string
+    setup_url = f"{request.host_url.rstrip('/')}/{user.sso_domain}/setup?token={setup_token_str}"
+
+    # Send setup email
+    from notifications import send_setup_token_email
+    success = send_setup_token_email(
+        email_config=email_config,
+        user_name=user.name or user.email.split('@')[0],
+        user_email=user.email,
+        setup_url=setup_url,
+        expires_in_hours=SetupToken.TOKEN_VALIDITY_HOURS
+    )
+
+    if success:
+        logger.info(f"Setup link sent to: {email}")
+    else:
+        logger.error(f"Failed to send setup link to: {email}")
+
+    # Always return success to prevent email enumeration
+    return jsonify({'message': success_message})
+
+
 @app.route('/api/auth/direct-signup', methods=['POST'])
 def api_direct_signup():
     """Direct signup (when email verification is disabled)."""
@@ -3490,6 +3830,7 @@ def api_verify_email(token):
     if verification.purpose == 'signup':
         # Create user account (if doesn't exist)
         user = User.query.filter_by(email=verification.email).first()
+        is_new_user = user is None
         if not user:
             # Determine if this is the first user for the domain
             is_first_user = User.query.filter_by(sso_domain=verification.domain).count() == 0
@@ -3503,6 +3844,7 @@ def api_verify_email(token):
                 email_verified=True
             )
             db.session.add(user)
+            db.session.flush()  # Get user ID before creating membership
 
             # Create default auth config if this is a new tenant
             if is_first_user:
@@ -3532,6 +3874,34 @@ def api_verify_email(token):
                     )
                     db.session.add(domain_approval)
                     app.logger.info(f"Auto-approved corporate domain via email verification: {verification.domain}")
+
+            # Create Tenant if it doesn't exist (v1.5 governance)
+            tenant = Tenant.query.filter_by(domain=verification.domain).first()
+            if not tenant:
+                tenant = Tenant(
+                    domain=verification.domain,
+                    name=verification.domain,  # Default name is domain
+                    status='active',
+                    maturity_state=MaturityState.BOOTSTRAP
+                )
+                db.session.add(tenant)
+                db.session.flush()
+                app.logger.info(f"Created tenant for domain: {verification.domain}")
+
+            # Create TenantMembership for the user
+            membership = TenantMembership.query.filter_by(
+                user_id=user.id,
+                tenant_id=tenant.id
+            ).first()
+            if not membership:
+                role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+                membership = TenantMembership(
+                    user_id=user.id,
+                    tenant_id=tenant.id,
+                    global_role=role
+                )
+                db.session.add(membership)
+                app.logger.info(f"Created TenantMembership for {verification.email} with role {role.value}")
         else:
             user.email_verified = True
             if verification.name:
@@ -3539,15 +3909,23 @@ def api_verify_email(token):
 
         db.session.commit()
 
+        # Generate SetupToken for user to set up credentials
+        setup_token = SetupToken.create_for_user(user)
+        setup_token_str = setup_token._token_string
+        setup_url = f'/{verification.domain}/setup?token={setup_token_str}'
+
+        app.logger.info(f"Email verified for {verification.email}, redirecting to setup page")
+
         if request.method == 'POST':
             return jsonify({
                 'message': 'Email verified successfully',
                 'email': verification.email,
                 'domain': verification.domain,
                 'purpose': 'signup',
-                'redirect': f'/{verification.domain}/login?verified=1'
+                'redirect': setup_url,
+                'setup_token': setup_token_str
             })
-        return redirect(f'/{verification.domain}/login?verified=1&email={verification.email}')
+        return redirect(setup_url)
 
     elif verification.purpose == 'access_request':
         # Create access request
@@ -5070,14 +5448,18 @@ def api_save_auth_config():
         domain = g.current_user.sso_domain
 
     auth_method = data.get('auth_method', 'webauthn')
-    if auth_method not in ['sso', 'webauthn']:
-        return jsonify({'error': 'auth_method must be "sso" or "webauthn"'}), 400
+    if auth_method not in ['sso', 'webauthn', 'slack_oidc', 'local']:
+        return jsonify({'error': 'auth_method must be "sso", "webauthn", "slack_oidc", or "local"'}), 400
 
     # If setting to SSO, check if SSO config exists for this domain
     if auth_method == 'sso':
         sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
         if not sso_config:
             return jsonify({'error': 'Cannot set auth method to SSO without a valid SSO configuration'}), 400
+
+    # If setting to slack_oidc, check if Slack feature is enabled
+    if auth_method == 'slack_oidc' and not is_slack_enabled():
+        return jsonify({'error': 'Slack integration is not enabled'}), 400
 
     config = AuthConfig.query.filter_by(domain=domain).first()
 
@@ -5088,6 +5470,7 @@ def api_save_auth_config():
             allow_registration=data.get('allow_registration', True),
             require_approval=data.get('require_approval', True),
             rp_name=data.get('rp_name', 'Decision Records'),
+            allow_slack_oidc=data.get('allow_slack_oidc', True),
         )
         db.session.add(config)
     else:
@@ -5098,6 +5481,12 @@ def api_save_auth_config():
             config.require_approval = bool(data['require_approval'])
         if 'rp_name' in data:
             config.rp_name = data['rp_name']
+        if 'allow_slack_oidc' in data:
+            config.allow_slack_oidc = bool(data['allow_slack_oidc'])
+        if 'allow_password' in data:
+            config.allow_password = bool(data['allow_password'])
+        if 'allow_passkey' in data:
+            config.allow_passkey = bool(data['allow_passkey'])
 
     db.session.commit()
 
@@ -5799,8 +6188,11 @@ def api_update_tenant_auth_config():
         db.session.add(auth_config)
 
     if 'auth_method' in data:
-        if data['auth_method'] not in ['local', 'sso', 'webauthn']:
+        if data['auth_method'] not in ['local', 'sso', 'webauthn', 'slack_oidc']:
             return jsonify({'error': 'Invalid auth method'}), 400
+        # If setting to slack_oidc, check if Slack feature is enabled
+        if data['auth_method'] == 'slack_oidc' and not is_slack_enabled():
+            return jsonify({'error': 'Slack integration is not enabled'}), 400
         auth_config.auth_method = data['auth_method']
 
     if 'allow_password' in data:
@@ -5808,6 +6200,9 @@ def api_update_tenant_auth_config():
 
     if 'allow_passkey' in data:
         auth_config.allow_passkey = bool(data['allow_passkey'])
+
+    if 'allow_slack_oidc' in data:
+        auth_config.allow_slack_oidc = bool(data['allow_slack_oidc'])
 
     if 'allow_registration' in data:
         auth_config.allow_registration = bool(data['allow_registration'])

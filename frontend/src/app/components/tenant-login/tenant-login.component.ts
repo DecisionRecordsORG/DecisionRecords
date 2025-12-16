@@ -19,6 +19,7 @@ interface TenantAuthConfig {
   auth_method: string;
   allow_password: boolean;
   allow_passkey: boolean;
+  allow_slack_oidc: boolean;
   allow_registration: boolean;
   has_sso: boolean;
   sso_provider: string | null;
@@ -111,6 +112,17 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               </button>
             </form>
 
+            <!-- Slack Sign-in Option -->
+            @if (slackOidcEnabled && authConfig?.allow_slack_oidc) {
+              <div class="social-divider">
+                <span>or</span>
+              </div>
+              <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                <span>Sign in with Slack</span>
+              </button>
+            }
+
             <p class="resend-link">
               <button mat-button (click)="showResendVerification()">
                 <mat-icon>mark_email_unread</mat-icon>
@@ -177,6 +189,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                     Please check your email for a setup link.
                   </span>
                 </div>
+                <button mat-raised-button color="accent" class="full-width resend-setup-btn"
+                        (click)="requestSetupLink()" [disabled]="isLoading">
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">send</mat-icon>
+                  <span *ngIf="!isLoading">Resend Setup Link</span>
+                </button>
               }
 
               <button mat-button class="back-button" (click)="goBack()">
@@ -538,6 +556,57 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       margin-top: 8px;
     }
 
+    /* Slack Sign-in Button Styles */
+    .social-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 20px 0;
+      color: #94a3b8;
+      font-size: 13px;
+      text-transform: lowercase;
+    }
+
+    .social-divider::before,
+    .social-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e2e8f0;
+    }
+
+    .slack-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      color: #1e293b !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+    }
+
+    .slack-signin-btn:hover {
+      background: #f8fafc !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .slack-signin-btn .slack-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .slack-signin-btn span {
+      display: inline-block;
+    }
+
     .recovery-link {
       margin-top: 24px;
       text-align: center;
@@ -597,6 +666,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       color: #666;
       font-size: 14px;
     }
+
+    .resend-setup-btn {
+      margin-top: 16px;
+      padding: 12px 24px;
+      font-size: 14px;
+    }
   `]
 })
 export class TenantLoginComponent implements OnInit {
@@ -618,6 +693,7 @@ export class TenantLoginComponent implements OnInit {
   showPasswordLogin = false;  // Default to showing passkey
 
   webAuthnSupported = false;
+  slackOidcEnabled = false;  // Global Slack OIDC availability
 
   constructor(
     private fb: FormBuilder,
@@ -657,6 +733,9 @@ export class TenantLoginComponent implements OnInit {
     // Load tenant auth config
     this.loadAuthConfig();
 
+    // Check global Slack OIDC availability
+    this.checkSlackOidcStatus();
+
     // Pre-fill email from query params
     const email = this.route.snapshot.queryParamMap.get('email');
     if (email) {
@@ -672,6 +751,31 @@ export class TenantLoginComponent implements OnInit {
     if (this.route.snapshot.queryParamMap.get('passkey_setup') === 'success') {
       this.success = 'Passkey created successfully! Sign in with your new passkey below.';
     }
+
+    // Check for Slack auth errors
+    const errorParam = this.route.snapshot.queryParamMap.get('error');
+    if (errorParam === 'slack_auth_error') {
+      this.error = 'Slack authentication failed. Please try again.';
+    } else if (errorParam === 'public_email') {
+      this.error = this.route.snapshot.queryParamMap.get('message') || 'Please use your work email address.';
+    }
+  }
+
+  private checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcEnabled = false;
+      }
+    });
+  }
+
+  signInWithSlack(): void {
+    // Include return URL to redirect back to tenant after login
+    const returnUrl = `/${this.tenant}/decisions`;
+    window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
   loadAuthConfig(): void {
@@ -686,6 +790,7 @@ export class TenantLoginComponent implements OnInit {
           auth_method: 'local',
           allow_password: true,
           allow_passkey: true,
+          allow_slack_oidc: true,
           allow_registration: true,
           has_sso: false,
           sso_provider: null,
@@ -894,6 +999,26 @@ export class TenantLoginComponent implements OnInit {
         this.isLoading = false;
         // Always show success message to prevent email enumeration
         this.success = err.error?.message || 'If a pending verification exists for this email, a new link has been sent.';
+      }
+    });
+  }
+
+  requestSetupLink(): void {
+    if (!this.currentEmail) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.success = '';
+
+    this.http.post<{ message: string }>('/api/auth/request-setup-link', { email: this.currentEmail }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.success = response.message || 'If your account exists, a setup link has been sent to your email.';
+      },
+      error: (err) => {
+        this.isLoading = false;
+        // Always show success message to prevent email enumeration
+        this.success = err.error?.message || 'If your account exists, a setup link has been sent to your email.';
       }
     });
   }

@@ -5,6 +5,7 @@ This module provides security utilities for the Slack integration:
 - Request signature verification (HMAC-SHA256)
 - Token encryption/decryption using Fernet
 - State parameter handling for OAuth
+- Slack OIDC authentication support
 """
 import hmac
 import hashlib
@@ -20,6 +21,12 @@ from cryptography.fernet import Fernet
 import base64
 
 logger = logging.getLogger(__name__)
+
+# Slack OIDC Endpoints
+SLACK_OIDC_AUTHORIZE_URL = 'https://slack.com/openid/connect/authorize'
+SLACK_OIDC_TOKEN_URL = 'https://slack.com/api/openid.connect.token'
+SLACK_OIDC_USERINFO_URL = 'https://slack.com/api/openid.connect.userInfo'
+SLACK_OIDC_SCOPES = 'openid profile email'
 
 # Cache for signing secret
 _slack_signing_secret = None
@@ -275,4 +282,75 @@ def verify_link_token(token):
         return token_data
     except Exception as e:
         logger.warning(f"Failed to verify link token: {e}")
+        return None
+
+
+# ==================== Slack OIDC Authentication ====================
+
+def generate_slack_oidc_state(return_url=None, extra_data=None):
+    """
+    Generate an encrypted state parameter for Slack OIDC login flow.
+
+    Unlike workspace OAuth, this doesn't need tenant_id since we derive
+    the tenant from the user's email after authentication.
+
+    Args:
+        return_url: URL to redirect to after successful authentication
+        extra_data: Any additional data to pass through the OAuth flow
+
+    Returns:
+        Encrypted state string
+    """
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+
+    state_data = {
+        'type': 'slack_oidc',
+        'csrf_token': csrf_token,
+        'expires_at': expires_at,
+        'return_url': return_url,
+        'extra_data': extra_data or {}
+    }
+
+    try:
+        fernet = Fernet(_get_encryption_key())
+        state_json = json.dumps(state_data)
+        return fernet.encrypt(state_json.encode()).decode()
+    except Exception as e:
+        logger.error(f"Failed to generate Slack OIDC state: {e}")
+        raise
+
+
+def verify_slack_oidc_state(state):
+    """
+    Verify and decode a Slack OIDC state parameter.
+
+    Args:
+        state: Encrypted state string from OAuth callback
+
+    Returns:
+        Decoded state data dict if valid, None otherwise
+    """
+    if not state:
+        return None
+
+    try:
+        fernet = Fernet(_get_encryption_key())
+        state_json = fernet.decrypt(state.encode()).decode()
+        state_data = json.loads(state_json)
+
+        # Verify this is an OIDC state (not workspace OAuth state)
+        if state_data.get('type') != 'slack_oidc':
+            logger.warning("Invalid state type for Slack OIDC")
+            return None
+
+        # Check expiration
+        expires_at = datetime.fromisoformat(state_data.get('expires_at', ''))
+        if datetime.utcnow() > expires_at:
+            logger.warning("Slack OIDC state expired")
+            return None
+
+        return state_data
+    except Exception as e:
+        logger.warning(f"Failed to verify Slack OIDC state: {e}")
         return None

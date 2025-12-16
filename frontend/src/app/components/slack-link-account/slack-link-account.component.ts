@@ -140,6 +140,17 @@ interface LinkTokenData {
                   </div>
                 }
 
+                <!-- Slack Sign-in Option -->
+                @if (slackOidcEnabled) {
+                  <button mat-flat-button class="slack-signin-btn" (click)="signInWithSlack()">
+                    <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                    <span>Sign in with Slack</span>
+                  </button>
+                  <div class="social-divider">
+                    <span>or</span>
+                  </div>
+                }
+
                 <div class="action-buttons">
                   <button mat-flat-button color="primary" (click)="goToLogin()">
                     Sign In
@@ -393,6 +404,54 @@ interface LinkTokenData {
       color: #333;
     }
 
+    /* Slack Sign-in Button Styles */
+    .slack-signin-btn {
+      display: flex !important;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 14px 24px !important;
+      border: none !important;
+      border-radius: 8px !important;
+      background: #4a154b !important;
+      color: white !important;
+      font-weight: 500 !important;
+      font-size: 15px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-bottom: 16px;
+    }
+
+    .slack-signin-btn:hover {
+      background: #611f69 !important;
+      box-shadow: 0 4px 12px rgba(74, 21, 75, 0.3);
+    }
+
+    .slack-signin-btn .slack-logo {
+      width: 22px;
+      height: 22px;
+    }
+
+    .social-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+      color: #94a3b8;
+      font-size: 13px;
+      text-transform: lowercase;
+    }
+
+    .social-divider::before,
+    .social-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e2e8f0;
+    }
+
     .action-buttons {
       display: flex;
       gap: 12px;
@@ -430,6 +489,7 @@ export class SlackLinkAccountComponent implements OnInit {
   token: string | null = null;
   linking = false;
   linkComplete = false;
+  slackOidcEnabled = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -448,7 +508,31 @@ export class SlackLinkAccountComponent implements OnInit {
       return;
     }
 
+    // Check if Slack OIDC is enabled
+    this.checkSlackOidcStatus();
+
     this.validateToken();
+  }
+
+  private checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcEnabled = false;
+      }
+    });
+  }
+
+  signInWithSlack(): void {
+    // Store the token in session storage to restore after login
+    if (this.token) {
+      sessionStorage.setItem('slack_link_token', this.token);
+    }
+    // Redirect to Slack OIDC with return URL to this page
+    const returnUrl = `/slack/link?token=${this.token}`;
+    window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
   validateToken(): void {

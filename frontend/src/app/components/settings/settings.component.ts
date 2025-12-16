@@ -458,8 +458,38 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                           </div>
                         </div>
                       </mat-radio-button>
+
+                      <mat-radio-button value="slack_oidc" class="auth-method-option"
+                                        [disabled]="!slackOidcGloballyEnabled || isProvisionalAdmin">
+                        <div class="option-content">
+                          <div class="option-icons">
+                            <img src="/assets/slack-logo.svg" alt="Slack" class="slack-icon-auth">
+                          </div>
+                          <div class="option-text">
+                            <strong>Slack Only</strong>
+                            @if (slackOidcGloballyEnabled) {
+                              <span class="option-desc">Only allow sign-in via Slack (SSO alternative)</span>
+                            } @else {
+                              <span class="option-desc disabled-hint">Slack integration not available</span>
+                            }
+                          </div>
+                        </div>
+                      </mat-radio-button>
                     </mat-radio-group>
                   </div>
+
+                  <!-- Slack Sign-in Toggle (when not in slack_oidc mode) -->
+                  @if (slackOidcGloballyEnabled && authConfigForm.value.auth_method !== 'slack_oidc' && authConfigForm.value.auth_method !== 'sso') {
+                    <div class="slack-oidc-toggle-section">
+                      <h4 class="options-header">Slack Sign-in</h4>
+                      <mat-slide-toggle formControlName="allow_slack_oidc">
+                        Allow "Sign in with Slack" option
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, users can sign in using their Slack account in addition to other methods.
+                      </p>
+                    </div>
+                  }
 
                   <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
@@ -1667,6 +1697,21 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       height: 28px;
     }
 
+    .option-icons .slack-icon-auth {
+      width: 24px;
+      height: 24px;
+    }
+
+    .slack-oidc-toggle-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .slack-oidc-toggle-section .options-header {
+      margin-bottom: 12px;
+    }
+
     .icon-plus {
       font-size: 16px;
       color: #666;
@@ -2016,6 +2061,7 @@ export class SettingsComponent implements OnInit {
 
   // Feature flags
   slackFeatureEnabled = false;
+  slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
 
   // Tab index for navigation
   selectedTabIndex = 0;
@@ -2107,9 +2153,10 @@ export class SettingsComponent implements OnInit {
     });
 
     this.authConfigForm = this.fb.group({
-      auth_method: ['both', Validators.required],  // 'both', 'webauthn', or 'sso'
+      auth_method: ['both', Validators.required],  // 'both', 'webauthn', 'sso', or 'slack_oidc'
       allow_registration: [true],
       auto_approve_users: [false],  // Inverted from require_approval for better UX
+      allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
       rp_name: ['Architecture Decisions']
     });
 
@@ -2127,6 +2174,7 @@ export class SettingsComponent implements OnInit {
     this.loadEmailConfig();
     this.loadUsers();
     this.loadAuthConfig();
+    this.checkSlackOidcStatus();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
       this.loadRoleRequests();
@@ -2164,6 +2212,17 @@ export class SettingsComponent implements OnInit {
       error: () => {
         // Default to disabled if can't load features
         this.slackFeatureEnabled = false;
+      }
+    });
+  }
+
+  checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcGloballyEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcGloballyEnabled = false;
       }
     });
   }
@@ -2367,7 +2426,9 @@ export class SettingsComponent implements OnInit {
         if (this.authConfig) {
           // Convert from backend model to simplified UI model
           let uiAuthMethod = 'both';  // default
-          if (this.authConfig.auth_method === 'sso') {
+          if (this.authConfig.auth_method === 'slack_oidc') {
+            uiAuthMethod = 'slack_oidc';
+          } else if (this.authConfig.auth_method === 'sso') {
             uiAuthMethod = 'sso';
           } else if (this.authConfig.allow_passkey && !this.authConfig.allow_password) {
             uiAuthMethod = 'webauthn';  // passkey only
@@ -2379,6 +2440,7 @@ export class SettingsComponent implements OnInit {
             auth_method: uiAuthMethod,
             allow_registration: this.authConfig.allow_registration,
             auto_approve_users: !this.authConfig.require_approval,  // Invert for UI
+            allow_slack_oidc: this.authConfig.allow_slack_oidc !== false,  // Default true if undefined
             rp_name: this.authConfig.rp_name
           });
         }
@@ -2402,9 +2464,10 @@ export class SettingsComponent implements OnInit {
     const formValue = this.authConfigForm.value;
 
     // Convert from simplified UI model to backend model
-    let backendAuthMethod: 'sso' | 'webauthn' = 'webauthn';
+    let backendAuthMethod: string = 'webauthn';
     let allowPassword = true;
     let allowPasskey = true;
+    let allowSlackOidc = formValue.allow_slack_oidc;
 
     switch (formValue.auth_method) {
       case 'both':
@@ -2421,6 +2484,13 @@ export class SettingsComponent implements OnInit {
         backendAuthMethod = 'sso';
         allowPassword = false;
         allowPasskey = false;
+        allowSlackOidc = false;  // SSO mode disables Slack OIDC
+        break;
+      case 'slack_oidc':
+        backendAuthMethod = 'slack_oidc';
+        allowPassword = false;
+        allowPasskey = false;
+        allowSlackOidc = true;  // Slack-only mode
         break;
     }
 
@@ -2430,7 +2500,8 @@ export class SettingsComponent implements OnInit {
       require_approval: !formValue.auto_approve_users,  // Invert for API
       rp_name: formValue.rp_name,
       allow_password: allowPassword,
-      allow_passkey: allowPasskey
+      allow_passkey: allowPasskey,
+      allow_slack_oidc: allowSlackOidc
     };
 
     this.adminService.saveAuthConfig(config).subscribe({

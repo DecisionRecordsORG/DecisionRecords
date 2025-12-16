@@ -33,12 +33,13 @@ export interface EmailConfigRequest {
 
 export interface AuthConfigRequest {
   domain?: string;  // Only required for master account
-  auth_method: 'sso' | 'webauthn';
+  auth_method: 'sso' | 'webauthn' | 'slack_oidc' | string;
   allow_registration?: boolean;
   require_approval?: boolean;
   rp_name?: string;
   allow_password?: boolean;
   allow_passkey?: boolean;
+  allow_slack_oidc?: boolean;  // Allow "Sign in with Slack" option
 }
 
 @Injectable({

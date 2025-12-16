@@ -162,6 +162,17 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <mat-icon *ngIf="!isLoading">arrow_forward</mat-icon>
                 </button>
               </form>
+
+              <!-- Slack Sign-in Option -->
+              @if (slackOidcEnabled) {
+                <div class="social-divider">
+                  <span>or</span>
+                </div>
+                <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                  <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                  <span>Sign in with Slack</span>
+                </button>
+              }
             }
 
             <!-- Signup View (first user for domain) -->
@@ -1290,6 +1301,57 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .submit-btn:disabled {
       background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
       color: rgba(255, 255, 255, 0.7) !important;
+    }
+
+    /* Slack Sign-in Button Styles */
+    .social-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 20px 0;
+      color: #94a3b8;
+      font-size: 13px;
+      text-transform: lowercase;
+    }
+
+    .social-divider::before,
+    .social-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e2e8f0;
+    }
+
+    .slack-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      color: #1e293b !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+    }
+
+    .slack-signin-btn:hover {
+      background: #f8fafc !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .slack-signin-btn .slack-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .slack-signin-btn span {
+      display: inline-block;
     }
 
     .tenant-info {
@@ -2753,6 +2815,9 @@ export class HomepageComponent implements OnInit {
   sponsorshipError = '';
   sponsorshipSuccess = '';
 
+  // Slack OIDC state
+  slackOidcEnabled = false;
+
   // Carousel state
   currentSlide = 0;
 
@@ -2810,11 +2875,38 @@ export class HomepageComponent implements OnInit {
         this.error = 'Invalid verification link. Please try again.';
       } else if (params['error'] === 'expired_token') {
         this.error = 'Verification link has expired. Please request a new one.';
+      } else if (params['error'] === 'slack_disabled') {
+        this.error = 'Slack sign-in is currently disabled.';
+      } else if (params['error'] === 'slack_not_configured') {
+        this.error = 'Slack sign-in is not configured.';
+      } else if (params['error'] === 'public_email') {
+        this.error = params['message'] || 'Please use your work email address.';
+      } else if (params['error'] === 'slack_auth_error') {
+        this.error = 'Slack authentication failed. Please try again.';
       }
     });
 
+    // Check if Slack OIDC sign-in is enabled
+    this.checkSlackOidcStatus();
+
     // Start typewriter animation
     this.startTypewriterAnimation();
+  }
+
+  private checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcEnabled = false;
+      }
+    });
+  }
+
+  signInWithSlack(): void {
+    // Redirect to Slack OIDC initiation endpoint
+    window.location.href = '/auth/slack/oidc';
   }
 
   private startTypewriterAnimation(): void {

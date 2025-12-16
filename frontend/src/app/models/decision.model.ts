@@ -156,13 +156,14 @@ export interface ApiError {
 
 export interface AuthConfig {
   domain: string;
-  auth_method: 'sso' | 'webauthn';
+  auth_method: 'sso' | 'webauthn' | 'slack_oidc' | string;
   allow_registration: boolean;
   require_approval: boolean;
   rp_name: string;
   tenant_prefix?: string;  // 3-letter prefix for decision IDs
   allow_password?: boolean;
   allow_passkey?: boolean;
+  allow_slack_oidc?: boolean;  // Allow "Sign in with Slack" option
   id?: number;
   created_at?: string;
   updated_at?: string;

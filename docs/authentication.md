@@ -7,6 +7,7 @@ This guide covers the comprehensive authentication system implemented in the Arc
 - [Authentication Methods](#authentication-methods)
 - [WebAuthn/Passkeys Implementation](#webauthnpasskeys-implementation)
 - [SSO Integration](#sso-integration)
+- [Slack OIDC Authentication](#slack-oidc-authentication)
 - [Local Authentication](#local-authentication)
 - [Multi-Tenant Authentication](#multi-tenant-authentication)
 - [Security Features](#security-features)
@@ -21,6 +22,7 @@ The Architecture Decisions application provides a multi-layered authentication s
 ### Authentication Types
 - **WebAuthn/Passkeys**: Modern passwordless authentication
 - **SSO Integration**: Support for SAML and OAuth providers
+- **Slack OIDC**: "Sign in with Slack" using OpenID Connect
 - **Local Authentication**: Traditional username/password with enhanced security
 - **Super Admin Authentication**: Special administrative access
 
@@ -436,6 +438,211 @@ def sso_callback(provider):
         return jsonify({'error': 'SSO authentication failed'}), 500
 ```
 
+## Slack OIDC Authentication
+
+Sign in with Slack provides a frictionless authentication experience for Slack-first organizations, especially startups. Users can authenticate using their existing Slack account, with tenant assignment based on email domain.
+
+### Overview
+
+- **Protocol**: OpenID Connect (OIDC) via Slack
+- **Scopes**: `openid profile email`
+- **Tenant Assignment**: Based on email domain (e.g., sara@klarna.com → tenant "klarna.com")
+- **First User Behavior**: First user from a domain becomes provisional admin
+
+### User Flow
+
+1. User clicks "Sign in with Slack" on the login page
+2. User is redirected to Slack's authorization page
+3. User authenticates with their Slack account
+4. Slack redirects back with authorization code
+5. Backend exchanges code for tokens and fetches user info (email, name)
+6. User is created/logged in based on email domain
+7. Tenant is auto-created if first user from that domain
+8. Session is established and user is redirected to their tenant
+
+### Backend Implementation
+
+#### OIDC Endpoints (slack_security.py)
+```python
+# Slack OIDC Endpoints
+SLACK_OIDC_AUTHORIZE_URL = 'https://slack.com/openid/connect/authorize'
+SLACK_OIDC_TOKEN_URL = 'https://slack.com/api/openid.connect.token'
+SLACK_OIDC_USERINFO_URL = 'https://slack.com/api/openid.connect.userInfo'
+SLACK_OIDC_SCOPES = 'openid profile email'
+```
+
+#### State Parameter Management
+```python
+def generate_slack_oidc_state(return_url=None, extra_data=None):
+    """
+    Generate encrypted state for OIDC flow with CSRF protection.
+    State expires after 10 minutes.
+    """
+    csrf_token = secrets.token_urlsafe(32)
+    expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+
+    state_data = {
+        'type': 'slack_oidc',
+        'csrf_token': csrf_token,
+        'expires_at': expires_at,
+        'return_url': return_url,
+        'extra_data': extra_data or {}
+    }
+
+    fernet = Fernet(_get_encryption_key())
+    return fernet.encrypt(json.dumps(state_data).encode()).decode()
+
+def verify_slack_oidc_state(state):
+    """Verify and decode state parameter. Returns None if invalid/expired."""
+    # Verifies type is 'slack_oidc' and checks expiration
+```
+
+#### API Routes (app.py)
+```python
+# Check if Slack OIDC is enabled
+GET /api/auth/slack-oidc-status
+# Returns: {"enabled": true/false, "reason": "..."}
+
+# Initiate OIDC flow
+GET /auth/slack/oidc
+# Redirects to Slack authorization URL
+
+# Handle callback
+GET /auth/slack/oidc/callback
+# Exchanges code for token, creates/logs in user
+```
+
+### Configuration
+
+#### Global Configuration
+Slack OIDC is automatically enabled when Slack credentials are configured:
+- `slack-client-id` in Azure Key Vault
+- `slack-client-secret` in Azure Key Vault
+
+#### Tenant Configuration (TenantSettings)
+Tenant admins can control Slack OIDC availability:
+
+```python
+# TenantSettings model
+allow_slack_oidc = db.Column(db.Boolean, default=True)  # Enable/disable for tenant
+auth_method = db.Column(db.String(20), default='local')  # Can be 'slack_oidc'
+```
+
+#### Auth Method Options
+| Value | Description |
+|-------|-------------|
+| `local` | Password and passkey authentication |
+| `sso` | Enterprise SSO only |
+| `webauthn` | Passkeys only |
+| `slack_oidc` | Slack sign-in only (SSO alternative) |
+
+When `auth_method='slack_oidc'`, only Slack sign-in is allowed for the tenant. This provides SSO-like control without configuring a separate identity provider.
+
+### Frontend Integration
+
+#### Sign-in Button Components
+The "Sign in with Slack" button appears on:
+- Homepage (email entry view)
+- Tenant login page
+- Slack account linking page (for users not logged in)
+
+#### Button Implementation
+```typescript
+// Check if Slack OIDC is enabled
+ngOnInit() {
+  this.checkSlackOidcStatus();
+}
+
+checkSlackOidcStatus(): void {
+  this.http.get<{enabled: boolean}>('/api/auth/slack-oidc-status')
+    .subscribe({
+      next: (status) => {
+        this.slackOidcEnabled = status.enabled;
+      }
+    });
+}
+
+signInWithSlack(): void {
+  window.location.href = '/auth/slack/oidc';
+}
+```
+
+#### Admin Settings
+Tenant admins can configure Slack OIDC in Settings > Auth Configuration:
+- Radio button: "Sign in with Slack Only" (`auth_method='slack_oidc'`)
+- Toggle: "Allow Sign in with Slack" (`allow_slack_oidc`)
+
+### Security Considerations
+
+1. **State Parameter**: Encrypted with Fernet, includes CSRF token, expires in 10 minutes
+2. **Domain Blocking**: Public email domains (gmail.com, yahoo.com, etc.) are rejected
+3. **Rate Limiting**: Callback endpoint is rate-limited (20/min)
+4. **Token Handling**: Access tokens used momentarily for user info, not stored
+5. **Existing Infrastructure**: Reuses proven Slack OAuth encryption from workspace integration
+
+### Blocked Email Domains
+The following public email domains are blocked to ensure enterprise-only usage:
+- gmail.com
+- yahoo.com
+- hotmail.com
+- outlook.com
+- aol.com
+- icloud.com
+- protonmail.com
+- mail.com
+- live.com
+- msn.com
+
+### Use Cases
+
+#### Startup Onboarding
+1. IT admin installs Slack app for their workspace
+2. Team members can immediately sign in with Slack
+3. First user becomes provisional admin
+4. No SSO configuration required
+
+#### Enterprise Slack-Only Mode
+1. Admin sets `auth_method='slack_oidc'` for tenant
+2. All users must authenticate via Slack
+3. When employees leave Slack workspace, they lose Decision Records access
+4. Provides SSO-like security without separate IdP configuration
+
+### Testing
+
+#### Backend Tests
+```bash
+# Run Slack OIDC unit tests
+python -m pytest tests/test_slack_oidc.py -v
+```
+
+Tests cover:
+- State generation and verification
+- Expired state rejection
+- OIDC status endpoint
+- Callback handling
+- User creation flow
+- Blocked domain rejection
+
+#### E2E Tests
+```bash
+# Run Slack OIDC E2E tests
+npx playwright test e2e/tests/slack-oidc.spec.ts
+```
+
+Tests cover:
+- Button visibility based on configuration
+- Redirect to OIDC endpoint
+- Admin settings for auth method
+- Tenant-level enable/disable
+
+### Rollback
+
+To disable Slack OIDC:
+1. Remove Slack credentials from Key Vault, OR
+2. Set `allow_slack_oidc=False` on tenant settings
+
+Users who signed up via Slack OIDC can still use other authentication methods (password, passkey, SSO) if configured.
+
 ## Local Authentication
 
 ### Password Security
@@ -674,6 +881,11 @@ GET  /api/sso/:provider/login     # Initiate SSO login
 GET  /api/sso/:provider/callback  # SSO callback
 GET  /api/sso/providers           # List available SSO providers
 
+# Slack OIDC
+GET  /api/auth/slack-oidc-status  # Check if Slack OIDC is enabled
+GET  /auth/slack/oidc             # Initiate Slack OIDC login
+GET  /auth/slack/oidc/callback    # Handle Slack OIDC callback
+
 # Session Management
 GET  /api/auth/me                 # Get current user
 POST /api/auth/refresh            # Refresh session
@@ -907,4 +1119,4 @@ def monitor_sessions():
 
 ---
 
-*Last Updated: December 2024*
+*Last Updated: December 2025*

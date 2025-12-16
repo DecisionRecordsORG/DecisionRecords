@@ -416,9 +416,15 @@ class TenantSettings(db.Model):
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, unique=True)
 
     # Auth settings
-    auth_method = db.Column(db.String(20), default='local')  # 'sso', 'webauthn', 'local'
+    # auth_method values: 'local', 'sso', 'webauthn', 'slack_oidc'
+    # - 'local': All enabled methods (password, passkey, Slack)
+    # - 'sso': Only configured SSO providers
+    # - 'webauthn': Passkeys only
+    # - 'slack_oidc': Slack sign-in only (SSO alternative for Slack-first companies)
+    auth_method = db.Column(db.String(20), default='local')
     allow_password = db.Column(db.Boolean, default=True)
     allow_passkey = db.Column(db.Boolean, default=True)
+    allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack"
     rp_name = db.Column(db.String(255), default='Architecture Decisions')
 
     # Registration settings
@@ -443,6 +449,7 @@ class TenantSettings(db.Model):
             'auth_method': self.auth_method,
             'allow_password': self.allow_password,
             'allow_passkey': self.allow_passkey,
+            'allow_slack_oidc': self.allow_slack_oidc,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
@@ -744,9 +751,11 @@ class AuthConfig(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     domain = db.Column(db.String(255), nullable=False, unique=True)
-    auth_method = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
+    # auth_method: 'local', 'sso', 'webauthn', 'slack_oidc'
+    auth_method = db.Column(db.String(20), nullable=False, default='local')
     allow_password = db.Column(db.Boolean, default=True)  # Allow password login
     allow_passkey = db.Column(db.Boolean, default=True)  # Allow passkey/WebAuthn login
+    allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack" option
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
@@ -776,6 +785,7 @@ class AuthConfig(db.Model):
             'auth_method': self.auth_method,
             'allow_password': self.allow_password,
             'allow_passkey': self.allow_passkey,
+            'allow_slack_oidc': self.allow_slack_oidc,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
