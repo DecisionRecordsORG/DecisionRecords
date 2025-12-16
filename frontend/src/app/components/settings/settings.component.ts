@@ -1143,14 +1143,14 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     }
 
     ::ng-deep .mat-mdc-tab .mdc-tab__text-label {
-      color: rgba(255, 255, 255, 0.7);
-      font-weight: 500;
-      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7) !important;
+      font-weight: 500 !important;
+      font-size: 13px !important;
       letter-spacing: 0.3px;
     }
 
     ::ng-deep .mat-mdc-tab:hover .mdc-tab__text-label {
-      color: rgba(255, 255, 255, 0.95);
+      color: rgba(255, 255, 255, 0.95) !important;
     }
 
     ::ng-deep .mat-mdc-tab.mdc-tab--active {
@@ -1158,8 +1158,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     }
 
     ::ng-deep .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label {
-      color: white;
-      font-weight: 600;
+      color: white !important;
+      font-weight: 600 !important;
     }
 
     ::ng-deep .mat-mdc-tab-body-wrapper {
@@ -1169,6 +1169,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
     ::ng-deep .mat-mdc-tab-body-content {
       padding: 24px;
+      overflow: hidden !important;
     }
 
     ::ng-deep .mdc-tab-indicator__content--underline {

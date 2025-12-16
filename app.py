@@ -6388,7 +6388,7 @@ def slack_install():
             return jsonify({'error': 'Slack integration not configured. Please set up Slack credentials in Key Vault.'}), 500
 
         user = get_current_user()
-        tenant = get_user_tenant(user)
+        tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
         if not tenant:
             return jsonify({'error': 'Tenant not found'}), 404
 
