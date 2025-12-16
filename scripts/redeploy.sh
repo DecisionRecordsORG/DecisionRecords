@@ -270,7 +270,7 @@ main() {
     echo ""
     success "=== Deployment Complete ==="
     echo ""
-    echo "Application URL: https://architecture-decisions.org"
+    echo "Application URL: https://decisionrecords.org"
     echo ""
     echo "Monitor logs: az container logs --name $CONTAINER_NAME --resource-group $RESOURCE_GROUP --follow"
     echo ""

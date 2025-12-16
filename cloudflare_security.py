@@ -229,7 +229,7 @@ def validate_cloudflare_origin() -> tuple[bool, str]:
             f"Path: {request.path}, "
             f"User-Agent: {request.headers.get('User-Agent', 'unknown')}"
         )
-        return False, "Direct access not allowed. Please use architecture-decisions.org"
+        return False, "Direct access not allowed. Please use decisionrecords.org"
 
     # Verify the immediate upstream is actually Cloudflare
     # X-Forwarded-For should show the chain, but request.remote_addr should be a Cloudflare IP

@@ -42,8 +42,8 @@ import { Decision, User, Space } from '../../models/decision.model';
     <div class="decision-list-container">
       <div class="header">
         <div class="header-content">
-          <h1>Architecture Decisions</h1>
-          <p class="subtitle">Track and manage your architecture decision records</p>
+          <h1>Decision Records</h1>
+          <p class="subtitle">Track and manage your decision records</p>
         </div>
         @if (!authService.isMasterAccount && userDomain) {
           <button mat-flat-button color="primary" class="new-decision-btn" [routerLink]="['/' + userDomain + '/decision/new']">
@@ -56,19 +56,25 @@ import { Decision, User, Space } from '../../models/decision.model';
       <mat-card class="filter-card" appearance="outlined">
         <mat-card-content>
           <div class="filter-row">
-            <mat-form-field appearance="outline" class="search-field">
-              <mat-label>Search decisions</mat-label>
-              <input matInput [(ngModel)]="searchTerm" (input)="filterDecisions()" placeholder="Search by title, context, or decision...">
-              <mat-icon matPrefix>search</mat-icon>
+            <div class="search-wrapper">
+              <mat-icon class="search-icon">search</mat-icon>
+              <input
+                class="search-input"
+                [(ngModel)]="searchTerm"
+                (input)="filterDecisions()"
+                placeholder="Search decisions..."
+                type="text"
+              >
               @if (searchTerm) {
-                <button matSuffix mat-icon-button (click)="searchTerm = ''; filterDecisions()">
+                <button class="clear-btn" (click)="searchTerm = ''; filterDecisions()">
                   <mat-icon>close</mat-icon>
                 </button>
               }
-            </mat-form-field>
+            </div>
 
-            <div class="results-count">
-              {{ filteredDecisions.length }} of {{ decisions.length }} decisions
+            <div class="results-badge">
+              <span class="count">{{ filteredDecisions.length }}</span>
+              <span class="label">of {{ decisions.length }} records</span>
             </div>
           </div>
 
@@ -313,16 +319,95 @@ import { Decision, User, Space } from '../../models/decision.model';
       gap: 16px;
     }
 
-    .search-field {
+    .search-wrapper {
       flex: 1;
       max-width: 400px;
       min-width: 250px;
+      display: flex;
+      align-items: center;
+      position: relative;
+      background: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: 12px;
+      padding: 0 16px;
+      height: 48px;
+      transition: all 0.2s ease;
     }
 
-    .results-count {
-      font-size: 14px;
+    .search-wrapper:focus-within {
+      border-color: #1976d2;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.1);
+    }
+
+    .search-icon {
+      color: #9e9e9e;
+      margin-right: 12px;
+      font-size: 22px;
+    }
+
+    .search-wrapper:focus-within .search-icon {
+      color: #1976d2;
+    }
+
+    .search-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-size: 15px;
+      color: #333;
+      outline: none;
+      height: 100%;
+    }
+
+    .search-input::placeholder {
+      color: #9e9e9e;
+    }
+
+    .clear-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #e0e0e0;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.2s ease;
+    }
+
+    .clear-btn:hover {
+      background: #bdbdbd;
+    }
+
+    .clear-btn mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
       color: #666;
+    }
+
+    .results-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+      border-radius: 24px;
       white-space: nowrap;
+    }
+
+    .results-badge .count {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1565c0;
+    }
+
+    .results-badge .label {
+      font-size: 13px;
+      color: #5c8bc7;
     }
 
     .status-filters {
@@ -706,12 +791,12 @@ import { Decision, User, Space } from '../../models/decision.model';
         align-items: stretch;
       }
 
-      .search-field {
+      .search-wrapper {
         max-width: none;
       }
 
-      .results-count {
-        text-align: center;
+      .results-badge {
+        justify-content: center;
       }
     }
   `]

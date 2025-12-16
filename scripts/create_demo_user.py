@@ -76,7 +76,7 @@ def create_demo_user(domain: str, email: str = None, password: str = 'demo123!')
         print(f"\n--- Login Credentials ---")
         print(f"Email: {email}")
         print(f"Password: {password}")
-        print(f"Login URL: https://architecture-decisions.org/{domain}/login")
+        print(f"Login URL: https://decisionrecords.org/{domain}/login")
         print(f"Or locally: http://localhost:4200/{domain}/login")
 
 

@@ -342,8 +342,8 @@ test.describe('Decision Form - Space Selector', () => {
     const currentUrl = page.url();
     expect(currentUrl).toContain('test-org.com');
     expect(currentUrl).toMatch(/\/decision\/\d+/);
-    expect(currentUrl).not.toBe('https://architecture-decisions.org');
-    expect(currentUrl).not.toBe('https://architecture-decisions.org/');
+    expect(currentUrl).not.toBe('https://decisionrecords.org');
+    expect(currentUrl).not.toBe('https://decisionrecords.org/');
 
     // Verify no error
     const errorVisible = await page.locator('.error-message, mat-error:visible').isVisible({ timeout: 1000 }).catch(() => false);

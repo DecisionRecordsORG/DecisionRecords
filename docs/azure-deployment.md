@@ -214,7 +214,7 @@ az network application-gateway address-pool update \
 
 ### DNS Configuration
 
-For custom domain (e.g., architecture-decisions.org):
+For custom domain (e.g., decisionrecords.org):
 
 1. Get Application Gateway public IP:
 ```bash

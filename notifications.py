@@ -462,7 +462,7 @@ This feedback was submitted through the {app_name} website.
     """
 
     # Send to the feedback inbox
-    return send_email(email_config, "feedback@architecture-decisions.org", subject, html_content, text_content)
+    return send_email(email_config, "feedback@decisionrecords.org", subject, html_content, text_content)
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
@@ -530,4 +530,4 @@ This sponsorship inquiry was submitted through the {app_name} website.
     """
 
     # Send to the admin inbox
-    return send_email(email_config, "adr-admin@architecture-decisions.org", subject, html_content, text_content)
+    return send_email(email_config, "adr-admin@decisionrecords.org", subject, html_content, text_content)

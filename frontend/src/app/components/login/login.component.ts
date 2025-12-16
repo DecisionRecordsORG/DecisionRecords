@@ -38,7 +38,7 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
         <mat-card-header>
           <mat-card-title>
             <mat-icon>architecture</mat-icon>
-            Architecture Decisions
+            Decision Records
           </mat-card-title>
           <mat-card-subtitle>
             @if (currentView === 'initial') {
