@@ -503,6 +503,18 @@ class SlackService:
 
         return None
 
+    def handle_modal_submission(self, payload: dict):
+        """Public wrapper for modal submission handling."""
+        return self._handle_view_submission(payload)
+
+    def handle_block_action(self, payload: dict):
+        """Public wrapper for block action handling."""
+        return self._handle_block_actions(payload)
+
+    def handle_message_action(self, payload: dict):
+        """Public wrapper for message action handling."""
+        return self._handle_message_action(payload)
+
     def _handle_view_submission(self, payload: dict):
         """Handle modal form submission."""
         callback_id = payload.get('view', {}).get('callback_id')
@@ -606,6 +618,9 @@ class SlackService:
                 decision_id = action.get('value')
                 if decision_id:
                     return self._send_decision_detail(payload, int(decision_id))
+            elif action_id == 'link_account':
+                # Link account button opens a URL - just acknowledge the action
+                return None
         return None
 
     def _send_decision_detail(self, payload: dict, decision_id: int):
