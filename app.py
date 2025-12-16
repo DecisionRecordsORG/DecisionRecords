@@ -1863,7 +1863,7 @@ def api_save_email_config():
     smtp_server = sanitize_title(data['smtp_server'], max_length=255)
     smtp_username = sanitize_title(data['smtp_username'], max_length=255)
     from_email_sanitized = sanitize_email(data['from_email'])
-    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+    from_name = sanitize_name(data.get('from_name', 'Decision Records'), max_length=100)
 
     if not from_email_sanitized:
         return jsonify({'error': 'Invalid from_email address'}), 400
@@ -1930,9 +1930,9 @@ def api_test_email():
     success = send_email(
         config,
         test_email,
-        'Architecture Decisions - Test Email',
-        '<h1>Test Email</h1><p>This is a test email from Architecture Decisions.</p>',
-        'Test Email\n\nThis is a test email from Architecture Decisions.'
+        'Decision Records - Test Email',
+        '<h1>Test Email</h1><p>This is a test email from Decision Records.</p>',
+        'Test Email\n\nThis is a test email from Decision Records.'
     )
 
     if success:
@@ -1981,7 +1981,7 @@ def api_save_system_email_config():
     # Sanitize inputs to prevent XSS attacks
     smtp_server = sanitize_title(data['smtp_server'], max_length=255)
     from_email_sanitized = sanitize_email(data['from_email'])
-    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+    from_name = sanitize_name(data.get('from_name', 'Decision Records'), max_length=100)
 
     if not from_email_sanitized:
         return jsonify({'error': 'Invalid from_email address'}), 400
@@ -2036,9 +2036,9 @@ def api_test_system_email():
     success = send_email(
         config,
         test_email,
-        'Architecture Decisions - Test Email',
-        '<h1>Test Email</h1><p>This is a test email from Architecture Decisions system config.</p>',
-        'Test Email\n\nThis is a test email from Architecture Decisions system config.'
+        'Decision Records - Test Email',
+        '<h1>Test Email</h1><p>This is a test email from Decision Records system config.</p>',
+        'Test Email\n\nThis is a test email from Decision Records system config.'
     )
 
     if success:
@@ -2820,7 +2820,7 @@ def api_get_auth_config_public(domain):
         'domain': domain.lower(),
         'auth_method': 'webauthn',
         'allow_registration': True,
-        'rp_name': 'Architecture Decisions',
+        'rp_name': 'Decision Records',
     })
 
 
@@ -2953,12 +2953,12 @@ def send_verification_email(email, token, purpose, domain):
         return False
 
     base_url = request.host_url.rstrip('/')
-    verify_url = f"{base_url}/verify-email/{token}"
+    verify_url = f"{base_url}/api/auth/verify-email/{token}"
 
     if purpose == 'signup':
-        subject = 'Verify your email - Architecture Decisions'
+        subject = 'Verify your email - Decision Records'
         html_body = f"""
-        <h1>Welcome to Architecture Decisions</h1>
+        <h1>Welcome to Decision Records</h1>
         <p>Please verify your email address by clicking the button below:</p>
         <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Email</a></p>
         <p>Or copy and paste this link into your browser:</p>
@@ -2966,11 +2966,11 @@ def send_verification_email(email, token, purpose, domain):
         <p>This link will expire in 24 hours.</p>
         <p>If you didn't request this, you can safely ignore this email.</p>
         """
-        text_body = f"Welcome to Architecture Decisions\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
+        text_body = f"Welcome to Decision Records\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
     elif purpose == 'access_request':
-        subject = 'Verify your email to request access - Architecture Decisions'
+        subject = 'Verify your email to request access - Decision Records'
         html_body = f"""
-        <h1>Request Access to Architecture Decisions</h1>
+        <h1>Request Access to Decision Records</h1>
         <p>Please verify your email address to submit your access request:</p>
         <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify and Submit Request</a></p>
         <p>Or copy and paste this link into your browser:</p>
@@ -2980,7 +2980,7 @@ def send_verification_email(email, token, purpose, domain):
         """
         text_body = f"Request Access\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
     else:
-        subject = 'Verify your email - Architecture Decisions'
+        subject = 'Verify your email - Decision Records'
         html_body = f"""
         <h1>Email Verification</h1>
         <p>Please verify your email address by clicking the link below:</p>
@@ -3276,7 +3276,7 @@ def api_direct_signup():
             allow_passkey=True,
             allow_registration=True,
             require_approval=True,
-            rp_name='Architecture Decisions'
+            rp_name='Decision Records'
         )
         db.session.add(auth_config)
 
@@ -3379,7 +3379,7 @@ def api_verify_email(token):
                         allow_passkey=True,
                         allow_registration=True,
                         require_approval=True,
-                        rp_name='Architecture Decisions'
+                        rp_name='Decision Records'
                     )
                     db.session.add(auth_config)
 
@@ -4914,7 +4914,7 @@ def api_get_auth_config():
             'auth_method': 'webauthn',
             'allow_registration': True,
             'require_approval': True,
-            'rp_name': 'Architecture Decisions',
+            'rp_name': 'Decision Records',
         })
     return jsonify(config.to_dict())
 
@@ -4951,7 +4951,7 @@ def api_save_auth_config():
             auth_method=auth_method,
             allow_registration=data.get('allow_registration', True),
             require_approval=data.get('require_approval', True),
-            rp_name=data.get('rp_name', 'Architecture Decisions'),
+            rp_name=data.get('rp_name', 'Decision Records'),
         )
         db.session.add(config)
     else:
