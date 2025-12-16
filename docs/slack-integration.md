@@ -8,6 +8,7 @@ Decision Records integrates with Slack to help your team manage architecture dec
 - **Notifications**: Get notified in Slack when decisions are created or status changes
 - **Message Shortcuts**: Right-click any message and save it as a decision
 - **Auto-linking**: Team members are automatically linked by email
+- **Dedicated Link Page**: Clean account linking flow for users coming from Slack
 
 ## Prerequisites
 
@@ -20,13 +21,26 @@ Decision Records integrates with Slack to help your team manage architecture dec
 
 ## Installation
 
-### Step 1: Install the App
+There are two ways to install the Slack integration:
 
-1. Go to **Settings** in Decision Records
-2. Click the **Integrations** tab
-3. Click **Add to Slack**
-4. Select your Slack workspace and authorize the app
-5. You'll be redirected back to Settings with a success message
+### Option A: Install from Decision Records (Recommended)
+
+1. Go to **Settings** in Decision Records (or navigate to `/{your-domain}/admin`)
+2. Click the **Slack** tab
+3. Read the guidance on what happens when you click "Add to Slack"
+4. Click **Add to Slack**
+5. Select your Slack workspace and authorize the app
+6. You'll be redirected back to Settings with the Slack tab selected and a success message
+7. Refresh the page if the connection status doesn't update immediately
+
+### Option B: Claim an Existing Installation
+
+If your IT team installed the app from the Slack App Directory:
+
+1. Go to **Settings** → **Slack** tab
+2. Under "Claim Existing Installation", enter your Slack Workspace ID
+3. Click **Claim Workspace**
+4. The integration will be linked to your organization
 
 ### Step 2: Configure Notifications
 
@@ -59,22 +73,32 @@ All commands use `/adr`:
 ### Valid Statuses
 - `proposed`
 - `accepted`
-- `deprecated`
+- `archived`
 - `superseded`
 
 ## User Account Linking
 
-When a team member uses `/adr` for the first time:
+When a team member uses `/adr` for the first time, they need to link their Slack account to their Decision Records account.
 
 ### Automatic Linking (Preferred)
-If their Slack email matches their Decision Records email, they're automatically linked.
+If their Slack email matches their Decision Records email, they're automatically linked. No action required!
 
-### Manual Linking (Fallback)
-If emails don't match:
-1. Slack shows a "Link Account" button
-2. Click to open Decision Records in browser
-3. Log in (or create an account)
-4. Account is linked automatically
+### Manual Linking (Dedicated Link Page)
+If emails don't match or auto-linking fails:
+
+1. Slack shows a message with workspace context and step-by-step guidance
+2. Click **"Link My Account"** button
+3. You're taken to a dedicated account linking page (`/slack/link`)
+4. The page shows:
+   - Which Slack workspace you're linking from
+   - Whether you're logged in to Decision Records
+   - Clear instructions for next steps
+5. If already logged in: Click **"Link Account"** to complete
+6. If not logged in: Click **"Sign In"** or **"Create Account"**
+7. After linking, you'll see a success page with available commands
+
+### Email Mismatch Notice
+If your Slack email differs from your Decision Records email, the link page will show a notice explaining that linking is based on your login, not email matching.
 
 ## Message Shortcuts
 
