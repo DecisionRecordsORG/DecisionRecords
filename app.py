@@ -6853,13 +6853,17 @@ def slack_interactions():
 
     service = SlackService(workspace)
 
+    result = None
     if payload_type == 'view_submission':
-        return service.handle_modal_submission(payload)
+        result = service.handle_modal_submission(payload)
     elif payload_type == 'block_actions':
-        return service.handle_block_action(payload)
+        result = service.handle_block_action(payload)
     elif payload_type == 'message_action':
-        return service.handle_message_action(payload)
+        result = service.handle_message_action(payload)
 
+    # Slack expects a 200 response - return result if it's a dict, otherwise empty 200
+    if result is not None:
+        return jsonify(result), 200
     return '', 200
 
 
