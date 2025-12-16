@@ -83,16 +83,16 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                     <mat-form-field appearance="outline" class="status-field">
                       <mat-label>Status</mat-label>
                       <mat-select formControlName="status">
-                        <mat-option value="proposed">
+                        <mat-option value="proposed" matTooltip="Decisions under discussion, awaiting approval">
                           <mat-icon>pending</mat-icon> Proposed
                         </mat-option>
-                        <mat-option value="accepted">
+                        <mat-option value="accepted" matTooltip="Approved decisions that are currently in effect">
                           <mat-icon>check_circle</mat-icon> Accepted
                         </mat-option>
-                        <mat-option value="deprecated">
-                          <mat-icon>warning</mat-icon> Deprecated
+                        <mat-option value="archived" matTooltip="Decisions no longer in use but kept for reference">
+                          <mat-icon>archive</mat-icon> Archived
                         </mat-option>
-                        <mat-option value="superseded">
+                        <mat-option value="superseded" matTooltip="Decisions replaced by a newer decision">
                           <mat-icon>swap_horiz</mat-icon> Superseded
                         </mat-option>
                       </mat-select>
@@ -768,7 +768,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
 
     .status-proposed { background-color: #fff3e0 !important; color: #e65100 !important; }
     .status-accepted { background-color: #e8f5e9 !important; color: #2e7d32 !important; }
-    .status-deprecated { background-color: #ffebee !important; color: #c62828 !important; }
+    .status-archived { background-color: #eceff1 !important; color: #546e7a !important; }
     .status-superseded { background-color: #e3f2fd !important; color: #1565c0 !important; }
 
     .default-space-badge {
@@ -915,7 +915,7 @@ export class DecisionDetailComponent implements OnInit {
     const icons: Record<string, string> = {
       'proposed': 'schedule',
       'accepted': 'check_circle',
-      'deprecated': 'warning',
+      'archived': 'archive',
       'superseded': 'swap_horiz'
     };
     return icons[status] || 'help';

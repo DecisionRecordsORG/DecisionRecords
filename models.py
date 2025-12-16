@@ -993,7 +993,7 @@ class ArchitectureDecision(db.Model):
     space_links = db.relationship('DecisionSpace', backref='decision', lazy='dynamic', cascade='all, delete-orphan')
 
     # Valid status values
-    VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
+    VALID_STATUSES = ['proposed', 'accepted', 'archived', 'superseded']
 
     @property
     def spaces(self):

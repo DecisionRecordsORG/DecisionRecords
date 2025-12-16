@@ -827,13 +827,12 @@ class TestSlackModalSubmission:
 
             response = service._create_decision_from_modal(payload)
 
-            # Should return validation errors
+            # Should return validation errors - only title is required now
             assert response is not None
             assert response['response_action'] == 'errors'
             assert 'errors' in response
             assert 'title_block' in response['errors']
-            assert 'decision_block' in response['errors']
-            assert 'consequences_block' in response['errors']
+            # context, decision, consequences are now optional
 
 
 # ==================== Test Helper Functions ====================

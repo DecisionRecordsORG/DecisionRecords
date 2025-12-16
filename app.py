@@ -607,6 +607,20 @@ def init_database():
                         else:
                             logger.info("owner_email column already exists")
 
+                        # === Status Rename Migration (v1.5.7) ===
+                        # Rename 'deprecated' status to 'archived' for better UX
+                        logger.info("Checking for deprecated status values to migrate...")
+                        result = conn.execute(db.text("""
+                            UPDATE architecture_decisions
+                            SET status = 'archived'
+                            WHERE status = 'deprecated'
+                        """))
+                        if result.rowcount > 0:
+                            conn.commit()
+                            logger.info(f"Migrated {result.rowcount} decisions from 'deprecated' to 'archived'")
+                        else:
+                            logger.info("No deprecated status values to migrate")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -1359,6 +1373,24 @@ def api_create_decision():
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_new_decision(db, decision, email_config)
 
+    # Notify decision owner if assigned (and it's not the creator)
+    if decision.owner_id or decision.owner_email:
+        try:
+            from notifications import notify_decision_owner
+            owner_email = decision.owner_email
+            owner_name = None
+            if decision.owner_id and decision.owner:
+                owner_email = decision.owner.email
+                owner_name = decision.owner.name
+                # Don't notify if owner is the creator
+                if decision.owner_id == decision.created_by_id:
+                    owner_email = None
+            if owner_email:
+                base_url = request.host_url.rstrip('/')
+                notify_decision_owner(email_config, decision, owner_email, owner_name, base_url)
+        except Exception as e:
+            logger.warning(f"Failed to notify decision owner: {e}")
+
     # Send Slack notification if configured
     try:
         from slack_service import notify_decision_created
@@ -1438,11 +1470,16 @@ def api_update_decision(decision_id):
                 status_changed = True
             break
 
-    # Check for owner changes
+    # Check for owner changes and track if owner is being assigned/changed
+    owner_changed = False
+    old_owner_id = decision.owner_id
+    old_owner_email = decision.owner_email
     if 'owner_id' in data and owner_id != decision.owner_id:
         has_changes = True
+        owner_changed = True
     if 'owner_email' in data and owner_email != decision.owner_email:
         has_changes = True
+        owner_changed = True
 
     if not has_changes:
         return jsonify(decision.to_dict_with_history())
@@ -1496,6 +1533,33 @@ def api_update_decision(decision_id):
     if not email_config:
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_decision_updated(db, decision, email_config, change_reason, status_changed)
+
+    # Notify new decision owner if owner was changed
+    if owner_changed and (decision.owner_id or decision.owner_email):
+        # Only notify if it's a new owner (not same as old)
+        new_owner_email = decision.owner_email
+        new_owner_name = None
+        should_notify = True
+
+        if decision.owner_id and decision.owner:
+            new_owner_email = decision.owner.email
+            new_owner_name = decision.owner.name
+            # Don't notify if owner is the person making the update
+            if decision.owner_id == g.current_user.id:
+                should_notify = False
+            # Don't notify if owner hasn't actually changed (same user)
+            if decision.owner_id == old_owner_id:
+                should_notify = False
+        elif decision.owner_email and decision.owner_email == old_owner_email:
+            should_notify = False
+
+        if should_notify and new_owner_email:
+            try:
+                from notifications import notify_decision_owner
+                base_url = request.host_url.rstrip('/')
+                notify_decision_owner(email_config, decision, new_owner_email, new_owner_name, base_url)
+            except Exception as e:
+                logger.warning(f"Failed to notify decision owner on update: {e}")
 
     # Send Slack notification if status changed
     if status_changed:

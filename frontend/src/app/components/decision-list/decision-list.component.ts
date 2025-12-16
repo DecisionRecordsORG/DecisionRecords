@@ -90,32 +90,45 @@ import { Decision, User, Space } from '../../models/decision.model';
               <mat-chip
                 [highlighted]="statusFilter === 'proposed'"
                 (click)="filterByStatus('proposed')"
-                class="filter-chip status-proposed-chip">
+                class="filter-chip status-proposed-chip"
+                matTooltip="Decisions under discussion, awaiting approval">
                 <mat-icon matChipAvatar>schedule</mat-icon>
                 Proposed
               </mat-chip>
               <mat-chip
                 [highlighted]="statusFilter === 'accepted'"
                 (click)="filterByStatus('accepted')"
-                class="filter-chip status-accepted-chip">
+                class="filter-chip status-accepted-chip"
+                matTooltip="Approved decisions that are currently in effect">
                 <mat-icon matChipAvatar>check_circle</mat-icon>
                 Accepted
               </mat-chip>
               <mat-chip
-                [highlighted]="statusFilter === 'deprecated'"
-                (click)="filterByStatus('deprecated')"
-                class="filter-chip status-deprecated-chip">
-                <mat-icon matChipAvatar>warning</mat-icon>
-                Deprecated
+                [highlighted]="statusFilter === 'archived'"
+                (click)="filterByStatus('archived')"
+                class="filter-chip status-archived-chip"
+                matTooltip="Decisions that are no longer in use but kept for reference">
+                <mat-icon matChipAvatar>archive</mat-icon>
+                Archived
               </mat-chip>
               <mat-chip
                 [highlighted]="statusFilter === 'superseded'"
                 (click)="filterByStatus('superseded')"
-                class="filter-chip status-superseded-chip">
+                class="filter-chip status-superseded-chip"
+                matTooltip="Decisions replaced by a newer decision">
                 <mat-icon matChipAvatar>swap_horiz</mat-icon>
                 Superseded
               </mat-chip>
             </mat-chip-set>
+
+            <mat-chip
+              [highlighted]="showMyDecisionsOnly"
+              (click)="toggleMyDecisions()"
+              class="filter-chip my-decisions-chip"
+              matTooltip="Show only decisions you created">
+              <mat-icon matChipAvatar>person</mat-icon>
+              My Decisions
+            </mat-chip>
           </div>
 
           @if (spaces.length > 1) {
@@ -439,6 +452,17 @@ import { Decision, User, Space } from '../../models/decision.model';
       height: 18px;
     }
 
+    .my-decisions-chip {
+      margin-left: 16px;
+      border-left: 1px solid #ddd;
+      padding-left: 16px;
+    }
+
+    .my-decisions-chip[highlighted] {
+      background: #e8f5e9 !important;
+      color: #2e7d32 !important;
+    }
+
     .space-filter {
       margin-top: 16px;
       padding-top: 16px;
@@ -633,7 +657,7 @@ import { Decision, User, Space } from '../../models/decision.model';
 
     .status-proposed { background: #fff3e0; color: #e65100; }
     .status-accepted { background: #e8f5e9; color: #2e7d32; }
-    .status-deprecated { background: #ffebee; color: #c62828; }
+    .status-archived { background: #eceff1; color: #546e7a; }
     .status-superseded { background: #e3f2fd; color: #1565c0; }
 
     .card-meta {
@@ -810,6 +834,7 @@ export class DecisionListComponent implements OnInit {
   searchTerm = '';
   statusFilter = '';
   spaceFilter: number | null = null;
+  showMyDecisionsOnly = false;
   spaces: Space[] = [];
   userDomain = '';
   onboardingDialogRef: MatDialogRef<any> | null = null;
@@ -906,6 +931,8 @@ export class DecisionListComponent implements OnInit {
   }
 
   filterDecisions(): void {
+    const currentUserId = this.authService.currentUser?.user?.id;
+
     this.filteredDecisions = this.decisions.filter(d => {
       const matchesSearch = !this.searchTerm ||
         d.title.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
@@ -917,8 +944,16 @@ export class DecisionListComponent implements OnInit {
       const matchesSpace = this.spaceFilter === null ||
         (d.spaces && d.spaces.some(s => s.id === this.spaceFilter));
 
-      return matchesSearch && matchesStatus && matchesSpace;
+      const matchesMyDecisions = !this.showMyDecisionsOnly ||
+        (d.created_by && d.created_by.id === currentUserId);
+
+      return matchesSearch && matchesStatus && matchesSpace && matchesMyDecisions;
     });
+  }
+
+  toggleMyDecisions(): void {
+    this.showMyDecisionsOnly = !this.showMyDecisionsOnly;
+    this.filterDecisions();
   }
 
   filterByStatus(status: string): void {
@@ -946,7 +981,7 @@ export class DecisionListComponent implements OnInit {
     const icons: Record<string, string> = {
       'proposed': 'schedule',
       'accepted': 'check_circle',
-      'deprecated': 'warning',
+      'archived': 'archive',
       'superseded': 'swap_horiz'
     };
     return icons[status] || 'help';
@@ -956,10 +991,11 @@ export class DecisionListComponent implements OnInit {
     this.searchTerm = '';
     this.statusFilter = '';
     this.spaceFilter = null;
+    this.showMyDecisionsOnly = false;
     this.filterDecisions();
   }
 
   hasActiveFilters(): boolean {
-    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null;
+    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null || this.showMyDecisionsOnly;
   }
 }
