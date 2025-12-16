@@ -6675,7 +6675,7 @@ def slack_update_settings():
 def slack_disconnect():
     """Disconnect Slack workspace."""
     user = get_current_user()
-    tenant = get_user_tenant(user)
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
 
@@ -6702,7 +6702,7 @@ def slack_test():
     from slack_service import SlackService
 
     user = get_current_user()
-    tenant = get_user_tenant(user)
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
 
@@ -6732,7 +6732,7 @@ def slack_channels():
     from slack_service import SlackService
 
     user = get_current_user()
-    tenant = get_user_tenant(user)
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
         return jsonify({'error': 'Tenant not found'}), 404
 
