@@ -39,6 +39,28 @@ class SlackService:
         self.workspace.last_activity_at = datetime.utcnow()
         db.session.commit()
 
+    def get_channels(self):
+        """Get list of public channels the bot can post to."""
+        channels = []
+        try:
+            # Get public channels the bot is a member of or can join
+            result = self.client.conversations_list(
+                types="public_channel",
+                exclude_archived=True,
+                limit=200
+            )
+            if result.get('ok'):
+                for channel in result.get('channels', []):
+                    channels.append({
+                        'id': channel.get('id'),
+                        'name': channel.get('name'),
+                        'is_member': channel.get('is_member', False)
+                    })
+        except SlackApiError as e:
+            logger.error(f"Failed to get Slack channels: {e}")
+            raise
+        return channels
+
     # =========================================================================
     # USER LINKING
     # =========================================================================
