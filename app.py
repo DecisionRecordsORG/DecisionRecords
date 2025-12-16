@@ -358,6 +358,22 @@ def init_database():
                         else:
                             logger.info("tenant_prefix column already exists")
 
+                        # Check and add allow_slack_oidc column to auth_configs
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'auth_configs' AND column_name = 'allow_slack_oidc'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_slack_oidc column to auth_configs...")
+                            conn.execute(db.text("""
+                                ALTER TABLE auth_configs
+                                ADD COLUMN allow_slack_oidc BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_slack_oidc column added successfully")
+                        else:
+                            logger.info("allow_slack_oidc column already exists")
+
                         # Check and add decision_number column to architecture_decisions
                         result = conn.execute(db.text("""
                             SELECT column_name FROM information_schema.columns
