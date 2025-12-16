@@ -819,4 +819,210 @@ test.describe('Slack Settings', () => {
       await expect(errorMessage).toBeVisible();
     });
   });
+
+  test.describe('Slack Link Account Page', () => {
+    test('shows-error-for-missing-token: Shows error when no token provided', async ({ page }) => {
+      // Navigate to slack link page without token
+      await page.goto('/slack/link');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify error message
+      const errorTitle = page.locator('h2:has-text("Missing Token")');
+      await expect(errorTitle).toBeVisible({ timeout: 5000 });
+
+      const errorMessage = page.locator('text=No link token provided');
+      await expect(errorMessage).toBeVisible();
+    });
+
+    test('shows-login-flow-when-not-logged-in: Shows login flow when user is not logged in', async ({ page }) => {
+      // Mock token validation API - not logged in
+      await page.route('/api/slack/link/validate', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            workspace_name: 'Test Workspace',
+            workspace_id: 'T123456',
+            slack_user_id: 'U123456',
+            slack_email: 'user@test.com',
+            is_logged_in: false
+          })
+        });
+      });
+
+      // Navigate to slack link page with token
+      await page.goto('/slack/link?token=valid_test_token');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify workspace info is shown
+      const workspaceName = page.locator('text=Test Workspace');
+      await expect(workspaceName).toBeVisible({ timeout: 5000 });
+
+      // Verify login instructions are shown
+      const loginInstructions = page.locator('text=sign in to Decision Records');
+      await expect(loginInstructions).toBeVisible();
+
+      // Verify sign in button is visible
+      const signInButton = page.locator('button:has-text("Sign In")');
+      await expect(signInButton).toBeVisible();
+
+      // Verify create account button is visible
+      const createAccountButton = page.locator('button:has-text("Create Account")');
+      await expect(createAccountButton).toBeVisible();
+    });
+
+    test('shows-link-button-when-logged-in: Shows link button when user is logged in', async ({ page }) => {
+      // Mock token validation API - logged in
+      await page.route('/api/slack/link/validate', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            workspace_name: 'Test Workspace',
+            workspace_id: 'T123456',
+            slack_user_id: 'U123456',
+            slack_email: 'user@test.com',
+            is_logged_in: true,
+            user_email: 'admin@test-org.com',
+            user_name: 'Admin User',
+            tenant_domain: 'test-org.com'
+          })
+        });
+      });
+
+      // Navigate to slack link page with token
+      await page.goto('/slack/link?token=valid_test_token');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify workspace info is shown
+      const workspaceName = page.locator('text=Test Workspace');
+      await expect(workspaceName).toBeVisible({ timeout: 5000 });
+
+      // Verify user info is shown
+      const userName = page.locator('text=Admin User');
+      await expect(userName).toBeVisible();
+
+      const userEmail = page.locator('text=admin@test-org.com');
+      await expect(userEmail).toBeVisible();
+
+      // Verify link button is visible
+      const linkButton = page.locator('button:has-text("Link Account")');
+      await expect(linkButton).toBeVisible();
+    });
+
+    test('shows-success-after-linking: Shows success message after linking account', async ({ page }) => {
+      // Mock token validation API - logged in
+      await page.route('/api/slack/link/validate', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            workspace_name: 'Test Workspace',
+            workspace_id: 'T123456',
+            slack_user_id: 'U123456',
+            slack_email: 'user@test.com',
+            is_logged_in: true,
+            user_email: 'admin@test-org.com',
+            user_name: 'Admin User',
+            tenant_domain: 'test-org.com'
+          })
+        });
+      });
+
+      // Mock link complete API
+      await page.route('/api/slack/link/complete', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            message: 'Account linked successfully'
+          })
+        });
+      });
+
+      // Navigate to slack link page with token
+      await page.goto('/slack/link?token=valid_test_token');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Click link button
+      const linkButton = page.locator('button:has-text("Link Account")');
+      await expect(linkButton).toBeVisible({ timeout: 5000 });
+      await linkButton.click();
+
+      // Verify success message
+      await page.waitForTimeout(2000);
+      const successTitle = page.locator('h2:has-text("Account Linked")');
+      await expect(successTitle).toBeVisible({ timeout: 5000 });
+
+      // Verify command hints are shown
+      const commandHint = page.locator('text=/adr create');
+      await expect(commandHint).toBeVisible();
+    });
+
+    test('shows-error-for-invalid-token: Shows error for invalid token', async ({ page }) => {
+      // Mock token validation API - invalid token
+      await page.route('/api/slack/link/validate', async route => {
+        await route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: false,
+            error: 'Invalid or expired link token'
+          })
+        });
+      });
+
+      // Navigate to slack link page with invalid token
+      await page.goto('/slack/link?token=invalid_token');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify error message
+      const errorTitle = page.locator('h2:has-text("Invalid Link")');
+      await expect(errorTitle).toBeVisible({ timeout: 5000 });
+
+      const errorMessage = page.locator('text=Invalid or expired link token');
+      await expect(errorMessage).toBeVisible();
+    });
+
+    test('shows-email-mismatch-notice: Shows notice when Slack email differs from DR email', async ({ page }) => {
+      // Mock token validation API - logged in with different email
+      await page.route('/api/slack/link/validate', async route => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            workspace_name: 'Test Workspace',
+            workspace_id: 'T123456',
+            slack_user_id: 'U123456',
+            slack_email: 'slack@different.com',
+            is_logged_in: true,
+            user_email: 'admin@test-org.com',
+            user_name: 'Admin User',
+            tenant_domain: 'test-org.com'
+          })
+        });
+      });
+
+      // Navigate to slack link page with token
+      await page.goto('/slack/link?token=valid_test_token');
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+
+      // Verify email mismatch notice is shown
+      const mismatchNotice = page.locator('text=Your Slack email');
+      await expect(mismatchNotice).toBeVisible({ timeout: 5000 });
+
+      const differentEmail = page.locator('text=slack@different.com');
+      await expect(differentEmail).toBeVisible();
+    });
+  });
 });
