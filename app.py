@@ -573,6 +573,40 @@ def init_database():
                         # Note: PostgreSQL doesn't have a direct way to alter nullable, but we can use DROP/ADD
                         # For safety, we'll just ensure the column exists - SQLAlchemy model already has nullable=True
 
+                        # === Decision Owner Migrations (v1.5.7) ===
+
+                        # Add owner_id column to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'owner_id'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding owner_id column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN owner_id INTEGER REFERENCES users(id)
+                            """))
+                            conn.commit()
+                            logger.info("owner_id column added successfully")
+                        else:
+                            logger.info("owner_id column already exists")
+
+                        # Add owner_email column to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'owner_email'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding owner_email column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN owner_email VARCHAR(255)
+                            """))
+                            conn.commit()
+                            logger.info("owner_email column added successfully")
+                        else:
+                            logger.info("owner_email column already exists")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -1247,15 +1281,20 @@ def api_create_decision():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    # Sanitize and validate input
+    # Sanitize and validate input - only title is required
     sanitized, errors = sanitize_request_data(data, {
         'title': {'type': 'title', 'max_length': 255, 'required': True},
-        'context': {'type': 'text', 'max_length': 50000, 'required': True},
-        'decision': {'type': 'text', 'max_length': 50000, 'required': True},
-        'consequences': {'type': 'text', 'max_length': 50000, 'required': True},
+        'context': {'type': 'text', 'max_length': 50000, 'required': False},
+        'decision': {'type': 'text', 'max_length': 50000, 'required': False},
+        'consequences': {'type': 'text', 'max_length': 50000, 'required': False},
         'status': {'type': 'string', 'max_length': 50},
         'change_reason': {'type': 'text', 'max_length': 500},
+        'owner_email': {'type': 'email', 'required': False},
     })
+
+    # Handle owner_id separately (not part of sanitization)
+    owner_id = data.get('owner_id')
+    owner_email = sanitized.get('owner_email')
 
     if errors:
         return jsonify({'error': errors[0]}), 400
@@ -1280,16 +1319,26 @@ def api_create_decision():
     ).scalar() or 0
     next_number = max_number + 1
 
+    # Validate owner_id if provided (must be a user in the same tenant)
+    validated_owner_id = None
+    if owner_id:
+        owner_user = User.query.filter_by(id=owner_id, sso_domain=domain).first()
+        if owner_user:
+            validated_owner_id = owner_id
+        # If owner_id is invalid, we silently ignore it (don't fail the request)
+
     decision = ArchitectureDecision(
         title=sanitized['title'],
-        context=sanitized['context'],
-        decision=sanitized['decision'],
+        context=sanitized.get('context', ''),
+        decision=sanitized.get('decision', ''),
         status=status,
-        consequences=sanitized['consequences'],
+        consequences=sanitized.get('consequences', ''),
         decision_number=next_number,
         domain=domain,  # SECURITY: Always use authenticated user's domain
         created_by_id=g.current_user.id,
-        updated_by_id=g.current_user.id
+        updated_by_id=g.current_user.id,
+        owner_id=validated_owner_id,
+        owner_email=owner_email
     )
 
     # Handle infrastructure associations
@@ -1363,7 +1412,12 @@ def api_update_decision(decision_id):
         'consequences': {'type': 'text', 'max_length': 50000},
         'status': {'type': 'string', 'max_length': 50},
         'change_reason': {'type': 'text', 'max_length': 500},
+        'owner_email': {'type': 'email', 'required': False},
     })
+
+    # Handle owner_id separately
+    owner_id = data.get('owner_id')
+    owner_email = sanitized.get('owner_email')
 
     if errors:
         return jsonify({'error': errors[0]}), 400
@@ -1384,6 +1438,12 @@ def api_update_decision(decision_id):
                 status_changed = True
             break
 
+    # Check for owner changes
+    if 'owner_id' in data and owner_id != decision.owner_id:
+        has_changes = True
+    if 'owner_email' in data and owner_email != decision.owner_email:
+        has_changes = True
+
     if not has_changes:
         return jsonify(decision.to_dict_with_history())
 
@@ -1402,6 +1462,18 @@ def api_update_decision(decision_id):
         decision.status = sanitized['status']
     if 'consequences' in sanitized:
         decision.consequences = sanitized['consequences']
+
+    # Handle owner updates
+    if 'owner_id' in data:
+        if owner_id:
+            # Validate owner_id is in the same tenant
+            owner_user = User.query.filter_by(id=owner_id, sso_domain=g.current_user.sso_domain).first()
+            if owner_user:
+                decision.owner_id = owner_id
+        else:
+            decision.owner_id = None
+    if 'owner_email' in data:
+        decision.owner_email = owner_email
 
     # Handle infrastructure associations
     if 'infrastructure_ids' in data:
@@ -6801,11 +6873,16 @@ def slack_update_settings():
     return jsonify({
         'message': 'Settings updated',
         'settings': {
+            'installed': True,
+            'workspace_id': workspace.workspace_id,
+            'workspace_name': workspace.workspace_name,
             'default_channel_id': workspace.default_channel_id,
             'default_channel_name': workspace.default_channel_name,
             'notifications_enabled': workspace.notifications_enabled,
             'notify_on_create': workspace.notify_on_create,
-            'notify_on_status_change': workspace.notify_on_status_change
+            'notify_on_status_change': workspace.notify_on_status_change,
+            'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None,
+            'last_activity_at': workspace.last_activity_at.isoformat() if workspace.last_activity_at else None
         }
     })
 

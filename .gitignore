@@ -5,6 +5,7 @@
 instance/
 architecture_decisions.db
 requirements
+user-feedback
 
 # Python
 __pycache__/

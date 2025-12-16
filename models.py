@@ -978,9 +978,14 @@ class ArchitectureDecision(db.Model):
     deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     deletion_expires_at = db.Column(db.DateTime, nullable=True)  # When soft-delete becomes permanent (default: 30 days)
 
+    # Decision owner (the person who made the decision, may differ from creator)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    owner_email = db.Column(db.String(255), nullable=True)  # For external owners not in system
+
     # Relationships
     updated_by = db.relationship('User', foreign_keys=[updated_by_id])
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
+    owner = db.relationship('User', foreign_keys=[owner_id])
     history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
     infrastructure = db.relationship('ITInfrastructure', secondary=decision_infrastructure, backref=db.backref('decisions', lazy='dynamic'))
     # v1.5 relationships
@@ -1021,6 +1026,9 @@ class ArchitectureDecision(db.Model):
             'tenant_id': self.tenant_id,  # v1.5
             'created_by': self.creator.to_dict() if self.creator else None,
             'updated_by': self.updated_by.to_dict() if self.updated_by else None,
+            'owner': self.owner.to_dict() if self.owner else None,
+            'owner_id': self.owner_id,
+            'owner_email': self.owner_email,
             'infrastructure': [i.to_dict() for i in self.infrastructure] if self.infrastructure else [],
         }
         if include_spaces:

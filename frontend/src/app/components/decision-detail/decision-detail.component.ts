@@ -13,11 +13,15 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { DecisionService, UpdateDecisionRequest } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
+import { AdminService } from '../../services/admin.service';
 import { Decision, DecisionHistory, DecisionStatus, Space } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { Observable, of } from 'rxjs';
+import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operators';
 
 @Component({
   selector: 'app-decision-detail',
@@ -38,6 +42,7 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
     MatSnackBarModule,
     MatDialogModule,
     MatTooltipModule,
+    MatAutocompleteModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -140,6 +145,34 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
                     <mat-hint>Select one or more spaces for this decision</mat-hint>
                   </mat-form-field>
                 }
+
+                <!-- Decision Owner Section -->
+                <div class="owner-section">
+                  <h4>Decision Owner</h4>
+                  <p class="owner-hint">The person who made this decision (may differ from who logged it)</p>
+                  <div class="owner-fields">
+                    <mat-form-field appearance="outline" class="owner-select-field">
+                      <mat-label>Select team member</mat-label>
+                      <mat-select [(ngModel)]="selectedOwnerId" [ngModelOptions]="{standalone: true}" [disabled]="authService.isMasterAccount">
+                        <mat-option [value]="null">-- None --</mat-option>
+                        @for (member of tenantMembers; track member.id) {
+                          <mat-option [value]="member.id">
+                            {{ member.name }} ({{ member.email }})
+                          </mat-option>
+                        }
+                      </mat-select>
+                      <mat-icon matPrefix>person</mat-icon>
+                    </mat-form-field>
+                    <span class="or-divider">or</span>
+                    <mat-form-field appearance="outline" class="owner-email-field">
+                      <mat-label>External owner email</mat-label>
+                      <input matInput [(ngModel)]="ownerEmail" [ngModelOptions]="{standalone: true}"
+                             placeholder="someone@external.com" type="email" [disabled]="authService.isMasterAccount">
+                      <mat-icon matPrefix>email</mat-icon>
+                      <mat-hint>For owners outside your organization</mat-hint>
+                    </mat-form-field>
+                  </div>
+                </div>
 
                 @if (!isNew) {
                   <mat-form-field appearance="outline" class="full-width">
@@ -743,6 +776,48 @@ import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
       color: #888;
       margin-left: 4px;
     }
+
+    .owner-section {
+      margin-top: 16px;
+      padding: 16px;
+      background: #f5f5f5;
+      border-radius: 8px;
+    }
+
+    .owner-section h4 {
+      margin: 0 0 4px 0;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .owner-hint {
+      margin: 0 0 12px 0;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .owner-fields {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .owner-select-field {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .owner-email-field {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .or-divider {
+      color: #888;
+      font-size: 12px;
+      font-style: italic;
+    }
   `]
 })
 export class DecisionDetailComponent implements OnInit {
@@ -758,6 +833,11 @@ export class DecisionDetailComponent implements OnInit {
   spaces: Space[] = [];
   selectedSpaceIds: number[] = [];
 
+  // Decision owner
+  tenantMembers: any[] = [];
+  selectedOwnerId: number | null = null;
+  ownerEmail: string = '';
+
   constructor(
     private route: ActivatedRoute,
     private router: Router,
@@ -765,15 +845,16 @@ export class DecisionDetailComponent implements OnInit {
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
+    private adminService: AdminService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
     this.form = this.fb.group({
       title: ['', Validators.required],
       status: ['proposed', Validators.required],
-      context: ['', Validators.required],
-      decision: ['', Validators.required],
-      consequences: ['', Validators.required],
+      context: [''],  // Optional - users can add details later
+      decision: [''],  // Optional - users can add details later
+      consequences: [''],  // Optional - users can add details later
       change_reason: ['']
     });
   }
@@ -784,6 +865,9 @@ export class DecisionDetailComponent implements OnInit {
 
     // Load spaces
     this.loadSpaces();
+
+    // Load tenant members for owner selection
+    this.loadTenantMembers();
 
     const id = this.route.snapshot.params['id'];
     // Check if this is a new decision - either no id param (route is /decision/new) or id is undefined
@@ -796,6 +880,17 @@ export class DecisionDetailComponent implements OnInit {
     } else {
       this.loadDecision(+id);
     }
+  }
+
+  loadTenantMembers(): void {
+    this.adminService.getUsers().subscribe({
+      next: (users) => {
+        this.tenantMembers = users;
+      },
+      error: (err) => {
+        console.error('Failed to load tenant members', err);
+      }
+    });
   }
 
   loadSpaces(): void {
@@ -845,6 +940,9 @@ export class DecisionDetailComponent implements OnInit {
         if (decision.spaces && decision.spaces.length > 0) {
           this.selectedSpaceIds = decision.spaces.map(s => s.id);
         }
+        // Load decision's owner
+        this.selectedOwnerId = (decision as any).owner_id || null;
+        this.ownerEmail = (decision as any).owner_email || '';
         if (this.authService.isMasterAccount) {
           this.form.disable();
         }
@@ -870,8 +968,10 @@ export class DecisionDetailComponent implements OnInit {
         decision: formValue.decision,
         status: formValue.status,
         consequences: formValue.consequences,
-        space_ids: this.selectedSpaceIds
-      }).subscribe({
+        space_ids: this.selectedSpaceIds,
+        owner_id: this.selectedOwnerId,
+        owner_email: this.ownerEmail || undefined
+      } as any).subscribe({
         next: (decision) => {
           this.snackBar.open('Decision created successfully', 'Close', { duration: 3000 });
           this.router.navigate(['/', this.tenant, 'decision', decision.id]);
@@ -882,13 +982,15 @@ export class DecisionDetailComponent implements OnInit {
         }
       });
     } else {
-      const update: UpdateDecisionRequest = {
+      const update: any = {
         title: formValue.title,
         context: formValue.context,
         decision: formValue.decision,
         status: formValue.status,
         consequences: formValue.consequences,
-        space_ids: this.selectedSpaceIds
+        space_ids: this.selectedSpaceIds,
+        owner_id: this.selectedOwnerId,
+        owner_email: this.ownerEmail || undefined
       };
       if (formValue.change_reason) {
         update.change_reason = formValue.change_reason;

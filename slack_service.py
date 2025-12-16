@@ -533,16 +533,10 @@ class SlackService:
         consequences = values.get('consequences_block', {}).get('consequences', {}).get('value', '').strip()
         status = values.get('status_block', {}).get('status', {}).get('selected_option', {}).get('value', 'proposed')
 
-        # Validate
+        # Validate - only title is required
         errors = {}
         if not title:
             errors['title_block'] = 'Title is required'
-        if not context:
-            errors['context_block'] = 'Context is required'
-        if not decision_text:
-            errors['decision_block'] = 'Decision is required'
-        if not consequences:
-            errors['consequences_block'] = 'Consequences are required'
 
         if errors:
             return {"response_action": "errors", "errors": errors}
