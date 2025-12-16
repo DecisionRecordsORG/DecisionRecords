@@ -140,14 +140,14 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <mat-slide-toggle formControlName="enabled">Enabled</mat-slide-toggle>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="ssoForm.invalid || savingSSOConfig">
                       <mat-spinner diameter="20" *ngIf="savingSSOConfig"></mat-spinner>
                       <mat-icon *ngIf="!savingSSOConfig">save</mat-icon>
                       <span *ngIf="!savingSSOConfig">{{ editingSSOId ? 'Update' : 'Add Provider' }}</span>
                     </button>
                     @if (editingSSOId) {
-                      <button mat-button type="button" (click)="cancelSSOEdit()">Cancel</button>
+                      <button mat-stroked-button type="button" (click)="cancelSSOEdit()">Cancel</button>
                     }
                   </div>
                 </form>
@@ -279,13 +279,13 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   </div>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="emailForm.invalid || savingEmailConfig">
                       <mat-spinner diameter="20" *ngIf="savingEmailConfig"></mat-spinner>
                       <mat-icon *ngIf="!savingEmailConfig">save</mat-icon>
                       <span *ngIf="!savingEmailConfig">Save Configuration</span>
                     </button>
-                    <button mat-button type="button" (click)="testEmail()"
+                    <button mat-stroked-button type="button" (click)="testEmail()"
                             [disabled]="!hasExistingEmailConfig || testingEmail">
                       <mat-spinner diameter="20" *ngIf="testingEmail"></mat-spinner>
                       <mat-icon *ngIf="!testingEmail">send</mat-icon>
@@ -595,14 +595,14 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <p class="option-hint">New decisions will automatically be assigned to the default space.</p>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="spaceForm.invalid || savingSpace">
                       <mat-spinner diameter="20" *ngIf="savingSpace"></mat-spinner>
                       <mat-icon *ngIf="!savingSpace">save</mat-icon>
                       <span *ngIf="!savingSpace">{{ editingSpaceId ? 'Update' : 'Create Space' }}</span>
                     </button>
                     @if (editingSpaceId) {
-                      <button mat-button type="button" (click)="cancelSpaceEdit()">Cancel</button>
+                      <button mat-stroked-button type="button" (click)="cancelSpaceEdit()">Cancel</button>
                     }
                   </div>
                 </form>
@@ -942,7 +942,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <p>Connect your Slack workspace to enable slash commands and notifications.</p>
                 </mat-card-content>
                 <mat-card-actions>
-                  <a mat-raised-button color="primary" href="/api/slack/install" data-testid="slack-install-button">
+                  <a mat-flat-button color="primary" href="/api/slack/install" data-testid="slack-install-button">
                     <mat-icon>add</mat-icon>
                     Add to Slack
                   </a>
@@ -1000,7 +1000,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   </form>
                 </mat-card-content>
                 <mat-card-actions>
-                  <button mat-raised-button color="primary" (click)="saveSlackSettings()" [disabled]="savingSlackSettings" data-testid="slack-save-button">
+                  <button mat-flat-button color="primary" (click)="saveSlackSettings()" [disabled]="savingSlackSettings" data-testid="slack-save-button">
                     <mat-spinner diameter="20" *ngIf="savingSlackSettings"></mat-spinner>
                     <mat-icon *ngIf="!savingSlackSettings">save</mat-icon>
                     <span *ngIf="!savingSlackSettings">Save Settings</span>
@@ -1115,22 +1115,31 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       background: #f8fafc;
       border-radius: 12px;
       overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
 
     ::ng-deep .mat-mdc-tab-header {
       background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
       border-bottom: none;
+      border-radius: 12px 12px 0 0;
+      padding: 0 8px;
     }
 
     ::ng-deep .mat-mdc-tab-labels {
-      gap: 0;
+      gap: 4px;
     }
 
     ::ng-deep .mat-mdc-tab {
       min-width: 100px;
       padding: 0 20px;
       opacity: 1;
-      height: 48px;
+      height: 52px;
+      border-radius: 8px 8px 0 0;
+      margin-top: 4px;
+    }
+
+    ::ng-deep .mat-mdc-tab:hover {
+      background: rgba(255, 255, 255, 0.05);
     }
 
     ::ng-deep .mat-mdc-tab .mdc-tab__text-label {
@@ -1141,11 +1150,16 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     }
 
     ::ng-deep .mat-mdc-tab:hover .mdc-tab__text-label {
-      color: rgba(255, 255, 255, 0.9);
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    ::ng-deep .mat-mdc-tab.mdc-tab--active {
+      background: rgba(96, 165, 250, 0.15);
     }
 
     ::ng-deep .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label {
       color: white;
+      font-weight: 600;
     }
 
     ::ng-deep .mat-mdc-tab-body-wrapper {
@@ -1282,14 +1296,43 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       border-top: 1px solid #f1f5f9;
     }
 
-    .form-actions button[color="primary"] {
+    /* Primary button styling - consistent across all tabs */
+    .form-actions button[mat-flat-button][color="primary"],
+    mat-card-actions button[mat-flat-button][color="primary"],
+    mat-card-actions a[mat-flat-button][color="primary"] {
       background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
       border-radius: 8px;
       padding: 0 24px;
+      height: 40px;
+      font-weight: 500;
     }
 
-    .form-actions button[mat-button] {
+    /* Secondary button styling - consistent across all tabs */
+    .form-actions button[mat-stroked-button],
+    mat-card-actions button[mat-stroked-button] {
       border-radius: 8px;
+      padding: 0 20px;
+      height: 40px;
+      border-color: #cbd5e1;
+      color: #475569;
+      font-weight: 500;
+    }
+
+    .form-actions button[mat-stroked-button]:hover,
+    mat-card-actions button[mat-stroked-button]:hover {
+      background: #f1f5f9;
+      border-color: #94a3b8;
+    }
+
+    /* Warn button styling */
+    mat-card-actions button[mat-stroked-button][color="warn"] {
+      border-color: #fca5a5;
+      color: #dc2626;
+    }
+
+    mat-card-actions button[mat-stroked-button][color="warn"]:hover {
+      background: #fef2f2;
+      border-color: #f87171;
     }
 
     .empty-message {

@@ -6381,32 +6381,37 @@ def slack_install():
     from keyvault_client import keyvault_client
     from slack_security import generate_oauth_state
 
-    client_id = keyvault_client.get_slack_client_id()
-    if not client_id:
-        return jsonify({'error': 'Slack integration not configured'}), 500
+    try:
+        client_id = keyvault_client.get_slack_client_id()
+        if not client_id:
+            logger.error("Slack client ID not found in Key Vault")
+            return jsonify({'error': 'Slack integration not configured. Please set up Slack credentials in Key Vault.'}), 500
 
-    user = get_current_user()
-    tenant = get_user_tenant(user)
-    if not tenant:
-        return jsonify({'error': 'Tenant not found'}), 404
+        user = get_current_user()
+        tenant = get_user_tenant(user)
+        if not tenant:
+            return jsonify({'error': 'Tenant not found'}), 404
 
-    # Generate state with tenant_id
-    state = generate_oauth_state(tenant.id, user.id)
+        # Generate state with tenant_id
+        state = generate_oauth_state(tenant.id, user.id)
 
-    # Slack OAuth scopes
-    scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
+        # Slack OAuth scopes
+        scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
 
-    redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
+        redirect_uri = f"{request.host_url.rstrip('/')}/api/slack/oauth/callback"
 
-    auth_url = (
-        f"https://slack.com/oauth/v2/authorize"
-        f"?client_id={client_id}"
-        f"&scope={scopes}"
-        f"&redirect_uri={redirect_uri}"
-        f"&state={state}"
-    )
+        auth_url = (
+            f"https://slack.com/oauth/v2/authorize"
+            f"?client_id={client_id}"
+            f"&scope={scopes}"
+            f"&redirect_uri={redirect_uri}"
+            f"&state={state}"
+        )
 
-    return redirect(auth_url)
+        return redirect(auth_url)
+    except Exception as e:
+        logger.error(f"Slack install error: {str(e)}")
+        return jsonify({'error': f'Failed to start Slack installation: {str(e)}'}), 500
 
 
 @app.route('/api/slack/oauth/callback')
