@@ -623,6 +623,56 @@ def init_database():
                         else:
                             logger.info("owner_email column already exists")
 
+                        # === Slack Workspace Scope Tracking Migration (v1.5.7) ===
+
+                        # Add granted_scopes column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'granted_scopes'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding granted_scopes column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN granted_scopes TEXT
+                            """))
+                            conn.commit()
+                            logger.info("granted_scopes column added successfully")
+                        else:
+                            logger.info("granted_scopes column already exists")
+
+                        # Add scopes_updated_at column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'scopes_updated_at'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding scopes_updated_at column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN scopes_updated_at TIMESTAMP
+                            """))
+                            conn.commit()
+                            logger.info("scopes_updated_at column added successfully")
+                        else:
+                            logger.info("scopes_updated_at column already exists")
+
+                        # Add app_version column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'app_version'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding app_version column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN app_version VARCHAR(20)
+                            """))
+                            conn.commit()
+                            logger.info("app_version column added successfully")
+                        else:
+                            logger.info("app_version column already exists")
+
                         # === Status Rename Migration (v1.5.7) ===
                         # Rename 'deprecated' status to 'archived' for better UX
                         logger.info("Checking for deprecated status values to migrate...")
