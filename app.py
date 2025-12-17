@@ -651,9 +651,10 @@ def init_database():
                         for domain in missing_domains:
                             logger.info(f"Creating missing tenant for domain: {domain}")
                             # Create tenant (tenants table doesn't have updated_at column)
+                            # Note: maturity_state enum uses uppercase values (BOOTSTRAP, MATURE)
                             conn.execute(db.text("""
                                 INSERT INTO tenants (domain, name, status, maturity_state, created_at)
-                                VALUES (:domain, :name, 'active', 'bootstrap', NOW())
+                                VALUES (:domain, :name, 'active', 'BOOTSTRAP', NOW())
                                 ON CONFLICT (domain) DO NOTHING
                             """), {'domain': domain, 'name': domain})
                             conn.commit()
