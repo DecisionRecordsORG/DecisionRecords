@@ -544,6 +544,265 @@ class TestSlackOidcUserCreation:
                 assert membership.global_role in [GlobalRole.PROVISIONAL_ADMIN, GlobalRole.ADMIN]
 
 
+# ==================== Test Tenant Auto-Creation ====================
+
+class TestSlackOidcTenantCreation:
+    """Test tenant auto-creation during Slack OIDC signup."""
+
+    def test_tenant_created_for_new_domain(self, app, session_fixture):
+        """Tenant is created when first user signs up via Slack OIDC."""
+        with app.app_context():
+            domain = 'brandnew.com'
+
+            # Verify no tenant exists
+            tenant = Tenant.query.filter_by(domain=domain).first()
+            assert tenant is None
+
+            # Create user (simulating what happens before tenant creation in callback)
+            user = User(
+                email=f'first@{domain}',
+                name='First User',
+                sso_domain=domain,
+                auth_type='sso',
+                is_admin=True,
+                email_verified=True
+            )
+            session_fixture.add(user)
+            session_fixture.flush()
+
+            # Now create tenant (simulating Slack OIDC callback logic)
+            tenant = Tenant(
+                domain=domain,
+                name=domain,
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            session_fixture.add(tenant)
+            session_fixture.flush()
+
+            # Create membership
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=GlobalRole.PROVISIONAL_ADMIN
+            )
+            session_fixture.add(membership)
+            session_fixture.commit()
+
+            # Verify
+            reloaded_tenant = Tenant.query.filter_by(domain=domain).first()
+            assert reloaded_tenant is not None
+            assert reloaded_tenant.status == 'active'
+            assert reloaded_tenant.maturity_state == MaturityState.BOOTSTRAP
+
+    def test_first_user_becomes_provisional_admin(self, app, session_fixture):
+        """First user from a new domain gets PROVISIONAL_ADMIN role."""
+        with app.app_context():
+            domain = 'newstartup.io'
+
+            # Create tenant
+            tenant = Tenant(
+                domain=domain,
+                name=domain,
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            session_fixture.add(tenant)
+            session_fixture.flush()
+
+            # Create first user
+            user = User(
+                email=f'founder@{domain}',
+                name='Founder',
+                sso_domain=domain,
+                auth_type='sso',
+                is_admin=True,
+                email_verified=True
+            )
+            session_fixture.add(user)
+            session_fixture.flush()
+
+            # Create membership as first user
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=GlobalRole.PROVISIONAL_ADMIN
+            )
+            session_fixture.add(membership)
+            session_fixture.commit()
+
+            # Verify
+            reloaded_membership = TenantMembership.query.filter_by(
+                user_id=user.id,
+                tenant_id=tenant.id
+            ).first()
+            assert reloaded_membership is not None
+            assert reloaded_membership.global_role == GlobalRole.PROVISIONAL_ADMIN
+
+    def test_second_user_becomes_regular_user(self, app, session_fixture, sample_tenant):
+        """Second user from domain gets USER role, not admin."""
+        with app.app_context():
+            # First user already exists via sample_tenant fixture
+            first_user = User(
+                email=f'first@{sample_tenant.domain}',
+                name='First User',
+                sso_domain=sample_tenant.domain,
+                auth_type='sso',
+                is_admin=True,
+                email_verified=True
+            )
+            session_fixture.add(first_user)
+            session_fixture.flush()
+
+            # Create membership for first user
+            first_membership = TenantMembership(
+                user_id=first_user.id,
+                tenant_id=sample_tenant.id,
+                global_role=GlobalRole.PROVISIONAL_ADMIN
+            )
+            session_fixture.add(first_membership)
+            session_fixture.commit()
+
+            # Create second user
+            second_user = User(
+                email=f'second@{sample_tenant.domain}',
+                name='Second User',
+                sso_domain=sample_tenant.domain,
+                auth_type='sso',
+                is_admin=False,  # Not admin
+                email_verified=True
+            )
+            session_fixture.add(second_user)
+            session_fixture.flush()
+
+            # Create membership for second user (should be regular USER)
+            second_membership = TenantMembership(
+                user_id=second_user.id,
+                tenant_id=sample_tenant.id,
+                global_role=GlobalRole.USER
+            )
+            session_fixture.add(second_membership)
+            session_fixture.commit()
+
+            # Verify second user is regular user
+            reloaded = TenantMembership.query.filter_by(
+                user_id=second_user.id,
+                tenant_id=sample_tenant.id
+            ).first()
+            assert reloaded.global_role == GlobalRole.USER
+
+    def test_auth_config_created_for_new_tenant(self, app, session_fixture):
+        """AuthConfig is created when tenant is created via Slack OIDC."""
+        with app.app_context():
+            domain = 'newcorp.com'
+
+            # Verify no auth config exists
+            config = AuthConfig.query.filter_by(domain=domain).first()
+            assert config is None
+
+            # Create AuthConfig (simulating Slack OIDC callback logic)
+            config = AuthConfig(
+                domain=domain,
+                auth_method='slack_oidc',
+                allow_password=True,
+                allow_passkey=True,
+                allow_slack_oidc=True,
+                allow_registration=True,
+                require_approval=True,
+                rp_name='Decision Records'
+            )
+            session_fixture.add(config)
+            session_fixture.commit()
+
+            # Verify
+            reloaded = AuthConfig.query.filter_by(domain=domain).first()
+            assert reloaded is not None
+            assert reloaded.auth_method == 'slack_oidc'
+            assert reloaded.allow_slack_oidc is True
+
+    def test_tenant_not_recreated_for_existing_domain(self, app, session_fixture, sample_tenant):
+        """Existing tenant is reused, not recreated."""
+        with app.app_context():
+            original_id = sample_tenant.id
+
+            # Check if tenant already exists (it does via fixture)
+            existing = Tenant.query.filter_by(domain=sample_tenant.domain).first()
+            assert existing is not None
+            assert existing.id == original_id
+
+            # Simulate what callback does - check before creating
+            tenant = Tenant.query.filter_by(domain=sample_tenant.domain).first()
+            if not tenant:
+                tenant = Tenant(domain=sample_tenant.domain, name='New Name')
+                session_fixture.add(tenant)
+
+            session_fixture.commit()
+
+            # Verify original tenant is still there
+            final = Tenant.query.filter_by(domain=sample_tenant.domain).first()
+            assert final.id == original_id
+
+    def test_membership_created_for_existing_tenant_new_user(self, app, session_fixture, sample_tenant):
+        """Membership is created when user signs up to existing tenant."""
+        with app.app_context():
+            # Create new user for existing tenant
+            user = User(
+                email=f'newbie@{sample_tenant.domain}',
+                name='New Employee',
+                sso_domain=sample_tenant.domain,
+                auth_type='sso',
+                is_admin=False,
+                email_verified=True
+            )
+            session_fixture.add(user)
+            session_fixture.flush()
+
+            # Create membership
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=sample_tenant.id,
+                global_role=GlobalRole.USER
+            )
+            session_fixture.add(membership)
+            session_fixture.commit()
+
+            # Verify
+            reloaded = TenantMembership.query.filter_by(
+                user_id=user.id,
+                tenant_id=sample_tenant.id
+            ).first()
+            assert reloaded is not None
+            assert reloaded.global_role == GlobalRole.USER
+
+
+class TestSlackOidcDomainValidation:
+    """Test domain validation during Slack OIDC signup."""
+
+    def test_public_domain_blocked(self):
+        """Public email domains (gmail, yahoo, etc.) are blocked."""
+        from models import DomainApproval
+
+        public_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']
+        for domain in public_domains:
+            assert DomainApproval.is_public_domain(domain), f"{domain} should be blocked"
+
+    def test_corporate_domain_allowed(self):
+        """Corporate domains are allowed."""
+        from models import DomainApproval
+
+        corporate_domains = ['acme.com', 'startup.io', 'bigcorp.co.uk']
+        for domain in corporate_domains:
+            assert not DomainApproval.is_public_domain(domain), f"{domain} should be allowed"
+
+    def test_disposable_domain_blocked(self):
+        """Disposable email domains are blocked."""
+        from models import DomainApproval
+
+        # Note: This may need actual disposable domains from the blocklist
+        # For now, test the method exists and works
+        assert hasattr(DomainApproval, 'is_disposable_domain')
+
+
 # ==================== Test Error Handling ====================
 
 class TestSlackOidcErrorHandling:

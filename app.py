@@ -1480,30 +1480,75 @@ def slack_oidc_callback():
             logger.warning(f"Disposable email domain rejected for Slack OIDC: {domain}")
             return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
 
-        # Get or create user (existing logic handles tenant creation, admin assignment)
+        # Check if this is the first user for this domain
+        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+        is_first_user = existing_domain_users == 0
+
+        # Get or create user
         user = get_or_create_user(email, name, slack_user_id, domain)
 
-        # Ensure TenantMembership exists (v1.5 governance)
+        # Create Tenant if it doesn't exist (v1.5 governance)
         tenant = Tenant.query.filter_by(domain=domain).first()
-        if tenant:
-            membership = TenantMembership.query.filter_by(
-                user_id=user.id,
-                tenant_id=tenant.id
-            ).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=domain,  # Default name is domain
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            db.session.add(tenant)
+            db.session.flush()
+            logger.info(f"Created tenant for Slack OIDC domain: {domain}")
 
-            if not membership:
-                # Create membership with appropriate role
-                from models import GlobalRole
-                role = GlobalRole.ADMIN if user.is_admin else GlobalRole.MEMBER
-                membership = TenantMembership(
-                    user_id=user.id,
-                    tenant_id=tenant.id,
-                    role=role,
-                    is_active=True
+            # Create default auth config for new tenant
+            auth_config = AuthConfig.query.filter_by(domain=domain).first()
+            if not auth_config:
+                auth_config = AuthConfig(
+                    domain=domain,
+                    auth_method='slack_oidc',  # Since they signed up via Slack
+                    allow_password=True,
+                    allow_passkey=True,
+                    allow_slack_oidc=True,
+                    allow_registration=True,
+                    require_approval=True,
+                    rp_name='Decision Records'
                 )
-                db.session.add(membership)
-                db.session.commit()
-                logger.info(f"Created TenantMembership for Slack OIDC user {email} in tenant {domain}")
+                db.session.add(auth_config)
+                logger.info(f"Created AuthConfig for Slack OIDC domain: {domain}")
+
+            # Auto-approve corporate domain
+            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+            if not domain_approval:
+                domain_approval = DomainApproval(
+                    domain=domain,
+                    status='approved',
+                    requested_by_email=email,
+                    requested_by_name=name,
+                    auto_approved=True,
+                    reviewed_at=datetime.utcnow()
+                )
+                db.session.add(domain_approval)
+                logger.info(f"Auto-approved corporate domain via Slack OIDC: {domain}")
+
+        # Ensure TenantMembership exists
+        membership = TenantMembership.query.filter_by(
+            user_id=user.id,
+            tenant_id=tenant.id
+        ).first()
+
+        if not membership:
+            # Create membership with appropriate role
+            # First user becomes provisional admin
+            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=role
+            )
+            db.session.add(membership)
+            logger.info(f"Created TenantMembership for Slack OIDC user {email} in tenant {domain} with role {role.value}")
+
+        db.session.commit()
 
         # Update auth_type to indicate Slack OIDC login
         if not user.auth_type or user.auth_type == 'local':
