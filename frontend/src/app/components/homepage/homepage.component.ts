@@ -11,6 +11,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDialogModule, MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { MatSelectModule } from '@angular/material/select';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
 
@@ -30,7 +31,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     MatInputModule,
     MatProgressSpinnerModule,
     MatDialogModule,
-    MatSelectModule
+    MatSelectModule,
+    MatCheckboxModule
   ],
   template: `
     <div class="homepage">
@@ -235,6 +237,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                     }
                   </span>
                 </p>
+
+                <div class="tos-checkbox">
+                  <mat-checkbox formControlName="acceptTos" color="primary">
+                    I agree to the <a routerLink="/terms" target="_blank">Terms of Service</a> and <a routerLink="/dpa" target="_blank">Data Processing Agreement</a>
+                  </mat-checkbox>
+                </div>
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && usePasswordSignup && signupForm.get('password')?.value?.length < 8)" class="full-width submit-btn">
@@ -611,7 +619,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             <div class="trust-intro">
               <h2>Security, Trust & Governance</h2>
               <p class="trust-statement">
-                Decision Records is a <strong>non-profit, independent initiative</strong>. No organisation owns or controls the platform.
+                Decision Records is <strong>open source and independent</strong>. No single organisation owns or controls the platform.
               </p>
               <p class="trust-subtext">
                 Your decision records may contain sensitive strategic information. We take security seriously and operate with full transparency.
@@ -661,10 +669,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </div>
               </div>
               <div class="trust-item">
-                <mat-icon>volunteer_activism</mat-icon>
+                <mat-icon>code</mat-icon>
                 <div>
-                  <strong>Sustainable, transparent funding</strong>
-                  <span>The project covers operating costs through sponsorships and community support</span>
+                  <strong>Open source, self-hostable</strong>
+                  <span>Run the platform on your own infrastructure or use our managed cloud service</span>
                 </div>
               </div>
               <div class="trust-item">
@@ -742,17 +750,27 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <div class="footer-grid">
             <div class="footer-mission-col">
               <p class="footer-mission">
-                DecisionRecords.org is an open initiative to make decision-making
+                DecisionRecords.org is an open source initiative to make decision-making
                 transparent, durable, and reusable across organisations.
               </p>
-              <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org <span class="footer-separator">|</span> <a routerLink="/licensing" class="footer-link">License Model</a></small>
+              <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org</small>
+            </div>
+            <div class="footer-legal-col">
+              <h4>Legal</h4>
+              <nav class="footer-legal-links">
+                <a routerLink="/terms">Terms of Service</a>
+                <a routerLink="/security">Security</a>
+                <a routerLink="/dpa">Data Processing</a>
+                <a routerLink="/sla">SLA</a>
+                <a routerLink="/licensing">License Model</a>
+              </nav>
             </div>
             <div class="footer-support-col">
-              <h4>Support the Initiative</h4>
-              <p class="footer-support-text">Help us keep the platform free, independent, and sustainable.</p>
+              <h4>Get in Touch</h4>
+              <p class="footer-support-text">Interested in our cloud service or have questions?</p>
               <button mat-stroked-button class="sponsorship-button" (click)="openSponsorshipDialog()">
-                <mat-icon>volunteer_activism</mat-icon>
-                Sponsorship & Support
+                <mat-icon>mail</mat-icon>
+                Contact Us
               </button>
             </div>
           </div>
@@ -782,12 +800,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             <div class="sponsorship-content">
               <div class="sponsorship-text">
                 <p>
-                  Decision Records is a <strong>non-profit initiative</strong>. The platform is free to use,
-                  and we do not monetise user data or sell access.
+                  Decision Records is <strong>open source</strong> and can be self-hosted for free.
+                  Our managed cloud service offers a hassle-free experience with professional support.
                 </p>
                 <p>
-                  Use this form to <strong>support the project</strong> through sponsorship, or to <strong>discuss extended limits</strong>
-                  if your organisation needs more users or wants to explore enterprise features.
+                  Use this form to <strong>inquire about pricing</strong> for our hosted service,
+                  <strong>discuss enterprise features</strong>, or <strong>explore partnership opportunities</strong>.
                 </p>
                 <p>
                   We'd love to hear from you and will respond directly.
@@ -818,12 +836,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                     <mat-label>Area of Interest</mat-label>
                     <mat-select formControlName="area_of_interest">
                       <mat-option value="">Select an option...</mat-option>
-                      <mat-option value="Extended limits / More users">Extended limits / More users</mat-option>
-                      <mat-option value="General sponsorship">General sponsorship</mat-option>
+                      <mat-option value="Cloud pricing inquiry">Cloud pricing inquiry</mat-option>
                       <mat-option value="Enterprise features">Enterprise features</mat-option>
+                      <mat-option value="Self-hosting support">Self-hosting support</mat-option>
+                      <mat-option value="Partnership opportunity">Partnership opportunity</mat-option>
                       <mat-option value="Public sector use">Public sector use</mat-option>
-                      <mat-option value="Research">Research</mat-option>
-                      <mat-option value="Internal adoption">Internal adoption</mat-option>
+                      <mat-option value="Research / Academia">Research / Academia</mat-option>
                       <mat-option value="Other">Other</mat-option>
                     </mat-select>
                     <mat-icon matPrefix>category</mat-icon>
@@ -1402,6 +1420,29 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #2563eb;
       flex-shrink: 0;
       margin-top: 1px;
+    }
+
+    .tos-checkbox {
+      margin: 16px 0;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .tos-checkbox mat-checkbox {
+      font-size: 14px;
+      color: #475569;
+    }
+
+    .tos-checkbox a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .tos-checkbox a:hover {
+      text-decoration: underline;
     }
 
     .back-button {
@@ -2369,8 +2410,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .footer-grid {
       display: grid;
-      grid-template-columns: 1.5fr 1fr;
-      gap: 60px;
+      grid-template-columns: 1.5fr 1fr 1fr;
+      gap: 40px;
       align-items: start;
       text-align: left;
     }
@@ -2384,18 +2425,27 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #64748b;
     }
 
-    .footer-separator {
-      margin: 0 8px;
-      color: #475569;
+    .footer-legal-col h4 {
+      color: #e2e8f0;
+      margin: 0 0 12px;
+      font-size: 1rem;
+      font-weight: 600;
     }
 
-    .footer-link {
-      color: #64748b;
+    .footer-legal-links {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .footer-legal-links a {
+      color: #94a3b8;
       text-decoration: none;
+      font-size: 0.9rem;
       transition: color 0.2s;
     }
 
-    .footer-link:hover {
+    .footer-legal-links a:hover {
       color: #93c5fd;
     }
 
@@ -2578,6 +2628,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
       .footer-mission-col .footer-mission {
         text-align: center;
+      }
+
+      .footer-legal-links {
+        align-items: center;
       }
 
       .browser-frame {
@@ -2851,7 +2905,8 @@ export class HomepageComponent implements OnInit {
     this.signupForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       name: ['', Validators.required],
-      password: ['', [Validators.minLength(8)]]
+      password: ['', [Validators.minLength(8)]],
+      acceptTos: [false, Validators.requiredTrue]
     });
 
     this.accessRequestForm = this.fb.group({

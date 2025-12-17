@@ -17,6 +17,23 @@ export const routes: Routes = [
     path: 'licensing',
     loadComponent: () => import('./components/licensing/licensing.component').then(m => m.LicensingComponent)
   },
+  // Legal pages
+  {
+    path: 'terms',
+    loadComponent: () => import('./components/terms-of-service/terms-of-service.component').then(m => m.TermsOfServiceComponent)
+  },
+  {
+    path: 'security',
+    loadComponent: () => import('./components/security-policy/security-policy.component').then(m => m.SecurityPolicyComponent)
+  },
+  {
+    path: 'dpa',
+    loadComponent: () => import('./components/data-processing/data-processing.component').then(m => m.DataProcessingComponent)
+  },
+  {
+    path: 'sla',
+    loadComponent: () => import('./components/service-level-agreement/service-level-agreement.component').then(m => m.ServiceLevelAgreementComponent)
+  },
   // Super admin login
   {
     path: 'superadmin',

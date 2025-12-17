@@ -68,10 +68,10 @@ import { MatIconModule } from '@angular/material/icon';
               Although the idea originated in software engineering, the issue it addresses is much broader. Large organisations make structural decisions across IT landscapes, cloud and infrastructure strategies, security and compliance frameworks, data and integration methods, and operational structures. In all these areas, future teams bear the consequences without necessarily inheriting explanations.
             </p>
 
-            <h2>A Non-Profit Initiative</h2>
+            <h2>Open Source & Independent</h2>
 
             <p>
-              Architecture Decisions is a non-profit initiative because impartiality matters. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach.
+              Architecture Decisions is an open source project because transparency and impartiality matter. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach. You can self-host the platform or use our managed cloud service.
             </p>
 
             <blockquote>
