@@ -681,9 +681,14 @@ class SlackService:
             if owner_slack_id:
                 owner_text = f"\n:bust_in_silhouette: Owner: <@{owner_slack_id}>"
 
-            self.client.chat_postMessage(
-                channel=creator_slack_id,
-                text=f"Decision {display_id} created successfully!",
+            # Open DM channel first to ensure we can send
+            dm_channel = self._open_dm_channel(creator_slack_id)
+            if not dm_channel:
+                logger.warning(f"Could not open DM channel with {creator_slack_id}")
+            else:
+                self.client.chat_postMessage(
+                    channel=dm_channel,
+                    text=f"Decision {display_id} created successfully!",
                 blocks=[
                     {
                         "type": "section",
@@ -718,9 +723,14 @@ class SlackService:
         # Send notification to owner if different from creator
         if owner_slack_id and owner_slack_id != creator_slack_id:
             try:
-                self.client.chat_postMessage(
-                    channel=owner_slack_id,
-                    text=f"You have been assigned as the owner of decision {display_id}",
+                # Open DM channel with owner
+                owner_dm_channel = self._open_dm_channel(owner_slack_id)
+                if not owner_dm_channel:
+                    logger.warning(f"Could not open DM channel with owner {owner_slack_id}")
+                else:
+                    self.client.chat_postMessage(
+                        channel=owner_dm_channel,
+                        text=f"You have been assigned as the owner of decision {display_id}",
                     blocks=[
                         {
                             "type": "section",
@@ -965,6 +975,30 @@ class SlackService:
             text="Test notification from Decision Records"
         )
         self.update_activity()
+
+    # =========================================================================
+    # DM HELPERS
+    # =========================================================================
+
+    def _open_dm_channel(self, user_id: str) -> str:
+        """Open a DM channel with a user and return the channel ID.
+
+        Args:
+            user_id: The Slack user ID to open a DM with
+
+        Returns:
+            The DM channel ID, or None if failed
+        """
+        try:
+            result = self.client.conversations_open(users=[user_id])
+            if result.get('ok'):
+                return result.get('channel', {}).get('id')
+            else:
+                logger.warning(f"conversations.open failed: {result.get('error')}")
+                return None
+        except SlackApiError as e:
+            logger.warning(f"Failed to open DM channel with {user_id}: {e}")
+            return None
 
     # =========================================================================
     # FORMATTING HELPERS

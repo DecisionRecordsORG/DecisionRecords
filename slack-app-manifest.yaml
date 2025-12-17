@@ -45,6 +45,7 @@ oauth_config:
       - commands
       - users:read
       - users:read.email
+      - im:write
 
 settings:
   interactivity:

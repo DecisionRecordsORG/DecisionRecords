@@ -1,6 +1,6 @@
 import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule, TitleCasePipe } from '@angular/common';
-import { RouterModule, ActivatedRoute } from '@angular/router';
+import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
@@ -226,6 +226,62 @@ import { Decision, User, Space } from '../../models/decision.model';
           }
         </div>
       }
+
+      <!-- Slack Welcome Modal -->
+      <ng-template #slackWelcomeDialog>
+        <div class="slack-welcome-dialog">
+          <div class="slack-welcome-header">
+            <div class="slack-logo">
+              <svg viewBox="0 0 127 127" width="48" height="48">
+                <path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80zm6.6 0c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A"/>
+                <path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47zm0 6.7c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H13.9C6.6 60.1.7 54.2.7 46.9c0-7.3 5.9-13.2 13.2-13.2H47z" fill="#36C5F0"/>
+                <path d="M99.9 46.9c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.9V46.9zm-6.6 0c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V13.8C66.9 6.5 72.8.6 80.1.6c7.3 0 13.2 5.9 13.2 13.2v33.1z" fill="#2EB67D"/>
+                <path d="M80.1 99.8c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.8h13.2zm0-6.6c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33.1c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80.1z" fill="#ECB22E"/>
+              </svg>
+            </div>
+            <h2>Welcome to Decision Records!</h2>
+          </div>
+
+          <p class="slack-welcome-intro">
+            You've successfully signed in with Slack. Your account is now connected and ready to go.
+          </p>
+
+          <div class="slack-welcome-benefits">
+            <div class="benefit-item">
+              <mat-icon>bolt</mat-icon>
+              <div>
+                <strong>Create decisions from Slack</strong>
+                <p>Use <code>/adr create</code> to capture decisions without leaving Slack</p>
+              </div>
+            </div>
+            <div class="benefit-item">
+              <mat-icon>notifications_active</mat-icon>
+              <div>
+                <strong>Stay informed</strong>
+                <p>Get notified in Slack when decisions are created or updated</p>
+              </div>
+            </div>
+            <div class="benefit-item">
+              <mat-icon>search</mat-icon>
+              <div>
+                <strong>Find decisions fast</strong>
+                <p>Search and view decisions with <code>/adr search</code> or <code>/adr list</code></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="slack-welcome-tagline">
+            <mat-icon>auto_awesome</mat-icon>
+            <span>Long-term decision memory for your organisation</span>
+          </div>
+
+          <div class="slack-welcome-actions">
+            <button mat-raised-button color="primary" (click)="dismissSlackWelcome()">
+              Let's Go!
+            </button>
+          </div>
+        </div>
+      </ng-template>
 
       <!-- Admin Onboarding Modal -->
       <ng-template #adminOnboardingDialog>
@@ -681,6 +737,118 @@ import { Decision, User, Space } from '../../models/decision.model';
       color: #999;
     }
 
+    /* Slack Welcome Modal */
+    .slack-welcome-dialog {
+      padding: 32px;
+      text-align: center;
+    }
+
+    .slack-welcome-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .slack-logo {
+      width: 48px;
+      height: 48px;
+    }
+
+    .slack-welcome-header h2 {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .slack-welcome-intro {
+      color: #475569;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0 0 24px;
+    }
+
+    .slack-welcome-benefits {
+      text-align: left;
+      margin-bottom: 24px;
+    }
+
+    .benefit-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .benefit-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .benefit-item mat-icon {
+      color: #4A154B;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .benefit-item strong {
+      display: block;
+      color: #1e293b;
+      font-size: 0.95rem;
+      margin-bottom: 2px;
+    }
+
+    .benefit-item p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: #64748b;
+      line-height: 1.4;
+    }
+
+    .benefit-item code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      color: #4A154B;
+    }
+
+    .slack-welcome-tagline {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 16px;
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .slack-welcome-tagline mat-icon {
+      color: #0284c7;
+    }
+
+    .slack-welcome-tagline span {
+      color: #0369a1;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .slack-welcome-actions {
+      display: flex;
+      justify-content: center;
+    }
+
+    .slack-welcome-actions button {
+      padding: 0 32px;
+      height: 44px;
+      font-size: 1rem;
+      font-weight: 500;
+    }
+
     /* Admin Onboarding Modal */
     .onboarding-dialog {
       padding: 32px;
@@ -827,6 +995,7 @@ import { Decision, User, Space } from '../../models/decision.model';
 })
 export class DecisionListComponent implements OnInit {
   @ViewChild('adminOnboardingDialog') adminOnboardingDialog!: TemplateRef<any>;
+  @ViewChild('slackWelcomeDialog') slackWelcomeDialog!: TemplateRef<any>;
 
   decisions: Decision[] = [];
   filteredDecisions: Decision[] = [];
@@ -838,12 +1007,14 @@ export class DecisionListComponent implements OnInit {
   spaces: Space[] = [];
   userDomain = '';
   onboardingDialogRef: MatDialogRef<any> | null = null;
+  slackWelcomeDialogRef: MatDialogRef<any> | null = null;
 
   constructor(
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
     private route: ActivatedRoute,
+    private router: Router,
     private http: HttpClient,
     private dialog: MatDialog
   ) {}
@@ -854,6 +1025,21 @@ export class DecisionListComponent implements OnInit {
     // Get tenant from route params - this is the reliable source
     this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
     console.log('[DecisionList] userDomain from route:', this.userDomain);
+
+    // Check for slack_welcome query param (from Slack OIDC login)
+    this.route.queryParams.subscribe(params => {
+      if (params['slack_welcome'] === '1') {
+        // Clean up the URL by removing the query param
+        this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { slack_welcome: null },
+          queryParamsHandling: 'merge',
+          replaceUrl: true
+        });
+        // Show welcome modal after a short delay
+        setTimeout(() => this.showSlackWelcome(), 300);
+      }
+    });
 
     // Check if admin needs to see onboarding modal
     this.checkAdminOnboarding();
@@ -880,6 +1066,21 @@ export class DecisionListComponent implements OnInit {
       setTimeout(() => {
         this.showAdminOnboarding();
       }, 500);
+    }
+  }
+
+  showSlackWelcome(): void {
+    this.slackWelcomeDialogRef = this.dialog.open(this.slackWelcomeDialog, {
+      width: '480px',
+      disableClose: false,
+      panelClass: 'slack-welcome-dialog-panel'
+    });
+  }
+
+  dismissSlackWelcome(): void {
+    if (this.slackWelcomeDialogRef) {
+      this.slackWelcomeDialogRef.close();
+      this.slackWelcomeDialogRef = null;
     }
   }
 

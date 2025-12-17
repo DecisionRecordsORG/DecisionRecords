@@ -879,8 +879,10 @@ class TestSlackModalSubmission:
                 }
             }
 
+            mock_conversations_open = MagicMock(return_value={'ok': True, 'channel': {'id': 'D_MOCK_DM'}})
             with patch.object(service.client, 'chat_postMessage'):
-                response = service._create_decision_from_modal(payload)
+                with patch.object(service.client, 'conversations_open', mock_conversations_open):
+                    response = service._create_decision_from_modal(payload)
 
             decision = ArchitectureDecision.query.filter_by(title='Decision with Owner').first()
             assert decision is not None
@@ -920,9 +922,11 @@ class TestSlackModalSubmission:
                 }
             })
 
+            mock_conversations_open = MagicMock(return_value={'ok': True, 'channel': {'id': 'D_MOCK_DM'}})
             with patch.object(service.client, 'chat_postMessage'):
                 with patch.object(service.client, 'users_info', mock_users_info):
-                    response = service._create_decision_from_modal(payload)
+                    with patch.object(service.client, 'conversations_open', mock_conversations_open):
+                        response = service._create_decision_from_modal(payload)
 
             decision = ArchitectureDecision.query.filter_by(title='Decision with External Owner').first()
             assert decision is not None
@@ -965,16 +969,19 @@ class TestSlackModalSubmission:
             }
 
             mock_post = MagicMock()
+            mock_conversations_open = MagicMock(return_value={'ok': True, 'channel': {'id': 'D_MOCK_DM'}})
             with patch.object(service.client, 'chat_postMessage', mock_post):
-                response = service._create_decision_from_modal(payload)
+                with patch.object(service.client, 'conversations_open', mock_conversations_open):
+                    response = service._create_decision_from_modal(payload)
 
             # Should have been called twice: once for creator, once for owner
             assert mock_post.call_count >= 2
 
-            # Check that owner was notified
+            # Check that owner was notified (channel will be the mock DM channel)
             owner_call = None
             for call in mock_post.call_args_list:
-                if call.kwargs.get('channel') == 'U_OWNER_NOTIF':
+                text = call.kwargs.get('text', '')
+                if "assigned" in text.lower():
                     owner_call = call
                     break
 
@@ -1017,17 +1024,17 @@ class TestSlackModalSubmission:
             }
 
             mock_post = MagicMock()
+            mock_conversations_open = MagicMock(return_value={'ok': True, 'channel': {'id': 'D_MOCK_DM'}})
             with patch.object(service.client, 'chat_postMessage', mock_post):
-                response = service._create_decision_from_modal(payload)
+                with patch.object(service.client, 'conversations_open', mock_conversations_open):
+                    response = service._create_decision_from_modal(payload)
 
-            # Count how many times the owner (U_SELF_ASSIGN) was messaged
-            # The owner notification has specific text "You have been assigned"
+            # Count how many times the "You have been assigned" notification was sent
             owner_assignment_notification_count = 0
             for call in mock_post.call_args_list:
-                channel = call.kwargs.get('channel')
                 text = call.kwargs.get('text', '')
                 # Owner assignment notification specifically says "You have been assigned as the owner"
-                if channel == 'U_SELF_ASSIGN' and 'you have been assigned as the owner' in text.lower():
+                if 'you have been assigned as the owner' in text.lower():
                     owner_assignment_notification_count += 1
 
             # Should NOT send the "You have been assigned" notification when self-assigning

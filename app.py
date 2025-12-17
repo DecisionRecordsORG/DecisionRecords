@@ -1564,11 +1564,14 @@ def slack_oidc_callback():
         logger.info(f"Slack OIDC login successful for {email}")
 
         # Redirect to return URL or tenant home
-        if return_url and return_url != '/':
-            return redirect(return_url)
+        # Add slack_welcome param to trigger welcome modal in frontend
+        if return_url and return_url != '/' and not return_url.startswith('/?'):
+            # User had a specific destination, append welcome flag
+            separator = '&' if '?' in return_url else '?'
+            return redirect(f'{return_url}{separator}slack_welcome=1')
 
-        # Redirect to tenant dashboard
-        return redirect(f'/{domain}/decisions')
+        # Redirect to tenant dashboard with welcome modal trigger
+        return redirect(f'/{domain}/decisions?slack_welcome=1')
 
     except requests.RequestException as e:
         logger.error(f"Slack OIDC request error: {e}")
