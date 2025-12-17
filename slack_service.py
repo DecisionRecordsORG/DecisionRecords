@@ -260,8 +260,11 @@ class SlackService:
                     "type": "mrkdwn",
                     "text": (
                         "`/adr create` - Create a new decision record\n"
-                        "`/adr list [status]` - List recent decisions (optionally filter by status)\n"
-                        "`/adr view <id>` - View a specific decision by ID\n"
+                        "`/adr list` - List recent decisions\n"
+                        "`/adr list mine` - List your decisions\n"
+                        "`/adr list [status]` - List by status\n"
+                        "`/adr list space:[name]` - List by space\n"
+                        "`/adr view <id>` - View a specific decision\n"
                         "`/adr search <query>` - Search decisions\n"
                         "`/adr help` - Show this help message"
                     )
@@ -272,7 +275,7 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "Valid statuses: proposed, accepted, archived, superseded"
+                        "text": "_Statuses: proposed, accepted, archived, superseded | Combine filters: `/adr list mine accepted`_"
                     }
                 ]
             }
@@ -280,46 +283,121 @@ class SlackService:
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
     def _handle_list(self, args: str, user: User, trigger_id: str):
-        """List recent decisions."""
+        """
+        List recent decisions with filtering options.
+
+        Usage:
+          /adr list              - List recent decisions
+          /adr list mine         - List my decisions (created by me or owned by me)
+          /adr list [status]     - List by status (proposed, accepted, archived, superseded)
+          /adr list space:[name] - List decisions in a specific space
+          /adr list mine [status] - Combine filters
+        """
+        from models import Space
+
         tenant = self.workspace.tenant
         if not tenant:
             return {'response_type': 'ephemeral', 'text': 'Workspace not configured properly.'}, True
 
-        # Parse optional status filter
-        status_filter = args.strip().lower() if args else None
+        # Parse arguments
+        parts = args.strip().lower().split() if args else []
         valid_statuses = ['proposed', 'accepted', 'archived', 'superseded']
 
+        show_mine = False
+        status_filter = None
+        space_filter = None
+        filter_description = []
+
+        for part in parts:
+            if part == 'mine':
+                show_mine = True
+                filter_description.append('my decisions')
+            elif part in valid_statuses:
+                status_filter = part
+                filter_description.append(part)
+            elif part.startswith('space:'):
+                space_name = part[6:]  # Remove 'space:' prefix
+                space_filter = space_name
+                filter_description.append(f'space: {space_name}')
+
+        # Build query
         query = ArchitectureDecision.query.filter_by(
             tenant_id=tenant.id,
             deleted_at=None
-        ).order_by(ArchitectureDecision.created_at.desc())
+        )
 
-        if status_filter and status_filter in valid_statuses:
+        # Apply filters
+        if show_mine and user:
+            # Show decisions created by user OR owned by user
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(
+                    ArchitectureDecision.created_by == user.id,
+                    ArchitectureDecision.owner_id == user.id
+                )
+            )
+
+        if status_filter:
             query = query.filter_by(status=status_filter)
 
+        if space_filter:
+            # Find space by name (case-insensitive)
+            space = Space.query.filter(
+                Space.tenant_id == tenant.id,
+                db.func.lower(Space.name) == space_filter.lower()
+            ).first()
+            if space:
+                query = query.filter_by(space_id=space.id)
+            else:
+                # Show available spaces if not found
+                spaces = Space.query.filter_by(tenant_id=tenant.id).all()
+                space_names = [s.name for s in spaces] if spaces else ['(none)']
+                return {
+                    'response_type': 'ephemeral',
+                    'text': f"Space '{space_filter}' not found. Available spaces: {', '.join(space_names)}"
+                }, True
+
+        query = query.order_by(ArchitectureDecision.created_at.desc())
         decisions = query.limit(10).all()
 
+        # Build title
+        title = "Recent Decisions"
+        if filter_description:
+            title += f" ({', '.join(filter_description)})"
+
         if not decisions:
+            help_text = (
+                "\n\n*Filter options:*\n"
+                "`/adr list mine` - Your decisions\n"
+                "`/adr list [status]` - By status\n"
+                "`/adr list space:[name]` - By space"
+            )
             return {
                 'response_type': 'ephemeral',
-                'text': f"No decisions found{' with status ' + status_filter if status_filter else ''}."
+                'text': f"No decisions found{' matching your filters' if filter_description else ''}." + help_text
             }, True
 
         blocks = [
             {
                 "type": "header",
-                "text": {"type": "plain_text", "text": f"Recent Decisions{' (' + status_filter + ')' if status_filter else ''}"}
+                "text": {"type": "plain_text", "text": title}
             }
         ]
 
         for decision in decisions:
             status_emoji = self._get_status_emoji(decision.status)
             display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+
+            # Include space name if showing all decisions (not filtered by space)
+            space_info = ""
+            if not space_filter and decision.space:
+                space_info = f" | Space: {decision.space.name}"
+
             blocks.append({
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status}_"
+                    "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status}{space_info}_"
                 },
                 "accessory": {
                     "type": "button",
@@ -327,6 +405,16 @@ class SlackService:
                     "action_id": f"view_decision_{decision.id}",
                     "value": str(decision.id)
                 }
+            })
+
+        # Add filter hint if no filters used
+        if not filter_description:
+            blocks.append({
+                "type": "context",
+                "elements": [{
+                    "type": "mrkdwn",
+                    "text": "_Tip: Use `/adr list mine` to see your decisions, or `/adr list space:[name]` for a specific space_"
+                }]
             })
 
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
@@ -830,16 +918,118 @@ class SlackService:
     def _handle_block_actions(self, payload: dict):
         """Handle button clicks and other block actions."""
         actions = payload.get('actions', [])
+        trigger_id = payload.get('trigger_id')
+        slack_user_id = payload.get('user', {}).get('id')
+
         for action in actions:
             action_id = action.get('action_id', '')
+
             if action_id.startswith('view_decision_'):
                 decision_id = action.get('value')
                 if decision_id:
                     return self._send_decision_detail(payload, int(decision_id))
+
+            elif action_id == 'create_decision_home':
+                # Create Decision button from App Home
+                mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
+                if needs_linking or not user:
+                    self._send_ephemeral_link_prompt(payload, slack_user_id)
+                    return None
+                try:
+                    self._open_create_modal(trigger_id, user)
+                except SlackApiError as e:
+                    logger.error(f"Failed to open create modal from App Home: {e}")
+                return None
+
+            elif action_id == 'list_decisions_home':
+                # List Decisions button from App Home
+                mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
+                if needs_linking or not user:
+                    self._send_ephemeral_link_prompt(payload, slack_user_id)
+                    return None
+                self._send_decisions_list(payload, user)
+                return None
+
             elif action_id == 'link_account':
                 # Link account button opens a URL - just acknowledge the action
                 return None
+
+            elif action_id == 'upgrade_app':
+                # Upgrade button opens OAuth URL - just acknowledge
+                return None
+
         return None
+
+    def _send_ephemeral_link_prompt(self, payload: dict, slack_user_id: str):
+        """Send an ephemeral message prompting user to link their account."""
+        response_url = payload.get('response_url')
+        if not response_url:
+            return
+
+        mapping = SlackUserMapping.query.filter_by(
+            slack_workspace_id=self.workspace.id,
+            slack_user_id=slack_user_id
+        ).first()
+
+        slack_email = mapping.slack_email if mapping else None
+
+        import requests
+        requests.post(response_url, json={
+            'response_type': 'ephemeral',
+            'replace_original': False,
+            'blocks': self.get_link_message_blocks(slack_user_id, slack_email)
+        })
+
+    def _send_decisions_list(self, payload: dict, user: User):
+        """Send a list of recent decisions as an ephemeral message."""
+        response_url = payload.get('response_url')
+        if not response_url:
+            return
+
+        tenant = self.workspace.tenant
+        if not tenant:
+            return
+
+        decisions = ArchitectureDecision.query.filter_by(
+            tenant_id=tenant.id,
+            deleted_at=None
+        ).order_by(ArchitectureDecision.created_at.desc()).limit(10).all()
+
+        if not decisions:
+            blocks = [{
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "No decisions found. Create your first one!"}
+            }]
+        else:
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": "Recent Decisions"}
+                }
+            ]
+            for decision in decisions:
+                status_emoji = self._get_status_emoji(decision.status)
+                display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status}_"
+                    },
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View"},
+                        "action_id": f"view_decision_{decision.id}",
+                        "value": str(decision.id)
+                    }
+                })
+
+        import requests
+        requests.post(response_url, json={
+            'response_type': 'ephemeral',
+            'replace_original': False,
+            'blocks': blocks
+        })
 
     def _send_decision_detail(self, payload: dict, decision_id: int):
         """Send decision detail as a response."""
