@@ -1025,10 +1025,10 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               </mat-card>
             } @else if (slackSettings) {
               <!-- Connected -->
-              <mat-card class="form-card">
+              <mat-card class="form-card slack-connected-card">
                 <mat-card-header>
-                  <mat-card-title>
-                    <mat-icon>check_circle</mat-icon>
+                  <mat-card-title class="slack-connected-title">
+                    <mat-icon class="slack-connected-icon">check_circle</mat-icon>
                     Connected to {{ slackSettings.workspace_name || 'Slack' }}
                   </mat-card-title>
                 </mat-card-header>
@@ -1845,11 +1845,31 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       padding: 48px;
     }
 
+    /* Slack connected state styling */
+    .slack-connected-card {
+      border: 2px solid #4caf50 !important;
+    }
+
+    .slack-connected-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #2e7d32 !important;
+    }
+
+    .slack-connected-icon {
+      color: #4caf50 !important;
+      font-size: 28px;
+      height: 28px;
+      width: 28px;
+    }
+
     .slack-status {
       margin-bottom: 24px;
       padding: 16px;
-      background: #f8f9fa;
+      background: #e8f5e9;
       border-radius: 8px;
+      border-left: 4px solid #4caf50;
     }
 
     .slack-status p {

@@ -38,6 +38,7 @@ features:
 oauth_config:
   redirect_urls:
     - https://decisionrecords.org/api/slack/oauth/callback
+    - https://decisionrecords.org/auth/slack/oidc/callback
   scopes:
     bot:
       - chat:write
