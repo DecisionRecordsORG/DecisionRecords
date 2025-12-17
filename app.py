@@ -7651,6 +7651,30 @@ def superadmin_slack_list_workspaces():
             tenant = Tenant.query.get(ws.tenant_id)
             tenant_domain = tenant.domain if tenant else 'Unknown'
 
+        # Get claimed_by user info
+        claimed_by_info = None
+        if ws.claimed_by:
+            claimed_by_info = {
+                'id': ws.claimed_by.id,
+                'name': ws.claimed_by.name,
+                'email': ws.claimed_by.email
+            }
+
+        # Get linked users count and details
+        linked_users = []
+        total_linked = 0
+        for mapping in ws.user_mappings.filter(SlackUserMapping.user_id.isnot(None)).all():
+            total_linked += 1
+            if mapping.user:
+                linked_users.append({
+                    'id': mapping.user.id,
+                    'name': mapping.user.name,
+                    'email': mapping.user.email,
+                    'slack_user_id': mapping.slack_user_id,
+                    'link_method': mapping.link_method,
+                    'linked_at': mapping.linked_at.isoformat() if mapping.linked_at else None
+                })
+
         result.append({
             'id': ws.id,
             'workspace_id': ws.workspace_id,
@@ -7660,10 +7684,46 @@ def superadmin_slack_list_workspaces():
             'is_active': ws.is_active,
             'status': ws.status,
             'installed_at': ws.installed_at.isoformat() if ws.installed_at else None,
-            'claimed_at': ws.claimed_at.isoformat() if ws.claimed_at else None
+            'claimed_at': ws.claimed_at.isoformat() if ws.claimed_at else None,
+            'claimed_by': claimed_by_info,
+            'linked_users_count': total_linked,
+            'linked_users': linked_users
         })
 
     return jsonify(result)
+
+
+@app.route('/api/superadmin/slack/workspaces/<int:workspace_id>', methods=['DELETE'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_delete')
+def superadmin_slack_delete_workspace(workspace_id):
+    """Super-admin endpoint to remove a Slack workspace assignment (soft delete)."""
+    workspace = SlackWorkspace.query.get(workspace_id)
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    old_tenant_id = workspace.tenant_id
+    old_tenant_domain = None
+    if old_tenant_id:
+        tenant = Tenant.query.get(old_tenant_id)
+        old_tenant_domain = tenant.domain if tenant else 'Unknown'
+
+    # Soft delete - mark as disconnected and remove tenant assignment
+    workspace.is_active = False
+    workspace.status = SlackWorkspace.STATUS_DISCONNECTED
+    workspace.tenant_id = None
+
+    db.session.commit()
+
+    logger.info(f"Super-admin removed Slack workspace {workspace.workspace_name} ({workspace.workspace_id}) from tenant {old_tenant_domain}")
+
+    return jsonify({
+        'message': f'Slack workspace {workspace.workspace_name} has been disconnected',
+        'workspace_id': workspace.workspace_id,
+        'previous_tenant': old_tenant_domain
+    })
 
 
 @app.route('/api/slack/claim', methods=['POST'])

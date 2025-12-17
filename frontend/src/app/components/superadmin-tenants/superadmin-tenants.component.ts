@@ -47,6 +47,36 @@ interface Tenant {
   maturity_thresholds?: MaturityThresholds;
 }
 
+interface SlackLinkedUser {
+  id: number;
+  name: string;
+  email: string;
+  slack_user_id: string;
+  link_method: string;
+  linked_at: string | null;
+}
+
+interface SlackClaimedBy {
+  id: number;
+  name: string;
+  email: string;
+}
+
+interface SlackWorkspace {
+  id: number;
+  workspace_id: string;
+  workspace_name: string;
+  tenant_id: number | null;
+  tenant_domain: string | null;
+  is_active: boolean;
+  status: string;
+  installed_at: string | null;
+  claimed_at: string | null;
+  claimed_by: SlackClaimedBy | null;
+  linked_users_count: number;
+  linked_users: SlackLinkedUser[];
+}
+
 @Component({
   selector: 'app-superadmin-tenants',
   standalone: true,
@@ -354,6 +384,118 @@ interface Tenant {
             </mat-card>
           </div>
         </mat-tab>
+
+        <!-- Slack Integrations Tab -->
+        <mat-tab>
+          <ng-template mat-tab-label>
+            <mat-icon class="tab-icon">tag</mat-icon>
+            Slack Integrations
+          </ng-template>
+          <div class="tab-content">
+            <mat-card>
+              <mat-card-header>
+                <mat-card-title>Slack Workspace Connections</mat-card-title>
+                <mat-card-subtitle>
+                  All Slack workspaces connected to the platform
+                </mat-card-subtitle>
+              </mat-card-header>
+              <mat-card-content>
+                @if (isLoadingSlack) {
+                  <div class="loading">
+                    <mat-spinner diameter="40"></mat-spinner>
+                    <span>Loading Slack workspaces...</span>
+                  </div>
+                } @else if (slackWorkspaces.length === 0) {
+                  <div class="empty-state">
+                    <mat-icon>tag</mat-icon>
+                    <p>No Slack workspaces connected</p>
+                  </div>
+                } @else {
+                  <table mat-table [dataSource]="slackWorkspaces" class="full-width">
+                    <ng-container matColumnDef="workspace_name">
+                      <th mat-header-cell *matHeaderCellDef>Workspace</th>
+                      <td mat-cell *matCellDef="let ws">
+                        <strong>{{ ws.workspace_name || 'Unknown' }}</strong>
+                        <div class="workspace-id">{{ ws.workspace_id }}</div>
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="tenant_domain">
+                      <th mat-header-cell *matHeaderCellDef>Tenant</th>
+                      <td mat-cell *matCellDef="let ws">
+                        @if (ws.tenant_domain) {
+                          <span>{{ ws.tenant_domain }}</span>
+                        } @else {
+                          <span class="na-text">Unassigned</span>
+                        }
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="status">
+                      <th mat-header-cell *matHeaderCellDef>Status</th>
+                      <td mat-cell *matCellDef="let ws">
+                        <mat-chip [class]="ws.is_active ? 'active' : 'disconnected'">
+                          {{ ws.is_active ? 'Active' : 'Disconnected' }}
+                        </mat-chip>
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="claimed_by">
+                      <th mat-header-cell *matHeaderCellDef>Connected By</th>
+                      <td mat-cell *matCellDef="let ws">
+                        @if (ws.claimed_by) {
+                          <div>{{ ws.claimed_by.name }}</div>
+                          <small class="email">{{ ws.claimed_by.email }}</small>
+                        } @else {
+                          <span class="na-text">-</span>
+                        }
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="claimed_at">
+                      <th mat-header-cell *matHeaderCellDef>Connected</th>
+                      <td mat-cell *matCellDef="let ws">
+                        {{ ws.claimed_at ? (ws.claimed_at | date:'medium') : (ws.installed_at | date:'medium') }}
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="linked_users_count">
+                      <th mat-header-cell *matHeaderCellDef>Linked Users</th>
+                      <td mat-cell *matCellDef="let ws">
+                        <span class="linked-count"
+                              [class.has-users]="ws.linked_users_count > 0"
+                              (click)="ws.linked_users_count > 0 && openLinkedUsersDialog(ws)"
+                              [style.cursor]="ws.linked_users_count > 0 ? 'pointer' : 'default'">
+                          {{ ws.linked_users_count }}
+                        </span>
+                      </td>
+                    </ng-container>
+
+                    <ng-container matColumnDef="actions">
+                      <th mat-header-cell *matHeaderCellDef>Actions</th>
+                      <td mat-cell *matCellDef="let ws">
+                        <button mat-icon-button
+                                color="warn"
+                                (click)="disconnectSlackWorkspace(ws)"
+                                [disabled]="!ws.is_active || deletingWorkspaceId === ws.id"
+                                matTooltip="Disconnect workspace">
+                          @if (deletingWorkspaceId === ws.id) {
+                            <mat-spinner diameter="18"></mat-spinner>
+                          } @else {
+                            <mat-icon>link_off</mat-icon>
+                          }
+                        </button>
+                      </td>
+                    </ng-container>
+
+                    <tr mat-header-row *matHeaderRowDef="slackColumns"></tr>
+                    <tr mat-row *matRowDef="let row; columns: slackColumns;"></tr>
+                  </table>
+                }
+              </mat-card-content>
+            </mat-card>
+          </div>
+        </mat-tab>
       </mat-tab-group>
     </div>
   `,
@@ -489,25 +631,61 @@ interface Tenant {
     .login-url-cell button {
       margin-right: 0;
     }
+
+    /* Slack tab styles */
+    mat-chip.active {
+      background: #e8f5e9 !important;
+      color: #2e7d32 !important;
+    }
+
+    mat-chip.disconnected {
+      background: #ffebee !important;
+      color: #c62828 !important;
+    }
+
+    .workspace-id {
+      font-size: 11px;
+      color: #666;
+      font-family: monospace;
+    }
+
+    .linked-count {
+      display: inline-block;
+      min-width: 24px;
+      text-align: center;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+
+    .linked-count.has-users {
+      background: #e3f2fd;
+      color: #1976d2;
+      text-decoration: underline;
+    }
   `]
 })
 export class SuperadminTenantsComponent implements OnInit {
   pendingApprovals: DomainApproval[] = [];
   allApprovals: DomainApproval[] = [];
   tenants: Tenant[] = [];
+  slackWorkspaces: SlackWorkspace[] = [];
 
   isLoading = true;
   isLoadingTenants = true;
   isLoadingHistory = true;
+  isLoadingSlack = true;
 
   processingId: number | null = null;
   processingAction: 'approve' | 'reject' | null = null;
+  deletingWorkspaceId: number | null = null;
 
   rejectionReason = '';
 
   pendingColumns = ['domain', 'requested_by', 'created_at', 'actions'];
   tenantColumns = ['domain', 'login_url', 'maturity_state', 'user_count', 'admin_count', 'steward_count', 'age_days', 'has_sso', 'created_at', 'actions'];
   historyColumns = ['domain', 'status', 'requested_by', 'created_at', 'reviewed_at'];
+  slackColumns = ['workspace_name', 'tenant_domain', 'status', 'claimed_by', 'claimed_at', 'linked_users_count', 'actions'];
 
   constructor(
     private http: HttpClient,
@@ -530,6 +708,7 @@ export class SuperadminTenantsComponent implements OnInit {
     this.loadPendingApprovals();
     this.loadTenants();
     this.loadAllApprovals();
+    this.loadSlackWorkspaces();
   }
 
   loadPendingApprovals(): void {
@@ -659,6 +838,176 @@ export class SuperadminTenantsComponent implements OnInit {
       }
     });
   }
+
+  // ==================== Slack Methods ====================
+
+  loadSlackWorkspaces(): void {
+    this.isLoadingSlack = true;
+    this.http.get<SlackWorkspace[]>('/api/superadmin/slack/workspaces').subscribe({
+      next: (workspaces) => {
+        this.slackWorkspaces = workspaces;
+        this.isLoadingSlack = false;
+      },
+      error: (err) => {
+        // If Slack is not enabled, just show empty state
+        if (err.status === 503) {
+          this.slackWorkspaces = [];
+        } else {
+          this.snackBar.open('Failed to load Slack workspaces', 'Close', { duration: 3000 });
+        }
+        this.isLoadingSlack = false;
+      }
+    });
+  }
+
+  disconnectSlackWorkspace(workspace: SlackWorkspace): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Disconnect Slack Workspace',
+        message: `Are you sure you want to disconnect the Slack workspace "${workspace.workspace_name}" from tenant "${workspace.tenant_domain}"? This will remove the connection but not delete the workspace data.`,
+        confirmText: 'Disconnect',
+        cancelText: 'Cancel',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(confirmed => {
+      if (confirmed) {
+        this.deletingWorkspaceId = workspace.id;
+        this.http.delete(`/api/superadmin/slack/workspaces/${workspace.id}`).subscribe({
+          next: () => {
+            this.snackBar.open(`Slack workspace "${workspace.workspace_name}" disconnected`, 'Close', { duration: 3000 });
+            this.deletingWorkspaceId = null;
+            this.loadSlackWorkspaces();
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to disconnect workspace', 'Close', { duration: 3000 });
+            this.deletingWorkspaceId = null;
+          }
+        });
+      }
+    });
+  }
+
+  openLinkedUsersDialog(workspace: SlackWorkspace): void {
+    this.dialog.open(SlackLinkedUsersDialogComponent, {
+      width: '600px',
+      data: {
+        workspace: workspace
+      }
+    });
+  }
+}
+
+// ==================== Slack Linked Users Dialog ====================
+
+interface SlackLinkedUsersDialogData {
+  workspace: SlackWorkspace;
+}
+
+@Component({
+  selector: 'app-slack-linked-users-dialog',
+  standalone: true,
+  imports: [
+    CommonModule,
+    MatDialogModule,
+    MatButtonModule,
+    MatIconModule,
+    MatTableModule
+  ],
+  template: `
+    <h2 mat-dialog-title>
+      <mat-icon>people</mat-icon>
+      Linked Users - {{ data.workspace.workspace_name }}
+    </h2>
+    <mat-dialog-content>
+      @if (data.workspace.linked_users.length === 0) {
+        <div class="empty-state">
+          <mat-icon>person_off</mat-icon>
+          <p>No users have linked their accounts</p>
+        </div>
+      } @else {
+        <table mat-table [dataSource]="data.workspace.linked_users" class="full-width">
+          <ng-container matColumnDef="name">
+            <th mat-header-cell *matHeaderCellDef>Name</th>
+            <td mat-cell *matCellDef="let user">{{ user.name }}</td>
+          </ng-container>
+
+          <ng-container matColumnDef="email">
+            <th mat-header-cell *matHeaderCellDef>Email</th>
+            <td mat-cell *matCellDef="let user">{{ user.email }}</td>
+          </ng-container>
+
+          <ng-container matColumnDef="slack_user_id">
+            <th mat-header-cell *matHeaderCellDef>Slack User ID</th>
+            <td mat-cell *matCellDef="let user">
+              <code>{{ user.slack_user_id }}</code>
+            </td>
+          </ng-container>
+
+          <ng-container matColumnDef="link_method">
+            <th mat-header-cell *matHeaderCellDef>Method</th>
+            <td mat-cell *matCellDef="let user">{{ user.link_method || '-' }}</td>
+          </ng-container>
+
+          <ng-container matColumnDef="linked_at">
+            <th mat-header-cell *matHeaderCellDef>Linked</th>
+            <td mat-cell *matCellDef="let user">
+              {{ user.linked_at ? (user.linked_at | date:'medium') : '-' }}
+            </td>
+          </ng-container>
+
+          <tr mat-header-row *matHeaderRowDef="linkedUsersColumns"></tr>
+          <tr mat-row *matRowDef="let row; columns: linkedUsersColumns;"></tr>
+        </table>
+      }
+    </mat-dialog-content>
+    <mat-dialog-actions align="end">
+      <button mat-button mat-dialog-close>Close</button>
+    </mat-dialog-actions>
+  `,
+  styles: [`
+    h2 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .full-width {
+      width: 100%;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px;
+      color: #888;
+    }
+
+    .empty-state mat-icon {
+      font-size: 48px;
+      height: 48px;
+      width: 48px;
+      margin-bottom: 16px;
+      color: #ccc;
+    }
+
+    code {
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+  `]
+})
+export class SlackLinkedUsersDialogComponent {
+  linkedUsersColumns = ['name', 'email', 'slack_user_id', 'link_method', 'linked_at'];
+
+  constructor(
+    public dialogRef: MatDialogRef<SlackLinkedUsersDialogComponent>,
+    @Inject(MAT_DIALOG_DATA) public data: SlackLinkedUsersDialogData
+  ) {}
 }
 
 // ==================== Tenant Details Dialog ====================

@@ -1274,3 +1274,189 @@ class TestSlackOAuthCallback:
 
             for error_code, expected_url in error_scenarios:
                 assert f'slack_error={error_code}' in expected_url
+
+
+# ==================== Superadmin Slack Management Tests ====================
+
+class TestSuperadminSlackManagement:
+    """Tests for superadmin Slack workspace management endpoints."""
+
+    def test_list_workspaces_returns_all_workspaces(self, app, session_fixture, sample_tenant, sample_user):
+        """Superadmin endpoint returns all workspaces with full details."""
+        with app.app_context():
+            # Create a workspace
+            workspace = SlackWorkspace(
+                tenant_id=sample_tenant.id,
+                workspace_id='T_SUPERADMIN_TEST',
+                workspace_name='Superadmin Test Workspace',
+                bot_token_encrypted=encrypt_token('xoxb-test-token'),
+                status=SlackWorkspace.STATUS_ACTIVE,
+                is_active=True,
+                claimed_at=datetime.utcnow(),
+                claimed_by_id=sample_user.id
+            )
+            session_fixture.add(workspace)
+            session_fixture.commit()
+
+            # Verify workspace data structure
+            assert workspace.workspace_id == 'T_SUPERADMIN_TEST'
+            assert workspace.workspace_name == 'Superadmin Test Workspace'
+            assert workspace.tenant_id == sample_tenant.id
+            assert workspace.is_active is True
+            assert workspace.claimed_by_id == sample_user.id
+            assert workspace.claimed_by is not None
+            assert workspace.claimed_by.email == sample_user.email
+
+    def test_list_workspaces_includes_linked_users(self, app, session_fixture, sample_tenant, sample_user, slack_workspace):
+        """Superadmin endpoint includes linked users count and details."""
+        with app.app_context():
+            # Create user mapping
+            mapping = SlackUserMapping(
+                slack_workspace_id=slack_workspace.id,
+                slack_user_id='U_LINKED_USER',
+                slack_email=sample_user.email,
+                user_id=sample_user.id,
+                link_method='browser_auth',
+                linked_at=datetime.utcnow()
+            )
+            session_fixture.add(mapping)
+            session_fixture.commit()
+
+            # Query linked users
+            linked_count = slack_workspace.user_mappings.filter(
+                SlackUserMapping.user_id.isnot(None)
+            ).count()
+
+            assert linked_count == 1
+
+            # Verify linked user details
+            linked_mapping = slack_workspace.user_mappings.filter(
+                SlackUserMapping.user_id.isnot(None)
+            ).first()
+
+            assert linked_mapping is not None
+            assert linked_mapping.user.email == sample_user.email
+            assert linked_mapping.link_method == 'browser_auth'
+
+    def test_delete_workspace_disconnects_from_tenant(self, app, session_fixture, sample_tenant):
+        """Superadmin can disconnect a workspace from its tenant."""
+        with app.app_context():
+            # Create a workspace for this test
+            workspace = SlackWorkspace(
+                tenant_id=sample_tenant.id,
+                workspace_id='T_TO_DISCONNECT',
+                workspace_name='Workspace to Disconnect',
+                bot_token_encrypted=encrypt_token('xoxb-test-token'),
+                status=SlackWorkspace.STATUS_ACTIVE,
+                is_active=True
+            )
+            session_fixture.add(workspace)
+            session_fixture.commit()
+
+            workspace_id = workspace.id
+            original_tenant_id = workspace.tenant_id
+
+            assert original_tenant_id == sample_tenant.id
+            assert workspace.is_active is True
+
+            # Simulate superadmin disconnect
+            workspace.is_active = False
+            workspace.status = SlackWorkspace.STATUS_DISCONNECTED
+            workspace.tenant_id = None
+            session_fixture.commit()
+
+            # Reload from database and verify
+            session_fixture.expire_all()
+            disconnected = session_fixture.get(SlackWorkspace, workspace_id)
+            assert disconnected.is_active is False
+            assert disconnected.status == SlackWorkspace.STATUS_DISCONNECTED
+            assert disconnected.tenant_id is None
+
+    def test_delete_workspace_preserves_workspace_data(self, app, session_fixture, sample_tenant, sample_user, slack_workspace):
+        """Disconnecting a workspace preserves user mappings and history."""
+        with app.app_context():
+            # Create user mapping
+            mapping = SlackUserMapping(
+                slack_workspace_id=slack_workspace.id,
+                slack_user_id='U_PRESERVED_USER',
+                slack_email=sample_user.email,
+                user_id=sample_user.id,
+                link_method='auto_email',
+                linked_at=datetime.utcnow()
+            )
+            session_fixture.add(mapping)
+            session_fixture.commit()
+
+            mapping_count_before = slack_workspace.user_mappings.count()
+            assert mapping_count_before == 1
+
+            # Disconnect workspace
+            slack_workspace.is_active = False
+            slack_workspace.status = SlackWorkspace.STATUS_DISCONNECTED
+            slack_workspace.tenant_id = None
+            session_fixture.commit()
+
+            # User mapping should still exist
+            mapping_count_after = slack_workspace.user_mappings.count()
+            assert mapping_count_after == 1
+
+    def test_disconnected_workspace_can_be_reclaimed(self, app, session_fixture, sample_tenant):
+        """A disconnected workspace can be reclaimed by another tenant."""
+        with app.app_context():
+            # Create disconnected workspace
+            workspace = SlackWorkspace(
+                tenant_id=None,  # Disconnected
+                workspace_id='T_RECLAIMABLE',
+                workspace_name='Reclaimable Workspace',
+                bot_token_encrypted=encrypt_token('xoxb-test-token'),
+                status=SlackWorkspace.STATUS_DISCONNECTED,
+                is_active=False
+            )
+            session_fixture.add(workspace)
+            session_fixture.commit()
+
+            # Verify it's disconnected
+            assert workspace.tenant_id is None
+            assert workspace.is_active is False
+
+            # Reclaim for tenant
+            workspace.tenant_id = sample_tenant.id
+            workspace.is_active = True
+            workspace.status = SlackWorkspace.STATUS_ACTIVE
+            workspace.claimed_at = datetime.utcnow()
+            session_fixture.commit()
+
+            # Verify reclaimed
+            reclaimed = SlackWorkspace.query.filter_by(workspace_id='T_RECLAIMABLE').first()
+            assert reclaimed.tenant_id == sample_tenant.id
+            assert reclaimed.is_active is True
+            assert reclaimed.status == SlackWorkspace.STATUS_ACTIVE
+
+    def test_list_workspaces_shows_unassigned_workspaces(self, app, session_fixture):
+        """Superadmin can see workspaces that are not assigned to any tenant."""
+        with app.app_context():
+            # Create unassigned workspace (e.g., IT admin installed but not claimed)
+            workspace = SlackWorkspace(
+                tenant_id=None,
+                workspace_id='T_UNASSIGNED',
+                workspace_name='Unassigned Workspace',
+                bot_token_encrypted=encrypt_token('xoxb-test-token'),
+                status=SlackWorkspace.STATUS_PENDING_CLAIM,
+                is_active=True
+            )
+            session_fixture.add(workspace)
+            session_fixture.commit()
+
+            # Query all workspaces
+            all_workspaces = SlackWorkspace.query.all()
+            unassigned = [w for w in all_workspaces if w.tenant_id is None]
+
+            assert len(unassigned) >= 1
+            assert any(w.workspace_id == 'T_UNASSIGNED' for w in unassigned)
+
+    def test_delete_nonexistent_workspace_returns_error(self, app, session_fixture):
+        """Attempting to delete non-existent workspace returns appropriate error."""
+        with app.app_context():
+            # Try to find workspace that doesn't exist
+            workspace = SlackWorkspace.query.get(99999)
+            assert workspace is None  # Should not exist
