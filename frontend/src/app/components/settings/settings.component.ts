@@ -2201,6 +2201,31 @@ export class SettingsComponent implements OnInit {
         // Reload Slack settings to show the connected state
         this.loadSlackSettings();
       }
+
+      // Handle Slack error messages
+      const slackError = params['slack_error'];
+      if (slackError) {
+        let errorMessage = 'Failed to connect Slack workspace.';
+
+        if (slackError.startsWith('domain_mismatch')) {
+          // Parse domain mismatch error
+          const workspaceDomain = params['workspace_domain'];
+          const tenantDomain = params['tenant_domain'];
+          errorMessage = `Domain mismatch: The Slack workspace uses email domain "${workspaceDomain}" but your organization is "${tenantDomain}". You can only connect Slack workspaces where members use your organization's email domain.`;
+        } else if (slackError === 'workspace_claimed_by_other') {
+          errorMessage = 'This Slack workspace is already connected to another organization.';
+        } else if (slackError === 'oauth_failed') {
+          errorMessage = 'Slack authorization failed. Please try again.';
+        } else if (slackError === 'invalid_state') {
+          errorMessage = 'Authorization session expired. Please try again.';
+        } else if (slackError === 'not_configured') {
+          errorMessage = 'Slack integration is not configured. Please contact support.';
+        } else if (slackError === 'missing_code') {
+          errorMessage = 'Slack did not return an authorization code. Please try again.';
+        }
+
+        this.snackBar.open(errorMessage, 'Close', { duration: 10000, panelClass: ['error-snackbar'] });
+      }
     });
   }
 

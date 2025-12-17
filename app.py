@@ -7186,6 +7186,73 @@ def slack_oauth_callback():
         # Encrypt and store
         encrypted_token = encrypt_token(bot_token)
 
+        # === Domain Validation ===
+        # Verify the Slack workspace's primary email domain matches the tenant's domain
+        # This prevents consultants/IT admins from accidentally claiming workspaces
+        # for the wrong organization
+        workspace_domain = None
+        if tenant_id:
+            tenant = Tenant.query.get(tenant_id)
+            if tenant:
+                try:
+                    # Use the bot token to fetch workspace users and identify primary domain
+                    auth_client = WebClient(token=bot_token)
+
+                    # Get the workspace's domain from team info
+                    team_info = auth_client.team_info()
+                    if team_info['ok']:
+                        # Slack team domain (e.g., 'acme' for acme.slack.com)
+                        slack_team_domain = team_info.get('team', {}).get('domain', '')
+
+                        # Also check email_domain if set (enterprise grid)
+                        email_domain = team_info.get('team', {}).get('email_domain', '')
+
+                        # Try to get primary domain from workspace users
+                        # Fetch a sample of users to determine the dominant email domain
+                        users_response = auth_client.users_list(limit=100)
+                        if users_response['ok']:
+                            domain_counts = {}
+                            for member in users_response.get('members', []):
+                                if member.get('deleted') or member.get('is_bot'):
+                                    continue
+                                profile = member.get('profile', {})
+                                user_email = profile.get('email', '')
+                                if user_email and '@' in user_email:
+                                    user_domain = user_email.split('@')[1].lower()
+                                    # Skip common public domains
+                                    if user_domain not in ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']:
+                                        domain_counts[user_domain] = domain_counts.get(user_domain, 0) + 1
+
+                            # Find the most common domain
+                            if domain_counts:
+                                workspace_domain = max(domain_counts, key=domain_counts.get)
+                                logger.info(f"Detected workspace primary domain: {workspace_domain} (from {domain_counts[workspace_domain]} users)")
+
+                        # Use email_domain as fallback if set
+                        if not workspace_domain and email_domain:
+                            workspace_domain = email_domain.lower()
+                            logger.info(f"Using Slack email_domain: {workspace_domain}")
+
+                except Exception as e:
+                    logger.warning(f"Could not verify workspace domain: {e}")
+                    # Continue without validation - will still work, just less secure
+
+                # Validate domain match
+                if workspace_domain:
+                    tenant_domain = tenant.domain.lower()
+                    if workspace_domain != tenant_domain:
+                        logger.warning(
+                            f"Domain mismatch: Slack workspace domain '{workspace_domain}' "
+                            f"does not match tenant domain '{tenant_domain}'. "
+                            f"Workspace: {workspace_name} ({workspace_id})"
+                        )
+                        # Return error with helpful message
+                        error_msg = (
+                            f"domain_mismatch&workspace_domain={workspace_domain}"
+                            f"&tenant_domain={tenant_domain}"
+                        )
+                        return redirect(f'/settings?slack_error={error_msg}')
+
         # Check for existing workspace by workspace_id (Slack team_id)
         existing_by_workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
 
@@ -7203,8 +7270,10 @@ def slack_oauth_callback():
                     existing_by_workspace.is_active = True
                     existing_by_workspace.installed_at = datetime.utcnow()
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
-                elif existing_by_workspace.tenant_id is None:
-                    # Unclaimed workspace, claim it for this tenant
+                elif existing_by_workspace.tenant_id is None or not existing_by_workspace.is_active:
+                    # Unclaimed or disconnected workspace - claim it for this tenant
+                    # Note: A disconnected workspace (is_active=False) can be reclaimed
+                    old_tenant_id = existing_by_workspace.tenant_id
                     existing_by_workspace.tenant_id = tenant_id
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
@@ -7213,10 +7282,13 @@ def slack_oauth_callback():
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
                     existing_by_workspace.claimed_at = datetime.utcnow()
                     existing_by_workspace.claimed_by_id = user_id
-                    logger.info(f"Claimed existing workspace {workspace_name} for tenant {tenant_id}")
+                    if old_tenant_id:
+                        logger.info(f"Re-claimed disconnected workspace {workspace_name} from tenant {old_tenant_id} for tenant {tenant_id}")
+                    else:
+                        logger.info(f"Claimed unclaimed workspace {workspace_name} for tenant {tenant_id}")
                 else:
-                    # Workspace belongs to another tenant
-                    logger.warning(f"Workspace {workspace_id} already belongs to tenant {existing_by_workspace.tenant_id}")
+                    # Workspace belongs to another tenant AND is active
+                    logger.warning(f"Workspace {workspace_id} already belongs to tenant {existing_by_workspace.tenant_id} and is active")
                     return redirect('/settings?slack_error=workspace_claimed_by_other')
 
             elif existing_by_tenant:
@@ -7496,6 +7568,102 @@ def slack_disconnect():
     logger.info(f"Slack workspace disconnected from tenant {tenant.id}")
 
     return jsonify({'message': 'Slack disconnected successfully'})
+
+
+@app.route('/api/superadmin/slack/reassign', methods=['POST'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_reassign')
+def superadmin_slack_reassign():
+    """Super-admin endpoint to reassign a Slack workspace to a different tenant.
+
+    Used for:
+    - Fixing incorrectly assigned workspaces
+    - Development/testing when same workspace needs to be tested with different tenants
+
+    Request body:
+    {
+        "workspace_id": "T12345678",
+        "target_tenant_domain": "newcompany.com"
+    }
+    """
+    data = request.get_json()
+    workspace_id = data.get('workspace_id', '').strip()
+    target_domain = data.get('target_tenant_domain', '').strip()
+
+    if not workspace_id:
+        return jsonify({'error': 'workspace_id is required'}), 400
+    if not target_domain:
+        return jsonify({'error': 'target_tenant_domain is required'}), 400
+
+    # Find the workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+    if not workspace:
+        return jsonify({'error': f'Workspace {workspace_id} not found'}), 404
+
+    # Find the target tenant
+    target_tenant = Tenant.query.filter_by(domain=target_domain).first()
+    if not target_tenant:
+        return jsonify({'error': f'Tenant {target_domain} not found'}), 404
+
+    # Get old tenant info for logging
+    old_tenant_id = workspace.tenant_id
+    old_tenant_domain = None
+    if old_tenant_id:
+        old_tenant = Tenant.query.get(old_tenant_id)
+        old_tenant_domain = old_tenant.domain if old_tenant else 'Unknown'
+
+    # Reassign the workspace
+    workspace.tenant_id = target_tenant.id
+    workspace.is_active = True
+    workspace.status = SlackWorkspace.STATUS_ACTIVE
+    workspace.claimed_at = datetime.utcnow()
+    db.session.commit()
+
+    logger.warning(
+        f"SUPER-ADMIN: Reassigned Slack workspace {workspace_id} "
+        f"from tenant '{old_tenant_domain}' ({old_tenant_id}) "
+        f"to tenant '{target_domain}' ({target_tenant.id})"
+    )
+
+    return jsonify({
+        'message': 'Workspace reassigned successfully',
+        'workspace_id': workspace_id,
+        'old_tenant': old_tenant_domain,
+        'new_tenant': target_domain
+    })
+
+
+@app.route('/api/superadmin/slack/workspaces', methods=['GET'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_list')
+def superadmin_slack_list_workspaces():
+    """Super-admin endpoint to list all Slack workspaces and their tenant assignments."""
+    workspaces = SlackWorkspace.query.all()
+
+    result = []
+    for ws in workspaces:
+        tenant_domain = None
+        if ws.tenant_id:
+            tenant = Tenant.query.get(ws.tenant_id)
+            tenant_domain = tenant.domain if tenant else 'Unknown'
+
+        result.append({
+            'id': ws.id,
+            'workspace_id': ws.workspace_id,
+            'workspace_name': ws.workspace_name,
+            'tenant_id': ws.tenant_id,
+            'tenant_domain': tenant_domain,
+            'is_active': ws.is_active,
+            'status': ws.status,
+            'installed_at': ws.installed_at.isoformat() if ws.installed_at else None,
+            'claimed_at': ws.claimed_at.isoformat() if ws.claimed_at else None
+        })
+
+    return jsonify(result)
 
 
 @app.route('/api/slack/claim', methods=['POST'])
