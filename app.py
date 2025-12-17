@@ -637,6 +637,60 @@ def init_database():
                         else:
                             logger.info("No deprecated status values to migrate")
 
+                        # === Create Missing Tenants Migration (v1.5.6) ===
+                        # Create Tenant records for users who exist but don't have a tenant
+                        logger.info("Checking for missing tenants...")
+                        result = conn.execute(db.text("""
+                            SELECT DISTINCT u.sso_domain
+                            FROM users u
+                            LEFT JOIN tenants t ON u.sso_domain = t.domain
+                            WHERE t.id IS NULL AND u.sso_domain IS NOT NULL
+                        """))
+                        missing_domains = [row[0] for row in result.fetchall()]
+
+                        for domain in missing_domains:
+                            logger.info(f"Creating missing tenant for domain: {domain}")
+                            # Create tenant
+                            conn.execute(db.text("""
+                                INSERT INTO tenants (domain, name, status, maturity_state, created_at, updated_at)
+                                VALUES (:domain, :name, 'active', 'bootstrap', NOW(), NOW())
+                                ON CONFLICT (domain) DO NOTHING
+                            """), {'domain': domain, 'name': domain})
+                            conn.commit()
+
+                        if missing_domains:
+                            logger.info(f"Created {len(missing_domains)} missing tenants: {missing_domains}")
+                        else:
+                            logger.info("No missing tenants to create")
+
+                        # === Create Missing TenantMemberships Migration (v1.5.6) ===
+                        # Create TenantMembership records for users who exist but don't have a membership
+                        logger.info("Checking for missing tenant memberships...")
+                        result = conn.execute(db.text("""
+                            SELECT u.id, u.email, u.sso_domain, u.is_admin, t.id as tenant_id
+                            FROM users u
+                            JOIN tenants t ON u.sso_domain = t.domain
+                            LEFT JOIN tenant_memberships tm ON u.id = tm.user_id AND t.id = tm.tenant_id
+                            WHERE tm.id IS NULL
+                        """))
+                        missing_memberships = result.fetchall()
+
+                        for user_id, email, domain, is_admin, tenant_id in missing_memberships:
+                            # Determine role: first admin user becomes provisional_admin, others become user
+                            role = 'provisional_admin' if is_admin else 'user'
+                            logger.info(f"Creating missing membership for user {email} in tenant {domain} with role {role}")
+                            conn.execute(db.text("""
+                                INSERT INTO tenant_memberships (user_id, tenant_id, global_role, joined_at)
+                                VALUES (:user_id, :tenant_id, :role, NOW())
+                                ON CONFLICT DO NOTHING
+                            """), {'user_id': user_id, 'tenant_id': tenant_id, 'role': role})
+                            conn.commit()
+
+                        if missing_memberships:
+                            logger.info(f"Created {len(missing_memberships)} missing tenant memberships")
+                        else:
+                            logger.info("No missing tenant memberships to create")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
