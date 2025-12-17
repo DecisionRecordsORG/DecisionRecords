@@ -239,23 +239,115 @@ Subscribe to the following bot events:
 
 ## App Upgrades
 
-When new features require additional scopes, users will see upgrade prompts in:
-1. **App Home** - Banner at top with "Upgrade App" button
-2. **Slash command responses** - Context message about new features
+Slack doesn't notify users when an app is updated. We must implement our own upgrade notification system.
+
+Based on patterns from [Slack's bolt-js-upgrade-app](https://github.com/slack-samples/bolt-js-upgrade-app).
+
+### Key Concepts
+
+1. **Scopes can only be appended** - OAuth grants new scopes while keeping the existing token
+2. **Users must re-authorize** - Clicking through OAuth grants the new permissions
+3. **App Home is ideal for prompts** - Users see it when opening the app in Slack
+
+### Where Upgrade Prompts Appear
+
+1. **App Home Tab** - Banner at top with "Upgrade App" button showing:
+   - Current vs latest version
+   - List of missing features
+   - One-click upgrade button
+2. **Slash command responses** - Context message about new features (planned)
 
 ### How Upgrades Work
 
-1. New app version is released with additional scopes
-2. Users see upgrade prompts when interacting with the app
-3. Clicking "Upgrade" takes them through OAuth flow
-4. Slack appends new scopes to their existing token
-5. New features become available immediately
+1. New app version is released with additional scopes in `slack_upgrade.py`
+2. Manifest is updated with new scopes
+3. Users see upgrade prompts when opening App Home
+4. Clicking "Upgrade" takes them through OAuth flow
+5. Slack appends new scopes to their existing bot token
+6. New features become available immediately
 
 ### Version Tracking
 
-The app tracks:
-- `granted_scopes` - Which scopes the workspace has granted
-- `app_version` - Version at time of last install/upgrade
-- `scopes_updated_at` - When scopes were last updated
+The `SlackWorkspace` model tracks:
+- `granted_scopes` - Comma-separated list of OAuth scopes granted
+- `app_version` - Version string at time of last install/upgrade
+- `scopes_updated_at` - Timestamp when scopes were last updated
 
-This allows showing targeted upgrade prompts only to workspaces missing required features.
+This enables showing targeted upgrade prompts only to workspaces missing required scopes.
+
+## For Developers: Releasing New Versions
+
+### Adding a New Feature Requiring Scopes
+
+1. **Update `slack_upgrade.py`**:
+   ```python
+   APP_VERSIONS["1.2.0"] = SlackAppVersion(
+       version="1.2.0",
+       release_date="2025-01-15",
+       scopes=[
+           "chat:write", "commands", "users:read",
+           "users:read.email", "im:write",
+           "new:scope"  # Add new scope
+       ],
+       features=[
+           # Existing features...
+           "New feature description"  # Add new feature
+       ],
+       changelog="Added new feature requiring new:scope"
+   )
+
+   # Update current version
+   CURRENT_APP_VERSION = "1.2.0"
+   ```
+
+2. **Update `slack-app-manifest.yaml`**:
+   ```yaml
+   oauth_config:
+     scopes:
+       bot:
+         - chat:write
+         - commands
+         - users:read
+         - users:read.email
+         - im:write
+         - new:scope  # Add new scope
+   ```
+
+3. **Deploy the changes** - Users will see upgrade prompts
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `slack_upgrade.py` | Version definitions, scope comparison, App Home blocks |
+| `slack_service.py` | Event handlers, App Home rendering |
+| `slack-app-manifest.yaml` | Slack app configuration (scopes, events, URLs) |
+| `models.py` | `SlackWorkspace` model with scope tracking fields |
+| `app.py` | OAuth callback stores scopes, Events API endpoint |
+
+### Scope Comparison Functions
+
+```python
+from slack_upgrade import (
+    get_missing_scopes,    # Returns list of missing scopes
+    needs_upgrade,         # Returns bool
+    get_upgrade_info,      # Returns detailed upgrade dict
+    get_workspace_scopes,  # Gets scopes from workspace model
+    CURRENT_APP_VERSION,   # Current version string
+    REQUIRED_SCOPES        # List of required scopes
+)
+```
+
+### Testing Upgrades
+
+1. Install app to a test workspace with old scopes
+2. Update `CURRENT_APP_VERSION` and `REQUIRED_SCOPES`
+3. Open App Home - should show upgrade banner
+4. Click upgrade - should go through OAuth
+5. Verify new scopes are stored in database
+
+### OAuth Redirect URLs
+
+Both URLs must be registered in your Slack app:
+- `https://decisionrecords.org/api/slack/oauth/callback` - Workspace installation
+- `https://decisionrecords.org/auth/slack/oidc/callback` - Sign in with Slack (OIDC)
