@@ -76,6 +76,49 @@ All commands use `/adr`:
 - `archived`
 - `superseded`
 
+## Creating Decisions from Slack
+
+### Using `/adr create`
+
+1. Type `/adr create` in any channel
+2. A modal opens with the following fields:
+   - **Title** (required): What is this decision about?
+   - **Context**: The background and forces at play
+   - **Decision**: The decision that was made
+   - **Consequences**: What follows from this decision
+   - **Status**: Proposed, Accepted, Archived, or Superseded
+   - **Decision Owner**: Select a team member to own this decision
+3. Click **Create**
+
+### Decision Creation Feedback
+
+After creating a decision, you receive:
+
+1. **Confirmation DM**: You get a direct message with:
+   - Decision ID (e.g., `DRS-042`)
+   - Decision title and status
+   - Owner (if assigned)
+   - Link to view the decision in Decision Records
+
+2. **Channel Notification**: If enabled, a notification is posted to your configured Slack channel
+
+3. **Owner Notification**: If you assigned an owner (different from yourself), they receive a DM with:
+   - Notice they've been assigned as owner
+   - Decision ID and title
+   - Context preview
+   - Link to view the full decision
+
+### Decision Owner Field
+
+When creating a decision via Slack, you can assign an owner:
+
+- Select any Slack user from the dropdown
+- The system automatically links the owner to their Decision Records account if:
+  - They've already linked their Slack account, OR
+  - Their Slack email matches a Decision Records user
+- If the owner isn't in Decision Records, their email is stored for future linking
+- Owners receive immediate Slack notification when assigned
+
 ## User Account Linking
 
 When a team member uses `/adr` for the first time, they need to link their Slack account to their Decision Records account.

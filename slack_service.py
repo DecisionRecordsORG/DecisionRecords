@@ -515,6 +515,18 @@ class SlackService:
                         ]
                     },
                     "label": {"type": "plain_text", "text": "Status"}
+                },
+                {
+                    "type": "input",
+                    "block_id": "owner_block",
+                    "optional": True,
+                    "element": {
+                        "type": "users_select",
+                        "action_id": "owner",
+                        "placeholder": {"type": "plain_text", "text": "Select decision owner"}
+                    },
+                    "label": {"type": "plain_text", "text": "Decision Owner"},
+                    "hint": {"type": "plain_text", "text": "The person responsible for this decision. They will be notified."}
                 }
             ]
         }
@@ -583,6 +595,9 @@ class SlackService:
         consequences = values.get('consequences_block', {}).get('consequences', {}).get('value', '').strip()
         status = values.get('status_block', {}).get('status', {}).get('selected_option', {}).get('value', 'proposed')
 
+        # Extract owner (Slack user ID)
+        owner_slack_id = values.get('owner_block', {}).get('owner', {}).get('selected_user')
+
         # Validate - only title is required
         errors = {}
         if not title:
@@ -614,36 +629,136 @@ class SlackService:
             updated_by_id=user.id
         )
 
+        # Handle decision owner
+        owner_platform_user = None
+        owner_slack_email = None
+        if owner_slack_id:
+            # Try to find the owner in our platform via Slack mapping or email
+            owner_mapping = SlackUserMapping.query.filter_by(
+                slack_workspace_id=self.workspace.id,
+                slack_user_id=owner_slack_id
+            ).first()
+
+            if owner_mapping and owner_mapping.user_id:
+                # Owner is already linked to platform
+                owner_platform_user = owner_mapping.user
+                decision.owner_id = owner_platform_user.id
+            else:
+                # Try to get owner's email from Slack
+                try:
+                    owner_info = self.client.users_info(user=owner_slack_id)
+                    if owner_info['ok']:
+                        owner_slack_email = owner_info['user'].get('profile', {}).get('email')
+                        if owner_slack_email:
+                            # Check if this email exists in our platform
+                            existing_user = User.query.filter_by(email=owner_slack_email).first()
+                            if existing_user:
+                                decision.owner_id = existing_user.id
+                                owner_platform_user = existing_user
+                            else:
+                                # Store email for external owner
+                                decision.owner_email = owner_slack_email
+                except SlackApiError as e:
+                    logger.warning(f"Could not fetch owner info from Slack: {e}")
+
         db.session.add(decision)
         db.session.commit()
 
-        # Post notification if enabled
+        # Get the display ID and build the decision URL
+        display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f'ADR-{decision.decision_number}'
+        # Build decision URL - we need to construct this from the domain
+        decision_url = f"https://decisionrecords.org/{domain}/decisions/{decision.id}"
+
+        # Post notification to channel if enabled
         self._send_creation_notification(decision)
 
-        # Send confirmation to user
+        # Send confirmation to the creator
         slack_user = payload.get('user', {})
+        creator_slack_id = slack_user.get('id')
+
         try:
+            owner_text = ""
+            if owner_slack_id:
+                owner_text = f"\n:bust_in_silhouette: Owner: <@{owner_slack_id}>"
+
             self.client.chat_postMessage(
-                channel=slack_user.get('id'),
-                text=f"Decision *{decision.get_display_id() if hasattr(decision, 'get_display_id') else 'ADR-' + str(decision.decision_number)}* created successfully!",
+                channel=creator_slack_id,
+                text=f"Decision {display_id} created successfully!",
                 blocks=[
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": f":white_check_mark: Decision created successfully!\n\n*{decision.title}*"
+                            "text": f":white_check_mark: *Decision Created Successfully*\n\n*{display_id}*: {decision.title}{owner_text}"
                         }
                     },
                     {
-                        "type": "context",
+                        "type": "section",
+                        "fields": [
+                            {"type": "mrkdwn", "text": f"*Status:*\n{status.title()}"},
+                            {"type": "mrkdwn", "text": f"*Created by:*\n<@{creator_slack_id}>"}
+                        ]
+                    },
+                    {
+                        "type": "actions",
                         "elements": [
-                            {"type": "mrkdwn", "text": f"ID: {decision.get_display_id() if hasattr(decision, 'get_display_id') else 'ADR-' + str(decision.decision_number)} | Status: {status}"}
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "View Decision"},
+                                "url": decision_url,
+                                "action_id": "view_decision_url"
+                            }
                         ]
                     }
                 ]
             )
         except SlackApiError as e:
-            logger.warning(f"Failed to send confirmation DM: {e}")
+            logger.warning(f"Failed to send confirmation DM to creator: {e}")
+
+        # Send notification to owner if different from creator
+        if owner_slack_id and owner_slack_id != creator_slack_id:
+            try:
+                self.client.chat_postMessage(
+                    channel=owner_slack_id,
+                    text=f"You have been assigned as the owner of decision {display_id}",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":clipboard: *You've Been Assigned a Decision*\n\n<@{creator_slack_id}> has assigned you as the owner of a new decision."
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"*{display_id}*: {decision.title}"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Status:*\n{status.title()}"},
+                                {"type": "mrkdwn", "text": f"*Context:*\n{context[:100] + '...' if len(context) > 100 else context or 'Not provided'}"}
+                            ]
+                        },
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "View Decision"},
+                                    "url": decision_url,
+                                    "style": "primary",
+                                    "action_id": "view_decision_url"
+                                }
+                            ]
+                        }
+                    ]
+                )
+            except SlackApiError as e:
+                logger.warning(f"Failed to send owner notification DM: {e}")
 
         return {}  # Empty response closes the modal
 

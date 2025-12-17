@@ -834,6 +834,205 @@ class TestSlackModalSubmission:
             assert 'title_block' in response['errors']
             # context, decision, consequences are now optional
 
+    def test_create_decision_with_owner_linked_user(self, app, session_fixture, slack_workspace, sample_user, sample_tenant, sample_membership):
+        """Modal submission with owner who is already linked sets owner_id."""
+        with app.app_context():
+            # Create another user to be the owner
+            owner_user = User(
+                email='owner@example.com',
+                name='Owner User',
+                sso_domain='example.com',
+                auth_type='webauthn'
+            )
+            session_fixture.add(owner_user)
+            session_fixture.commit()
+
+            # Create Slack mapping for owner
+            owner_mapping = SlackUserMapping(
+                slack_workspace_id=slack_workspace.id,
+                slack_user_id='U_OWNER_123',
+                slack_email='owner@example.com',
+                user_id=owner_user.id,
+                link_method='auto_email',
+                linked_at=datetime.utcnow()
+            )
+            session_fixture.add(owner_mapping)
+            session_fixture.commit()
+
+            service = SlackService(slack_workspace)
+
+            payload = {
+                'user': {'id': 'U_CREATOR'},
+                'view': {
+                    'callback_id': 'create_decision',
+                    'private_metadata': str(sample_user.id),
+                    'state': {
+                        'values': {
+                            'title_block': {'title': {'value': 'Decision with Owner'}},
+                            'context_block': {'context': {'value': 'Context'}},
+                            'decision_block': {'decision': {'value': 'Decision'}},
+                            'consequences_block': {'consequences': {'value': 'Consequences'}},
+                            'status_block': {'status': {'selected_option': {'value': 'proposed'}}},
+                            'owner_block': {'owner': {'selected_user': 'U_OWNER_123'}}
+                        }
+                    }
+                }
+            }
+
+            with patch.object(service.client, 'chat_postMessage'):
+                response = service._create_decision_from_modal(payload)
+
+            decision = ArchitectureDecision.query.filter_by(title='Decision with Owner').first()
+            assert decision is not None
+            assert decision.owner_id == owner_user.id
+            assert decision.owner_email is None  # Should not be set when owner_id is set
+
+    def test_create_decision_with_owner_unlinked_user(self, app, session_fixture, slack_workspace, sample_user, sample_tenant, sample_membership):
+        """Modal submission with unlinked owner stores owner email."""
+        with app.app_context():
+            service = SlackService(slack_workspace)
+
+            payload = {
+                'user': {'id': 'U_CREATOR'},
+                'view': {
+                    'callback_id': 'create_decision',
+                    'private_metadata': str(sample_user.id),
+                    'state': {
+                        'values': {
+                            'title_block': {'title': {'value': 'Decision with External Owner'}},
+                            'context_block': {'context': {'value': 'Context'}},
+                            'decision_block': {'decision': {'value': 'Decision'}},
+                            'consequences_block': {'consequences': {'value': 'Consequences'}},
+                            'status_block': {'status': {'selected_option': {'value': 'proposed'}}},
+                            'owner_block': {'owner': {'selected_user': 'U_EXTERNAL_USER'}}
+                        }
+                    }
+                }
+            }
+
+            # Mock users_info to return an external email
+            mock_users_info = MagicMock(return_value={
+                'ok': True,
+                'user': {
+                    'profile': {
+                        'email': 'external@other-company.com'
+                    }
+                }
+            })
+
+            with patch.object(service.client, 'chat_postMessage'):
+                with patch.object(service.client, 'users_info', mock_users_info):
+                    response = service._create_decision_from_modal(payload)
+
+            decision = ArchitectureDecision.query.filter_by(title='Decision with External Owner').first()
+            assert decision is not None
+            assert decision.owner_id is None  # User not in platform
+            assert decision.owner_email == 'external@other-company.com'
+
+    def test_create_decision_sends_owner_notification(self, app, session_fixture, slack_workspace, sample_user, sample_tenant, sample_membership):
+        """Modal submission sends notification to owner when different from creator."""
+        with app.app_context():
+            # Create owner mapping
+            owner_mapping = SlackUserMapping(
+                slack_workspace_id=slack_workspace.id,
+                slack_user_id='U_OWNER_NOTIF',
+                slack_email='owner-notif@example.com',
+                user_id=sample_user.id,
+                link_method='auto_email',
+                linked_at=datetime.utcnow()
+            )
+            session_fixture.add(owner_mapping)
+            session_fixture.commit()
+
+            service = SlackService(slack_workspace)
+
+            payload = {
+                'user': {'id': 'U_CREATOR_DIFFERENT'},  # Different from owner
+                'view': {
+                    'callback_id': 'create_decision',
+                    'private_metadata': str(sample_user.id),
+                    'state': {
+                        'values': {
+                            'title_block': {'title': {'value': 'Decision with Notification'}},
+                            'context_block': {'context': {'value': 'Context'}},
+                            'decision_block': {'decision': {'value': 'Decision'}},
+                            'consequences_block': {'consequences': {'value': 'Consequences'}},
+                            'status_block': {'status': {'selected_option': {'value': 'proposed'}}},
+                            'owner_block': {'owner': {'selected_user': 'U_OWNER_NOTIF'}}
+                        }
+                    }
+                }
+            }
+
+            mock_post = MagicMock()
+            with patch.object(service.client, 'chat_postMessage', mock_post):
+                response = service._create_decision_from_modal(payload)
+
+            # Should have been called twice: once for creator, once for owner
+            assert mock_post.call_count >= 2
+
+            # Check that owner was notified
+            owner_call = None
+            for call in mock_post.call_args_list:
+                if call.kwargs.get('channel') == 'U_OWNER_NOTIF':
+                    owner_call = call
+                    break
+
+            assert owner_call is not None
+            assert "assigned" in owner_call.kwargs.get('text', '').lower()
+
+    def test_create_decision_no_owner_notification_when_self_assigned(self, app, session_fixture, slack_workspace, sample_user, sample_tenant, sample_membership):
+        """No owner notification when creator assigns themselves as owner."""
+        with app.app_context():
+            # Create mapping where creator is also the owner
+            creator_mapping = SlackUserMapping(
+                slack_workspace_id=slack_workspace.id,
+                slack_user_id='U_SELF_ASSIGN',
+                slack_email=sample_user.email,
+                user_id=sample_user.id,
+                link_method='auto_email',
+                linked_at=datetime.utcnow()
+            )
+            session_fixture.add(creator_mapping)
+            session_fixture.commit()
+
+            service = SlackService(slack_workspace)
+
+            payload = {
+                'user': {'id': 'U_SELF_ASSIGN'},  # Same as owner
+                'view': {
+                    'callback_id': 'create_decision',
+                    'private_metadata': str(sample_user.id),
+                    'state': {
+                        'values': {
+                            'title_block': {'title': {'value': 'Self-assigned Decision'}},
+                            'context_block': {'context': {'value': 'Context'}},
+                            'decision_block': {'decision': {'value': 'Decision'}},
+                            'consequences_block': {'consequences': {'value': 'Consequences'}},
+                            'status_block': {'status': {'selected_option': {'value': 'proposed'}}},
+                            'owner_block': {'owner': {'selected_user': 'U_SELF_ASSIGN'}}
+                        }
+                    }
+                }
+            }
+
+            mock_post = MagicMock()
+            with patch.object(service.client, 'chat_postMessage', mock_post):
+                response = service._create_decision_from_modal(payload)
+
+            # Count how many times the owner (U_SELF_ASSIGN) was messaged
+            # The owner notification has specific text "You have been assigned"
+            owner_assignment_notification_count = 0
+            for call in mock_post.call_args_list:
+                channel = call.kwargs.get('channel')
+                text = call.kwargs.get('text', '')
+                # Owner assignment notification specifically says "You have been assigned as the owner"
+                if channel == 'U_SELF_ASSIGN' and 'you have been assigned as the owner' in text.lower():
+                    owner_assignment_notification_count += 1
+
+            # Should NOT send the "You have been assigned" notification when self-assigning
+            assert owner_assignment_notification_count == 0
+
 
 # ==================== Test Helper Functions ====================
 

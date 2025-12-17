@@ -2065,14 +2065,18 @@ export class SettingsComponent implements OnInit {
 
   // Tab index for navigation
   selectedTabIndex = 0;
+  // Tab map matches actual tab order in template:
+  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*
+  // (*) = conditional tabs for non-master accounts
   private tabMap: { [key: string]: number } = {
     'sso': 0,
     'email': 1,
-    'auth': 2,
-    'users': 3,
-    'requests': 4,
-    'spaces': 5,
-    'slack': 6
+    'users': 2,
+    'auth': 3,
+    'spaces': 4,
+    'access-requests': 5,
+    'role-requests': 6,
+    'slack': 7
   };
 
   /**

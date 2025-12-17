@@ -7845,7 +7845,7 @@ def slack_test():
 
     try:
         service = SlackService(workspace)
-        service.send_test_notification(user.name or user.email)
+        service.send_test_notification()
         return jsonify({'message': 'Test notification sent'})
     except Exception as e:
         logger.error(f"Slack test notification failed: {str(e)}")
