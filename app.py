@@ -677,8 +677,10 @@ def init_database():
                         missing_memberships = result.fetchall()
 
                         for user_id, email, domain, is_admin, tenant_id in missing_memberships:
-                            # Determine role: first admin user becomes provisional_admin, others become user
-                            role = 'provisional_admin' if is_admin else 'user'
+                            # Determine role: first admin user becomes PROVISIONAL_ADMIN, others become USER
+                            # Note: PostgreSQL enum uses the enum NAME (uppercase), not value
+                            role_enum = GlobalRole.PROVISIONAL_ADMIN if is_admin else GlobalRole.USER
+                            role = role_enum.name  # Get the name ('PROVISIONAL_ADMIN' or 'USER')
                             logger.info(f"Creating missing membership for user {email} in tenant {domain} with role {role}")
                             conn.execute(db.text("""
                                 INSERT INTO tenant_memberships (user_id, tenant_id, global_role, joined_at)
