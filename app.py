@@ -7186,6 +7186,13 @@ def slack_oauth_callback():
         workspace_name = response['team']['name']
         bot_token = response['access_token']
 
+        # Extract granted scopes from OAuth response
+        granted_scopes = response.get('scope', '').split(',') if response.get('scope') else []
+        logger.info(f"Slack OAuth granted scopes: {granted_scopes}")
+
+        # Get current app version for tracking
+        from slack_upgrade import CURRENT_APP_VERSION
+
         # Encrypt and store
         encrypted_token = encrypt_token(bot_token)
 
@@ -7267,12 +7274,16 @@ def slack_oauth_callback():
             if existing_by_workspace:
                 # Workspace already exists
                 if existing_by_workspace.tenant_id == tenant_id:
-                    # Same tenant, just update
+                    # Same tenant, just update (may be an upgrade with new scopes)
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
                     existing_by_workspace.installed_at = datetime.utcnow()
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
                 elif existing_by_workspace.tenant_id is None or not existing_by_workspace.is_active:
                     # Unclaimed or disconnected workspace - claim it for this tenant
                     # Note: A disconnected workspace (is_active=False) can be reclaimed
@@ -7285,6 +7296,10 @@ def slack_oauth_callback():
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
                     existing_by_workspace.claimed_at = datetime.utcnow()
                     existing_by_workspace.claimed_by_id = user_id
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
                     if old_tenant_id:
                         logger.info(f"Re-claimed disconnected workspace {workspace_name} from tenant {old_tenant_id} for tenant {tenant_id}")
                     else:
@@ -7302,6 +7317,10 @@ def slack_oauth_callback():
                 existing_by_tenant.is_active = True
                 existing_by_tenant.installed_at = datetime.utcnow()
                 existing_by_tenant.status = SlackWorkspace.STATUS_ACTIVE
+                # Track scopes and version
+                existing_by_tenant.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                existing_by_tenant.scopes_updated_at = datetime.utcnow()
+                existing_by_tenant.app_version = CURRENT_APP_VERSION
             else:
                 # New workspace for this tenant
                 workspace = SlackWorkspace(
@@ -7312,7 +7331,11 @@ def slack_oauth_callback():
                     is_active=True,
                     status=SlackWorkspace.STATUS_ACTIVE,
                     claimed_at=datetime.utcnow(),
-                    claimed_by_id=user_id
+                    claimed_by_id=user_id,
+                    # Track scopes and version
+                    granted_scopes=','.join(granted_scopes) if granted_scopes else None,
+                    scopes_updated_at=datetime.utcnow(),
+                    app_version=CURRENT_APP_VERSION
                 )
                 db.session.add(workspace)
 
@@ -7330,21 +7353,29 @@ def slack_oauth_callback():
             if existing_by_workspace:
                 # Workspace already exists
                 if existing_by_workspace.tenant_id:
-                    # Already claimed by a tenant, just update the token
+                    # Already claimed by a tenant, just update the token and scopes
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
                     existing_by_workspace.installed_at = datetime.utcnow()
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
                     db.session.commit()
                     logger.info(f"Updated existing workspace {workspace_name} (already claimed by tenant {existing_by_workspace.tenant_id})")
                     # Redirect to a page showing the workspace is already connected
                     return redirect(f'/slack/installed?workspace={workspace_id}&already_claimed=true')
                 else:
-                    # Still unclaimed, update token
+                    # Still unclaimed, update token and scopes
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
                     existing_by_workspace.installed_at = datetime.utcnow()
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
                     db.session.commit()
                     logger.info(f"Updated existing unclaimed workspace {workspace_name}")
                     return redirect(f'/slack/installed?workspace={workspace_id}')
@@ -7356,7 +7387,11 @@ def slack_oauth_callback():
                     workspace_name=workspace_name,
                     bot_token_encrypted=encrypted_token,
                     is_active=True,
-                    status=SlackWorkspace.STATUS_PENDING_CLAIM
+                    status=SlackWorkspace.STATUS_PENDING_CLAIM,
+                    # Track scopes and version
+                    granted_scopes=','.join(granted_scopes) if granted_scopes else None,
+                    scopes_updated_at=datetime.utcnow(),
+                    app_version=CURRENT_APP_VERSION
                 )
                 db.session.add(workspace)
                 db.session.commit()
@@ -7457,6 +7492,46 @@ def slack_interactions():
     # Slack expects a 200 response - return result if it's a dict, otherwise empty 200
     if result is not None:
         return jsonify(result), 200
+    return '', 200
+
+
+@app.route('/api/slack/webhook/events', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_events')
+def slack_events():
+    """Handle Slack Events API (app_home_opened, etc.)."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+    import json
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    data = request.get_json()
+
+    # Handle URL verification challenge (required when setting up Events API)
+    if data.get('type') == 'url_verification':
+        return jsonify({'challenge': data.get('challenge')}), 200
+
+    # Handle actual events
+    if data.get('type') == 'event_callback':
+        event = data.get('event', {})
+        team_id = data.get('team_id')
+
+        # Find workspace
+        workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+        if not workspace:
+            logger.warning(f"Event from unknown workspace: {team_id}")
+            return '', 200
+
+        # Update last activity
+        workspace.last_activity_at = datetime.utcnow()
+        db.session.commit()
+
+        service = SlackService(workspace)
+        service.handle_event(event)
+
     return '', 200
 
 

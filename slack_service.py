@@ -565,6 +565,61 @@ class SlackService:
         """Public wrapper for message action handling."""
         return self._handle_message_action(payload)
 
+    # =========================================================================
+    # EVENT HANDLERS
+    # =========================================================================
+
+    def handle_event(self, event: dict):
+        """
+        Handle a Slack event.
+
+        Returns response dict or None.
+        """
+        event_type = event.get('type')
+
+        if event_type == 'app_home_opened':
+            return self._handle_app_home_opened(event)
+
+        return None
+
+    def _handle_app_home_opened(self, event: dict):
+        """
+        Handle app_home_opened event - render the App Home tab.
+
+        This is where we show upgrade prompts if new scopes are available.
+        """
+        from slack_upgrade import get_app_home_blocks, get_workspace_scopes
+
+        user_id = event.get('user')
+
+        try:
+            # Get user info for personalization
+            user_info = self.client.users_info(user=user_id)
+            user_name = user_info.get('user', {}).get('real_name', '')
+        except SlackApiError:
+            user_name = None
+
+        # Get workspace scopes to check for upgrade
+        installed_scopes = get_workspace_scopes(self.workspace)
+
+        # Build App Home view
+        blocks = get_app_home_blocks(installed_scopes, user_name)
+
+        try:
+            self.client.views_publish(
+                user_id=user_id,
+                view={
+                    "type": "home",
+                    "blocks": blocks
+                }
+            )
+            logger.info(f"Published App Home for user {user_id}")
+        except SlackApiError as e:
+            logger.error(f"Failed to publish App Home: {e}")
+
+        self.update_activity()
+        return None
+
     def _handle_view_submission(self, payload: dict):
         """Handle modal form submission."""
         callback_id = payload.get('view', {}).get('callback_id')

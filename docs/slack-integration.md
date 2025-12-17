@@ -221,8 +221,7 @@ This removes the workspace connection but preserves all decisions.
 - `commands` - Handle slash commands
 - `users:read` - Read user info for linking
 - `users:read.email` - Read user emails for auto-linking
-- `channels:read` - List public channels
-- `groups:read` - List private channels (if added)
+- `im:write` - Send DMs to users (confirmations, owner notifications)
 
 ### Webhook URLs
 Configure these in your Slack app settings:
@@ -231,4 +230,32 @@ Configure these in your Slack app settings:
 |---------|-----|
 | Slash Commands | `https://decisionrecords.org/api/slack/webhook/commands` |
 | Interactivity | `https://decisionrecords.org/api/slack/webhook/interactions` |
+| Events | `https://decisionrecords.org/api/slack/webhook/events` |
 | OAuth Redirect | `https://decisionrecords.org/api/slack/oauth/callback` |
+
+### Event Subscriptions
+Subscribe to the following bot events:
+- `app_home_opened` - Display App Home tab with upgrade prompts
+
+## App Upgrades
+
+When new features require additional scopes, users will see upgrade prompts in:
+1. **App Home** - Banner at top with "Upgrade App" button
+2. **Slash command responses** - Context message about new features
+
+### How Upgrades Work
+
+1. New app version is released with additional scopes
+2. Users see upgrade prompts when interacting with the app
+3. Clicking "Upgrade" takes them through OAuth flow
+4. Slack appends new scopes to their existing token
+5. New features become available immediately
+
+### Version Tracking
+
+The app tracks:
+- `granted_scopes` - Which scopes the workspace has granted
+- `app_version` - Version at time of last install/upgrade
+- `scopes_updated_at` - When scopes were last updated
+
+This allows showing targeted upgrade prompts only to workspaces missing required features.

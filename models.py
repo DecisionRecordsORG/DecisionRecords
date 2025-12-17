@@ -1444,13 +1444,18 @@ class SlackWorkspace(db.Model):
     installed_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_activity_at = db.Column(db.DateTime, nullable=True)
 
+    # App version tracking (for upgrade management)
+    granted_scopes = db.Column(db.Text, nullable=True)  # Comma-separated list of granted OAuth scopes
+    scopes_updated_at = db.Column(db.DateTime, nullable=True)  # When scopes were last updated
+    app_version = db.Column(db.String(20), nullable=True)  # Version at time of install/upgrade
+
     # Relationships
     tenant = db.relationship('Tenant', backref=db.backref('slack_workspace', uselist=False))
     claimed_by = db.relationship('User', foreign_keys=[claimed_by_id])
     user_mappings = db.relationship('SlackUserMapping', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_upgrade_info=False):
+        result = {
             'id': self.id,
             'tenant_id': self.tenant_id,
             'workspace_id': self.workspace_id,
@@ -1465,7 +1470,16 @@ class SlackWorkspace(db.Model):
             'is_active': self.is_active,
             'installed_at': self.installed_at.isoformat() if self.installed_at else None,
             'last_activity_at': self.last_activity_at.isoformat() if self.last_activity_at else None,
+            'app_version': self.app_version,
+            'granted_scopes': self.granted_scopes.split(',') if self.granted_scopes else [],
         }
+
+        if include_upgrade_info:
+            from slack_upgrade import get_upgrade_info, get_workspace_scopes
+            scopes = get_workspace_scopes(self)
+            result['upgrade_info'] = get_upgrade_info(scopes)
+
+        return result
 
 
 class SlackUserMapping(db.Model):
