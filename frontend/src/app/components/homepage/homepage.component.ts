@@ -40,11 +40,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <section class="hero">
         <div class="hero-container">
           <div class="hero-content-centered">
-            <p class="hero-initiative">
-              <img src="/assets/doubt-blue.svg" alt="Decision Records" class="hero-logo">
-              <span class="initiative-badge">Open Initiative</span>
-              DecisionRecords.org
-            </p>
+            <div class="hero-logo-container">
+              <img src="/assets/decision-records-logo.svg" alt="Decision Records" class="hero-logo">
+            </div>
             <h1><span class="typewriter-text">{{ displayedDecisionType }}</span> <span class="highlight">Records</span></h1>
             <p class="hero-tagline">
               Long-term decision memory for organisations
@@ -89,7 +87,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </div>
               </div>
               <div class="browser-content">
-                <img src="/assets/screenshot-dashboard.png" alt="Decision Records Dashboard" />
+                <img src="/assets/homepage-decisions-dash.png" alt="Decision Records Dashboard" />
               </div>
             </div>
           </div>
@@ -751,8 +749,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <div class="footer-grid">
             <div class="footer-mission-col">
               <div class="footer-brand">
-                <img src="/assets/doubt-blue.svg" alt="Decision Records" class="footer-logo">
-                <span class="footer-brand-text">DecisionRecords.org</span>
+                <img src="/assets/decision-records-logo.svg" alt="Decision Records" class="footer-logo">
+                <span class="footer-brand-text">Decision Records</span>
               </div>
               <p class="footer-mission">
                 An open source initiative to make decision-making
@@ -986,6 +984,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #1e40af !important;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
       transition: all 0.2s ease !important;
+      min-height: 48px !important;
     }
 
     .cta-button:hover {
@@ -1005,6 +1004,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       border-radius: 8px !important;
       border-color: rgba(255, 255, 255, 0.4) !important;
       color: white !important;
+      min-height: 48px !important;
     }
 
     .cta-button-secondary:hover {
@@ -1148,34 +1148,16 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       }
     }
 
-    .hero-initiative {
+    .hero-logo-container {
       display: flex;
-      align-items: center;
       justify-content: center;
-      gap: 12px;
       margin-bottom: 24px;
-      font-size: 0.9rem;
-      color: #bfdbfe;
-      letter-spacing: 0.5px;
     }
 
     .hero-logo {
-      width: 48px;
-      height: 48px;
-      filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.3));
-    }
-
-    .initiative-badge {
-      display: inline-block;
-      padding: 6px 14px;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 100px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: white;
+      width: 80px;
+      height: 80px;
+      filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.3));
     }
 
     /* Dialog Styles */
@@ -1302,6 +1284,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
       letter-spacing: 0.1px;
       color: #ffffff !important;
+      min-height: 48px !important;
     }
 
     .submit-btn span,
@@ -1352,15 +1335,15 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .slack-signin-btn {
-      display: flex !important;
+      display: inline-flex !important;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 10px;
       padding: 12px 24px !important;
-      border: 1px solid #e2e8f0 !important;
-      border-radius: 8px !important;
-      background: #fff !important;
-      color: #1e293b !important;
+      border: none !important;
+      border-radius: 100px !important;
+      background: #4A154B !important;
+      color: white !important;
       font-weight: 500 !important;
       font-size: 14px !important;
       transition: all 0.2s ease !important;
@@ -1369,18 +1352,24 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .slack-signin-btn:hover {
-      background: #f8fafc !important;
-      border-color: #cbd5e1 !important;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      background: #611f69 !important;
+      box-shadow: 0 4px 12px rgba(74, 21, 75, 0.3);
     }
 
     .slack-signin-btn .slack-logo {
       width: 20px;
       height: 20px;
+      flex-shrink: 0;
     }
 
     .slack-signin-btn span {
-      display: inline-block;
+      color: white !important;
+    }
+
+    ::ng-deep .slack-signin-btn .mdc-button__label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 10px !important;
     }
 
     .tenant-info {
@@ -2502,6 +2491,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .sponsorship-button {
       border-color: rgba(255, 255, 255, 0.3) !important;
       color: #e2e8f0 !important;
+      min-height: 48px !important;
+      padding: 12px 24px !important;
+      border-radius: 8px !important;
     }
 
     .sponsorship-button:hover {
