@@ -390,8 +390,9 @@ class SlackService:
 
             # Include space name if showing all decisions (not filtered by space)
             space_info = ""
-            if not space_filter and decision.space:
-                space_info = f" | Space: {decision.space.name}"
+            # Show first space if decision belongs to any spaces
+            if not space_filter and decision.spaces:
+                space_info = f" | Space: {decision.spaces[0].name}"
 
             blocks.append({
                 "type": "section",
@@ -1011,8 +1012,9 @@ class SlackService:
 
                 # Include space name if available
                 space_info = ""
-                if decision.space:
-                    space_info = f" | Space: {decision.space.name}"
+                # Show first space if decision belongs to any spaces
+                if decision.spaces:
+                    space_info = f" | Space: {decision.spaces[0].name}"
 
                 blocks.append({
                     "type": "section",

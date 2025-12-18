@@ -61,10 +61,24 @@ APP_VERSIONS = {
         ],
         changelog="Added DM notifications for decision creation and owner assignments."
     ),
+    "1.2.0": SlackAppVersion(
+        version="1.2.0",
+        release_date="2024-12-18",
+        scopes=["chat:write", "commands", "users:read", "users:read.email", "im:write", "channels:read", "groups:read"],
+        features=[
+            "Slash commands with filtering (/adr list mine, /adr list space:<name>)",
+            "Channel notifications for new decisions",
+            "User auto-linking by email",
+            "Direct message confirmations after creating decisions",
+            "Owner assignment notifications via DM",
+            "Messages tab enabled for DM conversations"
+        ],
+        changelog="Enabled Messages tab for reliable DM notifications. Added channel visibility."
+    ),
 }
 
 # Current version - update this when releasing new versions
-CURRENT_APP_VERSION = "1.1.0"
+CURRENT_APP_VERSION = "1.2.0"
 
 # Scopes required for full functionality
 REQUIRED_SCOPES = APP_VERSIONS[CURRENT_APP_VERSION].scopes
@@ -253,13 +267,13 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
             {"type": "divider"}
         ])
 
-    # Quick actions section
+    # Quick action - Create Decision
     blocks.extend([
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Quick Actions*"
+                "text": "*Quick Action*"
             }
         },
         {
@@ -268,12 +282,8 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": "Create Decision"},
+                    "style": "primary",
                     "action_id": "create_decision_home"
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "List Decisions"},
-                    "action_id": "list_decisions_home"
                 },
                 {
                     "type": "button",
@@ -285,6 +295,46 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
         }
     ])
 
+    # Features section - educate users about capabilities
+    blocks.extend([
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Features*"
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": ":memo: *Capture Decisions*\nRecord the context, decision, and consequences of important choices. Use `/adr create` or the button above."
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": ":mag: *Find & Filter*\nSearch through decisions with `/adr search <query>`, list your decisions with `/adr list mine`, or filter by space with `/adr list space:<name>`."
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": ":bell: *Stay Informed*\nGet DM notifications when you create decisions or are assigned as an owner. Channel notifications keep your team in sync."
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": ":bookmark: *Save Messages*\nTurn any Slack message into a decision record using the message shortcut (right-click > More actions > Save as Decision)."
+            }
+        }
+    ])
+
     # Available commands section
     blocks.extend([
         {"type": "divider"},
@@ -292,12 +342,14 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Available Commands*\n" +
+                "text": "*Slash Commands*\n" +
                         "`/adr create` - Create a new decision\n" +
-                        "`/adr list [status]` - List recent decisions\n" +
+                        "`/adr list` - List recent decisions\n" +
+                        "`/adr list mine` - List your decisions\n" +
+                        "`/adr list space:<name>` - List by space\n" +
                         "`/adr view <id>` - View a specific decision\n" +
                         "`/adr search <query>` - Search decisions\n" +
-                        "`/adr help` - Show help"
+                        "`/adr help` - Show all commands"
             }
         }
     ])
