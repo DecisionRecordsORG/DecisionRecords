@@ -140,12 +140,20 @@ interface LinkTokenData {
                   </div>
                 }
 
-                <!-- Slack Sign-in Option -->
+                <!-- Social Sign-in Options -->
                 @if (slackOidcEnabled) {
                   <button mat-flat-button class="slack-signin-btn" (click)="signInWithSlack()">
                     <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
                     <span>Sign in with Slack</span>
                   </button>
+                }
+                @if (googleOauthEnabled) {
+                  <button mat-stroked-button class="google-signin-btn" (click)="signInWithGoogle()">
+                    <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
+                    <span>Sign in with Google</span>
+                  </button>
+                }
+                @if (slackOidcEnabled || googleOauthEnabled) {
                   <div class="social-divider">
                     <span>or</span>
                   </div>
@@ -434,6 +442,36 @@ interface LinkTokenData {
       height: 22px;
     }
 
+    /* Google Sign-in Button */
+    .google-signin-btn {
+      display: flex !important;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 14px 24px !important;
+      border: 1px solid #dadce0 !important;
+      border-radius: 4px !important;
+      background: white !important;
+      color: #3c4043 !important;
+      font-weight: 500 !important;
+      font-size: 15px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .google-signin-btn:hover {
+      background: #f8f9fa !important;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15);
+    }
+
+    .google-signin-btn .google-logo {
+      width: 22px;
+      height: 22px;
+    }
+
     .social-divider {
       display: flex;
       align-items: center;
@@ -490,6 +528,7 @@ export class SlackLinkAccountComponent implements OnInit {
   linking = false;
   linkComplete = false;
   slackOidcEnabled = false;
+  googleOauthEnabled = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -511,6 +550,9 @@ export class SlackLinkAccountComponent implements OnInit {
     // Check if Slack OIDC is enabled
     this.checkSlackOidcStatus();
 
+    // Check if Google OAuth is enabled
+    this.checkGoogleOauthStatus();
+
     this.validateToken();
   }
 
@@ -525,6 +567,17 @@ export class SlackLinkAccountComponent implements OnInit {
     });
   }
 
+  private checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthEnabled = false;
+      }
+    });
+  }
+
   signInWithSlack(): void {
     // Store the token in session storage to restore after login
     if (this.token) {
@@ -533,6 +586,16 @@ export class SlackLinkAccountComponent implements OnInit {
     // Redirect to Slack OIDC with return URL to this page
     const returnUrl = `/slack/link?token=${this.token}`;
     window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
+  }
+
+  signInWithGoogle(): void {
+    // Store the token in session storage to restore after login
+    if (this.token) {
+      sessionStorage.setItem('slack_link_token', this.token);
+    }
+    // Redirect to Google OAuth with return URL to this page
+    const returnUrl = `/slack/link?token=${this.token}`;
+    window.location.href = `/auth/google?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
   validateToken(): void {

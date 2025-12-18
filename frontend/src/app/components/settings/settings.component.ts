@@ -491,6 +491,20 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                     </div>
                   }
 
+                  <!-- Google Sign-in Toggle (when not in SSO mode) -->
+                  @if (googleOauthGloballyEnabled && authConfigForm.value.auth_method !== 'sso') {
+                    <div class="google-oauth-toggle-section">
+                      <h4 class="options-header">Google Sign-in</h4>
+                      <mat-slide-toggle formControlName="allow_google_oauth">
+                        Allow "Sign in with Google" option
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, users with Google Workspace accounts from your domain can sign in using Google.
+                        Personal Gmail accounts are not allowed.
+                      </p>
+                    </div>
+                  }
+
                   <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
 
@@ -1712,6 +1726,16 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       margin-bottom: 12px;
     }
 
+    .google-oauth-toggle-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .google-oauth-toggle-section .options-header {
+      margin-bottom: 12px;
+    }
+
     .icon-plus {
       font-size: 16px;
       color: #666;
@@ -2082,6 +2106,7 @@ export class SettingsComponent implements OnInit {
   // Feature flags
   slackFeatureEnabled = false;
   slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
+  googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
 
   // Tab index for navigation
   selectedTabIndex = 0;
@@ -2181,6 +2206,7 @@ export class SettingsComponent implements OnInit {
       allow_registration: [true],
       auto_approve_users: [false],  // Inverted from require_approval for better UX
       allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
+      allow_google_oauth: [true],   // Allow Google OAuth sign-in for tenant
       rp_name: ['Architecture Decisions']
     });
 
@@ -2199,6 +2225,7 @@ export class SettingsComponent implements OnInit {
     this.loadUsers();
     this.loadAuthConfig();
     this.checkSlackOidcStatus();
+    this.checkGoogleOauthStatus();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
       this.loadRoleRequests();
@@ -2272,6 +2299,17 @@ export class SettingsComponent implements OnInit {
       },
       error: () => {
         this.slackOidcGloballyEnabled = false;
+      }
+    });
+  }
+
+  checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthGloballyEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthGloballyEnabled = false;
       }
     });
   }
@@ -2490,6 +2528,7 @@ export class SettingsComponent implements OnInit {
             allow_registration: this.authConfig.allow_registration,
             auto_approve_users: !this.authConfig.require_approval,  // Invert for UI
             allow_slack_oidc: this.authConfig.allow_slack_oidc !== false,  // Default true if undefined
+            allow_google_oauth: this.authConfig.allow_google_oauth !== false,  // Default true if undefined
             rp_name: this.authConfig.rp_name
           });
         }
@@ -2500,6 +2539,7 @@ export class SettingsComponent implements OnInit {
           auto_approve_users: false,  // Default to requiring approval
           auth_method: 'webauthn',
           allow_registration: true,
+          allow_google_oauth: true,  // Default true
           rp_name: 'Architecture Decisions'
         });
       }
@@ -2517,6 +2557,7 @@ export class SettingsComponent implements OnInit {
     let allowPassword = true;
     let allowPasskey = true;
     let allowSlackOidc = formValue.allow_slack_oidc;
+    let allowGoogleOauth = formValue.allow_google_oauth;
 
     switch (formValue.auth_method) {
       case 'both':
@@ -2534,6 +2575,7 @@ export class SettingsComponent implements OnInit {
         allowPassword = false;
         allowPasskey = false;
         allowSlackOidc = false;  // SSO mode disables Slack OIDC
+        allowGoogleOauth = false;  // SSO mode disables Google OAuth
         break;
       case 'slack_oidc':
         backendAuthMethod = 'slack_oidc';
@@ -2550,7 +2592,8 @@ export class SettingsComponent implements OnInit {
       rp_name: formValue.rp_name,
       allow_password: allowPassword,
       allow_passkey: allowPasskey,
-      allow_slack_oidc: allowSlackOidc
+      allow_slack_oidc: allowSlackOidc,
+      allow_google_oauth: allowGoogleOauth
     };
 
     this.adminService.saveAuthConfig(config).subscribe({

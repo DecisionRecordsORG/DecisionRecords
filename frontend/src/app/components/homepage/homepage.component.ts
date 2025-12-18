@@ -164,15 +164,23 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </button>
               </form>
 
-              <!-- Slack Sign-in Option -->
-              @if (slackOidcEnabled) {
+              <!-- Social Sign-in Options -->
+              @if (slackOidcEnabled || googleOauthEnabled) {
                 <div class="social-divider">
                   <span>or</span>
                 </div>
-                <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
-                  <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
-                  <span>Sign in with Slack</span>
-                </button>
+                @if (slackOidcEnabled) {
+                  <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                    <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                    <span>Sign in with Slack</span>
+                  </button>
+                }
+                @if (googleOauthEnabled) {
+                  <button mat-stroked-button class="google-signin-btn full-width" (click)="signInWithGoogle()">
+                    <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
+                    <span>Sign in with Google</span>
+                  </button>
+                }
               }
             }
 
@@ -1367,6 +1375,46 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     ::ng-deep .slack-signin-btn .mdc-button__label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+    }
+
+    /* Google Sign-in Button - follows Google brand guidelines */
+    .google-signin-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 12px 24px !important;
+      border: 1px solid #dadce0 !important;
+      border-radius: 4px !important;
+      background: white !important;
+      color: #3c4043 !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .google-signin-btn:hover {
+      background: #f8f9fa !important;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15);
+    }
+
+    .google-signin-btn .google-logo {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .google-signin-btn span {
+      color: #3c4043 !important;
+    }
+
+    ::ng-deep .google-signin-btn .mdc-button__label {
       display: inline-flex !important;
       align-items: center !important;
       gap: 10px !important;
@@ -2893,6 +2941,9 @@ export class HomepageComponent implements OnInit {
   // Slack OIDC state
   slackOidcEnabled = false;
 
+  // Google OAuth state
+  googleOauthEnabled = false;
+
   // Carousel state
   currentSlide = 0;
 
@@ -2959,11 +3010,18 @@ export class HomepageComponent implements OnInit {
         this.error = params['message'] || 'Please use your work email address.';
       } else if (params['error'] === 'slack_auth_error') {
         this.error = 'Slack authentication failed. Please try again.';
+      } else if (params['error'] === 'google_not_configured') {
+        this.error = 'Google sign-in is not configured.';
+      } else if (params['error'] === 'google_auth_error') {
+        this.error = 'Google authentication failed. Please try again.';
       }
     });
 
     // Check if Slack OIDC sign-in is enabled
     this.checkSlackOidcStatus();
+
+    // Check if Google OAuth sign-in is enabled
+    this.checkGoogleOauthStatus();
 
     // Start typewriter animation
     this.startTypewriterAnimation();
@@ -2983,6 +3041,22 @@ export class HomepageComponent implements OnInit {
   signInWithSlack(): void {
     // Redirect to Slack OIDC initiation endpoint
     window.location.href = '/auth/slack/oidc';
+  }
+
+  private checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthEnabled = false;
+      }
+    });
+  }
+
+  signInWithGoogle(): void {
+    // Redirect to Google OAuth initiation endpoint
+    window.location.href = '/auth/google';
   }
 
   private startTypewriterAnimation(): void {

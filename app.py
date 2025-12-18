@@ -374,6 +374,38 @@ def init_database():
                         else:
                             logger.info("allow_slack_oidc column already exists")
 
+                        # Check and add allow_google_oauth column to auth_configs
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'auth_configs' AND column_name = 'allow_google_oauth'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_google_oauth column to auth_configs...")
+                            conn.execute(db.text("""
+                                ALTER TABLE auth_configs
+                                ADD COLUMN allow_google_oauth BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_google_oauth column added successfully")
+                        else:
+                            logger.info("allow_google_oauth column already exists")
+
+                        # Check and add allow_google_oauth column to tenant_settings
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'tenant_settings' AND column_name = 'allow_google_oauth'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_google_oauth column to tenant_settings...")
+                            conn.execute(db.text("""
+                                ALTER TABLE tenant_settings
+                                ADD COLUMN allow_google_oauth BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_google_oauth column added successfully")
+                        else:
+                            logger.info("allow_google_oauth column already exists in tenant_settings")
+
                         # Check and add decision_number column to architecture_decisions
                         result = conn.execute(db.text("""
                             SELECT column_name FROM information_schema.columns
@@ -1628,6 +1660,309 @@ def slack_oidc_callback():
         return redirect('/?error=network_error')
     except Exception as e:
         logger.error(f"Slack OIDC callback error: {e}")
+        return redirect('/?error=internal_error')
+
+
+# ==================== Google OAuth Authentication ====================
+# Sign in with Google using OAuth 2.0
+# This provides an alternative auth option for users whose orgs restrict Slack OIDC
+
+@app.route('/api/auth/google-status', methods=['GET'])
+@track_endpoint('api_auth_google_status')
+def google_oauth_status():
+    """Check if Google OAuth sign-in is enabled.
+
+    Returns whether Google sign-in is available for the frontend to show/hide the button.
+    This is a public endpoint (no login required) since users need to see it before login.
+    """
+    try:
+        from google_oauth import is_google_oauth_configured
+        if not is_google_oauth_configured():
+            return jsonify({'enabled': False, 'reason': 'not_configured'})
+    except Exception as e:
+        logger.error(f"Error checking Google OAuth status: {e}")
+        return jsonify({'enabled': False, 'reason': 'configuration_error'})
+
+    return jsonify({'enabled': True})
+
+
+@app.route('/auth/google')
+@track_endpoint('auth_google_initiate')
+def google_oauth_initiate():
+    """Initiate Google OAuth login flow.
+
+    Redirects the user to Google's authorization page to sign in.
+    After authentication, Google redirects back to /auth/google/callback
+    with the authorization code.
+    """
+    from google_oauth import (
+        get_google_client_id,
+        generate_google_oauth_state,
+        is_google_oauth_configured,
+        GOOGLE_OAUTH_AUTHORIZE_URL,
+        GOOGLE_OAUTH_SCOPES
+    )
+
+    # Check if Google sign-in is enabled
+    if not is_google_oauth_configured():
+        logger.warning("Google OAuth attempted but not configured")
+        return redirect('/?error=google_not_configured')
+
+    # Get Google client ID
+    client_id = get_google_client_id()
+    if not client_id:
+        logger.error("Google client ID not configured for OAuth")
+        return redirect('/?error=google_not_configured')
+
+    # Get optional return_url from query params (where to redirect after login)
+    return_url = request.args.get('return_url', '/')
+
+    # Generate encrypted state for CSRF protection
+    try:
+        state = generate_google_oauth_state(return_url=return_url)
+    except Exception as e:
+        logger.error(f"Failed to generate Google OAuth state: {e}")
+        return redirect('/?error=internal_error')
+
+    # Build redirect URI (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/google/callback"
+
+    # Build Google authorization URL
+    import urllib.parse
+    auth_params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': GOOGLE_OAUTH_SCOPES,
+        'redirect_uri': redirect_uri,
+        'state': state,
+        'access_type': 'offline',  # Get refresh token
+        'prompt': 'select_account'  # Always show account selector
+    }
+    auth_url = f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(auth_params)}"
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/google/callback')
+@track_endpoint('auth_google_callback')
+def google_oauth_callback():
+    """Handle Google OAuth callback.
+
+    This endpoint receives the authorization code from Google after the user
+    authenticates. It exchanges the code for tokens, fetches user info,
+    and creates/logs in the user based on their email domain.
+
+    IMPORTANT: Gmail accounts are blocked - only corporate/workspace Google accounts allowed.
+    The tenant is derived from the email domain (existing logic).
+    First user of a domain becomes provisional admin (existing logic).
+    """
+    import requests as http_requests
+    from google_oauth import (
+        get_google_client_id,
+        get_google_client_secret,
+        verify_google_oauth_state,
+        GOOGLE_OAUTH_TOKEN_URL,
+        GOOGLE_OAUTH_USERINFO_URL
+    )
+
+    # Get callback parameters
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description', '')
+
+    # Handle Google errors
+    if error:
+        logger.warning(f"Google OAuth error: {error} - {error_description}")
+        return redirect(f'/?error=google_auth_error&message={error}')
+
+    if not code:
+        logger.warning("Google OAuth callback missing code")
+        return redirect('/?error=missing_code')
+
+    # Verify state parameter (CSRF protection)
+    state_data = verify_google_oauth_state(state)
+    if not state_data:
+        logger.warning("Invalid or expired Google OAuth state")
+        return redirect('/?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Get Google credentials
+    client_id = get_google_client_id()
+    client_secret = get_google_client_secret()
+
+    if not client_id or not client_secret:
+        logger.error("Google credentials not configured for OAuth callback")
+        return redirect('/?error=google_not_configured')
+
+    # Build redirect URI (must match the one used in authorization)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/google/callback"
+
+    try:
+        # Exchange code for tokens
+        token_response = http_requests.post(
+            GOOGLE_OAUTH_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'grant_type': 'authorization_code'
+            },
+            timeout=30
+        )
+
+        if not token_response.ok:
+            logger.error(f"Google token exchange failed: {token_response.status_code}")
+            return redirect('/?error=token_exchange_failed')
+
+        token_data = token_response.json()
+        if 'error' in token_data:
+            logger.error(f"Google token error: {token_data.get('error')}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            logger.error("No access token in Google OAuth response")
+            return redirect('/?error=no_access_token')
+
+        # Fetch user info
+        userinfo_response = http_requests.get(
+            GOOGLE_OAUTH_USERINFO_URL,
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=30
+        )
+
+        if not userinfo_response.ok:
+            logger.error(f"Google userinfo failed: {userinfo_response.status_code}")
+            return redirect('/?error=userinfo_failed')
+
+        userinfo = userinfo_response.json()
+
+        # Extract user details
+        email = userinfo.get('email')
+        name = userinfo.get('name') or userinfo.get('given_name', '')
+        google_user_id = userinfo.get('sub')  # Google user ID
+
+        if not email:
+            logger.warning("No email in Google OAuth userinfo")
+            return redirect('/?error=no_email')
+
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+
+        # Check for public email domains (gmail, yahoo, etc.)
+        # IMPORTANT: Gmail accounts cannot sign up even though they authenticate with Google
+        if DomainApproval.is_public_domain(domain):
+            logger.warning(f"Public email domain rejected for Google OAuth: {domain}")
+            return redirect('/?error=public_email&message=Please use your work email address. Personal Gmail accounts are not allowed.')
+
+        # Check for disposable email domains
+        if DomainApproval.is_disposable_domain(domain):
+            logger.warning(f"Disposable email domain rejected for Google OAuth: {domain}")
+            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
+
+        # Check if this is the first user for this domain
+        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+        is_first_user = existing_domain_users == 0
+
+        # Get or create user
+        user = get_or_create_user(email, name, google_user_id, domain)
+
+        # Create Tenant if it doesn't exist (v1.5 governance)
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=domain,  # Default name is domain
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            db.session.add(tenant)
+            db.session.flush()
+            logger.info(f"Created tenant for Google OAuth domain: {domain}")
+
+            # Create default auth config for new tenant
+            auth_config = AuthConfig.query.filter_by(domain=domain).first()
+            if not auth_config:
+                auth_config = AuthConfig(
+                    domain=domain,
+                    auth_method='local',  # Default to local, allowing multiple auth methods
+                    allow_password=True,
+                    allow_passkey=True,
+                    allow_slack_oidc=True,
+                    allow_google_oauth=True,
+                    allow_registration=True,
+                    require_approval=True,
+                    rp_name='Decision Records'
+                )
+                db.session.add(auth_config)
+                logger.info(f"Created AuthConfig for Google OAuth domain: {domain}")
+
+            # Auto-approve corporate domain
+            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+            if not domain_approval:
+                domain_approval = DomainApproval(
+                    domain=domain,
+                    status='approved',
+                    requested_by_email=email,
+                    requested_by_name=name,
+                    auto_approved=True,
+                    reviewed_at=datetime.utcnow()
+                )
+                db.session.add(domain_approval)
+                logger.info(f"Auto-approved corporate domain via Google OAuth: {domain}")
+
+        # Ensure TenantMembership exists
+        membership = TenantMembership.query.filter_by(
+            user_id=user.id,
+            tenant_id=tenant.id
+        ).first()
+
+        if not membership:
+            # Create membership with appropriate role
+            # First user becomes provisional admin
+            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=role
+            )
+            db.session.add(membership)
+            logger.info(f"Created TenantMembership for Google OAuth user {email} in tenant {domain} with role {role.value}")
+
+        db.session.commit()
+
+        # Update auth_type to indicate Google OAuth login
+        if not user.auth_type or user.auth_type == 'local':
+            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+            db.session.commit()
+
+        # Set session
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=user.is_admin)
+
+        logger.info(f"Google OAuth login successful for {email}")
+
+        # Redirect to return URL or tenant home
+        if return_url and return_url != '/' and not return_url.startswith('/?'):
+            return redirect(return_url)
+
+        # Redirect to tenant dashboard
+        return redirect(f'/{domain}/decisions')
+
+    except http_requests.RequestException as e:
+        logger.error(f"Google OAuth request error: {e}")
+        return redirect('/?error=network_error')
+    except Exception as e:
+        logger.error(f"Google OAuth callback error: {e}")
         return redirect('/?error=internal_error')
 
 
@@ -5642,6 +5977,7 @@ def api_save_auth_config():
             require_approval=data.get('require_approval', True),
             rp_name=data.get('rp_name', 'Decision Records'),
             allow_slack_oidc=data.get('allow_slack_oidc', True),
+            allow_google_oauth=data.get('allow_google_oauth', True),
         )
         db.session.add(config)
     else:
@@ -5654,6 +5990,8 @@ def api_save_auth_config():
             config.rp_name = data['rp_name']
         if 'allow_slack_oidc' in data:
             config.allow_slack_oidc = bool(data['allow_slack_oidc'])
+        if 'allow_google_oauth' in data:
+            config.allow_google_oauth = bool(data['allow_google_oauth'])
         if 'allow_password' in data:
             config.allow_password = bool(data['allow_password'])
         if 'allow_passkey' in data:
@@ -6374,6 +6712,9 @@ def api_update_tenant_auth_config():
 
     if 'allow_slack_oidc' in data:
         auth_config.allow_slack_oidc = bool(data['allow_slack_oidc'])
+
+    if 'allow_google_oauth' in data:
+        auth_config.allow_google_oauth = bool(data['allow_google_oauth'])
 
     if 'allow_registration' in data:
         auth_config.allow_registration = bool(data['allow_registration'])

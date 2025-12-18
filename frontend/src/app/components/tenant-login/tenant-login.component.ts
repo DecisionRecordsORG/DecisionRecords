@@ -20,6 +20,7 @@ interface TenantAuthConfig {
   allow_password: boolean;
   allow_passkey: boolean;
   allow_slack_oidc: boolean;
+  allow_google_oauth: boolean;
   allow_registration: boolean;
   has_sso: boolean;
   sso_provider: string | null;
@@ -112,15 +113,25 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               </button>
             </form>
 
-            <!-- Slack Sign-in Option -->
-            @if (slackOidcEnabled && authConfig?.allow_slack_oidc) {
+            <!-- Social Sign-in Options -->
+            @if ((slackOidcEnabled && authConfig?.allow_slack_oidc) || (googleOauthEnabled && authConfig?.allow_google_oauth)) {
               <div class="social-divider">
                 <span>or</span>
               </div>
-              <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
-                <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
-                <span>Sign in with Slack</span>
-              </button>
+
+              @if (slackOidcEnabled && authConfig?.allow_slack_oidc) {
+                <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                  <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                  <span>Sign in with Slack</span>
+                </button>
+              }
+
+              @if (googleOauthEnabled && authConfig?.allow_google_oauth) {
+                <button mat-stroked-button class="google-signin-btn full-width" (click)="signInWithGoogle()">
+                  <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
+                  <span>Sign in with Google</span>
+                </button>
+              }
             }
 
             <p class="resend-link">
@@ -607,6 +618,41 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       display: inline-block;
     }
 
+    /* Google Sign-in Button Styles - Following Google Brand Guidelines */
+    .google-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #dadce0 !important;
+      border-radius: 4px !important;
+      background: #fff !important;
+      color: #3c4043 !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      font-family: 'Google Sans', Roboto, Arial, sans-serif !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .google-signin-btn:hover {
+      background: #f8f9fa !important;
+      border-color: #dadce0 !important;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+    }
+
+    .google-signin-btn .google-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .google-signin-btn span {
+      display: inline-block;
+    }
+
     .recovery-link {
       margin-top: 24px;
       text-align: center;
@@ -694,6 +740,7 @@ export class TenantLoginComponent implements OnInit {
 
   webAuthnSupported = false;
   slackOidcEnabled = false;  // Global Slack OIDC availability
+  googleOauthEnabled = false;  // Global Google OAuth availability
 
   constructor(
     private fb: FormBuilder,
@@ -736,6 +783,9 @@ export class TenantLoginComponent implements OnInit {
     // Check global Slack OIDC availability
     this.checkSlackOidcStatus();
 
+    // Check global Google OAuth availability
+    this.checkGoogleOauthStatus();
+
     // Pre-fill email from query params
     const email = this.route.snapshot.queryParamMap.get('email');
     if (email) {
@@ -752,10 +802,12 @@ export class TenantLoginComponent implements OnInit {
       this.success = 'Passkey created successfully! Sign in with your new passkey below.';
     }
 
-    // Check for Slack auth errors
+    // Check for OAuth auth errors
     const errorParam = this.route.snapshot.queryParamMap.get('error');
     if (errorParam === 'slack_auth_error') {
       this.error = 'Slack authentication failed. Please try again.';
+    } else if (errorParam === 'google_auth_error') {
+      this.error = 'Google authentication failed. Please try again.';
     } else if (errorParam === 'public_email') {
       this.error = this.route.snapshot.queryParamMap.get('message') || 'Please use your work email address.';
     }
@@ -778,6 +830,23 @@ export class TenantLoginComponent implements OnInit {
     window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
+  private checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthEnabled = false;
+      }
+    });
+  }
+
+  signInWithGoogle(): void {
+    // Include return URL to redirect back to tenant after login
+    const returnUrl = `/${this.tenant}/decisions`;
+    window.location.href = `/auth/google?return_url=${encodeURIComponent(returnUrl)}`;
+  }
+
   loadAuthConfig(): void {
     this.http.get<TenantAuthConfig>(`/api/tenant/${this.tenant}/auth-config`).subscribe({
       next: (config) => {
@@ -791,6 +860,7 @@ export class TenantLoginComponent implements OnInit {
           allow_password: true,
           allow_passkey: true,
           allow_slack_oidc: true,
+          allow_google_oauth: true,
           allow_registration: true,
           has_sso: false,
           sso_provider: null,
