@@ -621,7 +621,7 @@ class SlackService:
         }
         self.client.views_open(trigger_id=trigger_id, view=view)
 
-    def _open_change_status_modal(self, trigger_id: str, decision_id: int, user: User):
+    def _open_change_status_modal(self, trigger_id: str, decision_id: int, user: User, channel_id: str = None):
         """Open the change status modal for a decision."""
         decision = ArchitectureDecision.query.get(decision_id)
         if not decision:
@@ -655,13 +655,17 @@ class SlackService:
             status_options[0]
         )
 
+        # Store decision_id, user_id, and channel_id in private_metadata
+        # Format: decision_id:user_id:channel_id (channel_id may be empty)
+        private_metadata = f"{decision_id}:{user.id}:{channel_id or ''}"
+
         view = {
             "type": "modal",
             "callback_id": "change_status",
             "title": {"type": "plain_text", "text": "Change Status"},
             "submit": {"type": "plain_text", "text": "Update"},
             "close": {"type": "plain_text", "text": "Cancel"},
-            "private_metadata": f"{decision_id}:{user.id}",
+            "private_metadata": private_metadata,
             "blocks": [
                 {
                     "type": "section",
@@ -802,11 +806,13 @@ class SlackService:
         values = view.get('state', {}).get('values', {})
         private_metadata = view.get('private_metadata', '')
 
+        # Parse private_metadata: decision_id:user_id:channel_id
         try:
-            decision_id, user_id = private_metadata.split(':')
-            decision_id = int(decision_id)
-            user_id = int(user_id)
-        except (ValueError, TypeError):
+            parts = private_metadata.split(':')
+            decision_id = int(parts[0])
+            user_id = int(parts[1])
+            original_channel_id = parts[2] if len(parts) > 2 and parts[2] else None
+        except (ValueError, TypeError, IndexError):
             return {"response_action": "errors", "errors": {"status_block": "Invalid request"}}
 
         user = User.query.get(user_id)
@@ -835,26 +841,27 @@ class SlackService:
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
         slack_user_id = payload.get('user', {}).get('id')
-        notification_channel = self.workspace.default_channel_id
+        default_notification_channel = self.workspace.default_channel_id
 
         # Send notifications in background thread to avoid timeout
         def send_notifications():
             status_emoji = self._get_status_emoji(new_status)
             old_emoji = self._get_status_emoji(old_status)
 
-            # Send confirmation DM
-            try:
-                dm_channel = self._open_dm_channel(slack_user_id)
-                if dm_channel:
+            # Send confirmation to the original channel where user ran the command
+            # This is more natural than a DM
+            reply_channel = original_channel_id
+            if reply_channel:
+                try:
                     self.client.chat_postMessage(
-                        channel=dm_channel,
+                        channel=reply_channel,
                         text=f"Status updated for {display_id}",
                         blocks=[
                             {
                                 "type": "section",
                                 "text": {
                                     "type": "mrkdwn",
-                                    "text": f":white_check_mark: *Status Updated*\n\n*{display_id}*: {decision_title}"
+                                    "text": f":white_check_mark: *Status Updated*\n\n*<{decision_url}|{display_id}: {decision_title}>*"
                                 }
                             },
                             {
@@ -865,26 +872,62 @@ class SlackService:
                                 ]
                             },
                             {
-                                "type": "actions",
+                                "type": "context",
                                 "elements": [
-                                    {
-                                        "type": "button",
-                                        "text": {"type": "plain_text", "text": ":link: View Decision"},
-                                        "url": decision_url,
-                                        "action_id": "view_in_browser"
-                                    }
+                                    {"type": "mrkdwn", "text": f"Changed by <@{slack_user_id}>"}
                                 ]
                             }
                         ]
                     )
-            except SlackApiError as e:
-                logger.warning(f"Failed to send status change confirmation: {e}")
+                except SlackApiError as e:
+                    logger.warning(f"Failed to send status change confirmation to channel: {e}")
+                    # Fall back to DM if channel message fails
+                    reply_channel = None
 
-            # Send channel notification if configured
-            if notification_channel:
+            # If no original channel or channel message failed, send DM
+            if not reply_channel:
+                try:
+                    dm_channel = self._open_dm_channel(slack_user_id)
+                    if dm_channel:
+                        self.client.chat_postMessage(
+                            channel=dm_channel,
+                            text=f"Status updated for {display_id}",
+                            blocks=[
+                                {
+                                    "type": "section",
+                                    "text": {
+                                        "type": "mrkdwn",
+                                        "text": f":white_check_mark: *Status Updated*\n\n*{display_id}*: {decision_title}"
+                                    }
+                                },
+                                {
+                                    "type": "section",
+                                    "fields": [
+                                        {"type": "mrkdwn", "text": f"*Previous:*\n{old_emoji} {old_status.title()}"},
+                                        {"type": "mrkdwn", "text": f"*New:*\n{status_emoji} {new_status.title()}"}
+                                    ]
+                                },
+                                {
+                                    "type": "actions",
+                                    "elements": [
+                                        {
+                                            "type": "button",
+                                            "text": {"type": "plain_text", "text": ":link: View Decision"},
+                                            "url": decision_url,
+                                            "action_id": "view_in_browser"
+                                        }
+                                    ]
+                                }
+                            ]
+                        )
+                except SlackApiError as e:
+                    logger.warning(f"Failed to send status change confirmation DM: {e}")
+
+            # Also send to default notification channel if configured and different from reply channel
+            if default_notification_channel and default_notification_channel != original_channel_id:
                 try:
                     self.client.chat_postMessage(
-                        channel=notification_channel,
+                        channel=default_notification_channel,
                         text=f"Decision {display_id} status changed to {new_status}",
                         blocks=[
                             {
@@ -1164,7 +1207,9 @@ class SlackService:
                         self._send_ephemeral_link_prompt(payload, slack_user_id)
                         return None
                     try:
-                        self._open_change_status_modal(trigger_id, int(decision_id), user)
+                        # Get channel ID from payload to reply in same channel
+                        channel_id = payload.get('channel', {}).get('id')
+                        self._open_change_status_modal(trigger_id, int(decision_id), user, channel_id)
                     except SlackApiError as e:
                         logger.error(f"Failed to open status change modal: {e}")
                 return None
