@@ -332,7 +332,7 @@ class SlackService:
             from sqlalchemy import or_
             query = query.filter(
                 or_(
-                    ArchitectureDecision.created_by == user.id,
+                    ArchitectureDecision.created_by_id == user.id,
                     ArchitectureDecision.owner_id == user.id
                 )
             )
