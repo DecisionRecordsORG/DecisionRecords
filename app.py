@@ -7469,6 +7469,7 @@ def slack_commands():
     # Parse form data (Slack sends form-encoded data)
     team_id = request.form.get('team_id')
     user_id = request.form.get('user_id')
+    channel_id = request.form.get('channel_id')
     text = request.form.get('text', '').strip()
     trigger_id = request.form.get('trigger_id')
     response_url = request.form.get('response_url', '')
@@ -7494,7 +7495,7 @@ def slack_commands():
 
     # Create service and handle command
     service = SlackService(workspace)
-    response, _ = service.handle_command(text, user_id, trigger_id, response_url)
+    response, _ = service.handle_command(text, user_id, trigger_id, response_url, channel_id)
 
     if response is None:
         return '', 200

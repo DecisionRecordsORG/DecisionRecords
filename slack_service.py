@@ -210,7 +210,7 @@ class SlackService:
     # SLASH COMMAND HANDLERS
     # =========================================================================
 
-    def handle_command(self, command_text: str, slack_user_id: str, trigger_id: str, response_url: str):
+    def handle_command(self, command_text: str, slack_user_id: str, trigger_id: str, response_url: str, channel_id: str = None):
         """
         Handle a slash command.
 
@@ -238,9 +238,9 @@ class SlackService:
         }
 
         handler = handlers.get(subcommand, self._handle_help)
-        return handler(args, user, trigger_id)
+        return handler(args, user, trigger_id, channel_id)
 
-    def _handle_help(self, args: str, user: User, trigger_id: str):
+    def _handle_help(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """Show help message."""
         blocks = [
             {
@@ -282,7 +282,7 @@ class SlackService:
         ]
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
-    def _handle_list(self, args: str, user: User, trigger_id: str):
+    def _handle_list(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """
         List recent decisions with filtering options.
 
@@ -420,7 +420,7 @@ class SlackService:
 
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
-    def _handle_view(self, args: str, user: User, trigger_id: str):
+    def _handle_view(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """View a specific decision."""
         tenant = self.workspace.tenant
         if not tenant:
@@ -461,7 +461,7 @@ class SlackService:
         blocks = self._format_decision_detail_blocks(decision)
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
-    def _handle_search(self, args: str, user: User, trigger_id: str):
+    def _handle_search(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """Search decisions."""
         tenant = self.workspace.tenant
         if not tenant:
@@ -512,7 +512,7 @@ class SlackService:
 
         return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
-    def _handle_create(self, args: str, user: User, trigger_id: str):
+    def _handle_create(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """Open modal to create a new decision."""
         if not user:
             return {
@@ -521,21 +521,25 @@ class SlackService:
             }, True
 
         try:
-            self._open_create_modal(trigger_id, user)
+            self._open_create_modal(trigger_id, user, channel_id)
             return None, True  # No response needed, modal opens
         except SlackApiError as e:
             logger.error(f"Failed to open create modal: {e}")
             return {'response_type': 'ephemeral', 'text': 'Failed to open creation form. Please try again.'}, True
 
-    def _open_create_modal(self, trigger_id: str, user: User):
+    def _open_create_modal(self, trigger_id: str, user: User, channel_id: str = None):
         """Open the create decision modal."""
+        # Store user_id and channel_id in private_metadata
+        # Format: user_id:channel_id (channel_id may be empty)
+        private_metadata = f"{user.id}:{channel_id or ''}"
+
         view = {
             "type": "modal",
             "callback_id": "create_decision",
             "title": {"type": "plain_text", "text": "Create Decision"},
             "submit": {"type": "plain_text", "text": "Create"},
             "close": {"type": "plain_text", "text": "Cancel"},
-            "private_metadata": str(user.id),
+            "private_metadata": private_metadata,
             "blocks": [
                 {
                     "type": "input",
@@ -961,14 +965,17 @@ class SlackService:
         """Create a decision from modal submission."""
         view = payload.get('view', {})
         values = view.get('state', {}).get('values', {})
-        user_id = view.get('private_metadata')
+        private_metadata = view.get('private_metadata', '')
 
+        # Parse private_metadata: user_id:channel_id
         try:
-            user_id = int(user_id)
+            parts = private_metadata.split(':')
+            user_id = int(parts[0])
+            original_channel_id = parts[1] if len(parts) > 1 and parts[1] else None
             user = User.query.get(user_id)
             if not user:
                 return {"response_action": "errors", "errors": {"title_block": "User not found"}}
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, IndexError):
             return {"response_action": "errors", "errors": {"title_block": "Invalid user"}}
 
         # Extract values
@@ -1055,7 +1062,7 @@ class SlackService:
         # Post notification to channel if enabled
         self._send_creation_notification(decision)
 
-        # Send confirmation to the creator
+        # Send confirmation to the original channel where /adr create was run
         slack_user = payload.get('user', {})
         creator_slack_id = slack_user.get('id')
 
@@ -1064,44 +1071,75 @@ class SlackService:
             if owner_slack_id:
                 owner_text = f"\n:bust_in_silhouette: Owner: <@{owner_slack_id}>"
 
-            # Open DM channel first to ensure we can send
-            dm_channel = self._open_dm_channel(creator_slack_id)
-            if not dm_channel:
-                logger.warning(f"Could not open DM channel with {creator_slack_id}")
-            else:
-                self.client.chat_postMessage(
-                    channel=dm_channel,
-                    text=f"Decision {display_id} created successfully!",
-                blocks=[
-                    {
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": f":white_check_mark: *Decision Created Successfully*\n\n*{display_id}*: {decision.title}{owner_text}"
-                        }
-                    },
-                    {
-                        "type": "section",
-                        "fields": [
-                            {"type": "mrkdwn", "text": f"*Status:*\n{status.title()}"},
-                            {"type": "mrkdwn", "text": f"*Created by:*\n<@{creator_slack_id}>"}
-                        ]
-                    },
-                    {
-                        "type": "actions",
-                        "elements": [
+            status_emoji = self._get_status_emoji(status)
+
+            # Send to original channel if available, otherwise fall back to DM
+            reply_channel = original_channel_id
+            if reply_channel:
+                try:
+                    self.client.chat_postMessage(
+                        channel=reply_channel,
+                        text=f"Decision {display_id} created successfully!",
+                        blocks=[
                             {
-                                "type": "button",
-                                "text": {"type": "plain_text", "text": "View Decision"},
-                                "url": decision_url,
-                                "action_id": "view_decision_url"
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f":white_check_mark: *Decision Created*\n\n*<{decision_url}|{display_id}: {decision.title}>*{owner_text}"
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": f"*Status:*\n{status_emoji} {status.title()}"},
+                                    {"type": "mrkdwn", "text": f"*Created by:*\n<@{creator_slack_id}>"}
+                                ]
                             }
                         ]
-                    }
-                ]
-            )
+                    )
+                except SlackApiError as e:
+                    logger.warning(f"Failed to send confirmation to channel: {e}")
+                    reply_channel = None  # Fall back to DM
+
+            # If no original channel or channel message failed, send DM
+            if not reply_channel:
+                dm_channel = self._open_dm_channel(creator_slack_id)
+                if not dm_channel:
+                    logger.warning(f"Could not open DM channel with {creator_slack_id}")
+                else:
+                    self.client.chat_postMessage(
+                        channel=dm_channel,
+                        text=f"Decision {display_id} created successfully!",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f":white_check_mark: *Decision Created Successfully*\n\n*{display_id}*: {decision.title}{owner_text}"
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": f"*Status:*\n{status_emoji} {status.title()}"},
+                                    {"type": "mrkdwn", "text": f"*Created by:*\n<@{creator_slack_id}>"}
+                                ]
+                            },
+                            {
+                                "type": "actions",
+                                "elements": [
+                                    {
+                                        "type": "button",
+                                        "text": {"type": "plain_text", "text": "View Decision"},
+                                        "url": decision_url,
+                                        "action_id": "view_decision_url"
+                                    }
+                                ]
+                            }
+                        ]
+                    )
         except SlackApiError as e:
-            logger.warning(f"Failed to send confirmation DM to creator: {e}")
+            logger.warning(f"Failed to send confirmation to creator: {e}")
 
         # Send notification to owner if different from creator
         if owner_slack_id and owner_slack_id != creator_slack_id:
