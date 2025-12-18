@@ -621,6 +621,80 @@ class SlackService:
         }
         self.client.views_open(trigger_id=trigger_id, view=view)
 
+    def _open_change_status_modal(self, trigger_id: str, decision_id: int, user: User):
+        """Open the change status modal for a decision."""
+        decision = ArchitectureDecision.query.get(decision_id)
+        if not decision:
+            return
+
+        display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+
+        # Build status options with emojis
+        status_options = [
+            {
+                "text": {"type": "plain_text", "text": ":thought_balloon: Proposed"},
+                "value": "proposed"
+            },
+            {
+                "text": {"type": "plain_text", "text": ":large_green_circle: Accepted"},
+                "value": "accepted"
+            },
+            {
+                "text": {"type": "plain_text", "text": ":white_circle: Archived"},
+                "value": "archived"
+            },
+            {
+                "text": {"type": "plain_text", "text": ":large_orange_circle: Superseded"},
+                "value": "superseded"
+            }
+        ]
+
+        # Find current status option for initial_option
+        current_option = next(
+            (opt for opt in status_options if opt["value"] == decision.status),
+            status_options[0]
+        )
+
+        view = {
+            "type": "modal",
+            "callback_id": "change_status",
+            "title": {"type": "plain_text", "text": "Change Status"},
+            "submit": {"type": "plain_text", "text": "Update"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "private_metadata": f"{decision_id}:{user.id}",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{display_id}*: {decision.title}"
+                    }
+                },
+                {"type": "divider"},
+                {
+                    "type": "input",
+                    "block_id": "status_block",
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "new_status",
+                        "initial_option": current_option,
+                        "options": status_options
+                    },
+                    "label": {"type": "plain_text", "text": "New Status"}
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": ":thought_balloon: *Proposed* - Under consideration\n:large_green_circle: *Accepted* - Approved and active\n:white_circle: *Archived* - No longer relevant\n:large_orange_circle: *Superseded* - Replaced by a newer decision"
+                        }
+                    ]
+                }
+            ]
+        }
+        self.client.views_open(trigger_id=trigger_id, view=view)
+
     # =========================================================================
     # INTERACTION HANDLERS
     # =========================================================================
@@ -715,6 +789,117 @@ class SlackService:
 
         if callback_id == 'create_decision':
             return self._create_decision_from_modal(payload)
+        elif callback_id == 'change_status':
+            return self._change_status_from_modal(payload)
+
+        return None
+
+    def _change_status_from_modal(self, payload: dict):
+        """Handle status change from modal submission."""
+        view = payload.get('view', {})
+        values = view.get('state', {}).get('values', {})
+        private_metadata = view.get('private_metadata', '')
+
+        try:
+            decision_id, user_id = private_metadata.split(':')
+            decision_id = int(decision_id)
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            return {"response_action": "errors", "errors": {"status_block": "Invalid request"}}
+
+        user = User.query.get(user_id)
+        decision = ArchitectureDecision.query.get(decision_id)
+
+        if not user or not decision:
+            return {"response_action": "errors", "errors": {"status_block": "Decision not found"}}
+
+        # Get new status
+        new_status = values.get('status_block', {}).get('new_status', {}).get('selected_option', {}).get('value')
+        if not new_status:
+            return {"response_action": "errors", "errors": {"status_block": "Please select a status"}}
+
+        old_status = decision.status
+
+        # Update the decision
+        decision.status = new_status
+        decision.updated_by_id = user.id
+        decision.updated_at = datetime.utcnow()
+        db.session.commit()
+
+        # Get display ID and URL
+        display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+        tenant = self.workspace.tenant
+        base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
+        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
+
+        # Send confirmation to the user who made the change
+        slack_user = payload.get('user', {})
+        slack_user_id = slack_user.get('id')
+
+        status_emoji = self._get_status_emoji(new_status)
+
+        try:
+            dm_channel = self._open_dm_channel(slack_user_id)
+            if dm_channel:
+                self.client.chat_postMessage(
+                    channel=dm_channel,
+                    text=f"Status updated for {display_id}",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":white_check_mark: *Status Updated*\n\n*{display_id}*: {decision.title}"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Previous:*\n{self._get_status_emoji(old_status)} {old_status.title()}"},
+                                {"type": "mrkdwn", "text": f"*New:*\n{status_emoji} {new_status.title()}"}
+                            ]
+                        },
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": ":link: View Decision"},
+                                    "url": decision_url,
+                                    "action_id": "view_in_browser"
+                                }
+                            ]
+                        }
+                    ]
+                )
+        except SlackApiError as e:
+            logger.warning(f"Failed to send status change confirmation: {e}")
+
+        # Send notification to channel if configured
+        if self.workspace.notification_channel_id:
+            try:
+                self.client.chat_postMessage(
+                    channel=self.workspace.notification_channel_id,
+                    text=f"Decision {display_id} status changed to {new_status}",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f":arrows_counterclockwise: *Decision Status Changed*\n\n*<{decision_url}|{display_id}: {decision.title}>*"
+                            }
+                        },
+                        {
+                            "type": "section",
+                            "fields": [
+                                {"type": "mrkdwn", "text": f"*Status:*\n{status_emoji} {new_status.title()}"},
+                                {"type": "mrkdwn", "text": f"*Changed by:*\n<@{slack_user_id}>"}
+                            ]
+                        }
+                    ]
+                )
+            except SlackApiError as e:
+                logger.warning(f"Failed to send channel notification for status change: {e}")
 
         return None
 
@@ -957,6 +1142,20 @@ class SlackService:
 
             elif action_id == 'upgrade_app':
                 # Upgrade button opens OAuth URL - just acknowledge
+                return None
+
+            elif action_id.startswith('change_status_'):
+                # Change Status button - open modal
+                decision_id = action.get('value')
+                if decision_id and trigger_id:
+                    mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
+                    if needs_linking or not user:
+                        self._send_ephemeral_link_prompt(payload, slack_user_id)
+                        return None
+                    try:
+                        self._open_change_status_modal(trigger_id, int(decision_id), user)
+                    except SlackApiError as e:
+                        logger.error(f"Failed to open status change modal: {e}")
                 return None
 
         return None
@@ -1299,15 +1498,15 @@ class SlackService:
     # =========================================================================
 
     def _get_status_emoji(self, status: str) -> str:
-        """Get emoji for decision status."""
+        """Get emoji for decision status - using distinctive, colorful emojis."""
         return {
-            'proposed': ':memo:',
-            'accepted': ':white_check_mark:',
-            'archived': ':file_folder:',
-            'superseded': ':arrows_counterclockwise:'
-        }.get(status, ':memo:')
+            'proposed': ':thought_balloon:',      # 💭 Thinking/under consideration
+            'accepted': ':large_green_circle:',   # 🟢 Green = approved/active
+            'archived': ':white_circle:',         # ⚪ Neutral = no longer active
+            'superseded': ':large_orange_circle:' # 🟠 Orange = replaced by newer
+        }.get(status, ':thought_balloon:')
 
-    def _format_decision_detail_blocks(self, decision: ArchitectureDecision) -> list:
+    def _format_decision_detail_blocks(self, decision: ArchitectureDecision, include_actions: bool = True) -> list:
         """Format a decision as detailed Block Kit blocks."""
         status_emoji = self._get_status_emoji(decision.status)
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
@@ -1316,6 +1515,30 @@ class SlackService:
         tenant = self.workspace.tenant
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
 
+        # Get creator and owner info
+        creator_name = "Unknown"
+        if hasattr(decision, 'creator') and decision.creator:
+            creator_name = decision.creator.name or decision.creator.email or "Unknown"
+
+        owner_info = None
+        if decision.owner_id and decision.owner:
+            owner_name = decision.owner.name or decision.owner.email or "Unknown"
+            if decision.owner_id != getattr(decision, 'created_by', None):
+                owner_info = owner_name
+        elif decision.owner_email:
+            owner_info = decision.owner_email
+
+        # Build metadata fields
+        metadata_fields = [
+            {"type": "mrkdwn", "text": f"*Status:* {status_emoji} {decision.status.title()}"},
+            {"type": "mrkdwn", "text": f"*Created:* {decision.created_at.strftime('%b %d, %Y')}"},
+            {"type": "mrkdwn", "text": f"*Creator:* {creator_name}"},
+        ]
+
+        # Add owner if different from creator
+        if owner_info:
+            metadata_fields.append({"type": "mrkdwn", "text": f"*Owner:* {owner_info}"})
+
         blocks = [
             {
                 "type": "header",
@@ -1323,36 +1546,46 @@ class SlackService:
             },
             {
                 "type": "section",
-                "fields": [
-                    {"type": "mrkdwn", "text": f"*Status:* {status_emoji} {decision.status.title()}"},
-                    {"type": "mrkdwn", "text": f"*Created:* {decision.created_at.strftime('%Y-%m-%d')}"}
-                ]
+                "fields": metadata_fields[:2]  # First row: Status, Created
+            },
+            {
+                "type": "section",
+                "fields": metadata_fields[2:]  # Second row: Creator, Owner (if exists)
             },
             {"type": "divider"},
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Context:*\n{decision.context[:500]}{'...' if len(decision.context) > 500 else ''}"}
+                "text": {"type": "mrkdwn", "text": f"*:clipboard: Context*\n{decision.context[:500]}{'...' if len(decision.context) > 500 else ''}"}
             },
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Decision:*\n{decision.decision[:500]}{'...' if len(decision.decision) > 500 else ''}"}
+                "text": {"type": "mrkdwn", "text": f"*:bulb: Decision*\n{decision.decision[:500]}{'...' if len(decision.decision) > 500 else ''}"}
             },
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Consequences:*\n{decision.consequences[:500]}{'...' if len(decision.consequences) > 500 else ''}"}
-            },
-            {
+                "text": {"type": "mrkdwn", "text": f"*:warning: Consequences*\n{decision.consequences[:500]}{'...' if len(decision.consequences) > 500 else ''}"}
+            }
+        ]
+
+        if include_actions:
+            blocks.append({
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "View in Browser"},
+                        "text": {"type": "plain_text", "text": ":arrows_counterclockwise: Change Status"},
+                        "action_id": f"change_status_{decision.id}",
+                        "value": str(decision.id)
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": ":link: Open in Browser"},
                         "url": decision_url,
                         "action_id": "open_in_browser"
                     }
                 ]
-            }
-        ]
+            })
+
         return blocks
 
     def _format_notification_blocks(self, decision: ArchitectureDecision, event_type: str) -> list:

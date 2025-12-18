@@ -213,13 +213,13 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": "Decision Records"}
+            "text": {"type": "plain_text", "text": ":page_facing_up: Decision Records"}
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"Welcome{' ' + user_name if user_name else ''}! Decision Records helps your team capture and preserve the reasoning behind important decisions."
+                "text": f"Welcome{', *' + user_name + '*' if user_name else ''}! :wave:\n\nCapture and preserve the reasoning behind important decisions. Never lose context again."
             }
         },
         {"type": "divider"}
@@ -267,27 +267,20 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
             {"type": "divider"}
         ])
 
-    # Quick action - Create Decision
+    # Quick actions
     blocks.extend([
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*Quick Action*"
-            }
-        },
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Create Decision"},
+                    "text": {"type": "plain_text", "text": ":heavy_plus_sign: New Decision"},
                     "style": "primary",
                     "action_id": "create_decision_home"
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Open Web App"},
+                    "text": {"type": "plain_text", "text": ":globe_with_meridians: Open Web App"},
                     "action_id": "open_web_app",
                     "url": os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
                 }
@@ -299,38 +292,41 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
     blocks.extend([
         {"type": "divider"},
         {
+            "type": "header",
+            "text": {"type": "plain_text", "text": ":rocket: What You Can Do"}
+        },
+        {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Features*"
+                "text": ":pencil2: *Capture Decisions*\nRecord the context, decision, and consequences of important choices."
+            },
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Create"},
+                "style": "primary",
+                "action_id": "create_decision_home"
             }
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": ":memo: *Capture Decisions*\nRecord the context, decision, and consequences of important choices. Use `/adr create` or the button above."
+                "text": ":mag_right: *Find & Filter*\nSearch decisions, list your own, or filter by space."
             }
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": ":mag: *Find & Filter*\nSearch through decisions with `/adr search <query>`, list your decisions with `/adr list mine`, or filter by space with `/adr list space:<name>`."
+                "text": ":bell: *Stay Informed*\nGet DM notifications when you create decisions or are assigned as owner."
             }
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": ":bell: *Stay Informed*\nGet DM notifications when you create decisions or are assigned as an owner. Channel notifications keep your team in sync."
-            }
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": ":bookmark: *Save Messages*\nTurn any Slack message into a decision record using the message shortcut (right-click > More actions > Save as Decision)."
+                "text": ":speech_balloon: *Save Messages*\nRight-click any message → More actions → Save as Decision."
             }
         }
     ])
@@ -339,17 +335,20 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
     blocks.extend([
         {"type": "divider"},
         {
+            "type": "header",
+            "text": {"type": "plain_text", "text": ":keyboard: Commands"}
+        },
+        {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*Slash Commands*\n" +
-                        "`/adr create` - Create a new decision\n" +
-                        "`/adr list` - List recent decisions\n" +
-                        "`/adr list mine` - List your decisions\n" +
-                        "`/adr list space:<name>` - List by space\n" +
-                        "`/adr view <id>` - View a specific decision\n" +
-                        "`/adr search <query>` - Search decisions\n" +
-                        "`/adr help` - Show all commands"
+                "text": "`/adr create` Create a new decision\n" +
+                        "`/adr list` List recent decisions\n" +
+                        "`/adr list mine` Your decisions only\n" +
+                        "`/adr list space:name` Filter by space\n" +
+                        "`/adr view ID` View details\n" +
+                        "`/adr search query` Search\n" +
+                        "`/adr help` All commands"
             }
         }
     ])
