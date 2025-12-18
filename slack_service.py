@@ -910,8 +910,9 @@ class SlackService:
         thread = threading.Thread(target=send_notifications)
         thread.start()
 
-        # Return immediately to close modal (Slack has 3-second timeout)
-        return None
+        # Return empty dict to acknowledge and close modal
+        # (Slack view submissions require JSON response, not empty body)
+        return {"response_action": "clear"}
 
     def _create_decision_from_modal(self, payload: dict):
         """Create a decision from modal submission."""
