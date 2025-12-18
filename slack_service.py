@@ -796,6 +796,8 @@ class SlackService:
 
     def _change_status_from_modal(self, payload: dict):
         """Handle status change from modal submission."""
+        import threading
+
         view = payload.get('view', {})
         values = view.get('state', {}).get('values', {})
         private_metadata = view.get('private_metadata', '')
@@ -826,81 +828,89 @@ class SlackService:
         decision.updated_at = datetime.utcnow()
         db.session.commit()
 
-        # Get display ID and URL
+        # Capture data needed for notifications before returning
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+        decision_title = decision.title
         tenant = self.workspace.tenant
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
+        slack_user_id = payload.get('user', {}).get('id')
+        notification_channel = self.workspace.notification_channel_id
 
-        # Send confirmation to the user who made the change
-        slack_user = payload.get('user', {})
-        slack_user_id = slack_user.get('id')
+        # Send notifications in background thread to avoid timeout
+        def send_notifications():
+            status_emoji = self._get_status_emoji(new_status)
+            old_emoji = self._get_status_emoji(old_status)
 
-        status_emoji = self._get_status_emoji(new_status)
-
-        try:
-            dm_channel = self._open_dm_channel(slack_user_id)
-            if dm_channel:
-                self.client.chat_postMessage(
-                    channel=dm_channel,
-                    text=f"Status updated for {display_id}",
-                    blocks=[
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": f":white_check_mark: *Status Updated*\n\n*{display_id}*: {decision.title}"
-                            }
-                        },
-                        {
-                            "type": "section",
-                            "fields": [
-                                {"type": "mrkdwn", "text": f"*Previous:*\n{self._get_status_emoji(old_status)} {old_status.title()}"},
-                                {"type": "mrkdwn", "text": f"*New:*\n{status_emoji} {new_status.title()}"}
-                            ]
-                        },
-                        {
-                            "type": "actions",
-                            "elements": [
-                                {
-                                    "type": "button",
-                                    "text": {"type": "plain_text", "text": ":link: View Decision"},
-                                    "url": decision_url,
-                                    "action_id": "view_in_browser"
-                                }
-                            ]
-                        }
-                    ]
-                )
-        except SlackApiError as e:
-            logger.warning(f"Failed to send status change confirmation: {e}")
-
-        # Send notification to channel if configured
-        if self.workspace.notification_channel_id:
+            # Send confirmation DM
             try:
-                self.client.chat_postMessage(
-                    channel=self.workspace.notification_channel_id,
-                    text=f"Decision {display_id} status changed to {new_status}",
-                    blocks=[
-                        {
-                            "type": "section",
-                            "text": {
-                                "type": "mrkdwn",
-                                "text": f":arrows_counterclockwise: *Decision Status Changed*\n\n*<{decision_url}|{display_id}: {decision.title}>*"
+                dm_channel = self._open_dm_channel(slack_user_id)
+                if dm_channel:
+                    self.client.chat_postMessage(
+                        channel=dm_channel,
+                        text=f"Status updated for {display_id}",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f":white_check_mark: *Status Updated*\n\n*{display_id}*: {decision_title}"
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": f"*Previous:*\n{old_emoji} {old_status.title()}"},
+                                    {"type": "mrkdwn", "text": f"*New:*\n{status_emoji} {new_status.title()}"}
+                                ]
+                            },
+                            {
+                                "type": "actions",
+                                "elements": [
+                                    {
+                                        "type": "button",
+                                        "text": {"type": "plain_text", "text": ":link: View Decision"},
+                                        "url": decision_url,
+                                        "action_id": "view_in_browser"
+                                    }
+                                ]
                             }
-                        },
-                        {
-                            "type": "section",
-                            "fields": [
-                                {"type": "mrkdwn", "text": f"*Status:*\n{status_emoji} {new_status.title()}"},
-                                {"type": "mrkdwn", "text": f"*Changed by:*\n<@{slack_user_id}>"}
-                            ]
-                        }
-                    ]
-                )
+                        ]
+                    )
             except SlackApiError as e:
-                logger.warning(f"Failed to send channel notification for status change: {e}")
+                logger.warning(f"Failed to send status change confirmation: {e}")
 
+            # Send channel notification if configured
+            if notification_channel:
+                try:
+                    self.client.chat_postMessage(
+                        channel=notification_channel,
+                        text=f"Decision {display_id} status changed to {new_status}",
+                        blocks=[
+                            {
+                                "type": "section",
+                                "text": {
+                                    "type": "mrkdwn",
+                                    "text": f":arrows_counterclockwise: *Decision Status Changed*\n\n*<{decision_url}|{display_id}: {decision_title}>*"
+                                }
+                            },
+                            {
+                                "type": "section",
+                                "fields": [
+                                    {"type": "mrkdwn", "text": f"*Status:*\n{status_emoji} {new_status.title()}"},
+                                    {"type": "mrkdwn", "text": f"*Changed by:*\n<@{slack_user_id}>"}
+                                ]
+                            }
+                        ]
+                    )
+                except SlackApiError as e:
+                    logger.warning(f"Failed to send channel notification for status change: {e}")
+
+        # Start notifications in background
+        thread = threading.Thread(target=send_notifications)
+        thread.start()
+
+        # Return immediately to close modal (Slack has 3-second timeout)
         return None
 
     def _create_decision_from_modal(self, payload: dict):
