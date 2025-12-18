@@ -830,7 +830,7 @@ class SlackService:
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
         tenant = self.workspace.tenant
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
-        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
+        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
 
         # Send confirmation to the user who made the change
         slack_user = payload.get('user', {})
@@ -996,7 +996,7 @@ class SlackService:
         # Get the display ID and build the decision URL
         display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f'ADR-{decision.decision_number}'
         # Build decision URL - we need to construct this from the domain
-        decision_url = f"https://decisionrecords.org/{domain}/decisions/{decision.id}"
+        decision_url = f"https://decisionrecords.org/{domain}/decision/{decision.id}"
 
         # Post notification to channel if enabled
         self._send_creation_notification(decision)
@@ -1513,7 +1513,7 @@ class SlackService:
 
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         tenant = self.workspace.tenant
-        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
+        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
 
         # Get creator and owner info
         creator_name = "Unknown"
@@ -1601,7 +1601,7 @@ class SlackService:
 
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         tenant = self.workspace.tenant
-        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decisions/{decision.id}"
+        decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
 
         creator_name = decision.creator.name if hasattr(decision, 'creator') and decision.creator else 'Unknown'
 
