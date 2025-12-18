@@ -982,9 +982,7 @@ class SlackService:
 
     def _send_decisions_list(self, payload: dict, user: User):
         """Send a list of recent decisions as an ephemeral message."""
-        response_url = payload.get('response_url')
-        if not response_url:
-            return
+        slack_user_id = payload.get('user', {}).get('id')
 
         tenant = self.workspace.tenant
         if not tenant:
@@ -1010,11 +1008,17 @@ class SlackService:
             for decision in decisions:
                 status_emoji = self._get_status_emoji(decision.status)
                 display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+
+                # Include space name if available
+                space_info = ""
+                if decision.space:
+                    space_info = f" | Space: {decision.space.name}"
+
                 blocks.append({
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status}_"
+                        "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status}{space_info}_"
                     },
                     "accessory": {
                         "type": "button",
@@ -1024,12 +1028,39 @@ class SlackService:
                     }
                 })
 
-        import requests
-        requests.post(response_url, json={
-            'response_type': 'ephemeral',
-            'replace_original': False,
-            'blocks': blocks
-        })
+            # Add tip for filtering
+            blocks.append({
+                "type": "context",
+                "elements": [{
+                    "type": "mrkdwn",
+                    "text": "_Tip: Use `/adr list mine` for your decisions or `/adr list space:[name]` for a specific space_"
+                }]
+            })
+
+        # Try response_url first (for slash commands), fall back to chat.postEphemeral (for App Home)
+        response_url = payload.get('response_url')
+        if response_url:
+            import requests
+            requests.post(response_url, json={
+                'response_type': 'ephemeral',
+                'replace_original': False,
+                'blocks': blocks
+            })
+        else:
+            # App Home button clicks don't have response_url
+            # Send as regular message to DM (ephemeral doesn't work in DMs)
+            try:
+                # Open DM channel with user
+                dm_response = self.client.conversations_open(users=[slack_user_id])
+                if dm_response.get('ok'):
+                    channel_id = dm_response.get('channel', {}).get('id')
+                    self.client.chat_postMessage(
+                        channel=channel_id,
+                        blocks=blocks,
+                        text="Recent Decisions"
+                    )
+            except SlackApiError as e:
+                logger.error(f"Failed to send decisions list: {e}")
 
     def _send_decision_detail(self, payload: dict, decision_id: int):
         """Send decision detail as a response."""
@@ -1037,15 +1068,31 @@ class SlackService:
         if not decision:
             return None
 
+        blocks = self._format_decision_detail_blocks(decision)
+        slack_user_id = payload.get('user', {}).get('id')
+
         response_url = payload.get('response_url')
         if response_url:
             import requests
-            blocks = self._format_decision_detail_blocks(decision)
             requests.post(response_url, json={
                 'response_type': 'ephemeral',
                 'replace_original': False,
                 'blocks': blocks
             })
+        elif slack_user_id:
+            # No response_url (e.g., from App Home View buttons)
+            # Send as regular message to DM
+            try:
+                dm_response = self.client.conversations_open(users=[slack_user_id])
+                if dm_response.get('ok'):
+                    channel_id = dm_response.get('channel', {}).get('id')
+                    self.client.chat_postMessage(
+                        channel=channel_id,
+                        blocks=blocks,
+                        text=f"Decision: {decision.title}"
+                    )
+            except SlackApiError as e:
+                logger.error(f"Failed to send decision detail: {e}")
         return None
 
     def _handle_message_action(self, payload: dict):
