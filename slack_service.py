@@ -835,7 +835,7 @@ class SlackService:
         base_url = os.environ.get('APP_BASE_URL', 'https://decisionrecords.org')
         decision_url = f"{base_url}/{tenant.domain if tenant else ''}/decision/{decision.id}"
         slack_user_id = payload.get('user', {}).get('id')
-        notification_channel = self.workspace.notification_channel_id
+        notification_channel = self.workspace.default_channel_id
 
         # Send notifications in background thread to avoid timeout
         def send_notifications():
