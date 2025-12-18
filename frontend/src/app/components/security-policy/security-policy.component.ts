@@ -32,7 +32,7 @@ import { MatIconModule } from '@angular/material/icon';
         <div class="container">
           <article class="prose">
             <p class="lead">
-              Architecture Decisions is designed to support long-lived organisational knowledge. Because the platform is intended to preserve context over time, security and integrity are treated as foundational concerns rather than optional features.
+              Decision Records is designed to support long-lived organisational knowledge. Because the platform is intended to preserve context over time, security and integrity are treated as foundational concerns rather than optional features.
             </p>
 
             <p>

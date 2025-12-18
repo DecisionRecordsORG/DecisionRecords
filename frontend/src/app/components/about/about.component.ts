@@ -59,7 +59,7 @@ import { MatIconModule } from '@angular/material/icon';
             </p>
 
             <p>
-              We created the Architecture Decisions platform to make this practice accessible and sustainable. The aim is not to impose a framework or to formalise every choice, but to lower barriers to recording decisions that genuinely shape systems over time. The platform is designed to support collaboration, make decision context easy to revisit, and ensure that knowledge endures beyond individual roles and projects.
+              We created the Decision Records platform to make this practice accessible and sustainable. The aim is not to impose a framework or to formalise every choice, but to lower barriers to recording decisions that genuinely shape systems over time. The platform is designed to support collaboration, make decision context easy to revisit, and ensure that knowledge endures beyond individual roles and projects.
             </p>
 
             <h2>Beyond Software Engineering</h2>
@@ -71,7 +71,7 @@ import { MatIconModule } from '@angular/material/icon';
             <h2>Open Source & Independent</h2>
 
             <p>
-              Architecture Decisions is an open source project because transparency and impartiality matter. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach. You can self-host the platform or use our managed cloud service.
+              Decision Records is an open source project because transparency and impartiality matter. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach. You can self-host the platform or use our managed cloud service.
             </p>
 
             <blockquote>

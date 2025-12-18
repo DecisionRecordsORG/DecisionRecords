@@ -41,6 +41,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         <div class="hero-container">
           <div class="hero-content-centered">
             <p class="hero-initiative">
+              <img src="/assets/doubt-blue.svg" alt="Decision Records" class="hero-logo">
               <span class="initiative-badge">Open Initiative</span>
               DecisionRecords.org
             </p>
@@ -88,7 +89,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </div>
               </div>
               <div class="browser-content">
-                <img src="/assets/screenshot-dashboard.png" alt="Architecture Decisions Dashboard" />
+                <img src="/assets/screenshot-dashboard.png" alt="Decision Records Dashboard" />
               </div>
             </div>
           </div>
@@ -749,8 +750,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         <div class="container">
           <div class="footer-grid">
             <div class="footer-mission-col">
+              <div class="footer-brand">
+                <img src="/assets/doubt-blue.svg" alt="Decision Records" class="footer-logo">
+                <span class="footer-brand-text">DecisionRecords.org</span>
+              </div>
               <p class="footer-mission">
-                DecisionRecords.org is an open source initiative to make decision-making
+                An open source initiative to make decision-making
                 transparent, durable, and reusable across organisations.
               </p>
               <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org</small>
@@ -1152,6 +1157,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       font-size: 0.9rem;
       color: #bfdbfe;
       letter-spacing: 0.5px;
+    }
+
+    .hero-logo {
+      width: 48px;
+      height: 48px;
+      filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.3));
     }
 
     .initiative-badge {
@@ -2394,6 +2405,24 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: white;
       padding: 64px 24px;
       text-align: center;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .footer-logo {
+      width: 40px;
+      height: 40px;
+    }
+
+    .footer-brand-text {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e2e8f0;
     }
 
     .footer-mission {

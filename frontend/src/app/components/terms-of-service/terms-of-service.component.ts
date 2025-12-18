@@ -34,7 +34,7 @@ import { MatIconModule } from '@angular/material/icon';
             <p class="meta">Last updated: December 2024</p>
 
             <p class="lead">
-              These Terms of Service govern your access to and use of the Architecture Decisions platform, including the hosted cloud service, related websites, and documentation. By creating an account or using the service, you agree to these terms.
+              These Terms of Service govern your access to and use of the Decision Records platform, including the hosted cloud service, related websites, and documentation. By creating an account or using the service, you agree to these terms.
             </p>
 
             <hr class="divider">
@@ -42,7 +42,7 @@ import { MatIconModule } from '@angular/material/icon';
             <section class="terms-section">
               <h2>1. Purpose of the service</h2>
               <p>
-                Architecture Decisions provides a platform for capturing, preserving, and collaborating on architecture decisions and the context behind them. The project exists to help organisations retain institutional knowledge and reduce the long-term cost of lost decision rationale.
+                Decision Records provides a platform for capturing, preserving, and collaborating on important decisions and the context behind them. The project exists to help organisations retain institutional knowledge and reduce the long-term cost of lost decision rationale.
               </p>
               <p>
                 The project is operated as an independent, open source initiative and is offered both as self-hosted software and as a hosted cloud service. While related, these offerings are distinct and are governed by different terms.

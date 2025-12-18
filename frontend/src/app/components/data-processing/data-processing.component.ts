@@ -32,7 +32,7 @@ import { MatIconModule } from '@angular/material/icon';
         <div class="container">
           <article class="prose">
             <p class="lead">
-              This Data Processing Agreement ("DPA") explains how Architecture Decisions processes personal data when providing the hosted cloud service. It is designed to meet the requirements of the GDPR and similar data protection laws, without unnecessary complexity.
+              This Data Processing Agreement ("DPA") explains how Decision Records processes personal data when providing the hosted cloud service. It is designed to meet the requirements of the GDPR and similar data protection laws, without unnecessary complexity.
             </p>
 
             <hr class="divider">
@@ -44,7 +44,7 @@ import { MatIconModule } from '@angular/material/icon';
                 <p>For the purposes of data protection law:</p>
                 <ul>
                   <li>You (the customer) are the <strong>Data Controller</strong></li>
-                  <li>We (Architecture Decisions) are the <strong>Data Processor</strong></li>
+                  <li>We (Decision Records) are the <strong>Data Processor</strong></li>
                 </ul>
                 <p>
                   We process personal data only on your documented instructions and solely to provide and operate the service.
