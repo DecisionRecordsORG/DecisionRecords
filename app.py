@@ -7880,6 +7880,9 @@ def slack_interactions():
         result = service.handle_block_action(payload)
     elif payload_type == 'message_action':
         result = service.handle_message_action(payload)
+    elif payload_type == 'shortcut':
+        # Global shortcuts (type: global in manifest)
+        result = service.handle_message_action(payload)
 
     # Slack expects a 200 response - return result if it's a dict, otherwise empty 200
     if result is not None:
