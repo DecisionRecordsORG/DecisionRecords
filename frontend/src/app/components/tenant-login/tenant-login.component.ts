@@ -33,7 +33,7 @@ interface UserStatus {
   has_password: boolean;
 }
 
-type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto-approved' | 'recovery' | 'resend-verification';
+type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto-approved' | 'recovery' | 'resend-verification' | 'access-pending';
 
 @Component({
   selector: 'app-tenant-login',
@@ -70,6 +70,8 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               Reset your credentials
             } @else if (currentView === 'resend-verification') {
               Resend verification email
+            } @else if (currentView === 'access-pending') {
+              Awaiting approval
             } @else {
               Request submitted
             }
@@ -359,6 +361,24 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               </button>
             </div>
           }
+
+          <!-- Access Pending View - shown after email verification when admin approval required -->
+          @if (currentView === 'access-pending') {
+            <div class="request-sent-section">
+              <mat-icon class="pending-icon">hourglass_top</mat-icon>
+              <h3>Email Verified!</h3>
+              <p>
+                Your email has been verified and your access request for <strong>{{ tenant }}</strong> has been submitted.
+              </p>
+              <p class="pending-note">
+                An administrator will review your request. You'll receive an email once approved.
+              </p>
+              <button mat-raised-button color="primary" routerLink="/">
+                <mat-icon>home</mat-icon>
+                Back to Home
+              </button>
+            </div>
+          }
         </mat-card-content>
 
         @if (currentView === 'initial') {
@@ -543,6 +563,20 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       height: 64px;
       color: #4caf50;
       margin-bottom: 16px;
+    }
+
+    .pending-icon {
+      font-size: 64px;
+      width: 64px;
+      height: 64px;
+      color: #ff9800;
+      margin-bottom: 16px;
+    }
+
+    .pending-note {
+      font-size: 14px;
+      color: #888;
+      margin-top: 8px;
     }
 
     .request-sent-section h3 {
@@ -800,6 +834,11 @@ export class TenantLoginComponent implements OnInit {
     // Check for passkey setup success
     if (this.route.snapshot.queryParamMap.get('passkey_setup') === 'success') {
       this.success = 'Passkey created successfully! Sign in with your new passkey below.';
+    }
+
+    // Check for access_requested param - show access pending view
+    if (this.route.snapshot.queryParamMap.get('access_requested') === '1') {
+      this.currentView = 'access-pending';
     }
 
     // Check for OAuth auth errors

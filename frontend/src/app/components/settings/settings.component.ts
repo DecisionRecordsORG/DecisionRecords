@@ -505,7 +505,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                     </div>
                   }
 
-                  <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
+                  <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso' && !isProvisionalAdmin">
                       <h4 class="options-header">User Registration</h4>
 
                       <div class="toggle-with-tooltip">
