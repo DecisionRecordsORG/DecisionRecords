@@ -41,7 +41,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         <div class="hero-container">
           <div class="hero-content-centered">
             <div class="hero-logo-container">
-              <img src="/assets/decision-records-logo.svg" alt="Decision Records" class="hero-logo">
+              <img src="/assets/decision-records-logo-white.svg" alt="Decision Records" class="hero-logo">
             </div>
             <h1><span class="typewriter-text">{{ displayedDecisionType }}</span> <span class="highlight">Records</span></h1>
             <p class="hero-tagline">
@@ -52,7 +52,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             </p>
             <div class="hero-cta">
               <button mat-raised-button class="cta-button" (click)="openGetStartedDialog()">
-                <span>Get Started</span>
+                <span>Get Started. It's FREE!</span>
                 <mat-icon>arrow_forward</mat-icon>
               </button>
               <button mat-stroked-button class="cta-button-secondary" (click)="openSignInDialog()">
@@ -73,21 +73,23 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             </div>
           </div>
 
-          <!-- Screenshot inside hero -->
-          <div class="hero-screenshot">
-            <div class="browser-frame">
-              <div class="browser-header">
-                <div class="browser-dots">
-                  <span class="dot red"></span>
-                  <span class="dot yellow"></span>
-                  <span class="dot green"></span>
+          <!-- Screenshot inside hero - glass pane with cutoff at section bottom -->
+          <div class="hero-screenshot-wrapper">
+            <div class="hero-screenshot-glass">
+              <div class="browser-frame">
+                <div class="browser-header">
+                  <div class="browser-dots">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                  </div>
+                  <div class="browser-address">
+                    <span>decisionrecords.org/brandnewcorp.com</span>
+                  </div>
                 </div>
-                <div class="browser-address">
-                  <span>decisionrecords.org/brandnewcorp.com</span>
+                <div class="browser-content">
+                  <img src="/assets/homepage-decisions-dash.png" alt="Decision Records Dashboard" />
                 </div>
-              </div>
-              <div class="browser-content">
-                <img src="/assets/homepage-decisions-dash.png" alt="Decision Records Dashboard" />
               </div>
             </div>
           </div>
@@ -619,6 +621,49 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
+      <!-- Slack Integration Section -->
+      <section class="section slack-section">
+        <div class="slack-bg-gradient">
+          <div class="container slack-container">
+            <div class="slack-content">
+              <div class="slack-badge">
+                <mat-icon>flash_on</mat-icon>
+                <span>New Integration</span>
+              </div>
+              <h2>Capture decisions where your team already works</h2>
+              <p class="slack-tagline">
+                Create and manage decision records directly from Slack.
+                No context switching. No forgotten conversations.
+              </p>
+              <div class="slack-features">
+                <div class="slack-feature">
+                  <mat-icon>bolt</mat-icon>
+                  <span>Type <code>/decision</code> to get started</span>
+                </div>
+                <div class="slack-feature">
+                  <mat-icon>touch_app</mat-icon>
+                  <span>Create from any message with one click</span>
+                </div>
+                <div class="slack-feature">
+                  <mat-icon>notifications_active</mat-icon>
+                  <span>Get notified when decisions change</span>
+                </div>
+              </div>
+              <a href="https://slack.com/apps" target="_blank" class="slack-cta">
+                <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo-btn">
+                <span>Add to Slack</span>
+              </a>
+            </div>
+            <div class="slack-visual">
+              <img src="/assets/decisionrecords-with-slack-transpatent.png" alt="Decision Records + Slack" class="slack-hero-image">
+              <div class="slack-screenshot-wrapper">
+                <img src="/assets/slackscreenshot-decisionrecords.png" alt="Create Decision modal in Slack" class="slack-screenshot">
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Security, Trust & Governance -->
       <section class="section trust-section">
         <div class="container">
@@ -757,7 +802,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <div class="footer-grid">
             <div class="footer-mission-col">
               <div class="footer-brand">
-                <img src="/assets/decision-records-logo.svg" alt="Decision Records" class="footer-logo">
+                <img src="/assets/decision-records-logo-official.svg" alt="Decision Records" class="footer-logo">
                 <span class="footer-brand-text">Decision Records</span>
               </div>
               <p class="footer-mission">
@@ -888,6 +933,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .homepage {
       min-height: 100vh;
       background: #f8fafc;
+      font-family: 'Inter', sans-serif;
     }
 
     /* Hero Section - Salient rich blue gradient */
@@ -896,7 +942,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: white;
       padding: 100px 24px 80px;
       position: relative;
-      overflow: visible;
+      overflow: hidden;
     }
 
     .hero::before {
@@ -926,6 +972,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-content-centered h1 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 4.5rem;
       font-weight: 700;
       margin: 0 0 24px;
@@ -940,6 +987,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-tagline {
+      font-family: 'Inter', sans-serif;
       font-size: 1.75rem;
       font-weight: 400;
       margin: 0 0 20px;
@@ -948,6 +996,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-subtitle {
+      font-family: 'Inter', sans-serif;
       font-size: 1.25rem;
       color: #bfdbfe;
       line-height: 1.7;
@@ -1163,17 +1212,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-logo {
-      width: 80px;
-      height: 80px;
+      width: 150px;
+      height: 150px;
       filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.3));
     }
 
-    /* Dialog Styles */
+    /* Dialog Styles - Style Guide Aligned */
     .dialog-container {
       padding: 32px 32px 24px;
       min-width: 320px;
       max-width: 420px;
       position: relative;
+      font-family: 'Inter', sans-serif;
     }
 
     @media (max-width: 480px) {
@@ -1186,43 +1236,50 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .dialog-close {
       position: absolute;
-      top: 8px;
-      right: 8px;
+      top: 12px;
+      right: 12px;
       color: #94a3b8;
       z-index: 10;
+      transition: all 0.2s ease;
     }
 
     .dialog-close:hover {
-      color: #64748b;
-      background: #f1f5f9;
+      color: #3b82f6;
+      background: #eff6ff;
     }
 
     .dialog-header {
-      margin-bottom: 20px;
+      margin-bottom: 24px;
       padding-right: 32px;
     }
 
     .dialog-header h2 {
-      font-size: 1.35rem;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
-      margin: 0 0 6px;
+      margin: 0 0 8px;
       padding: 0;
+      letter-spacing: -0.01em;
     }
 
     .dialog-subtitle {
+      font-family: 'Inter', sans-serif;
       color: #64748b;
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       margin: 0;
-      line-height: 1.4;
+      line-height: 1.5;
     }
 
     ::ng-deep .mat-mdc-dialog-container {
       border-radius: 16px !important;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
     }
 
     ::ng-deep .mat-mdc-dialog-surface {
       padding: 0 !important;
+      background: #ffffff !important;
+      border: 1px solid #e2e8f0 !important;
     }
 
     ::ng-deep mat-dialog-content {
@@ -1232,47 +1289,54 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       overflow: visible !important;
     }
 
-    /* Signup Card - Salient style */
+    /* Signup Card - Style Guide */
     .signup-card {
       padding: 32px;
       border-radius: 16px;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
       border: 1px solid #e2e8f0;
+      font-family: 'Inter', sans-serif;
     }
 
     mat-card-header {
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
 
     mat-card-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
+      letter-spacing: -0.01em;
     }
 
     mat-card-subtitle {
+      font-family: 'Inter', sans-serif;
       color: #64748b;
       font-size: 0.95rem;
+      line-height: 1.5;
     }
 
     .error-message {
       background-color: #fef2f2;
-      color: #dc2626;
+      color: #ef4444;
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 16px;
       font-size: 14px;
       font-weight: 500;
+      border: 1px solid rgba(239, 68, 68, 0.2);
     }
 
     .success-message {
       background-color: #f0fdf4;
-      color: #16a34a;
+      color: #22c55e;
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 16px;
       font-size: 14px;
       font-weight: 500;
+      border: 1px solid rgba(34, 197, 94, 0.2);
     }
 
     .full-width {
@@ -1281,18 +1345,42 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     mat-form-field {
       margin-bottom: 8px;
+      font-family: 'Inter', sans-serif;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-text-field {
+      border-radius: 8px !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: #e2e8f0 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: #3b82f6 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-floating-label {
+      font-family: 'Inter', sans-serif !important;
     }
 
     .submit-btn {
-      margin-top: 12px;
-      padding: 12px 24px;
-      font-size: 14px;
+      margin-top: 16px;
+      padding: 14px 32px;
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
       font-weight: 500;
-      border-radius: 100px;
-      background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
-      letter-spacing: 0.1px;
+      border-radius: 8px;
+      background: #3b82f6 !important;
+      letter-spacing: 0;
       color: #ffffff !important;
       min-height: 48px !important;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);
+      transition: all 0.2s ease;
     }
 
     .submit-btn span,
@@ -1314,13 +1402,16 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .submit-btn:hover {
-      background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%) !important;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+      background: #2563eb !important;
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+      transform: translateY(-2px);
     }
 
     .submit-btn:disabled {
-      background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
+      background: #94a3b8 !important;
       color: rgba(255, 255, 255, 0.7) !important;
+      box-shadow: none;
+      transform: none;
     }
 
     /* Slack Sign-in Button Styles */
@@ -1328,8 +1419,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       display: flex;
       align-items: center;
       gap: 16px;
-      margin: 20px 0;
+      margin: 24px 0;
       color: #94a3b8;
+      font-family: 'Inter', sans-serif;
       font-size: 13px;
       text-transform: lowercase;
     }
@@ -1347,21 +1439,24 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       align-items: center;
       justify-content: center;
       gap: 10px;
-      padding: 12px 24px !important;
+      padding: 14px 32px !important;
       border: none !important;
-      border-radius: 100px !important;
+      border-radius: 8px !important;
       background: #4A154B !important;
       color: white !important;
+      font-family: 'Inter', sans-serif !important;
       font-weight: 500 !important;
-      font-size: 14px !important;
+      font-size: 16px !important;
       transition: all 0.2s ease !important;
       height: auto !important;
       min-height: 48px;
+      box-shadow: 0 4px 14px rgba(74, 21, 75, 0.25);
     }
 
     .slack-signin-btn:hover {
       background: #611f69 !important;
-      box-shadow: 0 4px 12px rgba(74, 21, 75, 0.3);
+      box-shadow: 0 6px 20px rgba(74, 21, 75, 0.35);
+      transform: translateY(-2px);
     }
 
     .slack-signin-btn .slack-logo {
@@ -1386,13 +1481,14 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       align-items: center;
       justify-content: center;
       gap: 10px;
-      padding: 12px 24px !important;
-      border: 1px solid #dadce0 !important;
-      border-radius: 4px !important;
+      padding: 14px 32px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
       background: white !important;
-      color: #3c4043 !important;
+      color: #334155 !important;
+      font-family: 'Inter', sans-serif !important;
       font-weight: 500 !important;
-      font-size: 14px !important;
+      font-size: 16px !important;
       transition: all 0.2s ease !important;
       height: auto !important;
       min-height: 48px;
@@ -1400,7 +1496,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .google-signin-btn:hover {
-      background: #f8f9fa !important;
+      background: #f8fafc !important;
+      border-color: #94a3b8 !important;
       box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15);
     }
 
@@ -1536,28 +1633,42 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin: 24px 0;
     }
 
-    /* Hero Screenshot - inside hero section */
-    .hero-screenshot {
+    /* Hero Screenshot - glass pane with cutoff at bottom */
+    .hero-screenshot-wrapper {
       max-width: 1100px;
-      margin: 60px auto 0;
+      margin: 24px auto 0;
       padding: 0 24px;
       position: relative;
       z-index: 5;
     }
 
+    .hero-screenshot-glass {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 16px;
+      padding-bottom: 0;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+    }
+
     .browser-frame {
-      border-radius: 16px;
+      border-radius: 16px 16px 0 0;
       overflow: hidden;
-      box-shadow:
-        0 25px 80px -12px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(255, 255, 255, 0.15),
-        0 0 60px rgba(59, 130, 246, 0.2);
-      background: rgba(30, 41, 59, 0.6);
-      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-bottom: none;
+      box-shadow: 0 0 60px rgba(59, 130, 246, 0.15);
     }
 
     .browser-header {
-      background: rgba(71, 85, 105, 0.5);
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
       padding: 12px 16px;
       display: flex;
       align-items: center;
@@ -1609,6 +1720,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 2.25rem;
       font-weight: 700;
       color: #0f172a;
@@ -2436,6 +2548,177 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       font-style: italic;
     }
 
+    /* Slack Integration Section - Inspired by ClickUp */
+    .slack-section {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .slack-bg-gradient {
+      /* Match the edge colors of decisionrecords-and-slack.png */
+      background: linear-gradient(135deg, #0822B5 0%, #0C3EDC 30%, #1436D9 50%, #1E5CF4 70%, #0A22C7 100%);
+      padding: 80px 24px 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slack-bg-gradient::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 30% 20%, rgba(30, 92, 244, 0.4) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 70% 60%, rgba(20, 54, 217, 0.3) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .slack-container {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 48px;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slack-content {
+      color: white;
+    }
+
+    .slack-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.25) 0%, rgba(245, 158, 11, 0.2) 100%);
+      border: 1px solid rgba(251, 191, 36, 0.5);
+      border-radius: 100px;
+      backdrop-filter: blur(8px);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fef3c7;
+      margin-bottom: 24px;
+    }
+
+    .slack-badge mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #fbbf24;
+    }
+
+    .slack-content h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 2.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin: 0 0 20px;
+      color: white;
+    }
+
+    .slack-tagline {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.25rem;
+      color: #bfdbfe;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+
+    .slack-features {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .slack-feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1rem;
+      color: #e0f2fe;
+    }
+
+    .slack-feature mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: #60a5fa;
+    }
+
+    .slack-feature code {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.9em;
+    }
+
+    .slack-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 28px;
+      background: white;
+      color: #1e40af;
+      font-weight: 600;
+      font-size: 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+      transition: all 0.2s ease;
+    }
+
+    .slack-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    .slack-logo-btn {
+      width: 22px;
+      height: 22px;
+    }
+
+    .slack-visual {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .slack-hero-image {
+      width: 100%;
+      max-width: 480px;
+      height: auto;
+      margin-bottom: -30px;
+      /* No border-radius or shadow - let the image blend naturally with background */
+    }
+
+    .slack-screenshot-wrapper {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+    }
+
+    .slack-screenshot {
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      display: block;
+    }
+
     /* Footer - Salient dark theme */
     .homepage-footer {
       background: #0f172a;
@@ -2552,20 +2835,21 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin-right: 8px;
     }
 
-    /* Dialog icon */
+    /* Dialog icon - Style Guide */
     .dialog-icon {
-      color: #2563eb;
-      font-size: 28px;
-      width: 28px;
-      height: 28px;
+      color: #3b82f6;
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
     }
 
-    /* Sponsorship Dialog - Two Column Layout */
+    /* Sponsorship Dialog - Two Column Layout - Style Guide */
     .sponsorship-dialog {
       padding: 32px;
       position: relative;
       min-width: 700px;
       max-width: 800px;
+      font-family: 'Inter', sans-serif;
     }
 
     .sponsorship-header {
@@ -2577,10 +2861,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-header h2 {
-      font-size: 1.35rem;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
       margin: 0;
+      letter-spacing: -0.01em;
     }
 
     .sponsorship-content {
@@ -2595,7 +2881,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-text p {
-      color: #475569;
+      font-family: 'Inter', sans-serif;
+      color: #334155;
       font-size: 0.95rem;
       line-height: 1.7;
       margin: 0 0 16px;
@@ -2606,7 +2893,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-text strong {
-      color: #1e40af;
+      color: #3b82f6;
+      font-weight: 600;
     }
 
     .sponsorship-form {
@@ -2615,6 +2903,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .sponsorship-form mat-form-field {
       margin-bottom: 4px;
+      font-family: 'Inter', sans-serif;
     }
 
     @media (max-width: 768px) {
@@ -2748,6 +3037,46 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         flex-direction: column;
         text-align: center;
       }
+
+      .slack-container {
+        grid-template-columns: 1fr;
+        gap: 32px;
+        text-align: center;
+      }
+
+      .slack-content {
+        text-align: center;
+      }
+
+      .slack-content h2 {
+        font-size: 2rem;
+      }
+
+      .slack-badge {
+        justify-content: center;
+      }
+
+      .slack-features {
+        align-items: center;
+      }
+
+      .slack-cta {
+        justify-content: center;
+      }
+
+      .slack-visual {
+        order: -1;
+      }
+
+      .slack-hero-image {
+        max-width: 320px;
+        margin-bottom: -20px;
+      }
+
+      .slack-screenshot-wrapper {
+        max-width: 300px;
+        transform: translateY(40px);
+      }
     }
 
     @media (max-width: 600px) {
@@ -2803,13 +3132,20 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         justify-content: center;
       }
 
-      .hero-screenshot {
+      .hero-screenshot-wrapper {
         margin: 40px auto 0;
         padding: 0 8px;
       }
 
-      .browser-frame {
-        border-radius: 8px;
+      .hero-screenshot-glass {
+        transform: translateY(40px);
+        padding: 8px;
+        padding-bottom: 0;
+        border-radius: 12px 12px 0 0;
+      }
+
+      .hero-screenshot-wrapper .browser-frame {
+        border-radius: 8px 8px 0 0;
       }
 
       .browser-header {

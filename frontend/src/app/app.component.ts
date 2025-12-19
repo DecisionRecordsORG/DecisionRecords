@@ -19,11 +19,9 @@ import { VersionService } from './services/version.service';
     <footer class="app-footer">
       <div class="footer-content">
         <small>
-          Architecture Decision Records
+          Decision Records
           <span class="separator">|</span>
           <a routerLink="/about">About</a>
-          <span class="separator">|</span>
-          Created by Lawrance Nyakiso
           <span class="separator">|</span>
           <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
         </small>

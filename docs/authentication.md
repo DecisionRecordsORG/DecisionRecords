@@ -1119,4 +1119,41 @@ def monitor_sessions():
 
 ---
 
+ The "Sign in with Google" feature has been successfully deployed to production at https://decisionrecords.org.
+
+  Summary of Changes:
+
+  | Component               | Changes                                                |
+  |-------------------------|--------------------------------------------------------|
+  | google_oauth.py         | New OAuth module with state management, token exchange |
+  | app.py                  | Added 3 routes + database migration                    |
+  | models.py               | Added allow_google_oauth field                         |
+  | Frontend (4 components) | Google sign-in buttons with brand styling              |
+  | Tests                   | 32 backend tests + E2E tests                           |
+
+  Important: To Enable Google OAuth
+
+  The feature is deployed but will show as disabled until you add Google credentials to Azure Key Vault:
+
+  # 1. Create OAuth credentials in Google Cloud Console
+  #    - Go to https://console.cloud.google.com
+  #    - Create a new project or select existing
+  #    - Enable Google+ API
+  #    - Create OAuth 2.0 credentials (Web application)
+  #    - Add callback URL: https://decisionrecords.org/auth/google/callback
+
+  # 2. Add credentials to Key Vault
+  az keyvault secret set \
+    --vault-name adr-keyvault-eu \
+    --name "google-client-id" \
+    --value "your-client-id.apps.googleusercontent.com"
+
+  az keyvault secret set \
+    --vault-name adr-keyvault-eu \
+    --name "google-client-secret" \
+    --value "your-client-secret"
+
+  Once the credentials are added, the "Sign in with Google" button will appear on login pages. Note that Gmail and other public email domains are blocked - only
+  Google Workspace accounts with corporate domains can sign in.
+
 *Last Updated: December 2025*
