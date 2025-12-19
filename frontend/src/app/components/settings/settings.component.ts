@@ -966,7 +966,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               <mat-card-content>
                 <p>Connect Slack to enable your team to:</p>
                 <ul>
-                  <li><strong>Slash Commands:</strong> Use <code>/adr create</code>, <code>/adr list</code>, <code>/adr view</code> directly in Slack</li>
+                  <li><strong>Slash Commands:</strong> Use <code>/decision</code>, <code>/decision list</code>, <code>/decision view</code> directly in Slack</li>
                   <li><strong>Notifications:</strong> Get notified when decisions are created or updated</li>
                   <li><strong>Quick Access:</strong> View and manage decisions without leaving Slack</li>
                 </ul>

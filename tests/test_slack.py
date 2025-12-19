@@ -433,7 +433,7 @@ class TestSlackCommands:
     """Test Slack slash command handling."""
 
     def test_help_command(self, app, slack_workspace, sample_user):
-        """'/adr help' returns help text."""
+        """'/decision help' returns help text."""
         with app.app_context():
             service = SlackService(slack_workspace)
 
@@ -461,11 +461,11 @@ class TestSlackCommands:
 
             # Check help text contains command info
             blocks_text = json.dumps(response['blocks'])
-            assert '/adr create' in blocks_text
-            assert '/adr list' in blocks_text
+            assert '/decision create' in blocks_text
+            assert '/decision list' in blocks_text
 
     def test_list_command(self, app, slack_workspace, sample_user, sample_decision, sample_membership):
-        """'/adr list' returns decision list."""
+        """'/decision list' returns decision list."""
         with app.app_context():
             service = SlackService(slack_workspace)
 
@@ -494,7 +494,7 @@ class TestSlackCommands:
             assert sample_decision.title in blocks_text
 
     def test_view_command(self, app, slack_workspace, sample_user, sample_decision, sample_membership):
-        """'/adr view <id>' returns decision details."""
+        """'/decision view <id>' returns decision details."""
         with app.app_context():
             service = SlackService(slack_workspace)
 
@@ -524,7 +524,7 @@ class TestSlackCommands:
             assert sample_decision.context[:100] in blocks_text
 
     def test_search_command(self, app, slack_workspace, sample_user, sample_decision, sample_membership):
-        """'/adr search <query>' returns results."""
+        """'/decision search <query>' returns results."""
         with app.app_context():
             service = SlackService(slack_workspace)
 
@@ -553,7 +553,7 @@ class TestSlackCommands:
             assert 'Search Results' in blocks_text or sample_decision.title in blocks_text
 
     def test_create_command_opens_modal(self, app, slack_workspace, sample_user, sample_membership):
-        """'/adr create' triggers modal."""
+        """'/decision create' triggers modal."""
         with app.app_context():
             service = SlackService(slack_workspace)
 
@@ -1051,10 +1051,10 @@ class TestSlackHelpers:
         with app.app_context():
             service = SlackService(slack_workspace)
 
-            assert service._get_status_emoji('proposed') == ':memo:'
-            assert service._get_status_emoji('accepted') == ':white_check_mark:'
-            assert service._get_status_emoji('archived') == ':file_folder:'
-            assert service._get_status_emoji('superseded') == ':arrows_counterclockwise:'
+            assert service._get_status_emoji('proposed') == ':thought_balloon:'
+            assert service._get_status_emoji('accepted') == ':large_green_circle:'
+            assert service._get_status_emoji('archived') == ':white_circle:'
+            assert service._get_status_emoji('superseded') == ':large_orange_circle:'
 
     def test_format_decision_detail_blocks(self, app, slack_workspace, sample_decision):
         """Decision detail blocks are formatted correctly."""
@@ -1065,8 +1065,8 @@ class TestSlackHelpers:
 
             assert len(blocks) > 0
             assert any(sample_decision.title in json.dumps(block) for block in blocks)
-            assert any('Context:' in json.dumps(block) for block in blocks)
-            assert any('Decision:' in json.dumps(block) for block in blocks)
+            assert any('Context' in json.dumps(block) for block in blocks)
+            assert any('Decision' in json.dumps(block) for block in blocks)
 
     def test_format_notification_blocks(self, app, slack_workspace, sample_decision):
         """Notification blocks are formatted correctly."""

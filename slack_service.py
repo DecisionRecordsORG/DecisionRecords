@@ -170,7 +170,7 @@ class SlackService:
                             "1. A new browser window will open\n" +
                             "2. If you're not logged in, you'll sign in to Decision Records\n" +
                             "3. Your accounts will be linked automatically\n" +
-                            "4. You can then use all /adr commands in Slack"
+                            "4. You can then use all /decision commands in Slack"
                 }
             },
             {
@@ -217,19 +217,20 @@ class SlackService:
         Returns (response_dict, is_ephemeral)
         """
         parts = command_text.strip().split(maxsplit=1)
-        subcommand = parts[0].lower() if parts else 'help'
+        subcommand = parts[0].lower() if parts else ''
         args = parts[1] if len(parts) > 1 else ''
 
         # Check user linking first
         mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
 
-        if needs_linking and subcommand != 'help':
+        if needs_linking and subcommand not in ['', 'help']:
             return {
                 'response_type': 'ephemeral',
                 'blocks': self.get_link_message_blocks(slack_user_id, mapping.slack_email)
             }, True
 
         handlers = {
+            '': self._handle_menu,  # Show interactive menu when just /decision is typed
             'help': self._handle_help,
             'list': self._handle_list,
             'view': self._handle_view,
@@ -237,8 +238,70 @@ class SlackService:
             'create': self._handle_create,
         }
 
-        handler = handlers.get(subcommand, self._handle_help)
+        handler = handlers.get(subcommand, self._handle_menu)
         return handler(args, user, trigger_id, channel_id)
+
+    def _handle_menu(self, args: str, user: User, trigger_id: str, channel_id: str = None):
+        """Show interactive menu with buttons for common actions."""
+        blocks = [
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": "Decision Records"}
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "What would you like to do?"
+                }
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Create Decision", "emoji": True},
+                        "style": "primary",
+                        "action_id": "menu_create_decision"
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "List Decisions", "emoji": True},
+                        "action_id": "menu_list_decisions"
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "My Decisions", "emoji": True},
+                        "action_id": "menu_my_decisions"
+                    }
+                ]
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Quick commands:*"
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            "`/decision create` - Create a new decision\n"
+                            "`/decision list` - List recent decisions\n"
+                            "`/decision view <id>` - View a specific decision\n"
+                            "`/decision search <query>` - Search decisions"
+                        )
+                    }
+                ]
+            }
+        ]
+        return {'response_type': 'ephemeral', 'blocks': blocks}, True
 
     def _handle_help(self, args: str, user: User, trigger_id: str, channel_id: str = None):
         """Show help message."""
@@ -259,14 +322,14 @@ class SlackService:
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        "`/adr create` - Create a new decision record\n"
-                        "`/adr list` - List recent decisions\n"
-                        "`/adr list mine` - List your decisions\n"
-                        "`/adr list [status]` - List by status\n"
-                        "`/adr list space:[name]` - List by space\n"
-                        "`/adr view <id>` - View a specific decision\n"
-                        "`/adr search <query>` - Search decisions\n"
-                        "`/adr help` - Show this help message"
+                        "`/decision` - Show interactive menu\n"
+                        "`/decision create` - Create a new decision record\n"
+                        "`/decision list` - List recent decisions\n"
+                        "`/decision list mine` - List your decisions\n"
+                        "`/decision list [status]` - List by status\n"
+                        "`/decision list space:[name]` - List by space\n"
+                        "`/decision view <id>` - View a specific decision\n"
+                        "`/decision search <query>` - Search decisions"
                     )
                 }
             },
@@ -275,7 +338,7 @@ class SlackService:
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "_Statuses: proposed, accepted, archived, superseded | Combine filters: `/adr list mine accepted`_"
+                        "text": "_Statuses: proposed, accepted, archived, superseded | Combine filters: `/decision list mine accepted`_"
                     }
                 ]
             }
@@ -287,11 +350,11 @@ class SlackService:
         List recent decisions with filtering options.
 
         Usage:
-          /adr list              - List recent decisions
-          /adr list mine         - List my decisions (created by me or owned by me)
-          /adr list [status]     - List by status (proposed, accepted, archived, superseded)
-          /adr list space:[name] - List decisions in a specific space
-          /adr list mine [status] - Combine filters
+          /decision list              - List recent decisions
+          /decision list mine         - List my decisions (created by me or owned by me)
+          /decision list [status]     - List by status (proposed, accepted, archived, superseded)
+          /decision list space:[name] - List decisions in a specific space
+          /decision list mine [status] - Combine filters
         """
         from models import Space
 
@@ -368,9 +431,9 @@ class SlackService:
         if not decisions:
             help_text = (
                 "\n\n*Filter options:*\n"
-                "`/adr list mine` - Your decisions\n"
-                "`/adr list [status]` - By status\n"
-                "`/adr list space:[name]` - By space"
+                "`/decision list mine` - Your decisions\n"
+                "`/decision list [status]` - By status\n"
+                "`/decision list space:[name]` - By space"
             )
             return {
                 'response_type': 'ephemeral',
@@ -414,7 +477,7 @@ class SlackService:
                 "type": "context",
                 "elements": [{
                     "type": "mrkdwn",
-                    "text": "_Tip: Use `/adr list mine` to see your decisions, or `/adr list space:[name]` for a specific space_"
+                    "text": "_Tip: Use `/decision list mine` to see your decisions, or `/decision list space:[name]` for a specific space_"
                 }]
             })
 
@@ -428,7 +491,7 @@ class SlackService:
 
         decision_id = args.strip()
         if not decision_id:
-            return {'response_type': 'ephemeral', 'text': 'Please provide a decision ID. Usage: `/adr view <id>`'}, True
+            return {'response_type': 'ephemeral', 'text': 'Please provide a decision ID. Usage: `/decision view <id>`'}, True
 
         # Try to find by display ID or numeric ID
         decision = None
@@ -469,7 +532,7 @@ class SlackService:
 
         query_text = args.strip()
         if not query_text:
-            return {'response_type': 'ephemeral', 'text': 'Please provide a search query. Usage: `/adr search <query>`'}, True
+            return {'response_type': 'ephemeral', 'text': 'Please provide a search query. Usage: `/decision search <query>`'}, True
 
         # Simple search in title and context
         search_pattern = f"%{query_text}%"
@@ -1062,7 +1125,7 @@ class SlackService:
         # Post notification to channel if enabled
         self._send_creation_notification(decision)
 
-        # Send confirmation to the original channel where /adr create was run
+        # Send confirmation to the original channel where /decision create was run
         slack_user = payload.get('user', {})
         creator_slack_id = slack_user.get('id')
 
@@ -1207,8 +1270,8 @@ class SlackService:
                 if decision_id:
                     return self._send_decision_detail(payload, int(decision_id))
 
-            elif action_id == 'create_decision_home':
-                # Create Decision button from App Home
+            elif action_id in ['create_decision_home', 'menu_create_decision']:
+                # Create Decision button from App Home or /decision menu
                 mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
                 if needs_linking or not user:
                     self._send_ephemeral_link_prompt(payload, slack_user_id)
@@ -1216,16 +1279,25 @@ class SlackService:
                 try:
                     self._open_create_modal(trigger_id, user)
                 except SlackApiError as e:
-                    logger.error(f"Failed to open create modal from App Home: {e}")
+                    logger.error(f"Failed to open create modal: {e}")
                 return None
 
-            elif action_id == 'list_decisions_home':
-                # List Decisions button from App Home
+            elif action_id in ['list_decisions_home', 'menu_list_decisions']:
+                # List Decisions button from App Home or /decision menu
                 mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
                 if needs_linking or not user:
                     self._send_ephemeral_link_prompt(payload, slack_user_id)
                     return None
                 self._send_decisions_list(payload, user)
+                return None
+
+            elif action_id == 'menu_my_decisions':
+                # My Decisions button from /decision menu
+                mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
+                if needs_linking or not user:
+                    self._send_ephemeral_link_prompt(payload, slack_user_id)
+                    return None
+                self._send_my_decisions_list(payload, user)
                 return None
 
             elif action_id == 'link_account':
@@ -1328,7 +1400,7 @@ class SlackService:
                 "type": "context",
                 "elements": [{
                     "type": "mrkdwn",
-                    "text": "_Tip: Use `/adr list mine` for your decisions or `/adr list space:[name]` for a specific space_"
+                    "text": "_Tip: Use `/decision list mine` for your decisions or `/decision list space:[name]` for a specific space_"
                 }]
             })
 
@@ -1356,6 +1428,87 @@ class SlackService:
                     )
             except SlackApiError as e:
                 logger.error(f"Failed to send decisions list: {e}")
+
+    def _send_my_decisions_list(self, payload: dict, user: User):
+        """Send a list of user's own decisions as an ephemeral message."""
+        from sqlalchemy import or_
+
+        slack_user_id = payload.get('user', {}).get('id')
+
+        tenant = self.workspace.tenant
+        if not tenant:
+            return
+
+        # Get decisions created by or owned by the user
+        decisions = ArchitectureDecision.query.filter(
+            ArchitectureDecision.tenant_id == tenant.id,
+            ArchitectureDecision.deleted_at == None,
+            or_(
+                ArchitectureDecision.created_by_id == user.id,
+                ArchitectureDecision.owner_id == user.id
+            )
+        ).order_by(ArchitectureDecision.created_at.desc()).limit(10).all()
+
+        if not decisions:
+            blocks = [{
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "You don't have any decisions yet. Create your first one!"}
+            }]
+        else:
+            blocks = [
+                {
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": "My Decisions"}
+                }
+            ]
+            for decision in decisions:
+                status_emoji = self._get_status_emoji(decision.status)
+                display_id = decision.get_display_id() if hasattr(decision, 'get_display_id') else f"ADR-{decision.decision_number}"
+
+                # Show role (creator vs owner)
+                role_info = ""
+                if decision.created_by_id == user.id and decision.owner_id == user.id:
+                    role_info = "Created & Owned"
+                elif decision.created_by_id == user.id:
+                    role_info = "Created"
+                else:
+                    role_info = "Owned"
+
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"{status_emoji} *{display_id}*: {decision.title}\n_Status: {decision.status} | {role_info}_"
+                    },
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View"},
+                        "action_id": f"view_decision_{decision.id}",
+                        "value": str(decision.id)
+                    }
+                })
+
+        # Send via response_url or DM
+        response_url = payload.get('response_url')
+        if response_url:
+            import requests
+            requests.post(response_url, json={
+                'response_type': 'ephemeral',
+                'replace_original': False,
+                'blocks': blocks
+            })
+        else:
+            try:
+                dm_response = self.client.conversations_open(users=[slack_user_id])
+                if dm_response.get('ok'):
+                    channel_id = dm_response.get('channel', {}).get('id')
+                    self.client.chat_postMessage(
+                        channel=channel_id,
+                        blocks=blocks,
+                        text="My Decisions"
+                    )
+            except SlackApiError as e:
+                logger.error(f"Failed to send my decisions list: {e}")
 
     def _send_decision_detail(self, payload: dict, decision_id: int):
         """Send decision detail as a response."""
@@ -1391,10 +1544,41 @@ class SlackService:
         return None
 
     def _handle_message_action(self, payload: dict):
-        """Handle message shortcuts (save as decision)."""
+        """Handle message shortcuts and global shortcuts."""
         callback_id = payload.get('callback_id')
         if callback_id == 'save_as_decision':
             return self._open_save_as_decision_modal(payload)
+        elif callback_id == 'create_decision_global':
+            return self._handle_global_shortcut(payload)
+        return None
+
+    def _handle_global_shortcut(self, payload: dict):
+        """Handle global shortcut to create decision from anywhere."""
+        trigger_id = payload.get('trigger_id')
+        slack_user_id = payload.get('user', {}).get('id')
+
+        mapping, user, needs_linking = self.get_or_link_user(slack_user_id)
+
+        if needs_linking or not user:
+            # Can't open modal for unlinked users - try to send DM with link prompt
+            try:
+                dm_response = self.client.conversations_open(users=[slack_user_id])
+                if dm_response.get('ok'):
+                    channel_id = dm_response.get('channel', {}).get('id')
+                    self.client.chat_postMessage(
+                        channel=channel_id,
+                        blocks=self.get_link_message_blocks(slack_user_id, mapping.slack_email if mapping else None),
+                        text="Please link your account to use Decision Records"
+                    )
+            except SlackApiError as e:
+                logger.error(f"Failed to send link prompt for global shortcut: {e}")
+            return None
+
+        try:
+            self._open_create_modal(trigger_id, user)
+        except SlackApiError as e:
+            logger.error(f"Failed to open create modal from global shortcut: {e}")
+
         return None
 
     def _open_save_as_decision_modal(self, payload: dict):

@@ -4,9 +4,10 @@ Decision Records integrates with Slack to help your team manage architecture dec
 
 ## Features
 
-- **Slash Commands**: Create, list, view, and search decisions with `/adr`
-- **Notifications**: Get notified in Slack when decisions are created or status changes
+- **Slash Commands**: Use `/decision` to open an interactive menu with buttons, or subcommands like `/decision create`
+- **Global Shortcut**: Create decisions from anywhere using the "Create Decision Record" shortcut (accessible from Slack's "+" menu or lightning bolt)
 - **Message Shortcuts**: Right-click any message and save it as a decision
+- **Notifications**: Get notified in Slack when decisions are created or status changes
 - **Auto-linking**: Team members are automatically linked by email
 - **Dedicated Link Page**: Clean account linking flow for users coming from Slack
 
@@ -57,18 +58,44 @@ After installation:
 1. Click **Send Test Notification**
 2. Check your selected Slack channel for the test message
 
-## Using Slack Commands
+## Using the Interactive Menu
 
-All commands use `/adr`:
+The easiest way to use Decision Records in Slack is the interactive menu:
+
+1. Type `/decision` in any channel (no subcommand needed)
+2. An interactive menu appears with buttons:
+   - **Create Decision** - Opens the create decision modal
+   - **List Decisions** - Shows recent decisions from your organization
+   - **My Decisions** - Shows decisions you own or created
+3. Click any button to perform that action
+
+This is perfect for users who prefer clicking over typing commands.
+
+## Using the Global Shortcut
+
+Create decisions from anywhere in Slack without typing a command:
+
+1. Click the **+** button (plus menu) or **⚡** (lightning bolt) in any message composer
+2. Select **Create Decision Record** from the shortcuts menu
+3. The create decision modal opens immediately
+
+You can also access shortcuts via:
+- Keyboard: `Cmd+K` (Mac) or `Ctrl+K` (Windows), then type "Create Decision"
+- Right-click in the message composer and select "Shortcuts"
+
+## Using Slash Commands
+
+For power users, all commands use `/decision`:
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `/adr help` | Show available commands | `/adr help` |
-| `/adr create` | Open modal to create a decision | `/adr create` |
-| `/adr list` | List recent decisions | `/adr list` |
-| `/adr list [status]` | List decisions by status | `/adr list accepted` |
-| `/adr view <id>` | View a specific decision | `/adr view 42` |
-| `/adr search <query>` | Search decisions | `/adr search authentication` |
+| `/decision` | Open interactive menu with buttons | `/decision` |
+| `/decision help` | Show available commands | `/decision help` |
+| `/decision create` | Open modal to create a decision | `/decision create` |
+| `/decision list` | List recent decisions | `/decision list` |
+| `/decision list [status]` | List decisions by status | `/decision list accepted` |
+| `/decision view <id>` | View a specific decision | `/decision view 42` |
+| `/decision search <query>` | Search decisions | `/decision search authentication` |
 
 ### Valid Statuses
 - `proposed`
@@ -78,9 +105,9 @@ All commands use `/adr`:
 
 ## Creating Decisions from Slack
 
-### Using `/adr create`
+### Using `/decision create`
 
-1. Type `/adr create` in any channel
+1. Type `/decision create` in any channel
 2. A modal opens with the following fields:
    - **Title** (required): What is this decision about?
    - **Context**: The background and forces at play
@@ -121,7 +148,7 @@ When creating a decision via Slack, you can assign an owner:
 
 ## User Account Linking
 
-When a team member uses `/adr` for the first time, they need to link their Slack account to their Decision Records account.
+When a team member uses `/decision` for the first time, they need to link their Slack account to their Decision Records account.
 
 ### Automatic Linking (Preferred)
 If their Slack email matches their Decision Records email, they're automatically linked. No action required!

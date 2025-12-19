@@ -42,7 +42,7 @@ APP_VERSIONS = {
         release_date="2024-12-01",
         scopes=["chat:write", "commands", "users:read", "users:read.email"],
         features=[
-            "Slash commands (/adr create, list, view, search)",
+            "Slash commands (/decision create, list, view, search)",
             "Channel notifications for new decisions",
             "User auto-linking by email"
         ],
@@ -53,7 +53,7 @@ APP_VERSIONS = {
         release_date="2024-12-17",
         scopes=["chat:write", "commands", "users:read", "users:read.email", "im:write"],
         features=[
-            "Slash commands (/adr create, list, view, search)",
+            "Slash commands (/decision create, list, view, search)",
             "Channel notifications for new decisions",
             "User auto-linking by email",
             "Direct message confirmations after creating decisions",
@@ -66,7 +66,7 @@ APP_VERSIONS = {
         release_date="2024-12-18",
         scopes=["chat:write", "commands", "users:read", "users:read.email", "im:write", "channels:read", "groups:read"],
         features=[
-            "Slash commands with filtering (/adr list mine, /adr list space:<name>)",
+            "Slash commands with filtering (/decision list mine, /decision list space:<name>)",
             "Channel notifications for new decisions",
             "User auto-linking by email",
             "Direct message confirmations after creating decisions",
@@ -342,13 +342,13 @@ def get_app_home_blocks(installed_scopes: List[str], user_name: str = None) -> L
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "`/adr create` Create a new decision\n" +
-                        "`/adr list` List recent decisions\n" +
-                        "`/adr list mine` Your decisions only\n" +
-                        "`/adr list space:name` Filter by space\n" +
-                        "`/adr view ID` View details\n" +
-                        "`/adr search query` Search\n" +
-                        "`/adr help` All commands"
+                "text": "`/decision create` Create a new decision\n" +
+                        "`/decision list` List recent decisions\n" +
+                        "`/decision list mine` Your decisions only\n" +
+                        "`/decision list space:name` Filter by space\n" +
+                        "`/decision view ID` View details\n" +
+                        "`/decision search query` Search\n" +
+                        "`/decision help` All commands"
             }
         }
     ])

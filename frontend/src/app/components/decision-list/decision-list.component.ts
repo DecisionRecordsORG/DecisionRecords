@@ -251,7 +251,7 @@ import { Decision, User, Space } from '../../models/decision.model';
               <mat-icon>bolt</mat-icon>
               <div>
                 <strong>Create decisions from Slack</strong>
-                <p>Use <code>/adr create</code> to capture decisions without leaving Slack</p>
+                <p>Use <code>/decision</code> to capture decisions without leaving Slack</p>
               </div>
             </div>
             <div class="benefit-item">
@@ -265,7 +265,7 @@ import { Decision, User, Space } from '../../models/decision.model';
               <mat-icon>search</mat-icon>
               <div>
                 <strong>Find decisions fast</strong>
-                <p>Search and view decisions with <code>/adr search</code> or <code>/adr list</code></p>
+                <p>Search and view decisions with <code>/decision search</code> or <code>/decision list</code></p>
               </div>
             </div>
           </div>

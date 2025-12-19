@@ -962,7 +962,7 @@ test.describe('Slack Settings', () => {
       await expect(successTitle).toBeVisible({ timeout: 5000 });
 
       // Verify command hints are shown
-      const commandHint = page.locator('text=/adr create');
+      const commandHint = page.locator('text=/decision create');
       await expect(commandHint).toBeVisible();
     });
 

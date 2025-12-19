@@ -56,14 +56,14 @@ interface LinkTokenData {
             <mat-icon class="success-icon">check_circle</mat-icon>
             <h2>Account Linked!</h2>
             <p>Your Slack account has been successfully linked to your Decision Records account.</p>
-            <p class="hint">You can now use /adr commands in Slack to create and view decisions.</p>
+            <p class="hint">You can now use /decision commands in Slack to create and view decisions.</p>
             <div class="next-steps">
               <h4>Try these commands in Slack:</h4>
               <ul>
-                <li><code>/adr create</code> - Create a new decision</li>
-                <li><code>/adr list</code> - List recent decisions</li>
-                <li><code>/adr search [query]</code> - Search decisions</li>
-                <li><code>/adr help</code> - See all commands</li>
+                <li><code>/decision</code> - Interactive menu with buttons</li>
+                <li><code>/decision create</code> - Create a new decision</li>
+                <li><code>/decision list</code> - List recent decisions</li>
+                <li><code>/decision search [query]</code> - Search decisions</li>
               </ul>
             </div>
             <button mat-flat-button color="primary" (click)="closeWindow()">

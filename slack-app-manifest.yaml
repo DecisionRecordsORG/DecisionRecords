@@ -6,10 +6,10 @@ display_information:
     Decision Records integrates your team's decision-making process with Slack.
 
     Features:
-    - Create new Decision Records with /adr create
-    - List recent decisions with /adr list
-    - View decision details with /adr view <id>
-    - Search decisions with /adr search <query>
+    - Create new Decision Records with /decision or the global shortcut
+    - List recent decisions with /decision list
+    - View decision details with /decision view <id>
+    - Search decisions with /decision search <query>
     - Save Slack messages as decisions using message shortcuts
     - Get notified when decisions are created or updated
 
@@ -24,15 +24,19 @@ features:
     display_name: Decision Records
     always_online: true
   shortcuts:
+    - name: Create Decision Record
+      type: global
+      callback_id: create_decision_global
+      description: Create a new Decision Record from anywhere
     - name: Save as Decision
       type: message
       callback_id: save_as_decision
       description: Create a Decision Record from this message
   slash_commands:
-    - command: /adr
+    - command: /decision
       url: https://decisionrecords.org/api/slack/webhook/commands
       description: Manage Decision Records
-      usage_hint: "[create | list | view <id> | search <query> | help]"
+      usage_hint: "[create | list | view <id> | search <query>]"
       should_escape: false
 
 oauth_config:
