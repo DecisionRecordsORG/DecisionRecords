@@ -3762,13 +3762,37 @@ def _api_get_tenant_status_impl(domain):
     # Check global email verification setting
     email_verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
 
+    # Check if tenant can process access requests (has full admins or stewards who can approve)
+    # This is INDEPENDENT of require_approval setting:
+    # - require_approval: tenant setting - whether new users must be approved (admin's choice)
+    # - can_process_access_requests: capability - whether the tenant has admins who CAN approve
+    #
+    # Edge case: If require_approval=true but can_process_access_requests=false (only provisional admin),
+    # the backend will auto-approve users since no one can approve them. The frontend should
+    # show "Join" instead of "Request Access" UI in this case.
+    can_process_access_requests = False
+    if has_users:
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if tenant:
+            approving_admin_count = TenantMembership.query.filter(
+                TenantMembership.tenant_id == tenant.id,
+                TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+            ).count()
+            can_process_access_requests = approving_admin_count > 0
+
+    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false
+    require_approval_setting = auth_config.require_approval if auth_config else True
+    effective_require_approval = require_approval_setting and can_process_access_requests
+
     return jsonify({
         'domain': domain,
         'has_users': has_users,
         'user_count': user_count,
         'auth_method': auth_config.auth_method if auth_config else 'webauthn',
         'allow_registration': auth_config.allow_registration if auth_config else True,
-        'require_approval': auth_config.require_approval if auth_config else True,
+        'require_approval': require_approval_setting,  # Tenant's configured setting
+        'effective_require_approval': effective_require_approval,  # Actual behavior (accounts for capability)
+        'can_process_access_requests': can_process_access_requests,  # Whether tenant has approvers
         'has_sso': sso_config is not None,
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
@@ -3949,6 +3973,22 @@ def api_send_verification():
     if has_users and not existing_user:
         # Existing tenant, new user - must request access unless auto-signup is enabled
         require_approval = auth_config.require_approval if auth_config else True
+
+        # Check if tenant has any full admins who can approve requests
+        # If only provisional admins exist, auto-approve new users since no one can approve them
+        if require_approval:
+            tenant = Tenant.query.filter_by(domain=domain).first()
+            if tenant:
+                full_admin_count = TenantMembership.query.filter(
+                    TenantMembership.tenant_id == tenant.id,
+                    TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+                ).count()
+                if full_admin_count == 0:
+                    # No full admins or stewards - provisional admin only tenant
+                    # Auto-approve since no one can approve access requests
+                    require_approval = False
+                    logger.info(f"Auto-approving signup for {domain} - tenant has only provisional admin")
+
         if require_approval:
             purpose = 'access_request'
         else:
@@ -4528,6 +4568,21 @@ def api_submit_access_request():
     # Check if tenant has auto-approval enabled (require_approval=False)
     auth_config = AuthConfig.query.filter_by(domain=domain).first()
     require_approval = auth_config.require_approval if auth_config else True
+
+    # Check if tenant has any full admins who can approve requests
+    # If only provisional admins exist, auto-approve new users since no one can approve them
+    if require_approval:
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if tenant:
+            full_admin_count = TenantMembership.query.filter(
+                TenantMembership.tenant_id == tenant.id,
+                TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+            ).count()
+            if full_admin_count == 0:
+                # No full admins or stewards - provisional admin only tenant
+                # Auto-approve since no one can approve access requests
+                require_approval = False
+                logger.info(f"Auto-approving access request for {domain} - tenant has only provisional admin")
 
     if not require_approval:
         # Auto-approval enabled: create user immediately and send setup email

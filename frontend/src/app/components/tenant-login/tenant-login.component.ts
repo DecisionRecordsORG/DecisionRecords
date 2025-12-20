@@ -65,7 +65,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             } @else if (currentView === 'login') {
               Welcome back, {{ currentEmail }}
             } @else if (currentView === 'request-access') {
-              Request access to join
+              {{ effectiveRequireApproval ? 'Request access to join' : 'Join your organization' }}
             } @else if (currentView === 'recovery') {
               Reset your credentials
             } @else if (currentView === 'resend-verification') {
@@ -288,12 +288,16 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             </div>
           }
 
-          <!-- Request Access View -->
+          <!-- Request Access / Join View -->
           @if (currentView === 'request-access') {
             <div class="request-section">
               <p class="info-text">
                 <mat-icon>info</mat-icon>
-                <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access to join your organisation.</span>
+                @if (effectiveRequireApproval) {
+                  <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access to join your organisation.</span>
+                } @else {
+                  <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Create your account to join your organisation.</span>
+                }
               </p>
 
               <form [formGroup]="requestForm" (ngSubmit)="submitAccessRequest()">
@@ -309,18 +313,20 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                   <mat-icon matPrefix>person</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Reason for Access (Optional)</mat-label>
-                  <textarea matInput formControlName="reason" rows="3"
-                            placeholder="Brief description of why you need access"></textarea>
-                  <mat-icon matPrefix>message</mat-icon>
-                </mat-form-field>
+                @if (effectiveRequireApproval) {
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Reason for Access (Optional)</mat-label>
+                    <textarea matInput formControlName="reason" rows="3"
+                              placeholder="Brief description of why you need access"></textarea>
+                    <mat-icon matPrefix>message</mat-icon>
+                  </mat-form-field>
+                }
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="requestForm.invalid || isLoading" class="full-width">
                   <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
-                  <mat-icon *ngIf="!isLoading">send</mat-icon>
-                  <span *ngIf="!isLoading">Submit Request</span>
+                  <mat-icon *ngIf="!isLoading">{{ effectiveRequireApproval ? 'send' : 'person_add' }}</mat-icon>
+                  <span *ngIf="!isLoading">{{ effectiveRequireApproval ? 'Submit Request' : 'Create Account' }}</span>
                 </button>
               </form>
 
@@ -775,6 +781,9 @@ export class TenantLoginComponent implements OnInit {
   webAuthnSupported = false;
   slackOidcEnabled = false;  // Global Slack OIDC availability
   googleOauthEnabled = false;  // Global Google OAuth availability
+  // Whether approval is effectively required (tenant wants approval AND has admins who can approve)
+  // If false, users will be auto-approved, so show "Join" UI instead of "Request Access"
+  effectiveRequireApproval = true;
 
   constructor(
     private fb: FormBuilder,
@@ -946,10 +955,24 @@ export class TenantLoginComponent implements OnInit {
             this.showPasswordLogin = true;
           }
         } else {
-          // User doesn't exist, show request access form
-          this.isLoading = false;
-          this.currentView = 'request-access';
-          this.requestForm.patchValue({ email });
+          // User doesn't exist - fetch tenant status to determine signup flow
+          // effective_require_approval accounts for both tenant setting AND whether approval is possible
+          this.http.get<{ effective_require_approval: boolean; require_approval: boolean; can_process_access_requests: boolean }>(
+            `/api/auth/tenant/${this.tenant}`
+          ).subscribe({
+            next: (tenantStatus) => {
+              this.effectiveRequireApproval = tenantStatus.effective_require_approval;
+              this.isLoading = false;
+              this.currentView = 'request-access';
+              this.requestForm.patchValue({ email });
+            },
+            error: () => {
+              // Default to showing request access (safer assumption)
+              this.isLoading = false;
+              this.currentView = 'request-access';
+              this.requestForm.patchValue({ email });
+            }
+          });
         }
       },
       error: (err) => {

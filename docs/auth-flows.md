@@ -139,14 +139,35 @@ This user becomes the tenant admin.
 
 User joins an existing tenant.
 
+### Approval Settings
+
+Two independent concepts control user approval:
+
+| Setting | Description | Who Controls |
+|---------|-------------|--------------|
+| `require_approval` | Whether new users must be approved | Tenant admin (in Settings) |
+| `can_process_access_requests` | Whether tenant has admins who CAN approve | System (based on tenant maturity) |
+
+**Effective Approval Requirement:**
+```
+effective_require_approval = require_approval AND can_process_access_requests
+```
+
+**Edge Case - Bootstrap Tenant:**
+When a tenant is in BOOTSTRAP state (only has provisional admin), `can_process_access_requests=false` because provisional admins cannot approve access requests. In this case, even if `require_approval=true`, users are auto-approved to avoid a deadlock where no one can approve them.
+
 ### Steps
 
 ```
 1. User enters email on landing page
 2. System checks domain exists with users → YES
-3. System checks tenant settings:
-   - If require_approval = true → Access request flow
-   - If require_approval = false → Direct signup flow
+3. System computes effective_require_approval:
+   - require_approval setting from AuthConfig
+   - can_process_access_requests (has full admin or steward?)
+   - effective = require_approval AND can_process_access_requests
+4. Based on effective_require_approval:
+   - If true → Access request flow (approval will be required)
+   - If false → Direct signup flow (auto-approved)
 
 ### Direct Signup Flow:
    Same as Flow 1, steps 4-5, but user is NOT admin
@@ -163,10 +184,21 @@ User joins an existing tenant.
    3a.9. After credential setup → dashboard
 ```
 
+### API Response Fields
+
+The `/api/auth/tenant/{domain}` endpoint returns:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `require_approval` | boolean | Tenant's configured setting (admin's choice) |
+| `can_process_access_requests` | boolean | Whether tenant has admins who can approve |
+| `effective_require_approval` | boolean | Actual behavior (require_approval AND can_process_access_requests) |
+
 ### Success Criteria
-- [ ] New users cannot access tenant data until approved (if approval required)
+- [ ] New users cannot access tenant data until approved (if effective approval required)
 - [ ] New users cannot access app until credential setup complete
-- [ ] Tenant admin is notified of access requests
+- [ ] Tenant admin is notified of access requests (if effective approval required)
+- [ ] Bootstrap tenants auto-approve users (no deadlock)
 
 ---
 
