@@ -1020,8 +1020,14 @@ def _api_submit_feedback_impl():
         logger.warning("Feedback received but no email config available")
         return jsonify({'error': 'Email service temporarily unavailable'}), 503
 
+    # Get support email from SystemConfig (fallback to default)
+    support_email = SystemConfig.get(
+        SystemConfig.KEY_SUPPORT_EMAIL,
+        SystemConfig.DEFAULT_SUPPORT_EMAIL
+    )
+
     # Send the feedback email
-    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent)
+    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent, recipient_email=support_email)
 
     if success:
         logger.info(f"Feedback submitted successfully from {email}")
@@ -3101,6 +3107,52 @@ def api_save_licensing_settings():
         'max_users_per_tenant': SystemConfig.get_int(
             SystemConfig.KEY_MAX_USERS_PER_TENANT,
             default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+        )
+    })
+
+
+@app.route('/api/admin/settings/support', methods=['GET'])
+@master_required
+def api_get_support_settings():
+    """Get support/contact email settings (super admin only)."""
+    return jsonify({
+        'support_email': SystemConfig.get(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            default=SystemConfig.DEFAULT_SUPPORT_EMAIL
+        ),
+        'defaults': {
+            'support_email': SystemConfig.DEFAULT_SUPPORT_EMAIL
+        }
+    })
+
+
+@app.route('/api/admin/settings/support', methods=['POST', 'PUT'])
+@master_required
+def api_save_support_settings():
+    """Update support/contact email settings (super admin only)."""
+    from security import sanitize_email
+
+    data = request.get_json() or {}
+
+    support_email = data.get('support_email', '').strip()
+
+    if support_email:
+        # Validate email format
+        sanitized = sanitize_email(support_email)
+        if not sanitized:
+            return jsonify({'error': 'Invalid email address format'}), 400
+
+        SystemConfig.set(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            sanitized,
+            description='Email address for contact form submissions'
+        )
+
+    return jsonify({
+        'message': 'Support settings updated successfully',
+        'support_email': SystemConfig.get(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            default=SystemConfig.DEFAULT_SUPPORT_EMAIL
         )
     })
 

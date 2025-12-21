@@ -480,8 +480,12 @@ If you didn't request this password reset, you can safely ignore this email. You
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
-def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions"):
-    """Send user feedback to the feedback inbox."""
+def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions", recipient_email=None):
+    """Send user feedback to the feedback inbox.
+
+    Args:
+        recipient_email: Override the default support email. If None, uses default.
+    """
     subject = f"[{app_name}] New Feedback from {sender_name}"
     consent_text = "Yes, okay to contact" if contact_consent else "No, do not contact"
     consent_badge = "✅ Can contact" if contact_consent else "❌ Do not contact"
@@ -536,8 +540,9 @@ Feedback Message:
 This feedback was submitted through the {app_name} website.
     """
 
-    # Send to the feedback inbox
-    return send_email(email_config, "feedback@decisionrecords.org", subject, html_content, text_content)
+    # Send to the feedback inbox (use provided recipient or default)
+    target_email = recipient_email or "admin@decisionrecords.org"
+    return send_email(email_config, target_email, subject, html_content, text_content)
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,

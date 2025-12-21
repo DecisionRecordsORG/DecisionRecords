@@ -58,6 +58,7 @@ class SystemConfig(db.Model):
     # Default configuration keys
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
     KEY_SUPER_ADMIN_EMAIL = 'super_admin_notification_email'
+    KEY_SUPPORT_EMAIL = 'support_email'  # Email address for contact form submissions
     KEY_ADMIN_SESSION_TIMEOUT_HOURS = 'admin_session_timeout_hours'
     KEY_USER_SESSION_TIMEOUT_HOURS = 'user_session_timeout_hours'
 
@@ -76,6 +77,7 @@ class SystemConfig(db.Model):
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
     DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
     DEFAULT_MAX_USERS_PER_TENANT = 5   # Free tier limit (0 = unlimited)
+    DEFAULT_SUPPORT_EMAIL = 'admin@decisionrecords.org'  # Default support email
 
     # Analytics defaults
     DEFAULT_ANALYTICS_ENABLED = False  # OFF by default (opt-in)

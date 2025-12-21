@@ -66,6 +66,13 @@ interface LogForwardingSettings {
   custom_headers: string;
 }
 
+interface SupportSettings {
+  support_email: string;
+  defaults: {
+    support_email: string;
+  };
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
@@ -190,6 +197,51 @@ interface LogForwardingSettings {
                 <button mat-button type="button" (click)="resetToDefaults()">
                   <mat-icon>restore</mat-icon>
                   Reset to Defaults
+                </button>
+              </div>
+            </form>
+          }
+        </mat-card-content>
+      </mat-card>
+
+      <!-- Support Email Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>email</mat-icon>
+            Support Email
+          </mat-card-title>
+          <mat-card-subtitle>
+            Configure the email address that receives contact form submissions
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (supportLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <form [formGroup]="supportForm" (ngSubmit)="saveSupportSettings()">
+              <div class="form-section">
+                <h3>Contact Form Email</h3>
+                <p class="hint">All submissions from the website contact form will be sent to this address</p>
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Support Email Address</mat-label>
+                  <input matInput type="email" formControlName="support_email" placeholder="admin@example.com">
+                  <mat-icon matPrefix>mail</mat-icon>
+                  <mat-hint>Default: {{ supportDefaults.support_email }}</mat-hint>
+                </mat-form-field>
+              </div>
+
+              <div class="actions">
+                <button mat-raised-button color="primary" type="submit" [disabled]="supportSaving || !supportForm.valid">
+                  <mat-spinner diameter="20" *ngIf="supportSaving"></mat-spinner>
+                  <mat-icon *ngIf="!supportSaving">save</mat-icon>
+                  <span *ngIf="!supportSaving">Save Settings</span>
+                </button>
+                <button mat-button type="button" (click)="resetSupportToDefaults()">
+                  <mat-icon>restore</mat-icon>
+                  Reset to Default
                 </button>
               </div>
             </form>
@@ -1074,6 +1126,14 @@ export class SuperadminSettingsComponent implements OnInit {
   lfTestResult = '';
   lfTestSuccess = false;
 
+  // Support email settings
+  supportForm: FormGroup;
+  supportLoading = true;
+  supportSaving = false;
+  supportDefaults = {
+    support_email: 'admin@decisionrecords.org'
+  };
+
   constructor(
     private http: HttpClient,
     private fb: FormBuilder,
@@ -1086,6 +1146,9 @@ export class SuperadminSettingsComponent implements OnInit {
     this.licensingForm = this.fb.group({
       max_users_per_tenant: [5, [Validators.required, Validators.min(0), Validators.max(10000)]]
     });
+    this.supportForm = this.fb.group({
+      support_email: ['', [Validators.required, Validators.email]]
+    });
   }
 
   ngOnInit() {
@@ -1094,6 +1157,7 @@ export class SuperadminSettingsComponent implements OnInit {
     this.loadAnalyticsSettings();
     this.loadCloudflareSettings();
     this.loadLogForwardingSettings();
+    this.loadSupportSettings();
   }
 
   loadSettings() {
@@ -1454,6 +1518,46 @@ export class SuperadminSettingsComponent implements OnInit {
         this.lfTestSuccess = false;
         this.lfTesting = false;
       }
+    });
+  }
+
+  // Support email methods
+  loadSupportSettings() {
+    this.supportLoading = true;
+    this.http.get<SupportSettings>('/api/admin/settings/support').subscribe({
+      next: (settings) => {
+        this.supportForm.patchValue({
+          support_email: settings.support_email
+        });
+        this.supportDefaults = settings.defaults;
+        this.supportLoading = false;
+      },
+      error: (error) => {
+        this.snackBar.open('Failed to load support settings', 'Close', { duration: 3000 });
+        this.supportLoading = false;
+      }
+    });
+  }
+
+  saveSupportSettings() {
+    if (!this.supportForm.valid) return;
+
+    this.supportSaving = true;
+    this.http.post('/api/admin/settings/support', this.supportForm.value).subscribe({
+      next: () => {
+        this.snackBar.open('Support settings saved successfully', 'Close', { duration: 3000 });
+        this.supportSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save support settings', 'Close', { duration: 3000 });
+        this.supportSaving = false;
+      }
+    });
+  }
+
+  resetSupportToDefaults() {
+    this.supportForm.patchValue({
+      support_email: this.supportDefaults.support_email
     });
   }
 }
