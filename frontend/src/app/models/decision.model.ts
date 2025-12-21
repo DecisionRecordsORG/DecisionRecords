@@ -24,7 +24,9 @@ export interface TenantInfo {
 export interface User {
   id: number;
   email: string;
-  name: string;
+  name: string;  // Full name (computed from first_name + last_name)
+  first_name?: string;
+  last_name?: string;
   sso_domain: string;
   auth_type: 'sso' | 'webauthn' | 'local' | 'oidc';
   is_admin: boolean;  // Legacy field - use membership.global_role for v1.5

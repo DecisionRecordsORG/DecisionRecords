@@ -180,11 +180,11 @@ def test_user(api_app, test_tenant):
     """Create a regular test user with password for authentication."""
     user = User(
         email='user@testdomain.com',
-        name='Test User',
         sso_domain='testdomain.com',
         auth_type='local',
         email_verified=True
     )
+    user.set_name(first_name='Test', last_name='User')
     user.set_password(TEST_USER_PASSWORD)
     db.session.add(user)
     db.session.flush()
@@ -204,11 +204,11 @@ def admin_user(api_app, test_tenant):
     """Create an admin user with password for authentication."""
     user = User(
         email='admin@testdomain.com',
-        name='Admin User',
         sso_domain='testdomain.com',
         auth_type='local',
         email_verified=True
     )
+    user.set_name(first_name='Admin', last_name='User')
     user.set_password(TEST_USER_PASSWORD)
     db.session.add(user)
     db.session.flush()

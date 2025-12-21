@@ -65,7 +65,8 @@ test.describe('Account Setup Flow', () => {
     const response = await apiContext.post('/api/test/create-incomplete-user', {
       data: {
         email: testEmail,
-        name: 'Setup Test User',
+        first_name: 'Setup',
+        last_name: 'Test User',
         domain: 'setup-test.com'
       }
     });
@@ -91,7 +92,8 @@ test.describe('Account Setup Flow', () => {
     const response = await apiContext.post('/api/test/create-incomplete-user', {
       data: {
         email: testEmail,
-        name: 'Page Test User',
+        first_name: 'Page',
+        last_name: 'Test User',
         domain: 'page-test.com'
       }
     });
@@ -127,7 +129,8 @@ test.describe('Account Setup Flow', () => {
     const response = await apiContext.post('/api/test/create-incomplete-user', {
       data: {
         email: testEmail,
-        name: 'Old Format Test',
+        first_name: 'Old Format',
+        last_name: 'Test',
         domain: 'old-test.com'
       }
     });

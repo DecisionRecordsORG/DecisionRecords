@@ -296,8 +296,17 @@ def authenticate_master(username, password):
     return None
 
 
-def get_or_create_user(email, name, sso_subject, sso_domain):
-    """Get existing user or create a new one after SSO authentication."""
+def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, last_name=None):
+    """Get existing user or create a new one after SSO authentication.
+
+    Args:
+        email: User's email address
+        name: Full name (legacy, will be parsed if first_name/last_name not provided)
+        sso_subject: SSO subject identifier
+        sso_domain: User's domain for multi-tenancy
+        first_name: Optional first name (preferred over parsing from name)
+        last_name: Optional last name (preferred over parsing from name)
+    """
     from models import db, User
 
     user = User.query.filter_by(email=email).first()
@@ -306,8 +315,10 @@ def get_or_create_user(email, name, sso_subject, sso_domain):
         # Update last login
         user.last_login = datetime.utcnow()
         # Update name if changed
-        if name and user.name != name:
-            user.name = name
+        if first_name or last_name:
+            user.set_name(first_name=first_name, last_name=last_name)
+        elif name and user.name != name:
+            user.set_name(full_name=name)
         db.session.commit()
     else:
         # Create new user
@@ -317,12 +328,16 @@ def get_or_create_user(email, name, sso_subject, sso_domain):
 
         user = User(
             email=email,
-            name=name,
             sso_subject=sso_subject,
             sso_domain=sso_domain,
             is_admin=is_admin,
             last_login=datetime.utcnow()
         )
+        # Set name using the helper method
+        if first_name or last_name:
+            user.set_name(first_name=first_name, last_name=last_name)
+        elif name:
+            user.set_name(full_name=name)
         db.session.add(user)
         db.session.commit()
 

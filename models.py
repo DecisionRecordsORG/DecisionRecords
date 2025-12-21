@@ -593,7 +593,9 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), nullable=False, unique=True)
-    name = db.Column(db.String(255), nullable=True)
+    name = db.Column(db.String(255), nullable=True)  # Legacy field, use first_name + last_name
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
     password_hash = db.Column(db.String(255), nullable=True)  # For local/password authentication
     sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
@@ -628,6 +630,30 @@ class User(db.Model):
     def has_password(self):
         """Check if user has a password set."""
         return self.password_hash is not None
+
+    def get_full_name(self):
+        """Get full name, preferring first_name + last_name over legacy name field."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return self.name or ''
+
+    def set_name(self, first_name=None, last_name=None, full_name=None):
+        """Set user's name. Prefer first_name/last_name, but handle legacy full_name too."""
+        if first_name is not None or last_name is not None:
+            self.first_name = first_name
+            self.last_name = last_name
+            # Also update legacy name field for backwards compatibility
+            self.name = self.get_full_name()
+        elif full_name:
+            # Parse full name into first and last (best effort)
+            parts = full_name.strip().split(None, 1)  # Split on first whitespace
+            self.first_name = parts[0] if parts else ''
+            self.last_name = parts[1] if len(parts) > 1 else ''
+            self.name = full_name
 
     # v1.5 Membership helpers
     def get_membership(self, tenant_id=None):
@@ -665,7 +691,9 @@ class User(db.Model):
         return {
             'id': self.id,
             'email': self.email,
-            'name': self.name,
+            'name': self.get_full_name(),  # Use helper for consistent name formatting
+            'first_name': self.first_name,
+            'last_name': self.last_name,
             'sso_domain': self.sso_domain,
             'auth_type': self.auth_type,
             'is_admin': self.is_admin,

@@ -115,11 +115,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <mat-icon matPrefix>email</mat-icon>
               </mat-form-field>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Full Name</mat-label>
-                <input matInput formControlName="name" placeholder="Your name">
-                <mat-icon matPrefix>person</mat-icon>
-              </mat-form-field>
+              <div class="name-fields">
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>First Name</mat-label>
+                  <input matInput formControlName="firstName" placeholder="First name">
+                  <mat-icon matPrefix>person</mat-icon>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>Last Name</mat-label>
+                  <input matInput formControlName="lastName" placeholder="Last name">
+                </mat-form-field>
+              </div>
 
               @if (tenantStatus?.email_verification_required === false && usePasswordSignup) {
                 <mat-form-field appearance="outline" class="full-width">
@@ -222,11 +229,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <mat-icon matPrefix>email</mat-icon>
               </mat-form-field>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Full Name</mat-label>
-                <input matInput formControlName="name" placeholder="Your name">
-                <mat-icon matPrefix>person</mat-icon>
-              </mat-form-field>
+              <div class="name-fields">
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>First Name</mat-label>
+                  <input matInput formControlName="firstName" placeholder="First name">
+                  <mat-icon matPrefix>person</mat-icon>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>Last Name</mat-label>
+                  <input matInput formControlName="lastName" placeholder="Last name">
+                </mat-form-field>
+              </div>
 
               <mat-form-field appearance="outline" class="full-width">
                 <mat-label>Reason for Access (Optional)</mat-label>
@@ -271,11 +285,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <mat-icon matPrefix>email</mat-icon>
               </mat-form-field>
 
-              <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Full Name</mat-label>
-                <input matInput formControlName="name" placeholder="Your name">
-                <mat-icon matPrefix>person</mat-icon>
-              </mat-form-field>
+              <div class="name-fields">
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>First Name</mat-label>
+                  <input matInput formControlName="firstName" placeholder="First name">
+                  <mat-icon matPrefix>person</mat-icon>
+                </mat-form-field>
+
+                <mat-form-field appearance="outline" class="half-width">
+                  <mat-label>Last Name</mat-label>
+                  <input matInput formControlName="lastName" placeholder="Last name">
+                </mat-form-field>
+              </div>
 
               <p class="info-text">
                 <mat-icon>verified_user</mat-icon>
@@ -286,7 +307,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
               </p>
 
               <button mat-raised-button color="primary" type="submit"
-                      [disabled]="accessRequestForm.get('email')?.invalid || accessRequestForm.get('name')?.invalid || isLoading" class="full-width">
+                      [disabled]="accessRequestForm.get('email')?.invalid || accessRequestForm.get('firstName')?.invalid || accessRequestForm.get('lastName')?.invalid || isLoading" class="full-width">
                 <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
                 <mat-icon *ngIf="!isLoading">person_add</mat-icon>
                 <span *ngIf="!isLoading">Join Organization</span>
@@ -432,6 +453,15 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     mat-form-field {
       margin-bottom: 8px;
+    }
+
+    .name-fields {
+      display: flex;
+      gap: 12px;
+    }
+
+    .half-width {
+      flex: 1;
     }
 
     .tenant-info {
@@ -608,13 +638,15 @@ export class LandingComponent implements OnInit {
 
     this.signupForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
+      firstName: ['', Validators.required],
+      lastName: ['', Validators.required],
       password: ['', [Validators.minLength(8)]]
     });
 
     this.accessRequestForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
+      firstName: ['', Validators.required],
+      lastName: ['', Validators.required],
       reason: ['']
     });
   }
@@ -692,13 +724,14 @@ export class LandingComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, password } = this.signupForm.value;
+    const { email, firstName, lastName, password } = this.signupForm.value;
 
     // Check if email verification is disabled - use direct signup
     if (this.tenantStatus && !this.tenantStatus.email_verification_required) {
       this.http.post<{ message: string; redirect: string; user?: any; setup_passkey?: boolean }>('/api/auth/direct-signup', {
         email,
-        name,
+        first_name: firstName,
+        last_name: lastName,
         password: this.usePasswordSignup ? password : null,
         auth_preference: this.usePasswordSignup ? 'password' : 'passkey'
       }).subscribe({
@@ -748,7 +781,8 @@ export class LandingComponent implements OnInit {
     // Email verification is enabled - send verification email
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email,
-      name,
+      first_name: firstName,
+      last_name: lastName,
       purpose: 'signup'
     }).subscribe({
       next: (response) => {
@@ -775,11 +809,12 @@ export class LandingComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, reason } = this.accessRequestForm.value;
+    const { email, firstName, lastName, reason } = this.accessRequestForm.value;
 
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email,
-      name,
+      first_name: firstName,
+      last_name: lastName,
       purpose: 'access_request',
       reason
     }).subscribe({
@@ -802,19 +837,22 @@ export class LandingComponent implements OnInit {
 
   submitJoinOrganization(): void {
     const emailCtrl = this.accessRequestForm.get('email');
-    const nameCtrl = this.accessRequestForm.get('name');
-    if (emailCtrl?.invalid || nameCtrl?.invalid) return;
+    const firstNameCtrl = this.accessRequestForm.get('firstName');
+    const lastNameCtrl = this.accessRequestForm.get('lastName');
+    if (emailCtrl?.invalid || firstNameCtrl?.invalid || lastNameCtrl?.invalid) return;
 
     this.isLoading = true;
     this.error = '';
 
     const email = emailCtrl?.value;
-    const name = nameCtrl?.value;
+    const firstName = firstNameCtrl?.value;
+    const lastName = lastNameCtrl?.value;
 
     // Call the access-request endpoint which handles auto-approval
     this.http.post<{ message: string; auto_approved?: boolean }>('/api/auth/access-request', {
       email,
-      name
+      first_name: firstName,
+      last_name: lastName
     }).subscribe({
       next: (response) => {
         this.isLoading = false;
@@ -852,7 +890,8 @@ export class LandingComponent implements OnInit {
 
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email: formData.email,
-      name: formData.name,
+      first_name: formData.firstName,
+      last_name: formData.lastName,
       purpose: this.tenantStatus?.has_users ? 'access_request' : 'signup',
       reason: this.accessRequestForm.value.reason
     }).subscribe({

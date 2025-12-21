@@ -776,6 +776,44 @@ def init_database():
                         else:
                             logger.info("No missing tenant memberships to create")
 
+                        # === User Name Split Migration (v1.8.4) ===
+                        # Add first_name and last_name columns to users table
+                        for col_name, col_type in [
+                            ('first_name', 'VARCHAR(100)'),
+                            ('last_name', 'VARCHAR(100)')
+                        ]:
+                            result = conn.execute(db.text(f"""
+                                SELECT column_name FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = '{col_name}'
+                            """))
+                            if not result.fetchone():
+                                logger.info(f"Adding {col_name} column to users...")
+                                conn.execute(db.text(f"""
+                                    ALTER TABLE users ADD COLUMN {col_name} {col_type}
+                                """))
+                                conn.commit()
+                                logger.info(f"{col_name} column added successfully")
+                            else:
+                                logger.info(f"{col_name} column already exists")
+
+                        # Migrate existing name data to first_name and last_name
+                        # Only migrate users where first_name is NULL but name is not NULL
+                        result = conn.execute(db.text("""
+                            UPDATE users
+                            SET first_name = SPLIT_PART(name, ' ', 1),
+                                last_name = CASE
+                                    WHEN POSITION(' ' IN name) > 0
+                                    THEN SUBSTRING(name FROM POSITION(' ' IN name) + 1)
+                                    ELSE ''
+                                END
+                            WHERE name IS NOT NULL AND first_name IS NULL
+                        """))
+                        if result.rowcount > 0:
+                            conn.commit()
+                            logger.info(f"Migrated {result.rowcount} users from name to first_name/last_name")
+                        else:
+                            logger.info("No users to migrate from name to first_name/last_name")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -3927,7 +3965,17 @@ def api_send_verification():
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+
     purpose = data.get('purpose', 'signup')  # signup, access_request, login
     reason = sanitize_text_field(data.get('reason', ''), max_length=1000)  # For access requests
 
@@ -4203,12 +4251,27 @@ def api_direct_signup():
     data = request.get_json() or {}
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+        # Parse first_name and last_name from legacy name
+        if name:
+            parts = name.strip().split(None, 1)
+            first_name = parts[0] if parts else ''
+            last_name = parts[1] if len(parts) > 1 else ''
+
     password = data.get('password', '').strip() if data.get('password') else None
     auth_preference = data.get('auth_preference', 'passkey')  # 'passkey' or 'password'
 
-    if not email or not name:
-        return jsonify({'error': 'Email and name are required'}), 400
+    if not email or not first_name:
+        return jsonify({'error': 'Email and first name are required'}), 400
 
     # Only require password if user chose password auth
     if auth_preference == 'password':
@@ -4278,12 +4341,13 @@ def api_direct_signup():
     # Create user account directly (first user becomes admin)
     user = User(
         email=email,
-        name=name,
         sso_domain=domain,
         auth_type='webauthn' if auth_preference == 'passkey' else 'local',
         is_admin=True,  # First user becomes admin
         email_verified=True  # Mark as verified since verification is disabled
     )
+    # Set name using helper method for first_name/last_name handling
+    user.set_name(first_name=first_name, last_name=last_name)
     if auth_preference == 'password' and password:
         user.set_password(password)
     db.session.add(user)
@@ -4537,12 +4601,27 @@ def api_submit_access_request():
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+        # Parse first_name and last_name from legacy name
+        if name:
+            parts = name.strip().split(None, 1)
+            first_name = parts[0] if parts else ''
+            last_name = parts[1] if len(parts) > 1 else ''
+
     reason = sanitize_text_field(data.get('reason', ''), max_length=1000)
     domain = data.get('domain', '').lower().strip()
 
-    if not email or not name:
-        return jsonify({'error': 'Email and name are required'}), 400
+    if not email or not first_name:
+        return jsonify({'error': 'Email and first name are required'}), 400
 
     # Extract and validate domain from email
     email_domain = email.split('@')[1] if '@' in email else ''
@@ -4602,11 +4681,12 @@ def api_submit_access_request():
         # Create the user account
         new_user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             auth_type='webauthn',
             is_admin=False
         )
+        # Set name using helper method for first_name/last_name handling
+        new_user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(new_user)
         db.session.flush()  # Get the user ID before creating token
 
@@ -5103,11 +5183,12 @@ def api_approve_access_request(request_id):
     # Create the user account
     new_user = User(
         email=access_request.email,
-        name=access_request.name,
         sso_domain=access_request.domain,
         auth_type='webauthn',
         is_admin=False
     )
+    # Parse name from access request into first_name/last_name
+    new_user.set_name(full_name=access_request.name)
     db.session.add(new_user)
     db.session.flush()  # Get the user ID before creating token
 
@@ -7292,7 +7373,21 @@ def create_test_user():
 
     email = data.get('email')
     password = data.get('password')
-    name = data.get('name', email.split('@')[0] if email else 'Test User')
+    # Support both legacy name and new first_name/last_name fields
+    first_name = data.get('first_name', '')
+    last_name = data.get('last_name', '')
+    legacy_name = data.get('name', '')
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    elif legacy_name:
+        name = legacy_name
+        parts = name.strip().split(None, 1)
+        first_name = parts[0] if parts else email.split('@')[0] if email else 'Test'
+        last_name = parts[1] if len(parts) > 1 else ''
+    else:
+        name = email.split('@')[0] if email else 'Test User'
+        first_name = name
+        last_name = ''
     role = data.get('role', 'user')
     domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
 
@@ -7325,11 +7420,11 @@ def create_test_user():
         # Create user
         user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             password_hash=generate_password_hash(password),
             auth_type='local'
         )
+        user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(user)
         db.session.flush()
 
@@ -7422,8 +7517,25 @@ def create_incomplete_test_user():
         return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
     email = data.get('email')
-    name = data.get('name', email.split('@')[0] if email else 'Test User')
     domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
+
+    # Support both legacy name and new first_name/last_name fields
+    first_name = data.get('first_name', '')
+    last_name = data.get('last_name', '')
+    legacy_name = data.get('name', '')
+
+    if first_name or last_name:
+        # New format: first_name and last_name provided
+        pass  # Use them as-is
+    elif legacy_name:
+        # Legacy format: parse name into first_name/last_name
+        parts = legacy_name.strip().split(None, 1)
+        first_name = parts[0] if parts else (email.split('@')[0] if email else 'Test')
+        last_name = parts[1] if len(parts) > 1 else ''
+    else:
+        # Default: use email prefix as first name
+        first_name = email.split('@')[0] if email else 'Test'
+        last_name = 'User'
 
     if not email:
         return jsonify({'error': 'email required'}), 400
@@ -7455,11 +7567,11 @@ def create_incomplete_test_user():
         # Create user WITHOUT password (incomplete state)
         user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             password_hash=None,  # No password - incomplete user
             auth_type=None  # No auth type yet
         )
+        user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(user)
         db.session.flush()
 

@@ -263,11 +263,18 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-fields">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="firstName" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="lastName" placeholder="Last name">
+                  </mat-form-field>
+                </div>
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="registerForm.invalid || isLoading" class="full-width">
@@ -415,6 +422,15 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
       width: 100%;
     }
 
+    .name-fields {
+      display: flex;
+      gap: 12px;
+    }
+
+    .half-width {
+      flex: 1;
+    }
+
     mat-form-field {
       margin-bottom: 8px;
     }
@@ -532,7 +548,8 @@ export class LoginComponent implements OnInit {
 
     this.registerForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required]
+      firstName: ['', Validators.required],
+      lastName: ['', Validators.required]
     });
 
     this.recoveryForm = this.fb.group({
@@ -656,9 +673,9 @@ export class LoginComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name } = this.registerForm.value;
+    const { email, firstName, lastName } = this.registerForm.value;
 
-    this.webAuthnService.register(email, name).subscribe({
+    this.webAuthnService.register(email, firstName, lastName).subscribe({
       next: () => {
         this.router.navigate(['/']);
       },

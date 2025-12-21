@@ -307,11 +307,18 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-row">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="first_name" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="last_name" placeholder="Last name">
+                  </mat-form-field>
+                </div>
 
                 @if (effectiveRequireApproval) {
                   <mat-form-field appearance="outline" class="full-width">
@@ -443,6 +450,17 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
 
     .full-width {
       width: 100%;
+    }
+
+    .name-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .half-width {
+      flex: 1;
+      min-width: 0;
     }
 
     mat-form-field {
@@ -803,7 +821,8 @@ export class TenantLoginComponent implements OnInit {
 
     this.requestForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
+      first_name: ['', Validators.required],
+      last_name: ['', Validators.required],
       reason: ['']
     });
 
@@ -1038,11 +1057,12 @@ export class TenantLoginComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, reason } = this.requestForm.value;
+    const { email, first_name, last_name, reason } = this.requestForm.value;
 
     this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string}>('/api/auth/access-request', {
       email,
-      name,
+      first_name,
+      last_name,
       reason,
       domain: this.tenant
     }).subscribe({
