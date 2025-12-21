@@ -3490,7 +3490,10 @@ export class HomepageComponent implements OnInit {
                 return;
               }
 
-              if (status.require_approval) {
+              // Use effective_require_approval which accounts for:
+              // - Tenant's require_approval setting
+              // - Whether tenant has admins who can actually approve (not just provisional admin)
+              if (status.effective_require_approval) {
                 this.currentView = 'access_request';
                 this.accessRequestForm.patchValue({ email });
               } else {

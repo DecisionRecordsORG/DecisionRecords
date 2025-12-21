@@ -239,7 +239,9 @@ export interface TenantStatus {
   user_count: number;
   auth_method: 'sso' | 'webauthn';
   allow_registration: boolean;
-  require_approval: boolean;
+  require_approval: boolean;  // Tenant's configured setting (admin's choice)
+  effective_require_approval: boolean;  // Actual behavior (accounts for tenant capability)
+  can_process_access_requests: boolean;  // Whether tenant has admins who can approve
   has_sso: boolean;
   sso_provider: string | null;
   sso_id: number | null;

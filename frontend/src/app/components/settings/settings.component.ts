@@ -505,16 +505,23 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                     </div>
                   }
 
-                  <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso' && !isProvisionalAdmin">
+                  <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
+
+                      @if (isProvisionalAdmin) {
+                        <div class="provisional-admin-notice">
+                          <mat-icon>info</mat-icon>
+                          <span>These settings will become available once shared administration is established (add another admin or steward).</span>
+                        </div>
+                      }
 
                       <div class="toggle-with-tooltip">
                         <mat-slide-toggle formControlName="allow_registration"
-                                          [disabled]="isRegistrationToggleRestricted && !authConfigForm.value.allow_registration"
+                                          [disabled]="isProvisionalAdmin || (isRegistrationToggleRestricted && !authConfigForm.value.allow_registration)"
                                           data-testid="allow-registration-toggle">
                           Allow new user registration
                         </mat-slide-toggle>
-                        @if (isRegistrationToggleRestricted) {
+                        @if (isRegistrationToggleRestricted && !isProvisionalAdmin) {
                           <mat-icon class="restricted-icon"
                                     matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                     data-testid="registration-lock-icon">
@@ -529,11 +536,11 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="approval-toggle-section" *ngIf="authConfigForm.value.allow_registration">
                           <div class="toggle-with-tooltip">
                             <mat-slide-toggle formControlName="auto_approve_users"
-                                              [disabled]="isApprovalToggleRestricted && authConfigForm.value.auto_approve_users"
+                                              [disabled]="isProvisionalAdmin || (isApprovalToggleRestricted && authConfigForm.value.auto_approve_users)"
                                               data-testid="auto-approve-toggle">
                               Auto-approve new users from your domain
                             </mat-slide-toggle>
-                            @if (isApprovalToggleRestricted) {
+                            @if (isApprovalToggleRestricted && !isProvisionalAdmin) {
                               <mat-icon class="restricted-icon"
                                         matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                         data-testid="approval-lock-icon">
@@ -554,7 +561,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="app-name-section">
                         <mat-form-field appearance="outline" class="full-width">
                           <mat-label>Application Name</mat-label>
-                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions">
+                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions"
+                                 [readonly]="isProvisionalAdmin">
                           <mat-hint>Shown to users during passkey setup</mat-hint>
                         </mat-form-field>
                       </div>
@@ -1175,6 +1183,25 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       height: 18px;
       color: #ff9800;
       cursor: help;
+    }
+
+    .provisional-admin-notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px;
+      background-color: #fff3e0;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      color: #e65100;
+      font-size: 13px;
+    }
+
+    .provisional-admin-notice mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
     }
 
     /* Role badge styles */
