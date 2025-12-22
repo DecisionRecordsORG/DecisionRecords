@@ -26,7 +26,8 @@
       "Bash(git commit:*)",
       "Bash(lsof:*)",
       "Bash(gh issue view:*)",
-      "Bash(npx --package=typescript tsc:*)"
+      "Bash(npx --package=typescript tsc:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

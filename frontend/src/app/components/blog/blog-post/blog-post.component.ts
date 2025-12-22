@@ -871,21 +871,21 @@ export class BlogPostComponent implements OnInit {
         this.metaService.updateTag({ name: 'description', content: this.post.metaDescription });
         this.metaService.updateTag({ name: 'author', content: this.post.author });
 
-        // Open Graph tags (Facebook, LinkedIn, etc.)
-        this.metaService.updateTag({ property: 'og:title', content: this.post.title });
-        this.metaService.updateTag({ property: 'og:description', content: this.post.metaDescription });
-        this.metaService.updateTag({ property: 'og:image', content: imageUrl });
-        this.metaService.updateTag({ property: 'og:url', content: postUrl });
-        this.metaService.updateTag({ property: 'og:type', content: 'article' });
-        this.metaService.updateTag({ property: 'og:site_name', content: 'DecisionRecords' });
-        this.metaService.updateTag({ property: 'article:published_time', content: this.post.date });
-        this.metaService.updateTag({ property: 'article:author', content: this.post.author });
+        // Open Graph tags (Facebook, LinkedIn, etc.) - use attribute selector for property tags
+        this.metaService.updateTag({ property: 'og:title', content: this.post.title }, "property='og:title'");
+        this.metaService.updateTag({ property: 'og:description', content: this.post.metaDescription }, "property='og:description'");
+        this.metaService.updateTag({ property: 'og:image', content: imageUrl }, "property='og:image'");
+        this.metaService.updateTag({ property: 'og:url', content: postUrl }, "property='og:url'");
+        this.metaService.updateTag({ property: 'og:type', content: 'article' }, "property='og:type'");
+        this.metaService.updateTag({ property: 'og:site_name', content: 'DecisionRecords' }, "property='og:site_name'");
+        this.metaService.updateTag({ property: 'article:published_time', content: this.post.date }, "property='article:published_time'");
+        this.metaService.updateTag({ property: 'article:author', content: this.post.author }, "property='article:author'");
 
         // Twitter Card tags
-        this.metaService.updateTag({ name: 'twitter:card', content: 'summary_large_image' });
-        this.metaService.updateTag({ name: 'twitter:title', content: this.post.title });
-        this.metaService.updateTag({ name: 'twitter:description', content: this.post.metaDescription });
-        this.metaService.updateTag({ name: 'twitter:image', content: imageUrl });
+        this.metaService.updateTag({ name: 'twitter:card', content: 'summary_large_image' }, "name='twitter:card'");
+        this.metaService.updateTag({ name: 'twitter:title', content: this.post.title }, "name='twitter:title'");
+        this.metaService.updateTag({ name: 'twitter:description', content: this.post.metaDescription }, "name='twitter:description'");
+        this.metaService.updateTag({ name: 'twitter:image', content: imageUrl }, "name='twitter:image'");
 
         // Get related posts (all posts except current)
         this.relatedPosts = this.posts
