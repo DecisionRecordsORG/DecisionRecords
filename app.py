@@ -7370,6 +7370,12 @@ if SERVE_ANGULAR:
         if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
             return send_from_directory(FRONTEND_DIR, path)
 
+        # Check for prerendered routes (SSR/prerender creates path/index.html)
+        # This enables proper meta tags for social sharing on blog posts etc.
+        prerendered_path = os.path.join(FRONTEND_DIR, path, 'index.html')
+        if path and os.path.exists(prerendered_path):
+            return send_from_directory(os.path.join(FRONTEND_DIR, path), 'index.html')
+
         # Fallback to index.html for Angular SPA routing
         # This handles all frontend routes like /, /superadmin, /{tenant}/login, etc.
         return send_from_directory(FRONTEND_DIR, 'index.html')
