@@ -7366,6 +7366,11 @@ if SERVE_ANGULAR:
         if path.startswith('api/'):
             return jsonify({'error': 'Not found'}), 404
 
+        # Security: Block path traversal attempts before any filesystem checks
+        # This prevents information disclosure via os.path.isfile probing
+        if path and ('..' in path or path.startswith('/')):
+            return send_from_directory(FRONTEND_DIR, 'index.html')
+
         # Check for prerendered routes FIRST (SSR/prerender creates path/index.html)
         # This enables proper meta tags for social sharing on blog posts etc.
         if path:
