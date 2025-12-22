@@ -133,8 +133,9 @@ interface RelatedPost {
     }
 
     .header-container {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 0 auto;
+      padding-left: 248px; /* Align with body content (200px sidebar + 48px gap) */
     }
 
     .back-link {
@@ -354,8 +355,9 @@ interface RelatedPost {
     }
 
     .related-container {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 0 auto;
+      padding-left: 248px; /* Align with body content (200px sidebar + 48px gap) */
     }
 
     .related-reading h2 {
@@ -462,6 +464,11 @@ interface RelatedPost {
 
     /* Responsive */
     @media (max-width: 900px) {
+      .header-container,
+      .related-container {
+        padding-left: 0; /* Remove sidebar alignment on smaller screens */
+      }
+
       .post-body-container {
         grid-template-columns: 1fr;
         gap: 32px;
