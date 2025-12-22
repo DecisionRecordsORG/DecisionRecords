@@ -108,7 +108,16 @@ check_git_status() {
 generate_prerender_routes() {
     log "Generating prerender routes for blog posts..."
     ./scripts/generate-prerender-routes.sh
-    success "Prerender routes updated"
+
+    # Auto-commit if routes changed
+    if git diff --quiet frontend/prerender-routes.txt 2>/dev/null; then
+        log "Prerender routes unchanged"
+    else
+        log "Prerender routes changed, committing..."
+        git add frontend/prerender-routes.txt
+        git commit -m "Auto-update prerender routes for blog posts"
+        success "Prerender routes committed"
+    fi
 }
 
 # Check for insecure Cloudflare settings in code
@@ -290,9 +299,9 @@ main() {
 
     validate_version_argument
     bump_version
+    generate_prerender_routes
     check_git_status
     check_cloudflare_security
-    generate_prerender_routes
     check_azure_login
     build_image
     push_image
