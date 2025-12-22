@@ -5,6 +5,7 @@ import { provideAnimationsAsync } from '@angular/platform-browser/animations/asy
 
 import { routes } from './app.routes';
 import { csrfInterceptor } from './interceptors/csrf.interceptor';
+import { provideClientHydration } from '@angular/platform-browser';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -18,6 +19,6 @@ export const appConfig: ApplicationConfig = {
       withFetch(),
       withInterceptors([csrfInterceptor])  // Add CSRF protection to all HTTP requests
     ),
-    provideAnimationsAsync()
+    provideAnimationsAsync(), provideClientHydration()
   ]
 };

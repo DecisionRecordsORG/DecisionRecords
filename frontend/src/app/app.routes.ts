@@ -17,6 +17,34 @@ export const routes: Routes = [
     path: 'licensing',
     loadComponent: () => import('./components/licensing/licensing.component').then(m => m.LicensingComponent)
   },
+  // FAQ page
+  {
+    path: 'faq',
+    loadComponent: () => import('./components/faq/faq.component').then(m => m.FaqComponent)
+  },
+  // Solutions page
+  {
+    path: 'solutions',
+    loadComponent: () => import('./components/solutions/solutions.component').then(m => m.SolutionsComponent)
+  },
+  // Integrations pages
+  {
+    path: 'integrations',
+    loadComponent: () => import('./components/integrations/integrations.component').then(m => m.IntegrationsComponent)
+  },
+  {
+    path: 'integrations/slack',
+    loadComponent: () => import('./components/slack-integration/slack-integration.component').then(m => m.SlackIntegrationComponent)
+  },
+  // Blog pages
+  {
+    path: 'blog',
+    loadComponent: () => import('./components/blog/blog-list/blog-list.component').then(m => m.BlogListComponent)
+  },
+  {
+    path: 'blog/:slug',
+    loadComponent: () => import('./components/blog/blog-post/blog-post.component').then(m => m.BlogPostComponent)
+  },
   // Legal pages
   {
     path: 'terms',

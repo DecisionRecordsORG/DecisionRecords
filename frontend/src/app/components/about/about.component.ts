@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 @Component({
   selector: 'app-about',
@@ -11,17 +12,17 @@ import { MatIconModule } from '@angular/material/icon';
     CommonModule,
     RouterModule,
     MatButtonModule,
-    MatIconModule
+    MatIconModule,
+    SiteNavComponent
   ],
   template: `
     <div class="about-page">
+      <!-- Sticky Site Navigation -->
+      <app-site-nav></app-site-nav>
+
       <!-- Header -->
       <header class="about-header">
         <div class="container">
-          <a routerLink="/" class="back-link">
-            <mat-icon>arrow_back</mat-icon>
-            <span>Back to Home</span>
-          </a>
           <h1>About This Project</h1>
         </div>
       </header>
@@ -107,7 +108,7 @@ import { MatIconModule } from '@angular/material/icon';
     .about-header {
       background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #1e40af 100%);
       color: white;
-      padding: 40px 24px 60px;
+      padding: 100px 24px 60px;
     }
 
     .container {

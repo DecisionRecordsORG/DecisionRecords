@@ -104,6 +104,13 @@ check_git_status() {
     success "Git status clean"
 }
 
+# Generate prerender routes for blog posts (SEO/social sharing)
+generate_prerender_routes() {
+    log "Generating prerender routes for blog posts..."
+    ./scripts/generate-prerender-routes.sh
+    success "Prerender routes updated"
+}
+
 # Check for insecure Cloudflare settings in code
 check_cloudflare_security() {
     log "Checking Cloudflare security settings..."
@@ -285,6 +292,7 @@ main() {
     bump_version
     check_git_status
     check_cloudflare_security
+    generate_prerender_routes
     check_azure_login
     build_image
     push_image

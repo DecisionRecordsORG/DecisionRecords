@@ -14,6 +14,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
+import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | 'join_organization' | 'account_created';
 
@@ -32,10 +33,14 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     MatProgressSpinnerModule,
     MatDialogModule,
     MatSelectModule,
-    MatCheckboxModule
+    MatCheckboxModule,
+    SiteNavComponent
   ],
   template: `
     <div class="homepage">
+      <!-- Sticky Site Navigation -->
+      <app-site-nav [darkBackground]="true"></app-site-nav>
+
       <!-- Hero Section -->
       <section class="hero">
         <div class="hero-container">
@@ -616,29 +621,55 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
-      <!-- In Practice -->
-      <section class="section usage-section">
+      <!-- How Simple It Is -->
+      <section class="section capture-section">
         <div class="container">
-          <h2>In practice</h2>
-          <div class="usage-timeline">
-            <div class="usage-item">
-              <span class="usage-trigger">After the meeting</span>
-              <span class="usage-outcome">One person writes it down before everyone forgets.</span>
+          <div class="capture-layout">
+            <div class="capture-content">
+              <span class="capture-badge">Simple by Design</span>
+              <h2>Capture a decision in minutes</h2>
+              <p class="capture-intro">
+                A decision record isn't a document. It's four things written down before everyone forgets.
+              </p>
+              <div class="capture-list">
+                <div class="capture-item">
+                  <span class="capture-number">1</span>
+                  <div class="capture-text">
+                    <strong>What was decided</strong>
+                    <span>The choice that was made</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">2</span>
+                  <div class="capture-text">
+                    <strong>Why it made sense</strong>
+                    <span>The reasoning at the time</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">3</span>
+                  <div class="capture-text">
+                    <strong>What else was considered</strong>
+                    <span>Alternatives that were rejected</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">4</span>
+                  <div class="capture-text">
+                    <strong>Assumptions at the time</strong>
+                    <span>What you believed to be true</span>
+                  </div>
+                </div>
+              </div>
+              <p class="capture-note">
+                <mat-icon>schedule</mat-icon>
+                <span>Most teams add <strong>2-3 records a month</strong>. Enough to matter. Not enough to slow down.</span>
+              </p>
             </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Someone new joins</span>
-              <span class="usage-outcome">Three records. Six months of context.</span>
-            </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Priorities shift</span>
-              <span class="usage-outcome">Old decisions get marked superseded. The reasoning stays.</span>
-            </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Auditors ask "why"</span>
-              <span class="usage-outcome">You show them the record, not a search through emails.</span>
+            <div class="capture-visual">
+              <img src="/assets/simple-capture.svg" alt="Simple decision capture form" />
             </div>
           </div>
-          <p class="usage-note">Most teams add 2-3 records a month. Enough to matter. Not enough to slow down.</p>
         </div>
       </section>
 
@@ -670,7 +701,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <span>Get notified when decisions change</span>
                 </div>
               </div>
-              <a href="https://slack.com/apps" target="_blank" class="slack-cta">
+              <a href="https://slack.com/oauth/v2/authorize?client_id=10124404087394.10108984440711&scope=channels:read,chat:write,commands,groups:read,im:write,users:read,users:read.email&user_scope=" target="_blank" class="slack-cta">
                 <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo-btn">
                 <span>Add to Slack</span>
               </a>
@@ -760,59 +791,22 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
-      <!-- Who Is This For -->
-      <section class="section audience-section">
+      <!-- Organisational Memory -->
+      <section class="section memory-section">
         <div class="container">
-          <div class="audience-header">
-            <h2>Sound Familiar?</h2>
-            <p class="audience-intro">If any of these resonate, you're in the right place.</p>
-          </div>
-
-          <div class="needs-grid">
-            <div class="need-card need-card-1">
-              <div class="need-icon">
-                <mat-icon>help_outline</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>"Why did we decide this?"</h3>
-                <p>Teams tired of rehashing old debates — from boardrooms to project standups.</p>
-              </div>
+          <div class="memory-content">
+            <div class="memory-text">
+              <h2>Memory that outlasts any individual</h2>
+              <p class="memory-lead">
+                People move on. Teams reorganise. Priorities shift. But the reasoning behind your decisions shouldn't disappear with them.
+              </p>
+              <p class="memory-detail">
+                Decision records create institutional memory that survives role changes, team growth, and the passage of time. New team members understand not just what exists, but why it came to be.
+              </p>
             </div>
-
-            <div class="need-card need-card-2">
-              <div class="need-icon">
-                <mat-icon>directions_walk</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Knowledge walks out the door</h3>
-                <p>Organizations losing context when people move on — especially growing teams.</p>
-              </div>
+            <div class="memory-visual">
+              <img src="/assets/organisational-memory.svg" alt="Decisions persist over time as teams change" />
             </div>
-
-            <div class="need-card need-card-3">
-              <div class="need-icon">
-                <mat-icon>description</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Decisions need a paper trail</h3>
-                <p>Regulated industries and client work requiring audit trails and accountability.</p>
-              </div>
-            </div>
-
-            <div class="need-card need-card-4">
-              <div class="need-icon">
-                <mat-icon>public</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Alignment across distance</h3>
-                <p>Distributed teams and async collaborators staying in sync on what matters.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="audience-cta">
-            <img src="/assets/brain-memory.svg" alt="Connected thinking" class="floating-brain" />
-            <p>Decision records give your team a shared memory that outlasts any individual.</p>
           </div>
         </div>
       </section>
@@ -832,6 +826,15 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
               </p>
               <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org</small>
             </div>
+            <div class="footer-resources-col">
+              <h4>Resources</h4>
+              <nav class="footer-legal-links">
+                <a routerLink="/solutions">Solutions</a>
+                <a routerLink="/integrations">Integrations</a>
+                <a routerLink="/faq">FAQ</a>
+                <a routerLink="/about">About</a>
+              </nav>
+            </div>
             <div class="footer-legal-col">
               <h4>Legal</h4>
               <nav class="footer-legal-links">
@@ -839,7 +842,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 <a routerLink="/security">Security</a>
                 <a routerLink="/dpa">Data Processing</a>
                 <a routerLink="/sla">SLA</a>
-                <a routerLink="/licensing">License Model</a>
               </nav>
             </div>
             <div class="footer-support-col">
@@ -2078,65 +2080,122 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       background: #2563eb;
     }
 
-    /* Usage Section */
-    .usage-section {
+    /* Capture Section */
+    .capture-section {
       background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
     }
 
-    .usage-section h2 {
-      text-align: center;
-      margin-bottom: 48px;
+    .capture-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
     }
 
-    .usage-timeline {
-      max-width: 680px;
-      margin: 0 auto 48px;
-      position: relative;
-      padding-left: 0;
+    .capture-badge {
+      display: inline-block;
+      background: #EFF6FF;
+      color: #2563EB;
+      padding: 6px 14px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 16px;
     }
 
-    .usage-timeline::before {
-      content: '';
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      top: 12px;
-      bottom: 12px;
-      width: 1px;
-      background: #cbd5e1;
+    .capture-content h2 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 16px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
     }
 
-    .usage-item {
+    .capture-intro {
+      font-size: 1.1rem;
+      color: #475569;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+
+    .capture-list {
       display: flex;
-      align-items: baseline;
-      padding: 18px 0;
+      flex-direction: column;
+      gap: 20px;
+      margin-bottom: 32px;
     }
 
-    .usage-trigger {
-      width: 50%;
-      text-align: right;
+    .capture-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .capture-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: #EFF6FF;
+      color: #2563EB;
+      border-radius: 50%;
+      font-weight: 600;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+
+    .capture-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding-top: 4px;
+    }
+
+    .capture-text strong {
+      font-size: 1rem;
       font-weight: 600;
       color: #1e293b;
-      font-size: 0.95rem;
-      padding-right: 32px;
     }
 
-    .usage-outcome {
-      width: 50%;
+    .capture-text span {
+      font-size: 0.9rem;
       color: #64748b;
-      font-size: 0.95rem;
-      line-height: 1.5;
-      padding-left: 32px;
     }
 
-    .usage-note {
-      font-size: 1rem;
+    .capture-note {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
       color: #475569;
-      text-align: center;
-      max-width: 600px;
-      margin: 0 auto;
-      line-height: 1.6;
-      font-weight: 500;
+      background: #fff;
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .capture-note mat-icon {
+      color: #2563EB;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .capture-note span {
+      line-height: 1.5;
+    }
+
+    .capture-visual {
+      display: flex;
+      justify-content: center;
+    }
+
+    .capture-visual img {
+      max-width: 100%;
+      height: auto;
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.08));
     }
 
     /* Trust Section */
@@ -2347,144 +2406,72 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       line-height: 1.4;
     }
 
-    /* Audience Section */
-    .audience-section {
+    /* Memory Section */
+    .memory-section {
       background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
-      padding-bottom: 80px;
+      padding: 80px 0;
     }
 
-    .audience-header {
-      text-align: center;
-      margin-bottom: 48px;
-    }
-
-    .audience-header h2 {
-      margin-bottom: 12px;
-    }
-
-    .audience-intro {
-      font-size: 1.1rem;
-      color: #64748b;
-    }
-
-    .needs-grid {
+    .memory-content {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 24px;
-      max-width: 900px;
-      margin: 0 auto;
-    }
-
-    .need-card {
-      display: flex;
-      align-items: flex-start;
-      gap: 20px;
-      padding: 28px;
-      background: white;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .need-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 4px;
-      height: 100%;
-      transition: width 0.3s ease;
-    }
-
-    .need-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-    }
-
-    .need-card:hover::before {
-      width: 6px;
-    }
-
-    .need-card-1::before { background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%); }
-    .need-card-2::before { background: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%); }
-    .need-card-3::before { background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%); }
-    .need-card-4::before { background: linear-gradient(180deg, #10b981 0%, #059669 100%); }
-
-    .need-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      display: flex;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 60px;
       align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
     }
 
-    .need-card-1 .need-icon { background: #eff6ff; }
-    .need-card-2 .need-icon { background: #f5f3ff; }
-    .need-card-3 .need-icon { background: #ecfeff; }
-    .need-card-4 .need-icon { background: #ecfdf5; }
-
-    .need-card-1 .need-icon mat-icon { color: #2563eb; }
-    .need-card-2 .need-icon mat-icon { color: #7c3aed; }
-    .need-card-3 .need-icon mat-icon { color: #0891b2; }
-    .need-card-4 .need-icon mat-icon { color: #059669; }
-
-    .need-icon mat-icon {
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-    }
-
-    .need-content h3 {
-      font-size: 1.1rem;
-      font-weight: 600;
+    .memory-text h2 {
+      font-size: 2rem;
+      font-weight: 700;
       color: #0f172a;
-      margin: 0 0 8px;
-      line-height: 1.4;
+      margin: 0 0 20px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
     }
 
-    .need-content p {
-      font-size: 0.95rem;
+    .memory-lead {
+      font-size: 1.15rem;
+      color: #475569;
+      line-height: 1.7;
+      margin: 0 0 16px;
+    }
+
+    .memory-detail {
+      font-size: 1rem;
       color: #64748b;
-      line-height: 1.6;
+      line-height: 1.7;
       margin: 0;
     }
 
-    .audience-cta {
+    .memory-visual {
       display: flex;
-      align-items: center;
       justify-content: center;
-      gap: 24px;
-      margin-top: 48px;
-      padding: 32px;
-      background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
-      border-radius: 16px;
-      max-width: 700px;
-      margin-left: auto;
-      margin-right: auto;
+      align-items: center;
     }
 
-    .floating-brain {
-      width: 80px;
-      height: 80px;
-      flex-shrink: 0;
-      animation: float 3s ease-in-out infinite;
+    .memory-visual img {
+      width: 100%;
+      max-width: 520px;
+      height: auto;
     }
 
-    @keyframes float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-8px); }
-    }
+    @media (max-width: 800px) {
+      .memory-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+        text-align: center;
+      }
 
-    .audience-cta p {
-      font-size: 1.1rem;
-      color: #1e293b;
-      line-height: 1.6;
-      margin: 0;
-      font-weight: 500;
+      .memory-text h2 {
+        font-size: 1.75rem;
+      }
+
+      .memory-visual {
+        order: -1;
+      }
+
+      .memory-visual img {
+        max-width: 360px;
+      }
     }
 
     /* Governance Section */
@@ -2791,8 +2778,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .footer-grid {
       display: grid;
-      grid-template-columns: 1.5fr 1fr 1fr;
-      gap: 40px;
+      grid-template-columns: 2fr 1fr 1fr 1.5fr;
+      gap: 32px;
       align-items: start;
       text-align: left;
     }
@@ -2806,6 +2793,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #64748b;
     }
 
+    .footer-resources-col h4,
     .footer-legal-col h4 {
       color: #e2e8f0;
       margin: 0 0 12px;
@@ -3029,8 +3017,21 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         border-radius: 12px;
       }
 
-      .usage-timeline {
-        max-width: 100%;
+      .capture-layout {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .capture-visual {
+        order: -1;
+      }
+
+      .capture-visual img {
+        max-width: 400px;
+      }
+
+      .capture-content h2 {
+        font-size: 1.75rem;
       }
 
       .problem-layout {
@@ -3112,31 +3113,24 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     @media (max-width: 600px) {
-      .usage-timeline::before {
-        display: none;
+      .capture-visual img {
+        max-width: 100%;
       }
 
-      .usage-item {
+      .capture-content h2 {
+        font-size: 1.5rem;
+      }
+
+      .capture-intro {
+        font-size: 1rem;
+      }
+
+      .capture-note {
         flex-direction: column;
-        gap: 6px;
-        padding: 16px 0;
-        border-bottom: 1px solid #e2e8f0;
+        text-align: center;
+        gap: 8px;
       }
 
-      .usage-item:last-child {
-        border-bottom: none;
-      }
-
-      .usage-trigger {
-        width: 100%;
-        text-align: left;
-        padding-right: 0;
-      }
-
-      .usage-outcome {
-        width: 100%;
-        padding-left: 0;
-      }
       .hero {
         padding: 60px 16px 40px;
       }
@@ -3309,6 +3303,9 @@ export class HomepageComponent implements OnInit {
   // Slack OIDC state
   slackOidcEnabled = false;
 
+  // Mobile menu state
+  mobileMenuOpen = false;
+
   // Google OAuth state
   googleOauthEnabled = false;
 
@@ -3368,6 +3365,15 @@ export class HomepageComponent implements OnInit {
 
   ngOnInit(): void {
     this.route.queryParams.subscribe(params => {
+      // Handle signin query param from nav
+      if (params['signin'] === 'true') {
+        // Small delay to ensure view is ready
+        setTimeout(() => this.openSignInDialog(), 100);
+        // Clear the query param
+        this.router.navigate(['/'], { replaceUrl: true });
+        return;
+      }
+
       if (params['error'] === 'invalid_token') {
         this.error = 'Invalid verification link. Please try again.';
       } else if (params['error'] === 'expired_token') {
@@ -3797,11 +3803,16 @@ export class HomepageComponent implements OnInit {
     this.currentSlide = index;
   }
 
+  toggleMobileMenu(): void {
+    this.mobileMenuOpen = !this.mobileMenuOpen;
+  }
+
   openGetStartedDialog(): void {
     this.currentView = 'email';
     this.error = '';
     this.success = '';
     this.isSignInMode = false;
+    this.mobileMenuOpen = false;
     this.dialogRef = this.dialog.open(this.getStartedDialog, {
       width: '450px',
       maxWidth: '90vw',
