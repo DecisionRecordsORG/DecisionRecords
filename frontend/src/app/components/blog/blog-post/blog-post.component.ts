@@ -643,15 +643,15 @@ export class BlogPostComponent implements OnInit {
       `
     },
     {
-      slug: 'where-do-startup-decisions-go',
-      title: 'Where Do Startup Decisions Go When No One Writes Them Down?',
+      slug: 'how-to-track-decisions-at-a-startup',
+      title: 'How to Track Decisions at a Startup',
       excerpt: 'Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we\'ll remember. That assumption rarely holds.',
       author: 'Decision Records',
       date: 'December 2024',
       readTime: '7 min read',
       image: '/assets/blog/startup-decisions.svg',
       category: 'Startups',
-      metaDescription: 'Startups make decisions constantly but rarely document them. Learn why speed is not the enemy, and how lightweight decision records can preserve context without killing momentum.',
+      metaDescription: 'Learn how startups can track important decisions without slowing down. A practical guide to lightweight decision records that preserve context and support fast-moving teams.',
       content: `
         <p class="lead">Startups make decisions constantly. That is not a flaw; it is the job.</p>
 
