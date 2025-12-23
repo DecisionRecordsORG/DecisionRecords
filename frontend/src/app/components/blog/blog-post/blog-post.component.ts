@@ -61,7 +61,7 @@ interface RelatedPost {
                 <h4 class="author-name">Lawrence Nyakiso</h4>
                 <p class="author-role">Founder</p>
                 <p class="author-bio">
-                  Building tools for organisational memory. Previously worked on enterprise systems where decisions got lost.
+                  Building tools to help teams preserve decision context and why they were made. Previously worked on projects where decisions got lost.
                 </p>
               </div>
             </aside>
@@ -565,7 +565,7 @@ export class BlogPostComponent implements OnInit {
       title: 'How Should Teams Document Important Decisions?',
       excerpt: 'Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
       author: 'Decision Records',
-      date: 'December 2024',
+      date: 'November 2025',
       readTime: '5 min read',
       image: '/assets/blog/documenting-decisions.svg',
       category: 'Documentation',
@@ -639,7 +639,7 @@ export class BlogPostComponent implements OnInit {
       title: 'How to Track Decisions at a Startup',
       excerpt: 'Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we\'ll remember. That assumption rarely holds.',
       author: 'Decision Records',
-      date: 'December 2024',
+      date: 'November 2025',
       readTime: '7 min read',
       image: '/assets/blog/startup-decisions.svg',
       category: 'Startups',
@@ -758,7 +758,7 @@ export class BlogPostComponent implements OnInit {
       title: 'A Decision Habit Framework for Fast-Moving Fashion Brands',
       excerpt: 'Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
       author: 'Decision Records',
-      date: 'December 2024',
+      date: 'November 2025',
       readTime: '5 min read',
       image: '/assets/blog/fashion-decisions.svg',
       category: 'Retail',

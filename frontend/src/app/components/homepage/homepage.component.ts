@@ -45,7 +45,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             </div>
             <h1><span class="typewriter-text">{{ displayedDecisionType }}</span> <span class="highlight">Records</span></h1>
             <p class="hero-tagline">
-              Long-term decision memory for organisations
+              Helping teams remember why decisions were made
             </p>
             <p class="hero-subtitle">
               Organisations make decisions every day. Most are forgotten. The important ones deserve better.

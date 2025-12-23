@@ -59,7 +59,7 @@ interface SecurityFeature {
             Decision Records is built with organisations of all sizes in mind. Our approach to security prioritises simplicity and minimal user friction. For teams without dedicated IT departments, everything should feel intuitive and secure by default. For enterprises requiring greater control over authentication, we provide flexible configuration options. Privacy is woven into the foundation of the platform.
           </p>
           <p class="intro intro-secondary">
-            We take a deliberately flat approach to decision visibility. Rather than layering bureaucratic access rules that work against the very purpose of shared knowledge, decisions are accessible across your organisation by design. Security should enable collaboration, not hinder it.
+            We take a deliberately flat approach to decision visibility. Rather than layering bureaucratic access rules that work against the very purpose of shared knowledge, decisions are accessible across your organisation by design. Security should enable collaboration, not hinder it. <a routerLink="/faq" class="intro-link">Visit our FAQ</a> to learn more about our features.
           </p>
 
           <!-- Feature Sections -->
@@ -431,6 +431,16 @@ interface SecurityFeature {
       margin-bottom: 64px;
       font-size: 1.1rem;
       color: #64748b;
+    }
+
+    .intro-link {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .intro-link:hover {
+      text-decoration: underline;
     }
 
     /* Feature Sections */

@@ -862,7 +862,7 @@ def init_database():
                                 meta_description='Most teams make important decisions but lose the context behind them. This article explains how teams should document decisions to preserve shared understanding as they grow.',
                                 published=True,
                                 featured=True,
-                                publish_date=datetime(2024, 12, 1)
+                                publish_date=datetime(2025, 11, 1)
                             ),
                             BlogPost(
                                 slug='how-to-track-decisions-at-a-startup',
@@ -875,7 +875,7 @@ def init_database():
                                 meta_description='Learn how startups can track important decisions without slowing down. A practical guide to lightweight decision records that preserve context and support fast-moving teams.',
                                 published=True,
                                 featured=False,
-                                publish_date=datetime(2024, 12, 8)
+                                publish_date=datetime(2025, 11, 8)
                             ),
                             BlogPost(
                                 slug='decision-habit-framework-fashion-brands',
@@ -888,7 +888,7 @@ def init_database():
                                 meta_description='Fashion brands make decisions under pressure every day. Learn how a lightweight decision habit can preserve context without slowing momentum.',
                                 published=True,
                                 featured=False,
-                                publish_date=datetime(2024, 12, 15)
+                                publish_date=datetime(2025, 11, 15)
                             ),
                         ]
                         for post in posts:
@@ -897,6 +897,22 @@ def init_database():
                         logger.info(f"Seeded {len(posts)} blog posts")
                     else:
                         logger.info("Blog posts already exist")
+                    # Update existing posts to November 2025 if they have December 2024 dates
+                    posts_to_update = BlogPost.query.filter(
+                        BlogPost.publish_date < datetime(2025, 1, 1)
+                    ).all()
+                    if posts_to_update:
+                        logger.info(f"Updating {len(posts_to_update)} blog posts to November 2025 dates...")
+                        date_mapping = {
+                            'how-should-teams-document-important-decisions': datetime(2025, 11, 1),
+                            'how-to-track-decisions-at-a-startup': datetime(2025, 11, 8),
+                            'decision-habit-framework-fashion-brands': datetime(2025, 11, 15),
+                        }
+                        for post in posts_to_update:
+                            if post.slug in date_mapping:
+                                post.publish_date = date_mapping[post.slug]
+                        db.session.commit()
+                        logger.info("Blog post dates updated")
                 except Exception as blog_error:
                     logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
                     db.session.rollback()

@@ -35,7 +35,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           <mat-icon class="hero-icon">architecture</mat-icon>
           <h1>Decision Records</h1>
           <p class="hero-subtitle">
-            Long-term decision memory for organisations.
+            Helping teams remember why decisions were made.
             Collaborate with your team and preserve the reasoning behind important decisions.
           </p>
         </div>
