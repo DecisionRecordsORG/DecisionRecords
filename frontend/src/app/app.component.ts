@@ -1,16 +1,17 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterOutlet, RouterModule } from '@angular/router';
+import { RouterOutlet, RouterModule, Router, NavigationEnd } from '@angular/router';
 import { NavbarComponent } from './components/shared/navbar.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
+import { filter } from 'rxjs/operators';
 
 @Component({
   selector: 'app-root',
   standalone: true,
   imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent],
   template: `
-    @if (authService.isAuthenticated) {
+    @if (authService.isAuthenticated && showAppNavbar) {
       <app-navbar></app-navbar>
     }
     <main>
@@ -77,11 +78,59 @@ import { VersionService } from './services/version.service';
     }
   `]
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
+  showAppNavbar = false;
+
+  // Marketing/public pages that should NOT show the app navbar
+  private publicRoutes = [
+    '/',
+    '/about',
+    '/blog',
+    '/solutions',
+    '/integrations',
+    '/faq',
+    '/terms',
+    '/security',
+    '/dpa',
+    '/sla',
+    '/licensing',
+    '/superadmin',
+    '/slack'
+  ];
+
   constructor(
     public authService: AuthService,
-    public versionService: VersionService
+    public versionService: VersionService,
+    private router: Router
   ) {}
+
+  ngOnInit(): void {
+    // Check initial route
+    this.updateNavbarVisibility(this.router.url);
+
+    // Listen for route changes
+    this.router.events.pipe(
+      filter(event => event instanceof NavigationEnd)
+    ).subscribe((event: NavigationEnd) => {
+      this.updateNavbarVisibility(event.urlAfterRedirects);
+    });
+  }
+
+  private updateNavbarVisibility(url: string): void {
+    // Remove query params for comparison
+    const path = url.split('?')[0];
+
+    // Check if current path is a public/marketing route
+    const isPublicRoute = this.publicRoutes.some(route => {
+      if (route === '/') {
+        return path === '/';
+      }
+      return path === route || path.startsWith(route + '/');
+    });
+
+    // Show app navbar only on tenant routes (not public pages)
+    this.showAppNavbar = !isPublicRoute;
+  }
 
   get versionTooltip(): string {
     const info = this.versionService.currentVersion;
