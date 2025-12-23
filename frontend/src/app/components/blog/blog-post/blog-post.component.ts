@@ -883,7 +883,8 @@ export class BlogPostComponent implements OnInit {
 
       if (this.post) {
         const postUrl = `https://decisionrecords.org/blog/${this.post.slug}`;
-        const imageUrl = `https://decisionrecords.org${this.post.image}`;
+        // Use PNG for og:image (social platforms don't support SVG)
+        const ogImageUrl = 'https://decisionrecords.org/assets/og-image-default.png';
 
         // Basic meta tags
         this.titleService.setTitle(`${this.post.title} | DecisionRecords`);
@@ -893,7 +894,7 @@ export class BlogPostComponent implements OnInit {
         // Open Graph tags (Facebook, LinkedIn, etc.) - use attribute selector for property tags
         this.metaService.updateTag({ property: 'og:title', content: this.post.title }, "property='og:title'");
         this.metaService.updateTag({ property: 'og:description', content: this.post.metaDescription }, "property='og:description'");
-        this.metaService.updateTag({ property: 'og:image', content: imageUrl }, "property='og:image'");
+        this.metaService.updateTag({ property: 'og:image', content: ogImageUrl }, "property='og:image'");
         this.metaService.updateTag({ property: 'og:url', content: postUrl }, "property='og:url'");
         this.metaService.updateTag({ property: 'og:type', content: 'article' }, "property='og:type'");
         this.metaService.updateTag({ property: 'og:site_name', content: 'DecisionRecords' }, "property='og:site_name'");
@@ -904,7 +905,7 @@ export class BlogPostComponent implements OnInit {
         this.metaService.updateTag({ name: 'twitter:card', content: 'summary_large_image' }, "name='twitter:card'");
         this.metaService.updateTag({ name: 'twitter:title', content: this.post.title }, "name='twitter:title'");
         this.metaService.updateTag({ name: 'twitter:description', content: this.post.metaDescription }, "name='twitter:description'");
-        this.metaService.updateTag({ name: 'twitter:image', content: imageUrl }, "name='twitter:image'");
+        this.metaService.updateTag({ name: 'twitter:image', content: ogImageUrl }, "name='twitter:image'");
 
         // Get related posts (all posts except current)
         this.relatedPosts = this.posts
