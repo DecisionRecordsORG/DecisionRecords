@@ -15,5 +15,5 @@
 
 # Blog posts (auto-generated from blog-post.component.ts)
 /blog/how-should-teams-document-important-decisions
-/blog/where-do-startup-decisions-go
+/blog/how-to-track-decisions-at-a-startup
 /blog/decision-habit-framework-fashion-brands
