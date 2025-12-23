@@ -1154,6 +1154,6 @@ def monitor_sessions():
     --value "your-client-secret"
 
   Once the credentials are added, the "Sign in with Google" button will appear on login pages. Note that Gmail and other public email domains are blocked - only
-  Google Workspace accounts with corporate domains can sign in.
+  Google Workspace accounts with corp'signorate domains can sign in.
 
 *Last Updated: December 2025*

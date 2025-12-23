@@ -1697,7 +1697,7 @@ def slack_oidc_callback():
             return redirect(f'{return_url}{separator}slack_welcome=1')
 
         # Redirect to tenant dashboard with welcome modal trigger
-        return redirect(f'/{domain}/decisions?slack_welcome=1')
+        return redirect(f'/{domain}?slack_welcome=1')
 
     except requests.RequestException as e:
         logger.error(f"Slack OIDC request error: {e}")
@@ -2000,7 +2000,7 @@ def google_oauth_callback():
             return redirect(return_url)
 
         # Redirect to tenant dashboard
-        return redirect(f'/{domain}/decisions')
+        return redirect(f'/{domain}')
 
     except http_requests.RequestException as e:
         logger.error(f"Google OAuth request error: {e}")

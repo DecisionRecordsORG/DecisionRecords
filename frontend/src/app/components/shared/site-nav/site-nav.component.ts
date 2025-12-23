@@ -1,8 +1,9 @@
-import { Component, Input } from '@angular/core';
+import { Component, Input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { AuthService } from '../../../services/auth.service';
 
 @Component({
   selector: 'app-site-nav',
@@ -27,7 +28,8 @@ import { MatIconModule } from '@angular/material/icon';
           <a routerLink="/about">About</a>
         </div>
         <div class="nav-actions">
-          <a (click)="signIn()" class="nav-signin">Sign In</a>
+          <a *ngIf="!isAuthenticated" (click)="signIn()" class="nav-signin">Sign In</a>
+          <a *ngIf="isAuthenticated" (click)="goToTenant()" class="nav-signin">Your Decisions</a>
         </div>
         <button class="nav-mobile-toggle" (click)="toggleMobileMenu()">
           <mat-icon>{{ mobileMenuOpen ? 'close' : 'menu' }}</mat-icon>
@@ -40,7 +42,8 @@ import { MatIconModule } from '@angular/material/icon';
         <a routerLink="/blog" (click)="mobileMenuOpen = false">Blog</a>
         <a routerLink="/faq" (click)="mobileMenuOpen = false">FAQ</a>
         <a routerLink="/about" (click)="mobileMenuOpen = false">About</a>
-        <a (click)="signIn()" class="nav-signin-mobile">Sign In</a>
+        <a *ngIf="!isAuthenticated" (click)="signIn()" class="nav-signin-mobile">Sign In</a>
+        <a *ngIf="isAuthenticated" (click)="goToTenant()" class="nav-signin-mobile">Your Decisions</a>
       </div>
     </nav>
   `,
@@ -250,14 +253,29 @@ import { MatIconModule } from '@angular/material/icon';
     '(window:scroll)': 'onScroll()'
   }
 })
-export class SiteNavComponent {
+export class SiteNavComponent implements OnInit {
   @Input() darkBackground = false;
   @Input() lightTopBackground = false;
 
   mobileMenuOpen = false;
   scrolled = false;
+  isAuthenticated = false;
+  userDomain: string | null = null;
 
-  constructor(private router: Router) {}
+  constructor(
+    private router: Router,
+    private authService: AuthService
+  ) {}
+
+  ngOnInit(): void {
+    // Check auth state
+    this.authService.currentUser$.subscribe(currentUser => {
+      this.isAuthenticated = !!currentUser?.user;
+      // Access sso_domain from the nested user object
+      const user = currentUser?.user as { sso_domain?: string } | null;
+      this.userDomain = user?.sso_domain || null;
+    });
+  }
 
   toggleMobileMenu(): void {
     this.mobileMenuOpen = !this.mobileMenuOpen;
@@ -266,6 +284,16 @@ export class SiteNavComponent {
   signIn(): void {
     this.mobileMenuOpen = false;
     this.router.navigate(['/'], { queryParams: { signin: 'true' } });
+  }
+
+  goToTenant(): void {
+    this.mobileMenuOpen = false;
+    if (this.userDomain) {
+      this.router.navigate(['/', this.userDomain]);
+    } else {
+      // Fallback to homepage with signin if no domain
+      this.router.navigate(['/'], { queryParams: { signin: 'true' } });
+    }
   }
 
   onScroll(): void {
