@@ -843,7 +843,64 @@ def init_database():
                     logger.warning(f"System config initialization failed (non-critical): {str(config_error)}")
                     # Don't fail the entire initialization for this
                     db.session.rollback()
-                
+
+                # Seed blog posts if none exist
+                logger.info("Checking blog posts...")
+                try:
+                    from models import BlogPost
+                    if BlogPost.query.count() == 0:
+                        logger.info("Seeding default blog posts...")
+                        posts = [
+                            BlogPost(
+                                slug='how-should-teams-document-important-decisions',
+                                title='How Should Teams Document Important Decisions?',
+                                excerpt='Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
+                                author='Decision Records',
+                                category='Documentation',
+                                read_time='5 min read',
+                                image='/assets/blog/documenting-decisions.svg',
+                                meta_description='Most teams make important decisions but lose the context behind them. This article explains how teams should document decisions to preserve shared understanding as they grow.',
+                                published=True,
+                                featured=True,
+                                publish_date=datetime(2024, 12, 1)
+                            ),
+                            BlogPost(
+                                slug='how-to-track-decisions-at-a-startup',
+                                title='How to Track Decisions at a Startup',
+                                excerpt="Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we'll remember. That assumption rarely holds.",
+                                author='Decision Records',
+                                category='Startups',
+                                read_time='7 min read',
+                                image='/assets/blog/startup-decisions.svg',
+                                meta_description='Learn how startups can track important decisions without slowing down. A practical guide to lightweight decision records that preserve context and support fast-moving teams.',
+                                published=True,
+                                featured=False,
+                                publish_date=datetime(2024, 12, 8)
+                            ),
+                            BlogPost(
+                                slug='decision-habit-framework-fashion-brands',
+                                title='A Decision Habit Framework for Fast-Moving Fashion Brands',
+                                excerpt='Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
+                                author='Decision Records',
+                                category='Retail',
+                                read_time='5 min read',
+                                image='/assets/blog/fashion-decisions.svg',
+                                meta_description='Fashion brands make decisions under pressure every day. Learn how a lightweight decision habit can preserve context without slowing momentum.',
+                                published=True,
+                                featured=False,
+                                publish_date=datetime(2024, 12, 15)
+                            ),
+                        ]
+                        for post in posts:
+                            db.session.add(post)
+                        db.session.commit()
+                        logger.info(f"Seeded {len(posts)} blog posts")
+                    else:
+                        logger.info("Blog posts already exist")
+                except Exception as blog_error:
+                    logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
+                    db.session.rollback()
+
                 _db_initialized = True
                 app_error_state['healthy'] = True
                 app_error_state['error'] = None
