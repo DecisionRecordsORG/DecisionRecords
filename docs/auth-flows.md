@@ -4,6 +4,7 @@ This document defines the authentication flows for the Architecture Decisions ap
 
 ## Table of Contents
 - [Design Principles](#design-principles)
+- [Authentication Types](#authentication-types)
 - [User States](#user-states)
 - [Flow 1: New User Signup (First user for domain)](#flow-1-new-user-signup-first-user-for-domain)
 - [Flow 2: New User Signup (Existing domain)](#flow-2-new-user-signup-existing-domain)
@@ -11,6 +12,9 @@ This document defines the authentication flows for the Architecture Decisions ap
 - [Flow 4: Login with Password](#flow-4-login-with-password)
 - [Flow 5: Account Recovery](#flow-5-account-recovery)
 - [Flow 6: Add Backup Authentication](#flow-6-add-backup-authentication)
+- [Flow 7: Sign in with Google](#flow-7-sign-in-with-google)
+- [Flow 8: Sign in with Slack](#flow-8-sign-in-with-slack)
+- [Admin-Enforced Authentication](#admin-enforced-authentication)
 - [Security Requirements](#security-requirements)
 - [Success Criteria](#success-criteria)
 
@@ -23,6 +27,42 @@ This document defines the authentication flows for the Architecture Decisions ap
 3. **Recovery is essential** - Users must have a way to recover their account if they lose their device
 4. **Progressive security** - Allow password as fallback, but encourage passkey adoption
 5. **Email verification as security layer** - When enabled, ensures email ownership before account creation
+6. **OAuth simplifies onboarding** - OAuth providers (Google, Slack) verify identity, so OAuth users skip email verification
+
+---
+
+## Authentication Types
+
+The `auth_type` field tracks the user's authentication method:
+
+| auth_type | Description | Requires Credential Setup |
+|-----------|-------------|---------------------------|
+| `webauthn` | Passkey authentication (FIDO2/WebAuthn) | No - passkey is the credential |
+| `local` | Password-based authentication | No - password is the credential |
+| `sso` | OAuth/SSO authentication (Google, Slack, Enterprise SAML) | No - OAuth is the credential |
+
+### How auth_type is Set
+
+1. **Initial Signup with Passkey**: `auth_type = 'webauthn'`
+2. **Initial Signup with Password**: `auth_type = 'local'`
+3. **Sign in with Google**: `auth_type = 'sso'` (only if user had no auth_type or was 'local')
+4. **Sign in with Slack**: `auth_type = 'sso'` (only if user had no auth_type or was 'local')
+5. **Enterprise SAML SSO**: `auth_type = 'sso'`
+
+### Auth Type Preservation
+
+When a user signs in with a different method than their original setup, the behavior is:
+
+| Original auth_type | Signs in with | Resulting auth_type | Notes |
+|--------------------|---------------|---------------------|-------|
+| `webauthn` | Google OAuth | `webauthn` | Preserved - user has existing passkey |
+| `webauthn` | Slack OIDC | `webauthn` | Preserved - user has existing passkey |
+| `local` | Google OAuth | `sso` | Updated - OAuth becomes primary method |
+| `local` | Slack OIDC | `sso` | Updated - OAuth becomes primary method |
+| (none) | Google OAuth | `sso` | Set - OAuth is first auth method |
+| (none) | Slack OIDC | `sso` | Set - OAuth is first auth method |
+
+**Rationale**: If a user already has passkey authentication set up, we preserve it because passkeys are considered more secure and the user may want to continue using them. OAuth just becomes an alternative login method. However, if a user only had password ('local'), switching to OAuth upgrades their security posture.
 
 ---
 
@@ -306,6 +346,138 @@ Users should be encouraged to have multiple auth methods.
 
 ---
 
+## Flow 7: Sign in with Google
+
+Google OAuth 2.0 provides a convenient sign-in option for organizations using Google Workspace.
+
+### Prerequisites
+- Google OAuth must be enabled (GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET configured)
+- User's email domain must match their Google account domain
+
+### New User Flow (First-time Google Sign-in)
+
+```
+1. User clicks "Sign in with Google" on landing page
+2. User is redirected to Google's consent screen
+3. User selects their Google account
+4. Google verifies identity and returns to callback
+5. System extracts email from Google's response
+6. System checks if user exists:
+   - No → Create new user with:
+     - email_verified = true (Google verified the email)
+     - auth_type = 'sso'
+     - setup_mode = false (no credential setup needed)
+     - has_passkey = false, has_password = false
+   - Yes → Sign in existing user
+7. System checks/creates tenant for user's email domain
+8. System creates session
+9. System redirects to /{domain} (tenant dashboard)
+```
+
+### Existing User Flow (User has account, signs in with Google)
+
+```
+1. User clicks "Sign in with Google"
+2. Google OAuth flow completes
+3. System finds existing user by email
+4. System updates auth_type:
+   - If auth_type is null or 'local' → set to 'sso'
+   - If auth_type is 'webauthn' → preserve (passkey remains primary)
+5. System creates session
+6. System redirects to /{domain} (tenant dashboard)
+```
+
+### Why OAuth Users Skip Credential Setup
+
+OAuth users do NOT need to set up a passkey or password because:
+1. **Identity is verified** - Google has already verified the user's email ownership
+2. **OAuth IS the credential** - The user authenticates via Google each time
+3. **Reduced friction** - Requiring additional credentials defeats the purpose of OAuth
+
+The system recognizes OAuth users by checking `auth_type === 'sso'` and skips the credential setup flow.
+
+### Success Criteria
+- [ ] Google sign-in completes successfully
+- [ ] New OAuth users skip email verification (Google verified them)
+- [ ] New OAuth users skip credential setup (OAuth is their auth method)
+- [ ] Existing passkey users can use Google as alternative login
+- [ ] auth_type is set correctly based on user state
+
+---
+
+## Flow 8: Sign in with Slack
+
+Slack OIDC provides sign-in for organizations using Slack Connect.
+
+### Prerequisites
+- Slack OIDC must be enabled (SLACK_CLIENT_ID and SLACK_CLIENT_SECRET configured)
+- User's email domain must match their Slack workspace domain
+
+### Flow
+
+```
+1. User clicks "Sign in with Slack" on landing page
+2. User is redirected to Slack's authorization page
+3. User authorizes the application
+4. Slack verifies identity and returns to callback
+5. System extracts email from Slack's response
+6. Same user creation/lookup logic as Google OAuth
+7. System creates session
+8. System redirects to /{domain}?slack_welcome=1
+```
+
+### Slack Welcome Modal
+
+New Slack users see a welcome modal explaining:
+- How Decision Records integrates with Slack
+- How to use the Slack app for decision tracking
+- Quick start tips
+
+---
+
+## Admin-Enforced Authentication
+
+Mature tenants can enforce specific authentication methods.
+
+### Tenant Maturity Levels
+
+| Level | Description | Can Enforce Auth |
+|-------|-------------|------------------|
+| BOOTSTRAP | Only provisional admin, no policies | No |
+| GROWING | Has full admin, basic policies | Yes |
+| MATURE | Full governance, compliance features | Yes |
+
+### Enforceable Auth Methods
+
+Tenant admins in GROWING or MATURE tenants can enforce:
+
+| Method | Description | Effect |
+|--------|-------------|--------|
+| Passkey Only | Require WebAuthn passkeys | Users must have passkey to access |
+| Password + Passkey | Require both methods | Users must have both credentials |
+| Google SSO | Require Google Workspace login | Users must sign in via Google |
+| Slack SSO | Require Slack login | Users must sign in via Slack |
+| Any SSO | Allow any OAuth provider | Users can use Google or Slack |
+
+### When Admin Enforces Google Auth
+
+If a tenant admin enforces Google authentication:
+
+1. **New users** must sign in with Google (other methods hidden)
+2. **Existing passkey users** can continue using passkeys OR switch to Google
+3. **Existing password users** must use Google (password login disabled)
+
+**Note**: When a passkey user signs in with Google, their `auth_type` remains 'webauthn' but Google login is now available as an alternative. The enforcement applies to the LOGIN method, not the stored auth_type.
+
+### Implementation Details
+
+The `auth_type` field represents the user's **original/primary** auth setup, not necessarily how they logged in most recently. This allows:
+- Users to have fallback auth methods
+- Admins to enforce policies without breaking existing accounts
+- Gradual migration to new auth methods
+
+---
+
 ## Security Requirements
 
 ### Session Management
@@ -364,4 +536,4 @@ Users should be encouraged to have multiple auth methods.
 
 ---
 
-*Last Updated: December 2025*
+*Last Updated: December 23, 2025 - Added Google OAuth and Slack OIDC flows, auth_type documentation*
