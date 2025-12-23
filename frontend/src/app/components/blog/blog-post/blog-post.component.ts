@@ -2,8 +2,6 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
-import { SiteNavComponent } from '../../shared/site-nav/site-nav.component';
-import { SiteFooterComponent } from '../../shared/site-footer/site-footer.component';
 import { Title, Meta } from '@angular/platform-browser';
 
 interface BlogPost {
@@ -31,14 +29,10 @@ interface RelatedPost {
   imports: [
     CommonModule,
     RouterModule,
-    MatIconModule,
-    SiteNavComponent,
-    SiteFooterComponent
+    MatIconModule
   ],
   template: `
     <div class="blog-post-page">
-      <app-site-nav [lightTopBackground]="true"></app-site-nav>
-
       @if (post) {
         <header class="post-header">
           <div class="header-container">
@@ -113,8 +107,6 @@ interface RelatedPost {
           </div>
         </div>
       }
-
-      <app-site-footer></app-site-footer>
     </div>
   `,
   styles: [`

@@ -21,7 +21,9 @@ import { AuthService } from '../../../services/auth.service';
           <img [src]="(scrolled && !darkBackground) || lightTopBackground ? '/assets/decision-records-logo-official.svg' : '/assets/decision-records-logo-white.svg'" alt="Decision Records" />
         </a>
         <div class="nav-links">
+          <a routerLink="/">Home</a>
           <a routerLink="/solutions">Solutions</a>
+          <a routerLink="/security-features">Security</a>
           <a routerLink="/integrations">Integrations</a>
           <a routerLink="/blog">Blog</a>
           <a routerLink="/faq">FAQ</a>
@@ -37,7 +39,9 @@ import { AuthService } from '../../../services/auth.service';
       </div>
       <!-- Mobile Menu -->
       <div class="nav-mobile-menu" [class.open]="mobileMenuOpen">
+        <a routerLink="/" (click)="mobileMenuOpen = false">Home</a>
         <a routerLink="/solutions" (click)="mobileMenuOpen = false">Solutions</a>
+        <a routerLink="/security-features" (click)="mobileMenuOpen = false">Security</a>
         <a routerLink="/integrations" (click)="mobileMenuOpen = false">Integrations</a>
         <a routerLink="/blog" (click)="mobileMenuOpen = false">Blog</a>
         <a routerLink="/faq" (click)="mobileMenuOpen = false">FAQ</a>
@@ -98,6 +102,7 @@ import { AuthService } from '../../../services/auth.service';
       text-decoration: none;
       font-size: 0.95rem;
       font-weight: 500;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       transition: color 0.2s;
     }
 
@@ -135,6 +140,7 @@ import { AuthService } from '../../../services/auth.service';
       padding: 8px 20px;
       font-weight: 500;
       font-size: 0.9rem;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       text-decoration: none;
       transition: all 0.2s;
       cursor: pointer;
@@ -208,6 +214,7 @@ import { AuthService } from '../../../services/auth.service';
       text-decoration: none;
       font-size: 1rem;
       font-weight: 500;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       padding: 14px 0;
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }

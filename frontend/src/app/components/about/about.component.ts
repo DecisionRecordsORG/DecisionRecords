@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 @Component({
   selector: 'app-about',
@@ -12,14 +11,10 @@ import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
     CommonModule,
     RouterModule,
     MatButtonModule,
-    MatIconModule,
-    SiteNavComponent
+    MatIconModule
   ],
   template: `
     <div class="about-page">
-      <!-- Sticky Site Navigation -->
-      <app-site-nav></app-site-nav>
-
       <!-- Header -->
       <header class="about-header">
         <div class="container">
@@ -88,13 +83,6 @@ import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
           </div>
         </div>
       </main>
-
-      <!-- Footer -->
-      <footer class="about-footer">
-        <div class="container">
-          <p>&copy; {{ currentYear }} Architecture-Decisions.org</p>
-        </div>
-      </footer>
     </div>
   `,
   styles: [`
@@ -253,6 +241,4 @@ import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
     }
   `]
 })
-export class AboutComponent {
-  currentYear = new Date().getFullYear();
-}
+export class AboutComponent {}

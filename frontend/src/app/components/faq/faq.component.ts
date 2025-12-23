@@ -4,7 +4,6 @@ import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatExpansionModule } from '@angular/material/expansion';
-import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 interface FaqItem {
   question: string;
@@ -25,14 +24,10 @@ interface FaqSection {
     RouterModule,
     MatButtonModule,
     MatIconModule,
-    MatExpansionModule,
-    SiteNavComponent
+    MatExpansionModule
   ],
   template: `
     <div class="faq-page">
-      <!-- Sticky Site Navigation -->
-      <app-site-nav></app-site-nav>
-
       <!-- Header -->
       <header class="faq-header">
         <div class="container">
@@ -98,13 +93,6 @@ interface FaqSection {
           </div>
         </div>
       </main>
-
-      <!-- Footer -->
-      <footer class="faq-footer">
-        <div class="container">
-          <p>&copy; {{ currentYear }} DecisionRecords.org</p>
-        </div>
-      </footer>
     </div>
   `,
   styles: [`

@@ -14,7 +14,6 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
-import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | 'join_organization' | 'account_created';
 
@@ -33,14 +32,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     MatProgressSpinnerModule,
     MatDialogModule,
     MatSelectModule,
-    MatCheckboxModule,
-    SiteNavComponent
+    MatCheckboxModule
   ],
   template: `
     <div class="homepage">
-      <!-- Sticky Site Navigation -->
-      <app-site-nav [darkBackground]="true"></app-site-nav>
-
       <!-- Hero Section -->
       <section class="hero">
         <div class="hero-container">
@@ -810,51 +805,6 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
           </div>
         </div>
       </section>
-
-      <!-- Footer -->
-      <footer class="homepage-footer">
-        <div class="container">
-          <div class="footer-grid">
-            <div class="footer-mission-col">
-              <div class="footer-brand">
-                <img src="/assets/decision-records-logo-official.svg" alt="Decision Records" class="footer-logo">
-                <span class="footer-brand-text">Decision Records</span>
-              </div>
-              <p class="footer-mission">
-                An open source initiative to make decision-making
-                transparent, durable, and reusable across organisations.
-              </p>
-              <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org</small>
-            </div>
-            <div class="footer-resources-col">
-              <h4>Resources</h4>
-              <nav class="footer-legal-links">
-                <a routerLink="/solutions">Solutions</a>
-                <a routerLink="/integrations">Integrations</a>
-                <a routerLink="/faq">FAQ</a>
-                <a routerLink="/about">About</a>
-              </nav>
-            </div>
-            <div class="footer-legal-col">
-              <h4>Legal</h4>
-              <nav class="footer-legal-links">
-                <a routerLink="/terms">Terms of Service</a>
-                <a routerLink="/security">Security</a>
-                <a routerLink="/dpa">Data Processing</a>
-                <a routerLink="/sla">SLA</a>
-              </nav>
-            </div>
-            <div class="footer-support-col">
-              <h4>Get in Touch</h4>
-              <p class="footer-support-text">Interested in our cloud service or have questions?</p>
-              <button mat-stroked-button class="sponsorship-button" (click)="openSponsorshipDialog()">
-                <mat-icon>mail</mat-icon>
-                Contact Us
-              </button>
-            </div>
-          </div>
-        </div>
-      </footer>
 
       <!-- Sponsorship Dialog Template -->
       <ng-template #sponsorshipDialog>
@@ -3318,7 +3268,7 @@ export class HomepageComponent implements OnInit {
     'supplier Decision',
     'policy Decision',
     'technology Decision',
-    'architecture Decision',
+    'design Decision',
     'Decision'
   ];
   currentTypeIndex = 0;

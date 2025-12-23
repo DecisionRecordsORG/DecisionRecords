@@ -27,6 +27,11 @@ export const routes: Routes = [
     path: 'solutions',
     loadComponent: () => import('./components/solutions/solutions.component').then(m => m.SolutionsComponent)
   },
+  // Security features page (product page, not legal)
+  {
+    path: 'security-features',
+    loadComponent: () => import('./components/security/security.component').then(m => m.SecurityComponent)
+  },
   // Integrations pages
   {
     path: 'integrations',

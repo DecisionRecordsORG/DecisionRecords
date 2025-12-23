@@ -2,6 +2,8 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet, RouterModule, Router, NavigationEnd } from '@angular/router';
 import { NavbarComponent } from './components/shared/navbar.component';
+import { SiteNavComponent } from './components/shared/site-nav/site-nav.component';
+import { SiteFooterComponent } from './components/shared/site-footer/site-footer.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
 import { filter } from 'rxjs/operators';
@@ -9,15 +11,21 @@ import { filter } from 'rxjs/operators';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent],
+  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent, SiteNavComponent, SiteFooterComponent],
   template: `
+    @if (showSiteNav) {
+      <app-site-nav [darkBackground]="siteNavDarkBg" [lightTopBackground]="siteNavLightTopBg"></app-site-nav>
+    }
     @if (authService.isAuthenticated && showAppNavbar) {
       <app-navbar></app-navbar>
     }
     <main>
       <router-outlet></router-outlet>
     </main>
-    <footer class="app-footer">
+    @if (showSiteFooter) {
+      <app-site-footer></app-site-footer>
+    }
+    <footer class="app-footer" [class.hidden]="showSiteFooter">
       <div class="footer-content">
         <small>
           Decision Records
@@ -76,12 +84,20 @@ import { filter } from 'rxjs/operators';
       width: auto;
       opacity: 0.8;
     }
+
+    .app-footer.hidden {
+      display: none;
+    }
   `]
 })
 export class AppComponent implements OnInit {
   showAppNavbar = false;
+  showSiteNav = false;
+  showSiteFooter = false;
+  siteNavDarkBg = false;
+  siteNavLightTopBg = false;
 
-  // Marketing/public pages that should NOT show the app navbar
+  // Marketing/public pages that should show the site nav
   private publicRoutes = [
     '/',
     '/about',
@@ -91,12 +107,17 @@ export class AppComponent implements OnInit {
     '/faq',
     '/terms',
     '/security',
+    '/security-features',
     '/dpa',
     '/sla',
-    '/licensing',
-    '/superadmin',
-    '/slack'
+    '/licensing'
   ];
+
+  // Routes that need dark background on site nav
+  private darkBgRoutes = ['/', '/integrations/slack'];
+
+  // Routes that need light top background on site nav
+  private lightTopBgRoutes = ['/blog'];
 
   constructor(
     public authService: AuthService,
@@ -128,8 +149,24 @@ export class AppComponent implements OnInit {
       return path === route || path.startsWith(route + '/');
     });
 
+    // Show site nav and footer on public pages
+    this.showSiteNav = isPublicRoute;
+    this.showSiteFooter = isPublicRoute;
+
     // Show app navbar only on tenant routes (not public pages)
     this.showAppNavbar = !isPublicRoute;
+
+    // Determine site nav background style
+    this.siteNavDarkBg = this.darkBgRoutes.some(route => {
+      if (route === '/') {
+        return path === '/';
+      }
+      return path === route || path.startsWith(route + '/');
+    });
+
+    this.siteNavLightTopBg = this.lightTopBgRoutes.some(route => {
+      return path === route || path.startsWith(route + '/');
+    });
   }
 
   get versionTooltip(): string {

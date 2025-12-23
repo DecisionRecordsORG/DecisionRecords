@@ -978,6 +978,39 @@ def get_features():
     return jsonify(get_enabled_features()), 200
 
 
+# ==================== Blog API ====================
+
+@app.route('/api/blog/posts')
+def get_blog_posts():
+    """Get all published blog posts for the blog listing page.
+
+    Returns posts ordered by featured status (featured first), then by publish date (newest first).
+    """
+    from models import BlogPost
+
+    posts = BlogPost.query.filter_by(published=True).order_by(
+        BlogPost.featured.desc(),
+        BlogPost.publish_date.desc()
+    ).all()
+
+    return jsonify([post.to_dict() for post in posts]), 200
+
+
+@app.route('/api/blog/posts/<slug>')
+def get_blog_post(slug):
+    """Get a single blog post by slug.
+
+    Returns 404 if post not found or not published.
+    """
+    from models import BlogPost
+
+    post = BlogPost.query.filter_by(slug=slug, published=True).first()
+    if not post:
+        return jsonify({'error': 'Blog post not found'}), 404
+
+    return jsonify(post.to_dict()), 200
+
+
 # ==================== Feedback & Sponsorship ====================
 
 def _api_submit_feedback_impl():

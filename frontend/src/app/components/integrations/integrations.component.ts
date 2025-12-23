@@ -4,7 +4,6 @@ import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatCardModule } from '@angular/material/card';
-import { SiteNavComponent } from '../shared/site-nav/site-nav.component';
 
 interface Integration {
   name: string;
@@ -25,14 +24,10 @@ interface Integration {
     RouterModule,
     MatButtonModule,
     MatIconModule,
-    MatCardModule,
-    SiteNavComponent
+    MatCardModule
   ],
   template: `
     <div class="integrations-page">
-      <!-- Sticky Site Navigation -->
-      <app-site-nav></app-site-nav>
-
       <!-- Header -->
       <header class="integrations-header">
         <div class="container">
@@ -157,13 +152,6 @@ Authorization: Bearer your-token
           </section>
         </div>
       </main>
-
-      <!-- Footer -->
-      <footer class="integrations-footer">
-        <div class="container">
-          <p>&copy; {{ currentYear }} DecisionRecords.org</p>
-        </div>
-      </footer>
     </div>
   `,
   styles: [`
@@ -538,8 +526,6 @@ Authorization: Bearer your-token
   `]
 })
 export class IntegrationsComponent {
-  currentYear = new Date().getFullYear();
-
   integrations: Integration[] = [
     {
       name: 'Slack',

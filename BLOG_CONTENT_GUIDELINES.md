@@ -152,6 +152,84 @@ Error:      #F87171, #DC2626
 [One paragraph summary. **Bold the main takeaway.**]
 ```
 
+## Adding a New Blog Post
+
+Blog posts are stored in the database and require both a database entry and an Angular component.
+
+### Step 1: Create the Database Entry
+
+Use the blog management script to add the post metadata:
+
+```bash
+# Add a new blog post
+python scripts/manage_blog.py add \
+  --slug "your-post-slug" \
+  --title "Your Post Title" \
+  --excerpt "A 1-2 sentence description for the blog list" \
+  --category "Documentation" \
+  --image "/assets/blog/your-image.svg" \
+  --read-time "5 min read"
+
+# List all posts to verify
+python scripts/manage_blog.py list
+```
+
+### Step 2: Create the Angular Component
+
+Each blog post needs a dedicated Angular component in:
+`frontend/src/app/components/blog/posts/`
+
+1. Create a new file: `your-post-slug.component.ts`
+2. Follow the existing post component structure
+3. Import and use `SiteNavComponent` and `SiteFooterComponent`
+4. Set the correct meta tags for SEO
+
+### Step 3: Add the Route
+
+Add the route to `frontend/src/app/app.routes.ts`:
+
+```typescript
+{
+  path: 'blog/your-post-slug',
+  loadComponent: () => import('./components/blog/posts/your-post-slug.component')
+    .then(m => m.YourPostSlugComponent),
+},
+```
+
+### Step 4: Update Prerender Routes
+
+Add the new blog post to `frontend/prerender-routes.txt`:
+
+```
+/blog/your-post-slug
+```
+
+### Step 5: Create the Hero Image
+
+Create an SVG image at `/frontend/src/assets/blog/your-image.svg` following the Visual Content Standards below.
+
+### Script Reference
+
+```bash
+# List all blog posts
+python scripts/manage_blog.py list
+
+# Seed initial blog posts (run after migration)
+python scripts/manage_blog.py seed
+
+# Update a post
+python scripts/manage_blog.py update --slug "post-slug" --title "New Title"
+
+# Publish/unpublish
+python scripts/manage_blog.py publish --slug "post-slug"
+python scripts/manage_blog.py unpublish --slug "post-slug"
+
+# Delete a post
+python scripts/manage_blog.py delete --slug "post-slug"
+```
+
+---
+
 ## SEO & Meta Standards
 
 ### Title Tags

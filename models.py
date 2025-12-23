@@ -1554,3 +1554,48 @@ class SlackUserMapping(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'linked_at': self.linked_at.isoformat() if self.linked_at else None,
         }
+
+
+class BlogPost(db.Model):
+    """Blog posts for the marketing website."""
+
+    __tablename__ = 'blog_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(255), nullable=False, unique=True, index=True)  # URL-friendly slug
+    title = db.Column(db.String(500), nullable=False)
+    excerpt = db.Column(db.Text, nullable=False)  # Short description for list view
+    author = db.Column(db.String(255), nullable=False, default='Decision Records')
+    category = db.Column(db.String(100), nullable=False)  # Documentation, Startups, Enterprise, etc.
+    read_time = db.Column(db.String(50), nullable=False, default='5 min read')
+    image = db.Column(db.String(500), nullable=True)  # Path to hero/thumbnail image
+    meta_description = db.Column(db.String(300), nullable=True)  # SEO meta description
+    meta_keywords = db.Column(db.String(500), nullable=True)  # SEO keywords (comma-separated)
+    published = db.Column(db.Boolean, default=True)  # Whether post is visible
+    featured = db.Column(db.Boolean, default=False)  # Featured posts appear first
+    publish_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # When to show as published
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Content is stored in Angular component, not DB (for now)
+    # This model manages metadata only
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slug': self.slug,
+            'title': self.title,
+            'excerpt': self.excerpt,
+            'author': self.author,
+            'category': self.category,
+            'readTime': self.read_time,
+            'image': self.image,
+            'metaDescription': self.meta_description,
+            'metaKeywords': self.meta_keywords,
+            'published': self.published,
+            'featured': self.featured,
+            'publishDate': self.publish_date.strftime('%B %Y') if self.publish_date else None,
+            'publishDateISO': self.publish_date.isoformat() if self.publish_date else None,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
+        }

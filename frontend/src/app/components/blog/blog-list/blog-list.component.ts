@@ -1,20 +1,8 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
-import { SiteNavComponent } from '../../shared/site-nav/site-nav.component';
-import { SiteFooterComponent } from '../../shared/site-footer/site-footer.component';
-
-interface BlogPost {
-  slug: string;
-  title: string;
-  excerpt: string;
-  author: string;
-  date: string;
-  readTime: string;
-  image: string;
-  category: string;
-}
+import { BlogService, BlogPost } from '../../../services/blog.service';
 
 @Component({
   selector: 'app-blog-list',
@@ -22,14 +10,10 @@ interface BlogPost {
   imports: [
     CommonModule,
     RouterModule,
-    MatIconModule,
-    SiteNavComponent,
-    SiteFooterComponent
+    MatIconModule
   ],
   template: `
     <div class="blog-list-page">
-      <app-site-nav [lightTopBackground]="true"></app-site-nav>
-
       <header class="blog-header">
         <div class="container">
           <h1>Blog</h1>
@@ -41,35 +25,43 @@ interface BlogPost {
 
       <main class="blog-content">
         <div class="container">
-          <div class="posts-grid">
-            @for (post of posts; track post.slug) {
-              <article class="post-card">
-                <a [routerLink]="['/blog', post.slug]" class="post-image-link">
-                  <div class="post-image">
-                    <img [src]="post.image" [alt]="post.title" />
+          @if (loading) {
+            <div class="loading-state">
+              <p>Loading posts...</p>
+            </div>
+          } @else if (posts.length === 0) {
+            <div class="empty-state">
+              <p>No blog posts yet. Check back soon!</p>
+            </div>
+          } @else {
+            <div class="posts-grid">
+              @for (post of posts; track post.slug) {
+                <article class="post-card">
+                  <a [routerLink]="['/blog', post.slug]" class="post-image-link">
+                    <div class="post-image">
+                      <img [src]="post.image || '/assets/blog/default-post.svg'" [alt]="post.title" />
+                    </div>
+                  </a>
+                  <div class="post-content">
+                    <span class="post-category">{{ post.category }}</span>
+                    <h2>
+                      <a [routerLink]="['/blog', post.slug]">{{ post.title }}</a>
+                    </h2>
+                    <p class="post-excerpt">{{ post.excerpt }}</p>
+                    <div class="post-meta">
+                      <span class="post-author">{{ post.author }}</span>
+                      <span class="meta-divider">·</span>
+                      <span class="post-date">{{ post.publishDate }}</span>
+                      <span class="meta-divider">·</span>
+                      <span class="post-read-time">{{ post.readTime }}</span>
+                    </div>
                   </div>
-                </a>
-                <div class="post-content">
-                  <span class="post-category">{{ post.category }}</span>
-                  <h2>
-                    <a [routerLink]="['/blog', post.slug]">{{ post.title }}</a>
-                  </h2>
-                  <p class="post-excerpt">{{ post.excerpt }}</p>
-                  <div class="post-meta">
-                    <span class="post-author">{{ post.author }}</span>
-                    <span class="meta-divider">·</span>
-                    <span class="post-date">{{ post.date }}</span>
-                    <span class="meta-divider">·</span>
-                    <span class="post-read-time">{{ post.readTime }}</span>
-                  </div>
-                </div>
-              </article>
-            }
-          </div>
+                </article>
+              }
+            </div>
+          }
         </div>
       </main>
-
-      <app-site-footer></app-site-footer>
     </div>
   `,
   styles: [`
@@ -202,6 +194,13 @@ interface BlogPost {
       color: #ccc;
     }
 
+    .loading-state,
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: #666;
+    }
+
     @media (max-width: 700px) {
       .blog-header {
         padding: 90px 20px 40px;
@@ -230,37 +229,27 @@ interface BlogPost {
     }
   `]
 })
-export class BlogListComponent {
-  posts: BlogPost[] = [
-    {
-      slug: 'how-should-teams-document-important-decisions',
-      title: 'How Should Teams Document Important Decisions?',
-      excerpt: 'Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
-      author: 'Decision Records',
-      date: 'December 2024',
-      readTime: '5 min read',
-      image: '/assets/blog/documenting-decisions.svg',
-      category: 'Documentation'
-    },
-    {
-      slug: 'where-do-startup-decisions-go',
-      title: 'Where Do Startup Decisions Go When No One Writes Them Down?',
-      excerpt: 'Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we\'ll remember. That assumption rarely holds.',
-      author: 'Decision Records',
-      date: 'December 2024',
-      readTime: '7 min read',
-      image: '/assets/blog/startup-decisions.svg',
-      category: 'Startups'
-    },
-    {
-      slug: 'decision-habit-framework-fashion-brands',
-      title: 'A Decision Habit Framework for Fast-Moving Fashion Brands',
-      excerpt: 'Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
-      author: 'Decision Records',
-      date: 'December 2024',
-      readTime: '5 min read',
-      image: '/assets/blog/fashion-decisions.svg',
-      category: 'Retail'
-    }
-  ];
+export class BlogListComponent implements OnInit {
+  posts: BlogPost[] = [];
+  loading = true;
+
+  constructor(private blogService: BlogService) {}
+
+  ngOnInit(): void {
+    this.loadPosts();
+  }
+
+  private loadPosts(): void {
+    this.loading = true;
+    this.blogService.getPosts().subscribe({
+      next: (posts) => {
+        this.posts = posts;
+        this.loading = false;
+      },
+      error: () => {
+        this.posts = [];
+        this.loading = false;
+      }
+    });
+  }
 }

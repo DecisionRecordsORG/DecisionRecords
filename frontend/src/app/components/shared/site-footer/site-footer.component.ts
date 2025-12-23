@@ -43,6 +43,7 @@ import { HttpClient } from '@angular/common/http';
             <h4>Resources</h4>
             <nav class="footer-legal-links">
               <a routerLink="/solutions">Solutions</a>
+              <a routerLink="/security-features">Security</a>
               <a routerLink="/integrations">Integrations</a>
               <a routerLink="/blog">Blog</a>
               <a routerLink="/faq">FAQ</a>
