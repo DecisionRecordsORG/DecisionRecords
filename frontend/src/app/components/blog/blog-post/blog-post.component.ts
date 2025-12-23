@@ -37,7 +37,7 @@ interface RelatedPost {
   ],
   template: `
     <div class="blog-post-page">
-      <app-site-nav></app-site-nav>
+      <app-site-nav [lightTopBackground]="true"></app-site-nav>
 
       @if (post) {
         <header class="post-header">
@@ -135,7 +135,13 @@ interface RelatedPost {
     .header-container {
       max-width: 1000px;
       margin: 0 auto;
-      padding-left: 248px; /* Align with body content (200px sidebar + 48px gap) */
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 48px;
+    }
+
+    .header-container > * {
+      grid-column: 2;
     }
 
     .back-link {
@@ -357,7 +363,13 @@ interface RelatedPost {
     .related-container {
       max-width: 1000px;
       margin: 0 auto;
-      padding-left: 248px; /* Align with body content (200px sidebar + 48px gap) */
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 48px;
+    }
+
+    .related-container > * {
+      grid-column: 2;
     }
 
     .related-reading h2 {
@@ -466,7 +478,7 @@ interface RelatedPost {
     @media (max-width: 900px) {
       .header-container,
       .related-container {
-        padding-left: 0; /* Remove sidebar alignment on smaller screens */
+        display: block; /* Remove grid on smaller screens */
       }
 
       .post-body-container {

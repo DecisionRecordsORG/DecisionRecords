@@ -14,10 +14,10 @@ import { MatIconModule } from '@angular/material/icon';
     MatIconModule
   ],
   template: `
-    <nav class="site-nav" [class.scrolled]="scrolled" [class.dark-bg]="darkBackground">
+    <nav class="site-nav" [class.scrolled]="scrolled" [class.dark-bg]="darkBackground" [class.light-top]="lightTopBackground">
       <div class="nav-container">
         <a routerLink="/" class="nav-logo">
-          <img [src]="scrolled && !darkBackground ? '/assets/decision-records-logo-official.svg' : '/assets/decision-records-logo-white.svg'" alt="Decision Records" />
+          <img [src]="(scrolled && !darkBackground) || lightTopBackground ? '/assets/decision-records-logo-official.svg' : '/assets/decision-records-logo-white.svg'" alt="Decision Records" />
         </a>
         <div class="nav-links">
           <a routerLink="/solutions">Solutions</a>
@@ -110,6 +110,15 @@ import { MatIconModule } from '@angular/material/icon';
       color: #1e40af;
     }
 
+    /* Light top background (for pages with light headers like blog posts) */
+    .site-nav.light-top:not(.scrolled) .nav-links a {
+      color: #475569;
+    }
+
+    .site-nav.light-top:not(.scrolled) .nav-links a:hover {
+      color: #1e40af;
+    }
+
     .nav-actions {
       display: flex;
       align-items: center;
@@ -142,6 +151,15 @@ import { MatIconModule } from '@angular/material/icon';
       background: rgba(30, 64, 175, 0.08);
     }
 
+    .site-nav.light-top:not(.scrolled) .nav-signin {
+      color: #1e40af;
+      border-color: #1e40af;
+    }
+
+    .site-nav.light-top:not(.scrolled) .nav-signin:hover {
+      background: rgba(30, 64, 175, 0.08);
+    }
+
     .nav-mobile-toggle {
       display: none;
       background: none;
@@ -152,6 +170,10 @@ import { MatIconModule } from '@angular/material/icon';
     }
 
     .site-nav.scrolled:not(.dark-bg) .nav-mobile-toggle {
+      color: #475569;
+    }
+
+    .site-nav.light-top:not(.scrolled) .nav-mobile-toggle {
       color: #475569;
     }
 
@@ -230,6 +252,7 @@ import { MatIconModule } from '@angular/material/icon';
 })
 export class SiteNavComponent {
   @Input() darkBackground = false;
+  @Input() lightTopBackground = false;
 
   mobileMenuOpen = false;
   scrolled = false;

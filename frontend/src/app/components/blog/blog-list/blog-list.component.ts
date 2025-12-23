@@ -28,7 +28,7 @@ interface BlogPost {
   ],
   template: `
     <div class="blog-list-page">
-      <app-site-nav></app-site-nav>
+      <app-site-nav [lightTopBackground]="true"></app-site-nav>
 
       <header class="blog-header">
         <div class="container">
