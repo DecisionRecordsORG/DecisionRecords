@@ -6,6 +6,7 @@ import { SiteNavComponent } from './components/shared/site-nav/site-nav.componen
 import { SiteFooterComponent } from './components/shared/site-footer/site-footer.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
+import { PostHogService } from './services/posthog.service';
 import { filter } from 'rxjs/operators';
 
 @Component({
@@ -122,8 +123,12 @@ export class AppComponent implements OnInit {
   constructor(
     public authService: AuthService,
     public versionService: VersionService,
-    private router: Router
-  ) {}
+    private router: Router,
+    private postHogService: PostHogService
+  ) {
+    // Initialize PostHog analytics
+    this.postHogService.init();
+  }
 
   ngOnInit(): void {
     // Check initial route

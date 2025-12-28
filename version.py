@@ -17,7 +17,7 @@ from datetime import datetime
 __version__ = "1.12.2"
 
 # Build metadata
-__build_date__ = "2025-12-24"
+__build_date__ = "2025-12-29"
 __git_commit__ = None  # Populated at runtime
 
 
