@@ -44,7 +44,7 @@ Related Files:
 - tests/test_*.py - Model-level tests that don't require HTTP auth
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import json
 import sys
 import os
@@ -364,7 +364,7 @@ class TestTenantMaturityAPI:
         # Set known values
         test_tenant.maturity_age_days = 30
         test_tenant.maturity_user_threshold = 3
-        test_tenant.created_at = datetime.utcnow() - timedelta(days=60)
+        test_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=60)
         db.session.commit()
 
         response = master_client.get(f'/api/tenants/{test_tenant.domain}/maturity')
@@ -826,7 +826,7 @@ class TestDecisionDeleteAPI:
             user_id=admin_user.id,
             tenant_id=test_tenant.id
         ).first()
-        membership.deletion_rate_limited_at = datetime.utcnow()
+        membership.deletion_rate_limited_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.session.commit()
 
         # Create decision

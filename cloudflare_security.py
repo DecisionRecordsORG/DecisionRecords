@@ -27,7 +27,7 @@ import jwt
 import requests
 from functools import wraps
 from flask import request, jsonify, g
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ def _get_cloudflare_config():
     global _config_cache
 
     # Check cache validity
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if (_config_cache['last_refresh'] and
             (now - _config_cache['last_refresh']).total_seconds() < CACHE_TTL_SECONDS):
         return _config_cache
@@ -269,7 +269,7 @@ def get_cloudflare_access_keys(team_domain: str) -> dict:
 
     # Check cache
     if _access_keys_cache['keys'] and _access_keys_cache['expires_at']:
-        if datetime.utcnow() < _access_keys_cache['expires_at']:
+        if datetime.now(timezone.utc) < _access_keys_cache['expires_at']:
             return _access_keys_cache['keys']
 
     # Fetch fresh keys
@@ -281,7 +281,7 @@ def get_cloudflare_access_keys(team_domain: str) -> dict:
 
         # Cache for 1 hour
         _access_keys_cache['keys'] = keys
-        _access_keys_cache['expires_at'] = datetime.utcnow() + timedelta(hours=1)
+        _access_keys_cache['expires_at'] = datetime.now(timezone.utc) + timedelta(hours=1)
 
         logger.info(f"Fetched Cloudflare Access keys from {certs_url}")
         return keys

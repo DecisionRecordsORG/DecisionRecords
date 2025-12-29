@@ -15,7 +15,7 @@ Tests cover:
 import pytest
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, MagicMock
 from flask import Flask, session as flask_session
 import requests
@@ -175,7 +175,7 @@ class TestSlackOidcState:
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)
-            expires_at = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            expires_at = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
             state_data = {
                 'type': 'slack_oidc',
                 'csrf_token': 'test',
@@ -213,7 +213,7 @@ class TestSlackOidcState:
             from cryptography.fernet import Fernet
 
             # Create state without 'slack_oidc' type (like regular OAuth state)
-            expires_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+            expires_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=30)).isoformat()
             state_data = {
                 'tenant_id': 123,  # Regular OAuth state has tenant_id
                 'csrf_token': 'test',

@@ -1,7 +1,7 @@
 from functools import wraps
 from flask import session, redirect, url_for, request, jsonify, g
 from authlib.integrations.requests_client import OAuth2Session
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ def get_current_user():
     if session.get('is_master'):
         master_id = session.get('master_id')
         if master_id:
-            return MasterAccount.query.get(master_id)
+            return db.session.get(MasterAccount, master_id)
         return None
 
     # Regular user session
@@ -23,7 +23,7 @@ def get_current_user():
     if not user_id:
         return None
 
-    return User.query.get(user_id)
+    return db.session.get(User, user_id)
 
 
 def is_master_account():
@@ -47,7 +47,7 @@ def validate_setup_token():
         Recovery tokens allow users who have lost access to their credentials to set up
         new ones. For recovery, users ARE expected to have existing credentials.
     """
-    from models import User, SetupToken
+    from models import db, User, SetupToken
     from datetime import datetime
 
     # Check for setup token in session
@@ -62,7 +62,7 @@ def validate_setup_token():
     # Check if token has expired (30 minute window)
     try:
         expires_at = datetime.fromisoformat(setup_expires)
-        if datetime.utcnow() > expires_at:
+        if datetime.now(timezone.utc) > expires_at:
             # Clear expired setup session
             session.pop('setup_token', None)
             session.pop('setup_user_id', None)
@@ -73,7 +73,7 @@ def validate_setup_token():
         return None, 'Invalid setup token'
 
     # Verify user exists and is in incomplete state
-    user = User.query.get(setup_user_id)
+    user = db.session.get(User, setup_user_id)
     if not user:
         return None, 'User not found'
 
@@ -135,7 +135,7 @@ def complete_setup_and_login(user):
     session.permanent = True
 
     # Update last login
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.session.commit()
 
     logger.info(f"Setup completed for user {user.email} - full session created")
@@ -147,8 +147,8 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         # Check for master account session
         if session.get('is_master') and session.get('master_id'):
-            from models import MasterAccount
-            g.current_user = MasterAccount.query.get(session.get('master_id'))
+            from models import db, MasterAccount
+            g.current_user = db.session.get(MasterAccount, session.get('master_id'))
             if g.current_user:
                 return f(*args, **kwargs)
 
@@ -290,7 +290,7 @@ def authenticate_master(username, password):
 
     master = MasterAccount.query.filter_by(username=username).first()
     if master and master.check_password(password):
-        master.last_login = datetime.utcnow()
+        master.last_login = datetime.now(timezone.utc)
         db.session.commit()
         return master
     return None
@@ -313,7 +313,7 @@ def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, la
 
     if user:
         # Update last login
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         # Update name if changed
         if first_name or last_name:
             user.set_name(first_name=first_name, last_name=last_name)
@@ -331,7 +331,7 @@ def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, la
             sso_subject=sso_subject,
             sso_domain=sso_domain,
             is_admin=is_admin,
-            last_login=datetime.utcnow()
+            last_login=datetime.now(timezone.utc)
         )
         # Set name using the helper method
         if first_name or last_name:

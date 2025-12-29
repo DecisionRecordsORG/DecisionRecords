@@ -14,7 +14,7 @@ import logging
 import os
 import secrets
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from flask import request, jsonify
 from cryptography.fernet import Fernet
@@ -187,7 +187,7 @@ def generate_oauth_state(tenant_id, user_id=None, extra_data=None):
     - extra_data: Any additional data to pass through OAuth
     """
     csrf_token = secrets.token_urlsafe(32)
-    expires_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
 
     state_data = {
         'tenant_id': tenant_id,
@@ -222,7 +222,7 @@ def verify_oauth_state(state):
 
         # Check expiration
         expires_at = datetime.fromisoformat(state_data.get('expires_at', ''))
-        if datetime.utcnow() > expires_at:
+        if datetime.now(timezone.utc) > expires_at:
             logger.warning("OAuth state expired")
             return None
 
@@ -240,7 +240,7 @@ def generate_link_token(slack_workspace_id, slack_user_id, slack_email=None):
     This token is sent to Slack users who need to link their account
     via browser authentication.
     """
-    expires_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
 
     token_data = {
         'slack_workspace_id': slack_workspace_id,
@@ -275,7 +275,7 @@ def verify_link_token(token):
 
         # Check expiration
         expires_at = datetime.fromisoformat(token_data.get('expires_at', ''))
-        if datetime.utcnow() > expires_at:
+        if datetime.now(timezone.utc) > expires_at:
             logger.warning("Link token expired")
             return None
 
@@ -302,7 +302,7 @@ def generate_slack_oidc_state(return_url=None, extra_data=None):
         Encrypted state string
     """
     csrf_token = secrets.token_urlsafe(32)
-    expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
     state_data = {
         'type': 'slack_oidc',
@@ -346,7 +346,7 @@ def verify_slack_oidc_state(state):
 
         # Check expiration
         expires_at = datetime.fromisoformat(state_data.get('expires_at', ''))
-        if datetime.utcnow() > expires_at:
+        if datetime.now(timezone.utc) > expires_at:
             logger.warning("Slack OIDC state expired")
             return None
 

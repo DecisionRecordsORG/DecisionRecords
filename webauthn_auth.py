@@ -2,7 +2,7 @@
 
 import base64
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import session, request
 from webauthn import (
     generate_registration_options,
@@ -153,7 +153,7 @@ def verify_registration(credential_json, device_name=None):
         )
         db.session.add(credential)
 
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         db.session.commit()
 
         return user, None
@@ -249,8 +249,8 @@ def verify_authentication(credential_json):
 
         # Update sign count
         db_credential.sign_count = verification.new_sign_count
-        db_credential.last_used_at = datetime.utcnow()
-        user.last_login = datetime.utcnow()
+        db_credential.last_used_at = datetime.now(timezone.utc)
+        user.last_login = datetime.now(timezone.utc)
         db.session.commit()
 
         return user, None
@@ -284,7 +284,7 @@ def delete_credential(user_id, credential_id):
         return False, 'Credential not found'
 
     # Check if this is the user's only credential
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if user and len(user.webauthn_credentials) <= 1:
         return False, 'Cannot delete the only credential'
 

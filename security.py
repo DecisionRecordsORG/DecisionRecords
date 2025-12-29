@@ -60,6 +60,7 @@ def require_tenant_match(model_class, id_field='id'):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             from auth import is_master_account
+            from models import db
 
             # Master accounts bypass tenant checks
             if is_master_account():
@@ -69,7 +70,7 @@ def require_tenant_match(model_class, id_field='id'):
             resource_id = kwargs.get(id_field) or kwargs.get(f'{model_class.__name__.lower()}_id')
 
             if resource_id:
-                resource = model_class.query.get(resource_id)
+                resource = db.session.get(model_class, resource_id)
                 if resource and hasattr(resource, 'domain'):
                     current_tenant = TenantContext.get_current_tenant()
                     if resource.domain != current_tenant:

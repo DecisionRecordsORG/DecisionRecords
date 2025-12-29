@@ -6,7 +6,7 @@ for the Decision Records Slack app.
 """
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
@@ -36,7 +36,7 @@ class SlackService:
 
     def update_activity(self):
         """Update last activity timestamp."""
-        self.workspace.last_activity_at = datetime.utcnow()
+        self.workspace.last_activity_at = datetime.now(timezone.utc)
         db.session.commit()
 
     def get_channels(self):
@@ -79,7 +79,7 @@ class SlackService:
 
         if mapping and mapping.user_id:
             # Already linked
-            user = User.query.get(mapping.user_id)
+            user = db.session.get(User, mapping.user_id)
             return mapping, user, False
 
         # Get Slack user info
@@ -117,7 +117,7 @@ class SlackService:
                     ).first()
                     if membership:
                         mapping.user_id = user.id
-                        mapping.linked_at = datetime.utcnow()
+                        mapping.linked_at = datetime.now(timezone.utc)
                         mapping.link_method = 'auto_email'
                         db.session.commit()
                         return mapping, user, False
@@ -690,7 +690,7 @@ class SlackService:
 
     def _open_change_status_modal(self, trigger_id: str, decision_id: int, user: User, channel_id: str = None):
         """Open the change status modal for a decision."""
-        decision = ArchitectureDecision.query.get(decision_id)
+        decision = db.session.get(ArchitectureDecision, decision_id)
         if not decision:
             return
 
@@ -882,8 +882,8 @@ class SlackService:
         except (ValueError, TypeError, IndexError):
             return {"response_action": "errors", "errors": {"status_block": "Invalid request"}}
 
-        user = User.query.get(user_id)
-        decision = ArchitectureDecision.query.get(decision_id)
+        user = db.session.get(User, user_id)
+        decision = db.session.get(ArchitectureDecision, decision_id)
 
         if not user or not decision:
             return {"response_action": "errors", "errors": {"status_block": "Decision not found"}}
@@ -898,7 +898,7 @@ class SlackService:
         # Update the decision
         decision.status = new_status
         decision.updated_by_id = user.id
-        decision.updated_at = datetime.utcnow()
+        decision.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Capture data needed for notifications before returning
@@ -1035,7 +1035,7 @@ class SlackService:
             parts = private_metadata.split(':')
             user_id = int(parts[0])
             original_channel_id = parts[1] if len(parts) > 1 and parts[1] else None
-            user = User.query.get(user_id)
+            user = db.session.get(User, user_id)
             if not user:
                 return {"response_action": "errors", "errors": {"title_block": "User not found"}}
         except (ValueError, TypeError, IndexError):
@@ -1512,7 +1512,7 @@ class SlackService:
 
     def _send_decision_detail(self, payload: dict, decision_id: int):
         """Send decision detail as a response."""
-        decision = ArchitectureDecision.query.get(decision_id)
+        decision = db.session.get(ArchitectureDecision, decision_id)
         if not decision:
             return None
 
@@ -1735,7 +1735,7 @@ class SlackService:
             {
                 "type": "context",
                 "elements": [
-                    {"type": "mrkdwn", "text": f"Sent from Decision Records at {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}
+                    {"type": "mrkdwn", "text": f"Sent from Decision Records at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"}
                 ]
             }
         ]

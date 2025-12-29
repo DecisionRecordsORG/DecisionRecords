@@ -2,7 +2,7 @@
 Tests for tenant management and maturity computation.
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import sys
 import os
@@ -119,7 +119,7 @@ class TestTenantMaturityComputation:
 
         # Set age threshold to 1 day and backdate creation
         sample_tenant.maturity_age_days = 1
-        sample_tenant.created_at = datetime.utcnow() - timedelta(days=2)
+        sample_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
         session.commit()
 
         computed_state = sample_tenant.compute_maturity_state()
@@ -156,7 +156,7 @@ class TestTenantMaturityComputation:
         # Set threshold to None
         sample_tenant.maturity_age_days = None
         sample_tenant.maturity_user_threshold = 10
-        sample_tenant.created_at = datetime.utcnow() - timedelta(days=2)
+        sample_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
         session.commit()
 
         # Should use default age of 90 days
@@ -387,7 +387,7 @@ class TestTenantSoftDelete:
 
     def test_soft_delete_sets_fields(self, session, sample_tenant):
         """Soft deleting tenant sets deletion fields."""
-        deletion_time = datetime.utcnow()
+        deletion_time = datetime.now(timezone.utc).replace(tzinfo=None)
         sample_tenant.deleted_at = deletion_time
         sample_tenant.deleted_by_admin = 'superadmin'
         sample_tenant.deletion_expires_at = deletion_time + timedelta(days=30)

@@ -8,7 +8,7 @@ import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -944,7 +944,7 @@ def set_session_expiry(is_admin=False):
             SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
             default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
         )
-    session['_expires_at'] = (datetime.utcnow() + timedelta(hours=timeout_hours)).isoformat()
+    session['_expires_at'] = (datetime.now(timezone.utc) + timedelta(hours=timeout_hours)).isoformat()
     session.permanent = True
 
 
@@ -957,7 +957,7 @@ def is_session_expired():
         return True
     try:
         expiry_time = datetime.fromisoformat(expires_at)
-        return datetime.utcnow() > expiry_time
+        return datetime.now(timezone.utc).replace(tzinfo=None) > expiry_time
     except (ValueError, TypeError):
         return True  # Invalid expiry format - expire the session
 
@@ -1018,14 +1018,14 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }), 200
     else:
         return jsonify({
             'status': 'unhealthy',
             'error': app_error_state['error'],
             'details': app_error_state['details'],
-            'timestamp': datetime.utcnow().isoformat()
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }), 503
 
 @app.route('/ping')
@@ -1034,7 +1034,7 @@ def ping():
     return jsonify({
         'status': 'ok',
         'server': 'running',
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.now(timezone.utc).isoformat()
     }), 200
 
 
@@ -1336,7 +1336,7 @@ def api_tenant_login():
     # Login successful
     session['user_id'] = user.id
     set_session_expiry(is_admin=False)  # 8 hours default for regular users
-    user.last_login = datetime.utcnow()
+    user.last_login = datetime.now(timezone.utc)
     db.session.commit()
 
     return jsonify({
@@ -1425,7 +1425,7 @@ def sso_callback():
     if not config_id:
         return redirect('/')
 
-    sso_config = SSOConfig.query.get(config_id)
+    sso_config = db.session.get(SSOConfig, config_id)
     if not sso_config:
         return redirect('/')
 
@@ -1759,7 +1759,7 @@ def slack_oidc_callback():
                     requested_by_email=email,
                     requested_by_name=name,
                     auto_approved=True,
-                    reviewed_at=datetime.utcnow()
+                    reviewed_at=datetime.now(timezone.utc)
                 )
                 db.session.add(domain_approval)
                 logger.info(f"Auto-approved corporate domain via Slack OIDC: {domain}")
@@ -2065,7 +2065,7 @@ def google_oauth_callback():
                     requested_by_email=email,
                     requested_by_name=name,
                     auto_approved=True,
-                    reviewed_at=datetime.utcnow()
+                    reviewed_at=datetime.now(timezone.utc)
                 )
                 db.session.add(domain_approval)
                 logger.info(f"Auto-approved corporate domain via Google OAuth: {domain}")
@@ -2533,7 +2533,7 @@ def api_delete_decision(decision_id):
     # Check if user is rate-limited for deletions
     if membership.deletion_rate_limited_at:
         # Rate limit lasts for 1 hour
-        if datetime.utcnow() < membership.deletion_rate_limited_at + timedelta(hours=1):
+        if datetime.now(timezone.utc).replace(tzinfo=None) < membership.deletion_rate_limited_at + timedelta(hours=1):
             return jsonify({
                 'error': 'Deletion rate limited',
                 'message': 'Your deletion privileges have been temporarily suspended due to multiple rapid deletions. Please contact an administrator.',
@@ -2544,7 +2544,7 @@ def api_delete_decision(decision_id):
     RATE_LIMIT_COUNT = 3
     RATE_LIMIT_WINDOW_MINUTES = 5
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     window_start = membership.deletion_count_window_start
 
     # Reset window if expired or not set
@@ -2588,7 +2588,7 @@ def api_delete_decision(decision_id):
     ).first_or_404()
 
     # Soft delete with retention window
-    deletion_time = datetime.utcnow()
+    deletion_time = datetime.now(timezone.utc)
     retention_days = 30
     decision.deleted_at = deletion_time
     decision.deleted_by_id = user.id
@@ -2660,14 +2660,14 @@ def api_get_current_user():
     # Check for regular session
     if session.get('is_master') and session.get('master_id'):
         from models import MasterAccount
-        master = MasterAccount.query.get(session.get('master_id'))
+        master = db.session.get(MasterAccount, session.get('master_id'))
         if master:
             return jsonify(master.to_dict())
 
     if 'user_id' not in session:
         return jsonify({'error': 'Authentication required'}), 401
 
-    user = User.query.get(session.get('user_id'))
+    user = db.session.get(User, session.get('user_id'))
     if not user:
         session.clear()
         return jsonify({'error': 'Authentication required'}), 401
@@ -3399,7 +3399,7 @@ def api_test_analytics():
             properties={
                 'test': True,
                 'source': 'admin_settings_test',
-                'timestamp': datetime.utcnow().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
         )
 
@@ -4203,7 +4203,7 @@ def api_send_verification():
     # Rate limiting: Check for recent verification emails
     recent_verification = EmailVerification.query.filter(
         EmailVerification.email == email,
-        EmailVerification.created_at > datetime.utcnow() - timedelta(minutes=2)
+        EmailVerification.created_at > datetime.now(timezone.utc) - timedelta(minutes=2)
     ).first()
 
     if recent_verification:
@@ -4218,7 +4218,7 @@ def api_send_verification():
 
     # Create new verification token (2-hour validity per PLAN-v1.4)
     token = generate_verification_token()
-    expires_at = datetime.utcnow() + timedelta(hours=2)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
 
     verification = EmailVerification(
         email=email,
@@ -4278,7 +4278,7 @@ def api_resend_verification():
         return jsonify({'message': success_message})
 
     # Rate limiting: Check for recent verification emails (2 minutes)
-    if pending.created_at > datetime.utcnow() - timedelta(minutes=2):
+    if pending.created_at > datetime.now(timezone.utc) - timedelta(minutes=2):
         logger.info(f"Rate limited resend verification for: {email}")
         return jsonify({'message': success_message})
 
@@ -4294,7 +4294,7 @@ def api_resend_verification():
 
     # Create new verification token (2-hour validity)
     token = generate_verification_token()
-    expires_at = datetime.utcnow() + timedelta(hours=2)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
 
     new_verification = EmailVerification(
         email=email,
@@ -4358,7 +4358,7 @@ def api_request_setup_link():
     # Rate limiting: Check for recent setup tokens (5 minutes)
     recent_token = SetupToken.query.filter(
         SetupToken.user_id == user.id,
-        SetupToken.created_at > datetime.utcnow() - timedelta(minutes=5)
+        SetupToken.created_at > datetime.now(timezone.utc) - timedelta(minutes=5)
     ).first()
 
     if recent_token:
@@ -4489,7 +4489,7 @@ def api_direct_signup():
             requested_by_email=email,
             requested_by_name=name,
             auto_approved=True,
-            reviewed_at=datetime.utcnow()
+            reviewed_at=datetime.now(timezone.utc)
         )
         db.session.add(domain_approval)
         app.logger.info(f"Auto-approved corporate domain: {domain}")
@@ -4537,7 +4537,7 @@ def api_direct_signup():
         # Store setup token in session with limited scope
         session['setup_token'] = setup_token
         session['setup_user_id'] = user.id
-        session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+        session['setup_expires'] = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
         session.permanent = False  # Session-only cookie
 
         # Do NOT set user_id - user is NOT fully logged in yet
@@ -4549,7 +4549,7 @@ def api_direct_signup():
         # Password auth - user already has credentials, log them in fully
         session['user_id'] = user.id
         set_session_expiry(is_admin=False)  # 8 hours default for regular users
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(timezone.utc)
         db.session.commit()
         redirect_url = f'/{domain}'
         setup_passkey = False
@@ -4592,7 +4592,7 @@ def api_verify_email(token):
         return redirect(f'/{verification.domain}/login')
 
     # Mark as verified
-    verification.verified_at = datetime.utcnow()
+    verification.verified_at = datetime.now(timezone.utc)
 
     # Process based on purpose
     if verification.purpose == 'signup':
@@ -4638,7 +4638,7 @@ def api_verify_email(token):
                         requested_by_email=verification.email,
                         requested_by_name=verification.name,
                         auto_approved=True,
-                        reviewed_at=datetime.utcnow()
+                        reviewed_at=datetime.now(timezone.utc)
                     )
                     db.session.add(domain_approval)
                     app.logger.info(f"Auto-approved corporate domain via email verification: {verification.domain}")
@@ -4934,7 +4934,7 @@ def api_request_account_recovery():
     recent_token = SetupToken.query.filter(
         SetupToken.user_id == user.id,
         SetupToken.purpose == SetupToken.PURPOSE_ACCOUNT_RECOVERY,
-        SetupToken.created_at > datetime.utcnow() - timedelta(minutes=2)
+        SetupToken.created_at > datetime.now(timezone.utc) - timedelta(minutes=2)
     ).first()
 
     if recent_token:
@@ -5014,7 +5014,7 @@ def api_validate_setup_token():
     # For recovery tokens, allow resetting credentials
     if (has_passkey or has_password) and not is_recovery:
         # Mark token as used since user already has credentials
-        setup_token.used_at = datetime.utcnow()
+        setup_token.used_at = datetime.now(timezone.utc)
         db.session.commit()
         return jsonify({
             'error': 'Your account is already set up. Please log in instead.',
@@ -5027,7 +5027,7 @@ def api_validate_setup_token():
     session_token = secrets.token_urlsafe(32)
     session['setup_token'] = session_token
     session['setup_user_id'] = user.id
-    session['setup_expires'] = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+    session['setup_expires'] = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
     session['setup_purpose'] = setup_token.purpose  # Track if this is recovery or initial setup
 
     # Determine the redirect based on token purpose
@@ -5081,7 +5081,7 @@ def api_use_setup_token():
     if setup_token.is_used():
         return jsonify({'message': 'Token already marked as used'})
 
-    setup_token.used_at = datetime.utcnow()
+    setup_token.used_at = datetime.now(timezone.utc)
     db.session.commit()
 
     return jsonify({'message': 'Token marked as used'})
@@ -5127,7 +5127,7 @@ def api_setup_password():
     user.auth_type = 'local'
 
     # Mark token as used
-    setup_token.used_at = datetime.utcnow()
+    setup_token.used_at = datetime.now(timezone.utc)
 
     db.session.commit()
 
@@ -5317,7 +5317,7 @@ def api_approve_access_request(request_id):
     if existing_user:
         access_request.status = 'approved'
         access_request.processed_by_id = g.current_user.id if not is_master_account() else None
-        access_request.processed_at = datetime.utcnow()
+        access_request.processed_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Generate setup token for existing user if they don't have credentials
@@ -5353,7 +5353,7 @@ def api_approve_access_request(request_id):
     # Update request status
     access_request.status = 'approved'
     access_request.processed_by_id = g.current_user.id if not is_master_account() else None
-    access_request.processed_at = datetime.utcnow()
+    access_request.processed_at = datetime.now(timezone.utc)
 
     # Generate setup token for the new user (48hr expiry)
     setup_token = SetupToken.create_for_user(new_user)
@@ -5396,7 +5396,7 @@ def api_reject_access_request(request_id):
     access_request.status = 'rejected'
     access_request.rejection_reason = rejection_reason
     access_request.processed_by_id = g.current_user.id if not is_master_account() else None
-    access_request.processed_at = datetime.utcnow()
+    access_request.processed_at = datetime.now(timezone.utc)
 
     db.session.commit()
 
@@ -5594,7 +5594,7 @@ def api_approve_role_request(domain, request_id):
 
     # Update request status
     role_request.status = RequestStatus.APPROVED
-    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_at = datetime.now(timezone.utc)
     role_request.reviewed_by_id = user.id
 
     # Log the approval and promotion
@@ -5672,7 +5672,7 @@ def api_reject_role_request(domain, request_id):
 
     # Update request status
     role_request.status = RequestStatus.REJECTED
-    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_at = datetime.now(timezone.utc)
     role_request.reviewed_by_id = user.id
     role_request.rejection_reason = rejection_reason
 
@@ -5872,7 +5872,7 @@ def api_admin_approve_role_request(request_id):
 
     # Update request status
     role_request.status = RequestStatus.APPROVED
-    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_at = datetime.now(timezone.utc)
     role_request.reviewed_by_id = user.id
 
     # Log the approval and role change
@@ -5896,7 +5896,7 @@ def api_admin_approve_role_request(request_id):
     check_and_upgrade_provisional_admins(tenant)
 
     # Get updated user
-    target_user = User.query.get(role_request.user_id)
+    target_user = db.session.get(User, role_request.user_id)
 
     return jsonify({
         'message': f'Role request approved. User is now a {target_role.value}.',
@@ -5935,7 +5935,7 @@ def api_admin_reject_role_request(request_id):
 
     # Update request status
     role_request.status = RequestStatus.REJECTED
-    role_request.reviewed_at = datetime.utcnow()
+    role_request.reviewed_at = datetime.now(timezone.utc)
     role_request.reviewed_by_id = user.id
     role_request.rejection_reason = rejection_reason
 
@@ -5988,7 +5988,7 @@ def api_get_tenant_admins():
 
     admins = []
     for membership in admin_memberships:
-        admin_user = User.query.get(membership.user_id)
+        admin_user = db.session.get(User, membership.user_id)
         if admin_user:
             admins.append({
                 'name': admin_user.name or 'Unnamed Admin',
@@ -6554,7 +6554,7 @@ def api_list_tenants():
 
             # Calculate age (handle None created_at for legacy tenants)
             if tenant.created_at:
-                age_days = (datetime.utcnow() - tenant.created_at).days
+                age_days = (datetime.now(timezone.utc) - tenant.created_at).days
             else:
                 age_days = None
 
@@ -6606,7 +6606,7 @@ def api_get_tenant_maturity(domain):
 
     # Calculate age (handle None created_at)
     if tenant.created_at:
-        age_days = (datetime.utcnow() - tenant.created_at).days
+        age_days = (datetime.now(timezone.utc) - tenant.created_at).days
     else:
         age_days = 0
 
@@ -6807,7 +6807,7 @@ def api_delete_tenant(domain):
         }), 400
 
     tenant_id = tenant.id
-    deletion_time = datetime.utcnow()
+    deletion_time = datetime.now(timezone.utc)
     retention_days = 30  # Configurable retention window
     deletion_expires_at = deletion_time + timedelta(days=retention_days)
 
@@ -6882,7 +6882,7 @@ def api_restore_tenant(domain):
         return jsonify({'error': f'Tenant {domain} is not deleted'}), 400
 
     # Check if retention window has expired
-    if tenant.deletion_expires_at and datetime.utcnow() > tenant.deletion_expires_at:
+    if tenant.deletion_expires_at and datetime.now(timezone.utc).replace(tzinfo=None) > tenant.deletion_expires_at:
         return jsonify({
             'error': 'Retention window has expired',
             'message': 'This tenant cannot be restored as the retention period has passed'
@@ -7757,7 +7757,7 @@ def create_incomplete_test_user():
 
         # Generate setup token
         setup_token = secrets.token_urlsafe(32)
-        token_expires = datetime.utcnow() + timedelta(hours=48)
+        token_expires = datetime.now(timezone.utc) + timedelta(hours=48)
 
         # Store token in SetupToken table if it exists, otherwise use session approach
         try:
@@ -7932,7 +7932,7 @@ def slack_oauth_callback():
         # for the wrong organization
         workspace_domain = None
         if tenant_id:
-            tenant = Tenant.query.get(tenant_id)
+            tenant = db.session.get(Tenant, tenant_id)
             if tenant:
                 try:
                     # Use the bot token to fetch workspace users and identify primary domain
@@ -8008,11 +8008,11 @@ def slack_oauth_callback():
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
-                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.installed_at = datetime.now(timezone.utc)
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
                     # Track scopes and version
                     existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
-                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.scopes_updated_at = datetime.now(timezone.utc)
                     existing_by_workspace.app_version = CURRENT_APP_VERSION
                 elif existing_by_workspace.tenant_id is None or not existing_by_workspace.is_active:
                     # Unclaimed or disconnected workspace - claim it for this tenant
@@ -8022,13 +8022,13 @@ def slack_oauth_callback():
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
-                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.installed_at = datetime.now(timezone.utc)
                     existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
-                    existing_by_workspace.claimed_at = datetime.utcnow()
+                    existing_by_workspace.claimed_at = datetime.now(timezone.utc)
                     existing_by_workspace.claimed_by_id = user_id
                     # Track scopes and version
                     existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
-                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.scopes_updated_at = datetime.now(timezone.utc)
                     existing_by_workspace.app_version = CURRENT_APP_VERSION
                     if old_tenant_id:
                         logger.info(f"Re-claimed disconnected workspace {workspace_name} from tenant {old_tenant_id} for tenant {tenant_id}")
@@ -8045,11 +8045,11 @@ def slack_oauth_callback():
                 existing_by_tenant.workspace_name = workspace_name
                 existing_by_tenant.bot_token_encrypted = encrypted_token
                 existing_by_tenant.is_active = True
-                existing_by_tenant.installed_at = datetime.utcnow()
+                existing_by_tenant.installed_at = datetime.now(timezone.utc)
                 existing_by_tenant.status = SlackWorkspace.STATUS_ACTIVE
                 # Track scopes and version
                 existing_by_tenant.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
-                existing_by_tenant.scopes_updated_at = datetime.utcnow()
+                existing_by_tenant.scopes_updated_at = datetime.now(timezone.utc)
                 existing_by_tenant.app_version = CURRENT_APP_VERSION
             else:
                 # New workspace for this tenant
@@ -8060,11 +8060,11 @@ def slack_oauth_callback():
                     bot_token_encrypted=encrypted_token,
                     is_active=True,
                     status=SlackWorkspace.STATUS_ACTIVE,
-                    claimed_at=datetime.utcnow(),
+                    claimed_at=datetime.now(timezone.utc),
                     claimed_by_id=user_id,
                     # Track scopes and version
                     granted_scopes=','.join(granted_scopes) if granted_scopes else None,
-                    scopes_updated_at=datetime.utcnow(),
+                    scopes_updated_at=datetime.now(timezone.utc),
                     app_version=CURRENT_APP_VERSION
                 )
                 db.session.add(workspace)
@@ -8073,7 +8073,7 @@ def slack_oauth_callback():
             logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
 
             # Get tenant domain for redirect
-            tenant = Tenant.query.get(tenant_id)
+            tenant = db.session.get(Tenant, tenant_id)
             if tenant:
                 return redirect(f'/{tenant.domain}/admin?tab=slack&slack_success=true')
             return redirect('/settings?slack_success=true')
@@ -8087,10 +8087,10 @@ def slack_oauth_callback():
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
-                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.installed_at = datetime.now(timezone.utc)
                     # Track scopes and version
                     existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
-                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.scopes_updated_at = datetime.now(timezone.utc)
                     existing_by_workspace.app_version = CURRENT_APP_VERSION
                     db.session.commit()
                     logger.info(f"Updated existing workspace {workspace_name} (already claimed by tenant {existing_by_workspace.tenant_id})")
@@ -8101,10 +8101,10 @@ def slack_oauth_callback():
                     existing_by_workspace.workspace_name = workspace_name
                     existing_by_workspace.bot_token_encrypted = encrypted_token
                     existing_by_workspace.is_active = True
-                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.installed_at = datetime.now(timezone.utc)
                     # Track scopes and version
                     existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
-                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.scopes_updated_at = datetime.now(timezone.utc)
                     existing_by_workspace.app_version = CURRENT_APP_VERSION
                     db.session.commit()
                     logger.info(f"Updated existing unclaimed workspace {workspace_name}")
@@ -8120,7 +8120,7 @@ def slack_oauth_callback():
                     status=SlackWorkspace.STATUS_PENDING_CLAIM,
                     # Track scopes and version
                     granted_scopes=','.join(granted_scopes) if granted_scopes else None,
-                    scopes_updated_at=datetime.utcnow(),
+                    scopes_updated_at=datetime.now(timezone.utc),
                     app_version=CURRENT_APP_VERSION
                 )
                 db.session.add(workspace)
@@ -8170,7 +8170,7 @@ def slack_commands():
         })
 
     # Update last activity
-    workspace.last_activity_at = datetime.utcnow()
+    workspace.last_activity_at = datetime.now(timezone.utc)
     db.session.commit()
 
     # Create service and handle command
@@ -8207,7 +8207,7 @@ def slack_interactions():
         return '', 200
 
     # Update last activity
-    workspace.last_activity_at = datetime.utcnow()
+    workspace.last_activity_at = datetime.now(timezone.utc)
     db.session.commit()
 
     service = SlackService(workspace)
@@ -8260,7 +8260,7 @@ def slack_events():
             return '', 200
 
         # Update last activity
-        workspace.last_activity_at = datetime.utcnow()
+        workspace.last_activity_at = datetime.now(timezone.utc)
         db.session.commit()
 
         service = SlackService(workspace)
@@ -8423,14 +8423,14 @@ def superadmin_slack_reassign():
     old_tenant_id = workspace.tenant_id
     old_tenant_domain = None
     if old_tenant_id:
-        old_tenant = Tenant.query.get(old_tenant_id)
+        old_tenant = db.session.get(Tenant, old_tenant_id)
         old_tenant_domain = old_tenant.domain if old_tenant else 'Unknown'
 
     # Reassign the workspace
     workspace.tenant_id = target_tenant.id
     workspace.is_active = True
     workspace.status = SlackWorkspace.STATUS_ACTIVE
-    workspace.claimed_at = datetime.utcnow()
+    workspace.claimed_at = datetime.now(timezone.utc)
     db.session.commit()
 
     logger.warning(
@@ -8460,7 +8460,7 @@ def superadmin_slack_list_workspaces():
     for ws in workspaces:
         tenant_domain = None
         if ws.tenant_id:
-            tenant = Tenant.query.get(ws.tenant_id)
+            tenant = db.session.get(Tenant, ws.tenant_id)
             tenant_domain = tenant.domain if tenant else 'Unknown'
 
         # Get claimed_by user info
@@ -8512,14 +8512,14 @@ def superadmin_slack_list_workspaces():
 @track_endpoint('api_superadmin_slack_delete')
 def superadmin_slack_delete_workspace(workspace_id):
     """Super-admin endpoint to remove a Slack workspace assignment (soft delete)."""
-    workspace = SlackWorkspace.query.get(workspace_id)
+    workspace = db.session.get(SlackWorkspace, workspace_id)
     if not workspace:
         return jsonify({'error': 'Workspace not found'}), 404
 
     old_tenant_id = workspace.tenant_id
     old_tenant_domain = None
     if old_tenant_id:
-        tenant = Tenant.query.get(old_tenant_id)
+        tenant = db.session.get(Tenant, old_tenant_id)
         old_tenant_domain = tenant.domain if tenant else 'Unknown'
 
     # Soft delete - mark as disconnected and remove tenant assignment
@@ -8593,7 +8593,7 @@ def slack_claim_workspace():
     # Claim the workspace
     workspace.tenant_id = tenant.id
     workspace.status = SlackWorkspace.STATUS_ACTIVE
-    workspace.claimed_at = datetime.utcnow()
+    workspace.claimed_at = datetime.now(timezone.utc)
     workspace.claimed_by_id = user.id
     workspace.is_active = True
 
@@ -8799,14 +8799,14 @@ def slack_link_complete():
     if mapping:
         mapping.user_id = user.id
         mapping.link_method = 'browser_auth'
-        mapping.linked_at = datetime.utcnow()
+        mapping.linked_at = datetime.now(timezone.utc)
     else:
         mapping = SlackUserMapping(
             slack_workspace_id=workspace.id,
             slack_user_id=slack_user_id,
             user_id=user.id,
             link_method='browser_auth',
-            linked_at=datetime.utcnow()
+            linked_at=datetime.now(timezone.utc)
         )
         db.session.add(mapping)
 

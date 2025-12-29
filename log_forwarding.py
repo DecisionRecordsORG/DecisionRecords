@@ -15,7 +15,7 @@ Features:
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Optional
 
@@ -59,7 +59,7 @@ def _get_log_forwarding_config():
     global _config_cache
 
     with _cache_lock:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         # Check cache validity
         if _config_cache['last_refresh']:

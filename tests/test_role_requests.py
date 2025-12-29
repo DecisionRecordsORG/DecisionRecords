@@ -2,7 +2,7 @@
 Tests for role request functionality.
 """
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 
 import sys
 import os
@@ -151,7 +151,7 @@ class TestRoleRequestApproval:
 
         # Approve request
         role_request.status = RequestStatus.APPROVED
-        role_request.reviewed_at = datetime.utcnow()
+        role_request.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         role_request.reviewed_by_id = admin_user.id
 
         # Update membership
@@ -229,7 +229,7 @@ class TestRoleRequestRejection:
 
         # Reject request
         role_request.status = RequestStatus.REJECTED
-        role_request.reviewed_at = datetime.utcnow()
+        role_request.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         role_request.reviewed_by_id = admin_user.id
         role_request.rejection_reason = 'Not needed at this time'
         session.commit()
@@ -306,7 +306,7 @@ class TestRoleRequestModel:
             reason='Test',
             status=RequestStatus.APPROVED,
             reviewed_by_id=admin_user.id,
-            reviewed_at=datetime.utcnow()
+            reviewed_at=datetime.now(timezone.utc).replace(tzinfo=None)
         )
         session.add(role_request)
         session.commit()

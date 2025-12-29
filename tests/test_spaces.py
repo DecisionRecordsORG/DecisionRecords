@@ -262,7 +262,7 @@ class TestSpaceInvariants:
         session.commit()
 
         # Decision should still exist
-        remaining = ArchitectureDecision.query.get(decision_id)
+        remaining = db.session.get(ArchitectureDecision, decision_id)
         assert remaining is not None
         assert remaining.title == 'Preserved Decision'
 

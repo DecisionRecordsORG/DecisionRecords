@@ -18,7 +18,7 @@ import os
 import secrets
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from cryptography.fernet import Fernet
 import hashlib
 import base64
@@ -109,7 +109,7 @@ def generate_google_oauth_state(return_url=None, extra_data=None):
         Encrypted state string
     """
     csrf_token = secrets.token_urlsafe(32)
-    expires_at = (datetime.utcnow() + timedelta(minutes=10)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
 
     state_data = {
         'type': 'google_oauth',
@@ -153,7 +153,7 @@ def verify_google_oauth_state(state):
 
         # Check expiration
         expires_at = datetime.fromisoformat(state_data.get('expires_at', ''))
-        if datetime.utcnow() > expires_at:
+        if datetime.now(timezone.utc) > expires_at:
             logger.warning("Google OAuth state expired")
             return None
 

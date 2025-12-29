@@ -2,7 +2,7 @@
 Tests for decision CRUD API endpoints.
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask
 
 import sys
@@ -67,9 +67,9 @@ class TestDecisionDeletion:
             assert decision is not None
 
             # Soft delete
-            decision.deleted_at = datetime.utcnow()
+            decision.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
             decision.deleted_by_id = admin_user.id
-            decision.deletion_expires_at = datetime.utcnow() + timedelta(days=30)
+            decision.deletion_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
             session.commit()
 
             # Verify soft delete
@@ -165,7 +165,7 @@ class TestDecisionDeletion:
         assert membership.deletion_count_window_start is None
 
         # Simulate deletion
-        membership.deletion_count_window_start = datetime.utcnow()
+        membership.deletion_count_window_start = datetime.now(timezone.utc).replace(tzinfo=None)
         membership.deletion_count = 1
         session.commit()
 
@@ -181,7 +181,7 @@ class TestDecisionDeletion:
         ).first()
 
         RATE_LIMIT_COUNT = 3
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # Set deletion count to threshold
         membership.deletion_count_window_start = now
@@ -206,12 +206,12 @@ class TestDecisionDeletion:
         ).first()
 
         # Set rate limit timestamp to 2 hours ago
-        two_hours_ago = datetime.utcnow() - timedelta(hours=2)
+        two_hours_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
         membership.deletion_rate_limited_at = two_hours_ago
         session.commit()
 
         # Check if expired (rate limit lasts 1 hour)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         is_expired = now >= membership.deletion_rate_limited_at + timedelta(hours=1)
         assert is_expired is True
 
@@ -225,13 +225,13 @@ class TestDecisionDeletion:
         RATE_LIMIT_WINDOW_MINUTES = 5
 
         # Set window start to 6 minutes ago
-        old_window = datetime.utcnow() - timedelta(minutes=6)
+        old_window = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=6)
         membership.deletion_count_window_start = old_window
         membership.deletion_count = 2
         session.commit()
 
         # Check if window expired
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         window_expired = (now - membership.deletion_count_window_start) > timedelta(minutes=RATE_LIMIT_WINDOW_MINUTES)
         assert window_expired is True
 
@@ -245,7 +245,7 @@ class TestDecisionDeletion:
 
     def test_soft_delete_sets_retention_window(self, session, sample_decision, admin_user):
         """Soft delete sets 30-day retention window."""
-        deletion_time = datetime.utcnow()
+        deletion_time = datetime.now(timezone.utc).replace(tzinfo=None)
         retention_days = 30
 
         sample_decision.deleted_at = deletion_time
@@ -265,7 +265,7 @@ class TestDecisionDeletion:
     def test_deleted_decisions_not_returned_in_query(self, session, sample_decision, admin_user):
         """Deleted decisions are filtered from normal queries."""
         # Soft delete
-        sample_decision.deleted_at = datetime.utcnow()
+        sample_decision.deleted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         session.commit()
 
         # Query for non-deleted decisions
@@ -313,7 +313,7 @@ class TestDecisionHistory:
         session.commit()
 
         # Load decision with history
-        decision = ArchitectureDecision.query.get(sample_decision.id)
+        decision = db.session.get(ArchitectureDecision, sample_decision.id)
         assert len(decision.history) == 3
 
     def test_to_dict_with_history(self, session, sample_decision, admin_user):

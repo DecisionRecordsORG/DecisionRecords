@@ -4,7 +4,7 @@ Tests for v1.5 Governance Models.
 Tests the new tenant/membership/space models and their relationships.
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import sys
 import os
@@ -193,7 +193,7 @@ class TestTenantMaturity:
         tenant = Tenant(
             domain='old.com',
             maturity_age_days=14,
-            created_at=datetime.utcnow() - timedelta(days=15)  # 15 days old
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=15)  # 15 days old
         )
         session.add(tenant)
         session.commit()
@@ -226,7 +226,7 @@ class TestTenantMaturity:
     def test_update_maturity_changes_state(self, session, sample_tenant):
         """Test update_maturity() changes and returns True when state changes."""
         # Make tenant mature by age
-        sample_tenant.created_at = datetime.utcnow() - timedelta(days=30)
+        sample_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         sample_tenant.maturity_age_days = 14
         session.commit()
 

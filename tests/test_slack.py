@@ -16,7 +16,7 @@ import hashlib
 import time
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, MagicMock
 from flask import Flask, session
 
@@ -285,7 +285,7 @@ class TestSlackOAuth:
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)
-            expires_at = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            expires_at = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
             state_data = {
                 'tenant_id': 123,
                 'csrf_token': 'test',
@@ -412,7 +412,7 @@ class TestSlackUserMapping:
                 slack_user_id='U77777777',
                 slack_email='test@example.com',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow(),
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 link_method='browser_auth'
             )
             session_fixture.add(mapping)
@@ -442,7 +442,7 @@ class TestSlackCommands:
                 slack_workspace_id=slack_workspace.id,
                 slack_user_id='U12345',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow(),
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 link_method='auto_email'
             )
             db.session.add(mapping)
@@ -474,7 +474,7 @@ class TestSlackCommands:
                 slack_workspace_id=slack_workspace.id,
                 slack_user_id='U12345',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             db.session.add(mapping)
             db.session.commit()
@@ -503,7 +503,7 @@ class TestSlackCommands:
                 slack_workspace_id=slack_workspace.id,
                 slack_user_id='U12345',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             db.session.add(mapping)
             db.session.commit()
@@ -533,7 +533,7 @@ class TestSlackCommands:
                 slack_workspace_id=slack_workspace.id,
                 slack_user_id='U12345',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             db.session.add(mapping)
             db.session.commit()
@@ -562,7 +562,7 @@ class TestSlackCommands:
                 slack_workspace_id=slack_workspace.id,
                 slack_user_id='U12345',
                 user_id=sample_user.id,
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             db.session.add(mapping)
             db.session.commit()
@@ -695,7 +695,7 @@ class TestSlackSettings:
             session_fixture.commit()
 
             # Reload from DB
-            reloaded = SlackWorkspace.query.get(slack_workspace.id)
+            reloaded = db.session.get(SlackWorkspace, slack_workspace.id)
             assert reloaded.default_channel_id == 'C99999999'
             assert reloaded.default_channel_name == '#general'
             assert reloaded.notifications_enabled is False
@@ -708,7 +708,7 @@ class TestSlackSettings:
             session_fixture.commit()
 
             # Verify inactive
-            reloaded = SlackWorkspace.query.get(slack_workspace.id)
+            reloaded = db.session.get(SlackWorkspace, slack_workspace.id)
             assert reloaded.is_active is False
 
     def test_test_notification_sends_message(self, app, slack_workspace):
@@ -854,7 +854,7 @@ class TestSlackModalSubmission:
                 slack_email='owner@example.com',
                 user_id=owner_user.id,
                 link_method='auto_email',
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(owner_mapping)
             session_fixture.commit()
@@ -943,7 +943,7 @@ class TestSlackModalSubmission:
                 slack_email='owner-notif@example.com',
                 user_id=sample_user.id,
                 link_method='auto_email',
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(owner_mapping)
             session_fixture.commit()
@@ -998,7 +998,7 @@ class TestSlackModalSubmission:
                 slack_email=sample_user.email,
                 user_id=sample_user.id,
                 link_method='auto_email',
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(creator_mapping)
             session_fixture.commit()
@@ -1145,7 +1145,7 @@ class TestSlackOAuthIntegration:
             # Claim the workspace for a tenant
             workspace.tenant_id = sample_tenant.id
             workspace.status = SlackWorkspace.STATUS_ACTIVE
-            workspace.claimed_at = datetime.utcnow()
+            workspace.claimed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             session_fixture.commit()
 
             # Verify claim
@@ -1410,7 +1410,7 @@ class TestSlackOAuthCallback:
                 bot_token_encrypted=encrypted_token,
                 is_active=True,
                 status=SlackWorkspace.STATUS_ACTIVE,
-                claimed_at=datetime.utcnow()
+                claimed_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(workspace)
             session_fixture.commit()
@@ -1498,7 +1498,7 @@ class TestSuperadminSlackManagement:
                 bot_token_encrypted=encrypt_token('xoxb-test-token'),
                 status=SlackWorkspace.STATUS_ACTIVE,
                 is_active=True,
-                claimed_at=datetime.utcnow(),
+                claimed_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 claimed_by_id=sample_user.id
             )
             session_fixture.add(workspace)
@@ -1523,7 +1523,7 @@ class TestSuperadminSlackManagement:
                 slack_email=sample_user.email,
                 user_id=sample_user.id,
                 link_method='browser_auth',
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(mapping)
             session_fixture.commit()
@@ -1588,7 +1588,7 @@ class TestSuperadminSlackManagement:
                 slack_email=sample_user.email,
                 user_id=sample_user.id,
                 link_method='auto_email',
-                linked_at=datetime.utcnow()
+                linked_at=datetime.now(timezone.utc).replace(tzinfo=None)
             )
             session_fixture.add(mapping)
             session_fixture.commit()
@@ -1629,7 +1629,7 @@ class TestSuperadminSlackManagement:
             workspace.tenant_id = sample_tenant.id
             workspace.is_active = True
             workspace.status = SlackWorkspace.STATUS_ACTIVE
-            workspace.claimed_at = datetime.utcnow()
+            workspace.claimed_at = datetime.now(timezone.utc).replace(tzinfo=None)
             session_fixture.commit()
 
             # Verify reclaimed
@@ -1664,5 +1664,5 @@ class TestSuperadminSlackManagement:
         """Attempting to delete non-existent workspace returns appropriate error."""
         with app.app_context():
             # Try to find workspace that doesn't exist
-            workspace = SlackWorkspace.query.get(99999)
+            workspace = db.session.get(SlackWorkspace, 99999)
             assert workspace is None  # Should not exist

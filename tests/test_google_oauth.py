@@ -15,7 +15,7 @@ Tests cover:
 import pytest
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch, MagicMock
 from flask import Flask
 
@@ -153,7 +153,7 @@ class TestGoogleOAuthState:
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)
-            expires_at = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+            expires_at = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
             state_data = {
                 'type': 'google_oauth',
                 'csrf_token': 'test',
@@ -191,7 +191,7 @@ class TestGoogleOAuthState:
             from cryptography.fernet import Fernet
 
             # Create state with wrong type
-            expires_at = (datetime.utcnow() + timedelta(minutes=30)).isoformat()
+            expires_at = (datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=30)).isoformat()
             state_data = {
                 'type': 'slack_oidc',  # Wrong type
                 'csrf_token': 'test',

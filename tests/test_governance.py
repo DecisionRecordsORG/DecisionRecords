@@ -4,7 +4,7 @@ Tests for v1.5 Governance Module.
 Tests permission guards, role restrictions, and automatic upgrades.
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import sys
 import os
@@ -270,7 +270,7 @@ class TestAutomaticRoleUpgrade:
 
         # Make tenant mature by age
         sample_tenant.maturity_age_days = 1
-        sample_tenant.created_at = datetime.utcnow() - timedelta(days=2)
+        sample_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
         session.commit()
 
         upgraded = check_and_upgrade_provisional_admins(sample_tenant, user.id)
@@ -319,7 +319,7 @@ class TestAutomaticRoleUpgrade:
 
         # Make tenant mature by setting low age threshold and backdating
         sample_tenant.maturity_age_days = 1
-        sample_tenant.created_at = datetime.utcnow() - timedelta(days=2)
+        sample_tenant.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=2)
         session.commit()
 
         check_and_upgrade_provisional_admins(sample_tenant, user.id)

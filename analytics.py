@@ -14,7 +14,7 @@ import logging
 import os
 import traceback
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 logger = logging.getLogger(__name__)
@@ -338,7 +338,7 @@ def _get_analytics_config():
     from models import SystemConfig
 
     with _cache_lock:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if (_config_cache['last_refresh'] and
             (now - _config_cache['last_refresh']).total_seconds() < CACHE_TTL_SECONDS):
             return _config_cache

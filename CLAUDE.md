@@ -402,6 +402,62 @@ For route-specific error handling:
 3. Return a user-friendly error message
 4. Use appropriate HTTP status codes
 
+## Python/Flask Coding Guidelines
+
+Follow these patterns to avoid deprecation warnings and ensure forward compatibility.
+
+### DateTime Handling (Python 3.12+)
+
+**NEVER use `datetime.utcnow()`** - it's deprecated in Python 3.12+.
+
+```python
+# ❌ WRONG - deprecated
+from datetime import datetime
+created_at = datetime.utcnow()
+
+# ✅ CORRECT - use timezone-aware datetime
+from datetime import datetime, timezone
+created_at = datetime.now(timezone.utc)
+```
+
+For SQLAlchemy model columns with datetime defaults, use lambda functions:
+
+```python
+# ❌ WRONG - deprecated
+created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+# ✅ CORRECT - use lambda for timezone-aware default
+created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+```
+
+### SQLAlchemy 2.0 Patterns
+
+**NEVER use `Model.query.get(id)`** - it's a legacy pattern deprecated in SQLAlchemy 2.0.
+
+```python
+# ❌ WRONG - legacy pattern
+user = User.query.get(user_id)
+decision = ArchitectureDecision.query.get(decision_id)
+
+# ✅ CORRECT - use session.get()
+user = db.session.get(User, user_id)
+decision = db.session.get(ArchitectureDecision, decision_id)
+```
+
+### Import Patterns
+
+Always import `timezone` when working with datetime:
+
+```python
+from datetime import datetime, timedelta, timezone
+```
+
+Always import `db` when using `db.session.get()`:
+
+```python
+from models import db, User, Tenant
+```
+
 ## Troubleshooting
 
 ### Login Issues

@@ -30,7 +30,8 @@ export class PostHogService {
       // Run outside Angular zone to prevent performance issues
       this.ngZone.runOutsideAngular(() => {
         posthog.init('phc_c3dvhlzjwriryAY7FBaEJ6vV6DigrM5zIqaXowbB2OQ', {
-          api_host: 'https://eu.i.posthog.com',
+          api_host: 'https://e.decisionrecords.org',
+          ui_host: 'https://eu.i.posthog.com',
           // Set defaults date - enables automatic pageview tracking
           defaults: '2025-11-30',
           // Track when users leave pages (for engagement metrics)

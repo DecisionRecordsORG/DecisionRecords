@@ -16,7 +16,7 @@ import os
 import logging
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -442,7 +442,7 @@ def update_workspace_scopes(workspace, scopes: List[str]):
     from models import db
 
     workspace.granted_scopes = ','.join(scopes) if scopes else None
-    workspace.scopes_updated_at = datetime.utcnow()
+    workspace.scopes_updated_at = datetime.now(timezone.utc)
     db.session.commit()
 
     logger.info(f"Updated scopes for workspace {workspace.workspace_id}: {scopes}")

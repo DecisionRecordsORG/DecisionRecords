@@ -1,7 +1,7 @@
 import os
 import enum
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
@@ -53,7 +53,7 @@ class SystemConfig(db.Model):
     key = db.Column(db.String(100), nullable=False, unique=True)
     value = db.Column(db.String(500), nullable=True)
     description = db.Column(db.String(500), nullable=True)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Default configuration keys
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
@@ -175,7 +175,7 @@ class MasterAccount(db.Model):
     username = db.Column(db.String(100), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     name = db.Column(db.String(255), nullable=True, default='System Administrator')
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, password):
@@ -233,7 +233,7 @@ class Tenant(db.Model):
     name = db.Column(db.String(255), nullable=True)  # Display name (defaults to domain)
     status = db.Column(db.String(20), default='active')  # active, suspended
     maturity_state = db.Column(db.Enum(MaturityState), default=MaturityState.BOOTSTRAP)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Maturity thresholds (can be overridden by super admin)
     maturity_age_days = db.Column(db.Integer, default=14)
@@ -287,8 +287,9 @@ class Tenant(db.Model):
         user_threshold = self.maturity_user_threshold if self.maturity_user_threshold is not None else 5
         age_days = self.maturity_age_days if self.maturity_age_days is not None else 90
         has_enough_users = member_count >= user_threshold
-        created_at = self.created_at or datetime.utcnow()
-        is_old_enough = (datetime.utcnow() - created_at).days >= age_days
+        # Use timezone-naive datetimes for comparison (SQLAlchemy returns naive from DB)
+        created_at = self.created_at or datetime.now(timezone.utc).replace(tzinfo=None)
+        is_old_enough = (datetime.now(timezone.utc).replace(tzinfo=None) - created_at).days >= age_days
 
         if has_multi_admin or has_enough_users or is_old_enough:
             return MaturityState.MATURE
@@ -337,7 +338,7 @@ class TenantMembership(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
     global_role = db.Column(db.Enum(GlobalRole), default=GlobalRole.USER)
-    joined_at = db.Column(db.DateTime, default=datetime.utcnow)
+    joined_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Deletion rate limiting fields
     deletion_rate_limited_at = db.Column(db.DateTime, nullable=True)  # When user was rate-limited
@@ -437,8 +438,8 @@ class TenantSettings(db.Model):
     # Display settings
     tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # For decision IDs
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     tenant = db.relationship('Tenant', backref=db.backref('settings', uselist=False))
@@ -482,7 +483,7 @@ class Space(db.Model):
     is_default = db.Column(db.Boolean, default=False)
     visibility_policy = db.Column(db.Enum(VisibilityPolicy), default=VisibilityPolicy.TENANT_VISIBLE)
     created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     tenant = db.relationship('Tenant', backref=db.backref('spaces', lazy='dynamic'))
@@ -514,7 +515,7 @@ class DecisionSpace(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     decision_id = db.Column(db.Integer, db.ForeignKey('architecture_decisions.id'), nullable=False)
     space_id = db.Column(db.Integer, db.ForeignKey('spaces.id'), nullable=False)
-    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    added_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     added_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
     # Relationships
@@ -552,7 +553,7 @@ class AuditLog(db.Model):
     target_entity = db.Column(db.String(50), nullable=True)  # 'user', 'tenant_settings', etc.
     target_id = db.Column(db.Integer, nullable=True)
     details = db.Column(db.JSON, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships (read-only)
     tenant = db.relationship('Tenant', backref=db.backref('audit_logs', lazy='dynamic'))
@@ -605,7 +606,7 @@ class User(db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     email_verified = db.Column(db.Boolean, default=False)  # Email verification status
     has_seen_admin_onboarding = db.Column(db.Boolean, default=False)  # Track if admin has seen the onboarding modal
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime, nullable=True)
 
     # GDPR deletion fields
@@ -720,8 +721,8 @@ class SSOConfig(db.Model):
     client_secret = db.Column(db.String(255), nullable=False)
     discovery_url = db.Column(db.String(500), nullable=False)  # OpenID Connect discovery URL
     enabled = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self, include_secret=False):
         data = {
@@ -754,8 +755,8 @@ class EmailConfig(db.Model):
     from_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')
     use_tls = db.Column(db.Boolean, default=True)
     enabled = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self, include_password=False):
         data = {
@@ -793,8 +794,8 @@ class AuthConfig(db.Model):
     require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
     tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # 3-letter prefix for decision IDs (consonants only)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Consonants only for tenant prefix (no vowels to avoid offensive words)
     CONSONANTS = 'BCDFGHJKLMNPQRSTVWXYZ'
@@ -842,7 +843,7 @@ class DomainApproval(db.Model):
     approved_by_id = db.Column(db.Integer, db.ForeignKey('master_accounts.id'), nullable=True)
     rejection_reason = db.Column(db.String(500), nullable=True)
     auto_approved = db.Column(db.Boolean, default=False)  # True if auto-approved (corporate domain)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     reviewed_at = db.Column(db.DateTime, nullable=True)  # When approved/rejected
 
     @staticmethod
@@ -916,7 +917,7 @@ class WebAuthnCredential(db.Model):
     sign_count = db.Column(db.Integer, nullable=False, default=0)
     device_name = db.Column(db.String(255), nullable=True)  # User-friendly name for the device
     transports = db.Column(db.String(255), nullable=True)  # JSON array of transports
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     last_used_at = db.Column(db.DateTime, nullable=True)
 
     def to_dict(self):
@@ -940,8 +941,8 @@ class Subscription(db.Model):
     notify_on_create = db.Column(db.Boolean, default=True)
     notify_on_update = db.Column(db.Boolean, default=False)
     notify_on_status_change = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -959,7 +960,7 @@ class Subscription(db.Model):
 decision_infrastructure = db.Table('decision_infrastructure',
     db.Column('decision_id', db.Integer, db.ForeignKey('architecture_decisions.id'), primary_key=True),
     db.Column('infrastructure_id', db.Integer, db.ForeignKey('it_infrastructure.id'), primary_key=True),
-    db.Column('created_at', db.DateTime, nullable=False, default=datetime.utcnow)
+    db.Column('created_at', db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 )
 
 
@@ -973,8 +974,8 @@ class ITInfrastructure(db.Model):
     type = db.Column(db.String(50), nullable=False)  # application, network, database, server, service, api, storage, cloud, container, other
     description = db.Column(db.Text, nullable=True)
     domain = db.Column(db.String(255), nullable=False, index=True)  # Multi-tenancy
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
     # Relationships
@@ -1008,8 +1009,8 @@ class ArchitectureDecision(db.Model):
     status = db.Column(db.String(50), nullable=False, default='proposed')
     consequences = db.Column(db.Text, nullable=False)
     decision_number = db.Column(db.Integer, nullable=True)  # Sequential number per tenant for display ID
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Multi-tenancy - v1.5 uses tenant_id FK, domain kept for backward compatibility during migration
     domain = db.Column(db.String(255), nullable=False, index=True)
@@ -1101,7 +1102,7 @@ class DecisionHistory(db.Model):
     consequences = db.Column(db.Text, nullable=False)
 
     # Metadata about the change
-    changed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    changed_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     change_reason = db.Column(db.String(500), nullable=True)
     changed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
@@ -1134,8 +1135,8 @@ class AccessRequest(db.Model):
     domain = db.Column(db.String(255), nullable=False, index=True)
     reason = db.Column(db.Text, nullable=True)  # Optional reason for requesting access
     status = db.Column(db.String(20), nullable=False, default='pending')  # pending, approved, rejected
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Admin who processed the request
     processed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -1175,7 +1176,7 @@ class RoleRequest(db.Model):
     requested_role = db.Column(db.Enum(RequestedRole), nullable=False)
     reason = db.Column(db.Text, nullable=True)  # Why they need this role
     status = db.Column(db.Enum(RequestStatus), nullable=False, default=RequestStatus.PENDING)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     reviewed_at = db.Column(db.DateTime, nullable=True)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     rejection_reason = db.Column(db.Text, nullable=True)
@@ -1222,7 +1223,7 @@ class SetupToken(db.Model):
     purpose = db.Column(db.String(20), nullable=False, default='initial_setup')  # 'initial_setup', 'account_recovery', 'admin_invite'
     expires_at = db.Column(db.DateTime, nullable=False)
     used_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     user = db.relationship('User', foreign_keys=[user_id])
@@ -1239,7 +1240,7 @@ class SetupToken(db.Model):
     VALID_PURPOSES = [PURPOSE_INITIAL_SETUP, PURPOSE_ACCOUNT_RECOVERY, PURPOSE_ADMIN_INVITE]
 
     def is_expired(self):
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def is_used(self):
         return self.used_at is not None
@@ -1272,7 +1273,7 @@ class SetupToken(db.Model):
         payload = json.dumps({
             'user_id': user_id,
             'expires_at': expires_at.isoformat(),
-            'created_at': datetime.utcnow().isoformat()
+            'created_at': datetime.now(timezone.utc).isoformat()
         })
 
         encrypted = fernet.encrypt(payload.encode())
@@ -1345,11 +1346,11 @@ class SetupToken(db.Model):
 
         # Invalidate any existing tokens for this user with the same purpose
         SetupToken.query.filter_by(user_id=user.id, purpose=purpose, used_at=None).update({
-            'used_at': datetime.utcnow()
+            'used_at': datetime.now(timezone.utc)
         })
         db.session.flush()
 
-        expires_at = datetime.utcnow() + timedelta(hours=validity_hours)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=validity_hours)
         token_string = SetupToken.generate_token(user.id, expires_at)
         token_hash = SetupToken._hash_token(token_string)
 
@@ -1378,7 +1379,7 @@ class SetupToken(db.Model):
             'used_at': self.used_at.isoformat() if self.used_at else None,
             'created_at': self.created_at.isoformat(),
             'is_valid': self.is_valid(),
-            'hours_remaining': max(0, int((self.expires_at - datetime.utcnow()).total_seconds() / 3600)) if not self.is_expired() else 0,
+            'hours_remaining': max(0, int((self.expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds() / 3600)) if not self.is_expired() else 0,
         }
         # Only include actual token if explicitly requested (e.g., at creation time)
         if include_token and hasattr(self, '_token_string'):
@@ -1399,13 +1400,13 @@ class EmailVerification(db.Model):
     domain = db.Column(db.String(255), nullable=False)
     expires_at = db.Column(db.DateTime, nullable=False)
     verified_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # For access requests, store the reason
     access_request_reason = db.Column(db.Text, nullable=True)
 
     def is_expired(self):
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at
 
     def is_verified(self):
         return self.verified_at is not None
@@ -1475,7 +1476,7 @@ class SlackWorkspace(db.Model):
 
     # Status
     is_active = db.Column(db.Boolean, default=True)
-    installed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    installed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_activity_at = db.Column(db.DateTime, nullable=True)
 
     # App version tracking (for upgrade management)
@@ -1532,7 +1533,7 @@ class SlackUserMapping(db.Model):
     # How the user was linked
     link_method = db.Column(db.String(20), nullable=True)  # 'auto_email', 'browser_auth'
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     linked_at = db.Column(db.DateTime, nullable=True)
 
     # Relationships
@@ -1573,9 +1574,9 @@ class BlogPost(db.Model):
     meta_keywords = db.Column(db.String(500), nullable=True)  # SEO keywords (comma-separated)
     published = db.Column(db.Boolean, default=True)  # Whether post is visible
     featured = db.Column(db.Boolean, default=False)  # Featured posts appear first
-    publish_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # When to show as published
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    publish_date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))  # When to show as published
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Content is stored in Angular component, not DB (for now)
     # This model manages metadata only
