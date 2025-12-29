@@ -92,7 +92,7 @@
 
 ### Environment Context
 - **Working Directory**: `/Users/lawrencenyakiso/Dev/architecture-decisions`
-- **Current Branch**: `claude/architecture-decisions-app-01PGTE3hzrXBjQ5GZ2DgF8vE`
+- **Current Branch**: `main`
 - **Deployment Target**: Azure Container Instances (adr-app-eu)
 - **Frontend**: Angular with Material Design
 - **Backend**: Flask with Azure Key Vault integration
