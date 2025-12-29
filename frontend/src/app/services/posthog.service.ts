@@ -32,8 +32,8 @@ export class PostHogService {
         posthog.init('phc_c3dvhlzjwriryAY7FBaEJ6vV6DigrM5zIqaXowbB2OQ', {
           api_host: 'https://e.decisionrecords.org',
           ui_host: 'https://eu.i.posthog.com',
-          // Set defaults date - enables automatic pageview tracking
-          defaults: '2025-11-30',
+          // Enable automatic pageview tracking
+          capture_pageview: true,
           // Track when users leave pages (for engagement metrics)
           capture_pageleave: true,
           // Privacy-friendly defaults

@@ -26,7 +26,7 @@ import { filter } from 'rxjs/operators';
     @if (showSiteFooter) {
       <app-site-footer></app-site-footer>
     }
-    <footer class="app-footer" [class.hidden]="showSiteFooter">
+    <footer class="app-footer">
       <div class="footer-content">
         <small>
           Decision Records
@@ -84,10 +84,6 @@ import { filter } from 'rxjs/operators';
       height: 20px;
       width: auto;
       opacity: 0.8;
-    }
-
-    .app-footer.hidden {
-      display: none;
     }
   `]
 })
