@@ -79,19 +79,24 @@ class TestUserLimitLogic:
     def test_can_tenant_accept_users_under_limit(self, app):
         """Test accepting users when under the limit."""
         from app import can_tenant_accept_users
-        from models import SystemConfig, User, Tenant, db
+        from models import SystemConfig, User, Tenant, TenantMembership, GlobalRole, db
 
         with app.app_context():
             # Set limit to 5
             SystemConfig.set(SystemConfig.KEY_MAX_USERS_PER_TENANT, 5)
 
-            # Create a tenant with 3 users
+            # Create a tenant with 3 users (using TenantMembership)
             tenant = Tenant(domain='test.com', name='Test Tenant')
             db.session.add(tenant)
+            db.session.flush()  # Get tenant.id
 
             for i in range(3):
                 user = User(email=f'user{i}@test.com', name=f'User {i}', sso_domain='test.com')
                 db.session.add(user)
+                db.session.flush()  # Get user.id
+                # Create TenantMembership to properly associate user with tenant
+                membership = TenantMembership(tenant_id=tenant.id, user_id=user.id, global_role=GlobalRole.USER)
+                db.session.add(membership)
 
             db.session.commit()
 
@@ -103,19 +108,24 @@ class TestUserLimitLogic:
     def test_can_tenant_accept_users_at_limit(self, app):
         """Test rejecting users when at the limit."""
         from app import can_tenant_accept_users
-        from models import SystemConfig, User, Tenant, db
+        from models import SystemConfig, User, Tenant, TenantMembership, GlobalRole, db
 
         with app.app_context():
             # Set limit to 3
             SystemConfig.set(SystemConfig.KEY_MAX_USERS_PER_TENANT, 3)
 
-            # Create a tenant with 3 users (at limit)
+            # Create a tenant with 3 users (at limit, using TenantMembership)
             tenant = Tenant(domain='full.com', name='Full Tenant')
             db.session.add(tenant)
+            db.session.flush()  # Get tenant.id
 
             for i in range(3):
                 user = User(email=f'user{i}@full.com', name=f'User {i}', sso_domain='full.com')
                 db.session.add(user)
+                db.session.flush()  # Get user.id
+                # Create TenantMembership to properly associate user with tenant
+                membership = TenantMembership(tenant_id=tenant.id, user_id=user.id, global_role=GlobalRole.USER)
+                db.session.add(membership)
 
             db.session.commit()
 
@@ -128,19 +138,24 @@ class TestUserLimitLogic:
     def test_can_tenant_accept_multiple_users(self, app):
         """Test checking if multiple users can be added."""
         from app import can_tenant_accept_users
-        from models import SystemConfig, User, Tenant, db
+        from models import SystemConfig, User, Tenant, TenantMembership, GlobalRole, db
 
         with app.app_context():
             # Set limit to 5
             SystemConfig.set(SystemConfig.KEY_MAX_USERS_PER_TENANT, 5)
 
-            # Create a tenant with 3 users
+            # Create a tenant with 3 users (using TenantMembership)
             tenant = Tenant(domain='partial.com', name='Partial Tenant')
             db.session.add(tenant)
+            db.session.flush()  # Get tenant.id
 
             for i in range(3):
                 user = User(email=f'user{i}@partial.com', name=f'User {i}', sso_domain='partial.com')
                 db.session.add(user)
+                db.session.flush()  # Get user.id
+                # Create TenantMembership to properly associate user with tenant
+                membership = TenantMembership(tenant_id=tenant.id, user_id=user.id, global_role=GlobalRole.USER)
+                db.session.add(membership)
 
             db.session.commit()
 
@@ -284,7 +299,7 @@ class TestAccessRequestUserLimit:
     @pytest.fixture
     def setup_tenant_at_limit(self, app, client):
         """Create a tenant with users at the limit."""
-        from models import SystemConfig, User, Tenant, AuthConfig, MasterAccount, AccessRequest, db
+        from models import SystemConfig, User, Tenant, TenantMembership, GlobalRole, AuthConfig, MasterAccount, AccessRequest, db
         from werkzeug.security import generate_password_hash
 
         with app.app_context():
@@ -294,12 +309,13 @@ class TestAccessRequestUserLimit:
             # Create tenant
             tenant = Tenant(domain='limited.com', name='Limited Tenant')
             db.session.add(tenant)
+            db.session.flush()  # Get tenant.id
 
             # Create auth config with approval required
             auth_config = AuthConfig(domain='limited.com', require_approval=True)
             db.session.add(auth_config)
 
-            # Create 2 users (at limit)
+            # Create 2 users (at limit) with TenantMemberships
             admin_user = User(
                 email='admin@limited.com',
                 name='Admin User',
@@ -307,6 +323,10 @@ class TestAccessRequestUserLimit:
                 is_admin=True
             )
             db.session.add(admin_user)
+            db.session.flush()
+            # Create membership for admin
+            admin_membership = TenantMembership(tenant_id=tenant.id, user_id=admin_user.id, global_role=GlobalRole.ADMIN)
+            db.session.add(admin_membership)
 
             regular_user = User(
                 email='user@limited.com',
@@ -314,6 +334,10 @@ class TestAccessRequestUserLimit:
                 sso_domain='limited.com'
             )
             db.session.add(regular_user)
+            db.session.flush()
+            # Create membership for regular user
+            user_membership = TenantMembership(tenant_id=tenant.id, user_id=regular_user.id, global_role=GlobalRole.USER)
+            db.session.add(user_membership)
 
             # Create master account
             master = MasterAccount(

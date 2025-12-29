@@ -30,15 +30,16 @@ test.describe('Signup Forms', () => {
       await continueButton.click();
 
       // Wait for signup form to appear (new tenant, so should show signup view)
-      await page.waitForSelector('form:has(input[formControlName="firstName"])', { timeout: 10000 });
+      // Note: homepage.component uses snake_case form controls (first_name, last_name)
+      await page.waitForSelector('form:has(input[formControlName="first_name"])', { timeout: 10000 });
 
       // Verify First Name field is visible
-      const firstNameField = page.locator('mat-form-field:has(input[formControlName="firstName"])');
+      const firstNameField = page.locator('mat-form-field:has(input[formControlName="first_name"])');
       await expect(firstNameField).toBeVisible();
       await expect(firstNameField.locator('mat-label')).toHaveText('First Name');
 
       // Verify Last Name field is visible
-      const lastNameField = page.locator('mat-form-field:has(input[formControlName="lastName"])');
+      const lastNameField = page.locator('mat-form-field:has(input[formControlName="last_name"])');
       await expect(lastNameField).toBeVisible();
       await expect(lastNameField.locator('mat-label')).toHaveText('Last Name');
 
@@ -67,15 +68,15 @@ test.describe('Signup Forms', () => {
       const continueButton = page.locator('button[type="submit"]:has-text("Continue")').first();
       await continueButton.click();
 
-      // Wait for signup form
-      await page.waitForSelector('input[formControlName="firstName"]', { timeout: 10000 });
+      // Wait for signup form (snake_case form controls)
+      await page.waitForSelector('input[formControlName="first_name"]', { timeout: 10000 });
 
       // Fill in First Name
-      const firstNameInput = page.locator('input[formControlName="firstName"]');
+      const firstNameInput = page.locator('input[formControlName="first_name"]');
       await firstNameInput.fill('John');
 
       // Fill in Last Name
-      const lastNameInput = page.locator('input[formControlName="lastName"]');
+      const lastNameInput = page.locator('input[formControlName="last_name"]');
       await lastNameInput.fill('Doe');
 
       // Verify values are filled
@@ -105,8 +106,8 @@ test.describe('Signup Forms', () => {
       const continueButton = page.locator('button[type="submit"]:has-text("Continue")').first();
       await continueButton.click();
 
-      // Wait for signup form
-      await page.waitForSelector('input[formControlName="firstName"]', { timeout: 10000 });
+      // Wait for signup form (snake_case form controls)
+      await page.waitForSelector('input[formControlName="first_name"]', { timeout: 10000 });
 
       // Get the submit button (either "Create Account" or "Send Verification Email")
       const submitButton = page.locator('button[type="submit"]').filter({ hasText: /Create Account|Send Verification Email/ });
@@ -115,7 +116,7 @@ test.describe('Signup Forms', () => {
       await expect(submitButton).toBeDisabled();
 
       // Fill in only First Name
-      const firstNameInput = page.locator('input[formControlName="firstName"]');
+      const firstNameInput = page.locator('input[formControlName="first_name"]');
       await firstNameInput.fill('John');
 
       // Button should still be disabled (Last Name is required)
@@ -123,7 +124,7 @@ test.describe('Signup Forms', () => {
 
       // Clear First Name and fill in only Last Name
       await firstNameInput.clear();
-      const lastNameInput = page.locator('input[formControlName="lastName"]');
+      const lastNameInput = page.locator('input[formControlName="last_name"]');
       await lastNameInput.fill('Doe');
 
       // Button should still be disabled (First Name is required)
@@ -174,16 +175,16 @@ test.describe('Signup Forms', () => {
       if (await createAccountButton.isVisible({ timeout: 5000 })) {
         await createAccountButton.click();
 
-        // Wait for registration form
-        await page.waitForSelector('input[formControlName="firstName"]', { timeout: 10000 });
+        // Wait for registration form (snake_case form controls)
+        await page.waitForSelector('input[formControlName="first_name"]', { timeout: 10000 });
 
         // Verify First Name field
-        const firstNameField = page.locator('mat-form-field:has(input[formControlName="firstName"])');
+        const firstNameField = page.locator('mat-form-field:has(input[formControlName="first_name"])');
         await expect(firstNameField).toBeVisible();
         await expect(firstNameField.locator('mat-label')).toHaveText('First Name');
 
         // Verify Last Name field
-        const lastNameField = page.locator('mat-form-field:has(input[formControlName="lastName"])');
+        const lastNameField = page.locator('mat-form-field:has(input[formControlName="last_name"])');
         await expect(lastNameField).toBeVisible();
         await expect(lastNameField.locator('mat-label')).toHaveText('Last Name');
 
@@ -234,15 +235,15 @@ test.describe('Signup Forms', () => {
       if (await createAccountButton.isVisible({ timeout: 5000 })) {
         await createAccountButton.click();
 
-        // Wait for registration form
-        await page.waitForSelector('input[formControlName="firstName"]', { timeout: 10000 });
+        // Wait for registration form (snake_case form controls)
+        await page.waitForSelector('input[formControlName="first_name"]', { timeout: 10000 });
 
         // Fill in First Name
-        const firstNameInput = page.locator('input[formControlName="firstName"]');
+        const firstNameInput = page.locator('input[formControlName="first_name"]');
         await firstNameInput.fill('Jane');
 
         // Fill in Last Name
-        const lastNameInput = page.locator('input[formControlName="lastName"]');
+        const lastNameInput = page.locator('input[formControlName="last_name"]');
         await lastNameInput.fill('Smith');
 
         // Verify values
@@ -292,8 +293,8 @@ test.describe('Signup Forms', () => {
       if (await createAccountButton.isVisible({ timeout: 5000 })) {
         await createAccountButton.click();
 
-        // Wait for registration form
-        await page.waitForSelector('input[formControlName="firstName"]', { timeout: 10000 });
+        // Wait for registration form (snake_case form controls)
+        await page.waitForSelector('input[formControlName="first_name"]', { timeout: 10000 });
 
         // Get submit button
         const submitButton = page.locator('button[type="submit"]').filter({ hasText: /Create account with passkey/i });
@@ -302,7 +303,7 @@ test.describe('Signup Forms', () => {
         await expect(submitButton).toBeDisabled();
 
         // Fill only First Name
-        const firstNameInput = page.locator('input[formControlName="firstName"]');
+        const firstNameInput = page.locator('input[formControlName="first_name"]');
         await firstNameInput.fill('Test');
 
         // Should still be disabled
@@ -310,7 +311,7 @@ test.describe('Signup Forms', () => {
 
         // Clear and fill only Last Name
         await firstNameInput.clear();
-        const lastNameInput = page.locator('input[formControlName="lastName"]');
+        const lastNameInput = page.locator('input[formControlName="last_name"]');
         await lastNameInput.fill('User');
 
         // Should still be disabled
@@ -360,16 +361,16 @@ test.describe('Signup Forms', () => {
       // The view might be 'access_request' or 'join_organization' depending on tenant settings
       await page.waitForTimeout(2000);
 
-      // Check if we're on access request or join organization view
-      const firstNameInput = page.locator('input[formControlName="firstName"]');
+      // Check if we're on access request or join organization view (snake_case form controls)
+      const firstNameInput = page.locator('input[formControlName="first_name"]');
       if (await firstNameInput.isVisible({ timeout: 5000 })) {
         // Verify First Name field
-        const firstNameField = page.locator('mat-form-field:has(input[formControlName="firstName"])');
+        const firstNameField = page.locator('mat-form-field:has(input[formControlName="first_name"])');
         await expect(firstNameField).toBeVisible();
         await expect(firstNameField.locator('mat-label')).toHaveText('First Name');
 
         // Verify Last Name field
-        const lastNameField = page.locator('mat-form-field:has(input[formControlName="lastName"])');
+        const lastNameField = page.locator('mat-form-field:has(input[formControlName="last_name"])');
         await expect(lastNameField).toBeVisible();
         await expect(lastNameField.locator('mat-label')).toHaveText('Last Name');
 

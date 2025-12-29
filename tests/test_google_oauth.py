@@ -243,14 +243,18 @@ class TestGoogleOAuthConfiguration:
             old_secret = os.environ.pop('GOOGLE_CLIENT_SECRET', None)
 
             try:
-                result = is_google_oauth_configured()
-                assert result is False
+                # Mock Key Vault to prevent fallback to real credentials
+                with patch('keyvault_client.keyvault_client') as mock_kv:
+                    mock_kv.get_secret.return_value = None
+                    result = is_google_oauth_configured()
+                    assert result is False
             finally:
                 # Restore
                 if old_id:
                     os.environ['GOOGLE_CLIENT_ID'] = old_id
                 if old_secret:
                     os.environ['GOOGLE_CLIENT_SECRET'] = old_secret
+                clear_credential_cache()
 
     def test_is_configured_returns_true_when_credentials_set(self, app):
         """is_google_oauth_configured returns True when credentials exist."""
@@ -437,10 +441,13 @@ class TestGoogleOAuthRoutes:
             # Force re-check by clearing cache
             clear_credential_cache()
 
-            with full_app.test_client() as client:
-                response = client.get('/api/auth/google-status')
-                data = response.get_json()
-                assert data['enabled'] is False
+            # Mock Key Vault to prevent fallback to real credentials
+            with patch('keyvault_client.keyvault_client') as mock_kv:
+                mock_kv.get_secret.return_value = None
+                with full_app.test_client() as client:
+                    response = client.get('/api/auth/google-status')
+                    data = response.get_json()
+                    assert data['enabled'] is False
         finally:
             # Restore
             if old_client_id:
