@@ -8,9 +8,7 @@
 /security
 /dpa
 /sla
-/integrations/slack
-/security-features
-/licensing
+/slack-integration
 
 # Blog listing
 /blog
