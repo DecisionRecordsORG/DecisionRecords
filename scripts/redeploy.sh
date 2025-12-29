@@ -2,13 +2,13 @@
 # Quick redeploy script for Architecture Decisions application
 # This script builds, pushes, and redeploys the container with the new image
 #
-# Usage: ./scripts/redeploy.sh [patch|minor|major]
+# Usage: ./scripts/redeploy.sh <patch|minor|major|--no-bump>
 #
-# Arguments:
-#   patch - Bump patch version (1.0.0 -> 1.0.1) for bug fixes
-#   minor - Bump minor version (1.0.0 -> 1.1.0) for new features
-#   major - Bump major version (1.0.0 -> 2.0.0) for breaking changes
-#   (none) - No version bump, just redeploy
+# Arguments (REQUIRED - one of):
+#   patch     - Bump patch version (1.0.0 -> 1.0.1) for bug fixes
+#   minor     - Bump minor version (1.0.0 -> 1.1.0) for new features
+#   major     - Bump major version (1.0.0 -> 2.0.0) for breaking changes
+#   --no-bump - Explicitly skip version bump (for hotfixes or config changes)
 #
 # Prerequisites:
 # - Azure CLI installed and logged in (az login)
@@ -28,8 +28,38 @@ GATEWAY_NAME="adr-appgateway"
 # Cloudflare configuration
 CLOUDFLARE_ZONE_ID="592b5c760ee2d37cabc0bcba764693ea"
 
-# Version bump type (optional argument)
+# Version bump type (REQUIRED argument)
 VERSION_BUMP="${1:-}"
+
+# Validate required argument
+validate_version_argument() {
+    if [[ -z "$VERSION_BUMP" ]]; then
+        echo -e "${RED}[ERROR]${NC} Version argument is REQUIRED"
+        echo ""
+        echo "Usage: ./scripts/redeploy.sh <patch|minor|major|--no-bump>"
+        echo ""
+        echo "Arguments:"
+        echo "  patch     - Bump patch version (1.0.0 -> 1.0.1) for bug fixes"
+        echo "  minor     - Bump minor version (1.0.0 -> 1.1.0) for new features"
+        echo "  major     - Bump major version (1.0.0 -> 2.0.0) for breaking changes"
+        echo "  --no-bump - Explicitly skip version bump (for hotfixes or config changes)"
+        echo ""
+        exit 1
+    fi
+
+    case "$VERSION_BUMP" in
+        patch|minor|major|--no-bump)
+            # Valid argument
+            ;;
+        *)
+            echo -e "${RED}[ERROR]${NC} Invalid argument: $VERSION_BUMP"
+            echo ""
+            echo "Valid arguments: patch, minor, major, --no-bump"
+            echo ""
+            exit 1
+            ;;
+    esac
+}
 
 # Colors
 RED='\033[0;31m'
@@ -45,25 +75,21 @@ success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 
 # Bump version if requested
 bump_version() {
-    if [[ -n "$VERSION_BUMP" ]]; then
-        case "$VERSION_BUMP" in
-            patch|minor|major)
-                log "Bumping version ($VERSION_BUMP)..."
-                ./scripts/version-bump.sh "$VERSION_BUMP"
+    case "$VERSION_BUMP" in
+        patch|minor|major)
+            log "Bumping version ($VERSION_BUMP)..."
+            ./scripts/version-bump.sh "$VERSION_BUMP"
 
-                # Commit the version bump
-                local new_version=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
-                git add version.py
-                git commit -m "Bump version to $new_version"
-                success "Version bumped to $new_version"
-                ;;
-            *)
-                error "Invalid version bump type: $VERSION_BUMP. Use patch, minor, or major."
-                ;;
-        esac
-    else
-        log "No version bump requested"
-    fi
+            # Commit the version bump
+            local new_version=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
+            git add version.py
+            git commit -m "Bump version to $new_version"
+            success "Version bumped to $new_version"
+            ;;
+        --no-bump)
+            log "Skipping version bump (--no-bump specified)"
+            ;;
+    esac
 }
 
 # Check for uncommitted changes (excluding local settings)
@@ -76,6 +102,53 @@ check_git_status() {
         error "Uncommitted changes detected. Please commit before deploying.\nRun: git add . && git commit -m 'your message'"
     fi
     success "Git status clean"
+}
+
+# Generate prerender routes for blog posts (SEO/social sharing)
+generate_prerender_routes() {
+    log "Generating prerender routes for blog posts..."
+    ./scripts/generate-prerender-routes.sh
+
+    # Auto-commit if routes changed
+    if git diff --quiet frontend/prerender-routes.txt 2>/dev/null; then
+        log "Prerender routes unchanged"
+    else
+        log "Prerender routes changed, committing..."
+        git add frontend/prerender-routes.txt
+        git commit -m "Auto-update prerender routes for blog posts"
+        success "Prerender routes committed"
+    fi
+}
+
+# Check for insecure Cloudflare settings in code
+check_cloudflare_security() {
+    log "Checking Cloudflare security settings..."
+
+    # Check Dockerfile for insecure environment variables
+    local dockerfile="deployment/Dockerfile.production"
+    if [ -f "$dockerfile" ]; then
+        # Check for FLASK_ENV=testing (bypasses Cloudflare check)
+        if grep -q "FLASK_ENV.*testing" "$dockerfile"; then
+            error "SECURITY: $dockerfile contains FLASK_ENV=testing which bypasses Cloudflare security!"
+        fi
+
+        # Check for SKIP_CLOUDFLARE_CHECK=true
+        if grep -q "SKIP_CLOUDFLARE_CHECK.*true" "$dockerfile"; then
+            error "SECURITY: $dockerfile contains SKIP_CLOUDFLARE_CHECK=true which bypasses Cloudflare security!"
+        fi
+    fi
+
+    # Check run_local.py isn't accidentally being imported in production code
+    if grep -rq "import run_local\|from run_local" app.py models.py 2>/dev/null; then
+        error "SECURITY: Production code imports run_local.py which has dev-only settings!"
+    fi
+
+    # Check cloudflare_security.py doesn't have hardcoded bypasses
+    if grep -q "return True.*# BYPASS\|# DISABLE" cloudflare_security.py 2>/dev/null; then
+        error "SECURITY: cloudflare_security.py contains hardcoded bypass!"
+    fi
+
+    success "Cloudflare security settings OK"
 }
 
 # Check Azure login
@@ -224,8 +297,11 @@ main() {
     log "=== Architecture Decisions Redeploy Script ==="
     echo ""
 
+    validate_version_argument
     bump_version
+    generate_prerender_routes
     check_git_status
+    check_cloudflare_security
     check_azure_login
     build_image
     push_image
@@ -238,7 +314,7 @@ main() {
     echo ""
     success "=== Deployment Complete ==="
     echo ""
-    echo "Application URL: https://architecture-decisions.org"
+    echo "Application URL: https://decisionrecords.org"
     echo ""
     echo "Monitor logs: az container logs --name $CONTAINER_NAME --resource-group $RESOURCE_GROUP --follow"
     echo ""

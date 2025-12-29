@@ -13,6 +13,9 @@ bleach==6.1.0
 free-email-domains==1.0.1
 disposable-email-domains==0.0.92
 posthog>=3.0.0
+# Slack SDK for Slack integration
+slack-sdk>=3.21.0
+cryptography>=41.0.0
 # OpenTelemetry for log forwarding
 opentelemetry-sdk>=1.20.0
 opentelemetry-exporter-otlp>=1.20.0

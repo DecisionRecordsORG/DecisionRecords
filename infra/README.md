@@ -2,7 +2,7 @@
 
 This folder contains Azure Resource Manager (ARM) templates for deploying the Architecture Decisions application infrastructure.
 
-**Production URL**: https://architecture-decisions.org
+**Production URL**: https://decisionrecords.org
 
 ## Files
 
@@ -100,8 +100,8 @@ The application uses Cloudflare for edge SSL with Origin Server certificates:
 3. **SSL Mode**: Cloudflare SSL/TLS mode set to "Full (strict)"
 
 **Origin Certificate Files** (stored locally, not in repo):
-- Certificate: `~/.ssh/architecture-decisions.pem`
-- Private Key: `~/.ssh/architecture-decisions.key`
+- Certificate: `~/.ssh/decisionrecords.pem`
+- Private Key: `~/.ssh/decisionrecords.key`
 
 ### Private DNS Auto-Registration
 

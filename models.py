@@ -58,6 +58,7 @@ class SystemConfig(db.Model):
     # Default configuration keys
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
     KEY_SUPER_ADMIN_EMAIL = 'super_admin_notification_email'
+    KEY_SUPPORT_EMAIL = 'support_email'  # Email address for contact form submissions
     KEY_ADMIN_SESSION_TIMEOUT_HOURS = 'admin_session_timeout_hours'
     KEY_USER_SESSION_TIMEOUT_HOURS = 'user_session_timeout_hours'
 
@@ -76,6 +77,7 @@ class SystemConfig(db.Model):
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
     DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
     DEFAULT_MAX_USERS_PER_TENANT = 5   # Free tier limit (0 = unlimited)
+    DEFAULT_SUPPORT_EMAIL = 'admin@decisionrecords.org'  # Default support email
 
     # Analytics defaults
     DEFAULT_ANALYTICS_ENABLED = False  # OFF by default (opt-in)
@@ -416,9 +418,16 @@ class TenantSettings(db.Model):
     tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, unique=True)
 
     # Auth settings
-    auth_method = db.Column(db.String(20), default='local')  # 'sso', 'webauthn', 'local'
+    # auth_method values: 'local', 'sso', 'webauthn', 'slack_oidc'
+    # - 'local': All enabled methods (password, passkey, Slack)
+    # - 'sso': Only configured SSO providers
+    # - 'webauthn': Passkeys only
+    # - 'slack_oidc': Slack sign-in only (SSO alternative for Slack-first companies)
+    auth_method = db.Column(db.String(20), default='local')
     allow_password = db.Column(db.Boolean, default=True)
     allow_passkey = db.Column(db.Boolean, default=True)
+    allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack"
+    allow_google_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Google"
     rp_name = db.Column(db.String(255), default='Architecture Decisions')
 
     # Registration settings
@@ -443,6 +452,8 @@ class TenantSettings(db.Model):
             'auth_method': self.auth_method,
             'allow_password': self.allow_password,
             'allow_passkey': self.allow_passkey,
+            'allow_slack_oidc': self.allow_slack_oidc,
+            'allow_google_oauth': self.allow_google_oauth,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
@@ -584,7 +595,9 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(255), nullable=False, unique=True)
-    name = db.Column(db.String(255), nullable=True)
+    name = db.Column(db.String(255), nullable=True)  # Legacy field, use first_name + last_name
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
     password_hash = db.Column(db.String(255), nullable=True)  # For local/password authentication
     sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
@@ -619,6 +632,30 @@ class User(db.Model):
     def has_password(self):
         """Check if user has a password set."""
         return self.password_hash is not None
+
+    def get_full_name(self):
+        """Get full name, preferring first_name + last_name over legacy name field."""
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        elif self.first_name:
+            return self.first_name
+        elif self.last_name:
+            return self.last_name
+        return self.name or ''
+
+    def set_name(self, first_name=None, last_name=None, full_name=None):
+        """Set user's name. Prefer first_name/last_name, but handle legacy full_name too."""
+        if first_name is not None or last_name is not None:
+            self.first_name = first_name
+            self.last_name = last_name
+            # Also update legacy name field for backwards compatibility
+            self.name = self.get_full_name()
+        elif full_name:
+            # Parse full name into first and last (best effort)
+            parts = full_name.strip().split(None, 1)  # Split on first whitespace
+            self.first_name = parts[0] if parts else ''
+            self.last_name = parts[1] if len(parts) > 1 else ''
+            self.name = full_name
 
     # v1.5 Membership helpers
     def get_membership(self, tenant_id=None):
@@ -656,7 +693,9 @@ class User(db.Model):
         return {
             'id': self.id,
             'email': self.email,
-            'name': self.name,
+            'name': self.get_full_name(),  # Use helper for consistent name formatting
+            'first_name': self.first_name,
+            'last_name': self.last_name,
             'sso_domain': self.sso_domain,
             'auth_type': self.auth_type,
             'is_admin': self.is_admin,
@@ -744,9 +783,12 @@ class AuthConfig(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     domain = db.Column(db.String(255), nullable=False, unique=True)
-    auth_method = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
+    # auth_method: 'local', 'sso', 'webauthn', 'slack_oidc'
+    auth_method = db.Column(db.String(20), nullable=False, default='local')
     allow_password = db.Column(db.Boolean, default=True)  # Allow password login
     allow_passkey = db.Column(db.Boolean, default=True)  # Allow passkey/WebAuthn login
+    allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack" option
+    allow_google_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Google" option
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
@@ -776,6 +818,8 @@ class AuthConfig(db.Model):
             'auth_method': self.auth_method,
             'allow_password': self.allow_password,
             'allow_passkey': self.allow_passkey,
+            'allow_slack_oidc': self.allow_slack_oidc,
+            'allow_google_oauth': self.allow_google_oauth,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
@@ -978,9 +1022,14 @@ class ArchitectureDecision(db.Model):
     deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     deletion_expires_at = db.Column(db.DateTime, nullable=True)  # When soft-delete becomes permanent (default: 30 days)
 
+    # Decision owner (the person who made the decision, may differ from creator)
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    owner_email = db.Column(db.String(255), nullable=True)  # For external owners not in system
+
     # Relationships
     updated_by = db.relationship('User', foreign_keys=[updated_by_id])
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
+    owner = db.relationship('User', foreign_keys=[owner_id])
     history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
     infrastructure = db.relationship('ITInfrastructure', secondary=decision_infrastructure, backref=db.backref('decisions', lazy='dynamic'))
     # v1.5 relationships
@@ -988,7 +1037,7 @@ class ArchitectureDecision(db.Model):
     space_links = db.relationship('DecisionSpace', backref='decision', lazy='dynamic', cascade='all, delete-orphan')
 
     # Valid status values
-    VALID_STATUSES = ['proposed', 'accepted', 'deprecated', 'superseded']
+    VALID_STATUSES = ['proposed', 'accepted', 'archived', 'superseded']
 
     @property
     def spaces(self):
@@ -1021,6 +1070,9 @@ class ArchitectureDecision(db.Model):
             'tenant_id': self.tenant_id,  # v1.5
             'created_by': self.creator.to_dict() if self.creator else None,
             'updated_by': self.updated_by.to_dict() if self.updated_by else None,
+            'owner': self.owner.to_dict() if self.owner else None,
+            'owner_id': self.owner_id,
+            'owner_email': self.owner_email,
             'infrastructure': [i.to_dict() for i in self.infrastructure] if self.infrastructure else [],
         }
         if include_spaces:
@@ -1385,3 +1437,165 @@ def save_history(decision, change_reason=None, changed_by=None):
     )
     db.session.add(history_entry)
     return history_entry
+
+
+# ============================================================================
+# SLACK INTEGRATION MODELS
+# ============================================================================
+
+class SlackWorkspace(db.Model):
+    """Slack workspace installation for a tenant."""
+
+    __tablename__ = 'slack_workspaces'
+
+    # Status values
+    STATUS_PENDING_CLAIM = 'pending_claim'
+    STATUS_ACTIVE = 'active'
+    STATUS_DISCONNECTED = 'disconnected'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True, unique=True, index=True)
+    workspace_id = db.Column(db.String(50), nullable=False, unique=True, index=True)  # Slack team_id
+    workspace_name = db.Column(db.String(255), nullable=True)
+
+    # Encrypted bot token (xoxb-...)
+    bot_token_encrypted = db.Column(db.Text, nullable=False)
+
+    # Claim tracking
+    status = db.Column(db.String(20), default=STATUS_PENDING_CLAIM)
+    claimed_at = db.Column(db.DateTime, nullable=True)
+    claimed_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Notification settings
+    default_channel_id = db.Column(db.String(50), nullable=True)
+    default_channel_name = db.Column(db.String(255), nullable=True)
+    notifications_enabled = db.Column(db.Boolean, default=True)
+    notify_on_create = db.Column(db.Boolean, default=True)
+    notify_on_status_change = db.Column(db.Boolean, default=True)
+
+    # Status
+    is_active = db.Column(db.Boolean, default=True)
+    installed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity_at = db.Column(db.DateTime, nullable=True)
+
+    # App version tracking (for upgrade management)
+    granted_scopes = db.Column(db.Text, nullable=True)  # Comma-separated list of granted OAuth scopes
+    scopes_updated_at = db.Column(db.DateTime, nullable=True)  # When scopes were last updated
+    app_version = db.Column(db.String(20), nullable=True)  # Version at time of install/upgrade
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref=db.backref('slack_workspace', uselist=False))
+    claimed_by = db.relationship('User', foreign_keys=[claimed_by_id])
+    user_mappings = db.relationship('SlackUserMapping', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self, include_upgrade_info=False):
+        result = {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'workspace_id': self.workspace_id,
+            'workspace_name': self.workspace_name,
+            'status': self.status,
+            'claimed_at': self.claimed_at.isoformat() if self.claimed_at else None,
+            'default_channel_id': self.default_channel_id,
+            'default_channel_name': self.default_channel_name,
+            'notifications_enabled': self.notifications_enabled,
+            'notify_on_create': self.notify_on_create,
+            'notify_on_status_change': self.notify_on_status_change,
+            'is_active': self.is_active,
+            'installed_at': self.installed_at.isoformat() if self.installed_at else None,
+            'last_activity_at': self.last_activity_at.isoformat() if self.last_activity_at else None,
+            'app_version': self.app_version,
+            'granted_scopes': self.granted_scopes.split(',') if self.granted_scopes else [],
+        }
+
+        if include_upgrade_info:
+            from slack_upgrade import get_upgrade_info, get_workspace_scopes
+            scopes = get_workspace_scopes(self)
+            result['upgrade_info'] = get_upgrade_info(scopes)
+
+        return result
+
+
+class SlackUserMapping(db.Model):
+    """Maps Slack users to ADR platform users."""
+
+    __tablename__ = 'slack_user_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slack_workspace_id = db.Column(db.Integer, db.ForeignKey('slack_workspaces.id'), nullable=False, index=True)
+    slack_user_id = db.Column(db.String(50), nullable=False, index=True)  # Slack user ID (U...)
+    slack_email = db.Column(db.String(320), nullable=True)  # Email from Slack profile
+
+    # Linked ADR user (nullable - may not be linked yet)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # How the user was linked
+    link_method = db.Column(db.String(20), nullable=True)  # 'auto_email', 'browser_auth'
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    linked_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('slack_mappings', lazy='dynamic'))
+
+    # Unique constraint: one mapping per slack user per workspace
+    __table_args__ = (
+        db.UniqueConstraint('slack_workspace_id', 'slack_user_id', name='uq_slack_user_workspace'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slack_workspace_id': self.slack_workspace_id,
+            'slack_user_id': self.slack_user_id,
+            'slack_email': self.slack_email,
+            'user_id': self.user_id,
+            'link_method': self.link_method,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'linked_at': self.linked_at.isoformat() if self.linked_at else None,
+        }
+
+
+class BlogPost(db.Model):
+    """Blog posts for the marketing website."""
+
+    __tablename__ = 'blog_posts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(255), nullable=False, unique=True, index=True)  # URL-friendly slug
+    title = db.Column(db.String(500), nullable=False)
+    excerpt = db.Column(db.Text, nullable=False)  # Short description for list view
+    author = db.Column(db.String(255), nullable=False, default='Decision Records')
+    category = db.Column(db.String(100), nullable=False)  # Documentation, Startups, Enterprise, etc.
+    read_time = db.Column(db.String(50), nullable=False, default='5 min read')
+    image = db.Column(db.String(500), nullable=True)  # Path to hero/thumbnail image
+    meta_description = db.Column(db.String(300), nullable=True)  # SEO meta description
+    meta_keywords = db.Column(db.String(500), nullable=True)  # SEO keywords (comma-separated)
+    published = db.Column(db.Boolean, default=True)  # Whether post is visible
+    featured = db.Column(db.Boolean, default=False)  # Featured posts appear first
+    publish_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)  # When to show as published
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Content is stored in Angular component, not DB (for now)
+    # This model manages metadata only
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'slug': self.slug,
+            'title': self.title,
+            'excerpt': self.excerpt,
+            'author': self.author,
+            'category': self.category,
+            'readTime': self.read_time,
+            'image': self.image,
+            'metaDescription': self.meta_description,
+            'metaKeywords': self.meta_keywords,
+            'published': self.published,
+            'featured': self.featured,
+            'publishDate': self.publish_date.strftime('%B %Y') if self.publish_date else None,
+            'publishDateISO': self.publish_date.isoformat() if self.publish_date else None,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
+        }

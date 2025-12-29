@@ -1,0 +1,19 @@
+# Static pages (auto-generated - do not edit manually)
+/
+/solutions
+/about
+/faq
+/integrations
+/terms
+/security
+/dpa
+/sla
+/slack-integration
+
+# Blog listing
+/blog
+
+# Blog posts (auto-generated from blog-post.component.ts)
+/blog/how-should-teams-document-important-decisions
+/blog/how-to-track-decisions-at-a-startup
+/blog/decision-habit-framework-fashion-brands

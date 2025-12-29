@@ -21,7 +21,13 @@
       "Bash(python -m pytest:*)",
       "Bash(.venv/bin/python:*)",
       "Bash(FLASK_ENV=testing python3:*)",
-      "Bash(npx playwright test:*)"
+      "Bash(npx playwright test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(lsof:*)",
+      "Bash(gh issue view:*)",
+      "Bash(npx --package=typescript tsc:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []

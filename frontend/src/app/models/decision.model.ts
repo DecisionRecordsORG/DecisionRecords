@@ -24,7 +24,9 @@ export interface TenantInfo {
 export interface User {
   id: number;
   email: string;
-  name: string;
+  name: string;  // Full name (computed from first_name + last_name)
+  first_name?: string;
+  last_name?: string;
   sso_domain: string;
   auth_type: 'sso' | 'webauthn' | 'local' | 'oidc';
   is_admin: boolean;  // Legacy field - use membership.global_role for v1.5
@@ -156,13 +158,15 @@ export interface ApiError {
 
 export interface AuthConfig {
   domain: string;
-  auth_method: 'sso' | 'webauthn';
+  auth_method: 'sso' | 'webauthn' | 'slack_oidc' | string;
   allow_registration: boolean;
   require_approval: boolean;
   rp_name: string;
   tenant_prefix?: string;  // 3-letter prefix for decision IDs
   allow_password?: boolean;
   allow_passkey?: boolean;
+  allow_slack_oidc?: boolean;  // Allow "Sign in with Slack" option
+  allow_google_oauth?: boolean;  // Allow "Sign in with Google" option
   id?: number;
   created_at?: string;
   updated_at?: string;
@@ -237,7 +241,9 @@ export interface TenantStatus {
   user_count: number;
   auth_method: 'sso' | 'webauthn';
   allow_registration: boolean;
-  require_approval: boolean;
+  require_approval: boolean;  // Tenant's configured setting (admin's choice)
+  effective_require_approval: boolean;  // Actual behavior (accounts for tenant capability)
+  can_process_access_requests: boolean;  // Whether tenant has admins who can approve
   has_sso: boolean;
   sso_provider: string | null;
   sso_id: number | null;

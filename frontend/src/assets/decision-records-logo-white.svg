@@ -1,0 +1,29 @@
+<?xml version="1.0" ?>
+<!-- Decision Records Logo - Mono White Version -->
+<!-- Use on dark/colored backgrounds (hero sections, dark mode) -->
+<svg width="800px" height="800px" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+<g id="elephant">
+<!-- Ear - white full opacity -->
+<path d="M9.91,25.94v-2.65l-2.52-.81c-.3,.14-.55,.35-.75,.61l-1.38,1.89c-.36,.49-.37,1.15-.02,1.66l.66,.96c.31,.46,.95,.57,1.39,.24l2.61-1.9Z" fill="#ffffff" fill-opacity="0.95"/>
+<!-- Ear inner - white medium opacity -->
+<path d="M14.26,31.5l3.65-2.14-1.67-3.44-3.05-2.94c-.47-.45-1.09-.7-1.75-.7h-3.18c-.3,0-.6,.07-.87,.21l2.52,3.46,3.65,5.02c.18,.24,.42,.43,.69,.54h0Z" fill="#ffffff" fill-opacity="0.8"/>
+<!-- Trunk tip - white full opacity -->
+<path d="M55.68,33.44l-1.25,3.18,1.25,3.16,3.08-3.08c.37-.37,.31-.99-.12-1.28l-2.95-1.98Z" fill="#ffffff" fill-opacity="0.95"/>
+<!-- Trunk tip shadow - white lower opacity -->
+<path d="M55.68,33.44l-1.25,3.18,1.25,3.16,1.4-1.4v-4l-1.4-.94Z" fill="#ffffff" fill-opacity="0.6"/>
+<!-- Body rear - white medium opacity -->
+<path d="M55.42,28.04l-8.87,4.84-4.21,7.07,4.66,7.98c.32,.54,.9,.88,1.53,.88h6.14c.56,0,1.01-.46,1.01-1.02V28.81c-.01-.28-.1-.55-.26-.78h0Z" fill="#ffffff" fill-opacity="0.8"/>
+<!-- Body main - white with transparency -->
+<path d="M40.51,22.17l-14.62,9.61v16c0,.56,.45,1.02,1.01,1.02h4.69c.65,0,1.28-.24,1.77-.68l8.97-8.17,13.08-11.91c-.16-.27-.4-.47-.69-.59l-14.22-5.28Z" fill="#ffffff" fill-opacity="0.45"/>
+<!-- Head fold - white medium opacity -->
+<path d="M38.88,15.48l-10.22,5.95-4.47,8.72,1.74,1.62,4.27,3.96c.44,.41,1.09,.5,1.63,.24l9.47-4.65c.53-.26,.82-.84,.71-1.42l-1.5-7.73-1.15-5.97c-.07-.29-.24-.54-.48-.71h0Z" fill="#ffffff" fill-opacity="0.8"/>
+<!-- Head main - white lightest with transparency -->
+<path d="M21.06,15.2c-.61,0-1.15,.38-1.35,.96l-3.46,9.76-1.98,5.59c.28,.12,.6,.16,.9,.11l9.01-1.46h0l14.7-14.67c-.21-.17-.46-.27-.73-.28H21.06Z" fill="#ffffff" fill-opacity="0.4"/>
+<!-- Ear shadow - white accent -->
+<path d="M7.4,22.48l1.21,4.41,1.31-.95-2.52-3.46Z" fill="#ffffff" fill-opacity="0.6"/>
+<!-- Face shadow - white accent -->
+<path d="M14.26,31.5l1.98-5.59-1.6-1.54-.38,7.13Z" fill="#ffffff" fill-opacity="0.6"/>
+<!-- Body shadow - white deeper -->
+<path d="M55.42,28.04l-10.75,15.9-2.33-3.99,13.08-11.91Z" fill="#ffffff" fill-opacity="0.5"/>
+</g>
+</svg>

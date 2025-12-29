@@ -18,10 +18,6 @@ import { MatIconModule } from '@angular/material/icon';
       <!-- Header -->
       <header class="about-header">
         <div class="container">
-          <a routerLink="/" class="back-link">
-            <mat-icon>arrow_back</mat-icon>
-            <span>Back to Home</span>
-          </a>
           <h1>About This Project</h1>
         </div>
       </header>
@@ -42,14 +38,14 @@ import { MatIconModule } from '@angular/material/icon';
               Over time, people change roles, teams reorganise, vendors disappear, and priorities shift. Documentation deteriorates or is discarded altogether. What remains is a system that behaves in a certain way, with little visible explanation. Anyone asked to maintain, secure, regulate, modernise, or integrate with that system must reconstruct decisions after the fact, often through inference, guesswork, or repeated failure.
             </p>
 
-            <h2>What is a Decision Record?</h2>
+            <h2>What is an Architecture Decision?</h2>
 
             <p>
-              The term <em>decision record</em> signifies this class of choices. It does not describe a job title or a methodology. It refers to any decision with a lasting structural impact: decisions that limit future change, influence how components interact, or define the boundaries within which systems and organisations operate. These decisions exist whether documented or not. Naming them simply makes them visible.
+              The term <em>architecture decision</em> signifies this class of choices. It does not describe a job title or a methodology. It refers to any decision with a lasting structural impact: decisions that limit future change, influence how components interact, or define the boundaries within which systems and organisations operate. These decisions exist whether documented or not. Naming them simply makes them visible.
             </p>
 
             <p>
-              Despite their importance, important decisions are seldom treated as first-class knowledge. They tend to reside in people's minds, in forgotten presentations, or in fragments scattered across tools not designed to preserve rationale. When documented, it is often as an afterthought, detached from the context that made the decision meaningful.
+              Despite their importance, architecture decisions are seldom treated as first-class knowledge. They tend to reside in people's minds, in forgotten presentations, or in fragments scattered across tools not designed to preserve rationale. When documented, it is often as an afterthought, detached from the context that made the decision meaningful.
             </p>
 
             <h2>Why This Project Exists</h2>
@@ -68,10 +64,10 @@ import { MatIconModule } from '@angular/material/icon';
               Although the idea originated in software engineering, the issue it addresses is much broader. Large organisations make structural decisions across IT landscapes, cloud and infrastructure strategies, security and compliance frameworks, data and integration methods, and operational structures. In all these areas, future teams bear the consequences without necessarily inheriting explanations.
             </p>
 
-            <h2>A Non-Profit Initiative</h2>
+            <h2>Open Source & Independent</h2>
 
             <p>
-              Decision Records is a non-profit initiative because impartiality matters. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach.
+              Decision Records is an open source project because transparency and impartiality matter. The platform is not intended to promote tools, vendors, or certifications. Its purpose is to provide a stable infrastructure for preserving decision context, regardless of organisational size, maturity, or technical approach. You can self-host the platform or use our managed cloud service.
             </p>
 
             <blockquote>
@@ -87,13 +83,6 @@ import { MatIconModule } from '@angular/material/icon';
           </div>
         </div>
       </main>
-
-      <!-- Footer -->
-      <footer class="about-footer">
-        <div class="container">
-          <p>&copy; {{ currentYear }} DecisionRecords.org</p>
-        </div>
-      </footer>
     </div>
   `,
   styles: [`
@@ -107,7 +96,7 @@ import { MatIconModule } from '@angular/material/icon';
     .about-header {
       background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #1e40af 100%);
       color: white;
-      padding: 40px 24px 60px;
+      padding: 100px 24px 60px;
     }
 
     .container {
@@ -252,6 +241,4 @@ import { MatIconModule } from '@angular/material/icon';
     }
   `]
 })
-export class AboutComponent {
-  currentYear = new Date().getFullYear();
-}
+export class AboutComponent {}

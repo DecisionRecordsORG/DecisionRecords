@@ -61,6 +61,10 @@ export class AuthService {
     if (this.isMasterAccount) return false;
     const user = this.currentUser?.user as User;
     if (!user) return false;
+    // OAuth users (sso, oidc) don't need passkey/password - OAuth is their auth method
+    if (user.auth_type === 'sso' || user.auth_type === 'oidc') {
+      return false;
+    }
     return !user.has_passkey && !user.has_password;
   }
 

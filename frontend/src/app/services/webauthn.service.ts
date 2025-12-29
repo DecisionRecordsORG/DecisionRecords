@@ -137,11 +137,11 @@ export class WebAuthnService {
   /**
    * Register a new user with WebAuthn (or add a new credential for existing user)
    */
-  register(email: string, name?: string): Observable<{ message: string; user: User }> {
+  register(email: string, firstName?: string, lastName?: string): Observable<{ message: string; user: User }> {
     // Step 1: Get registration options from server
     return this.http.post<WebAuthnRegistrationOptions>(
       `${this.apiUrl}/webauthn/register/options`,
-      { email, name }
+      { email, first_name: firstName, last_name: lastName }
     ).pipe(
       // Step 2: Create credential using browser WebAuthn API
       switchMap(options => from(this.createCredential(options))),

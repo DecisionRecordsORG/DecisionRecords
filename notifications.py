@@ -217,7 +217,82 @@ You are receiving this because you subscribed to decision update notifications.
         send_email(email_config, subscriber.email, subject, html_content, text_content)
 
 
-def send_setup_token_email(email_config, user_name, user_email, setup_url, expires_in_hours, app_name="Architecture Decisions"):
+def notify_decision_owner(email_config, decision, owner_email, owner_name=None, base_url=None):
+    """Notify a person that they've been assigned as the owner of a decision.
+
+    Args:
+        email_config: Email configuration to use for sending
+        decision: The ArchitectureDecision object
+        owner_email: Email address of the new owner
+        owner_name: Name of the owner (optional, will use email if not provided)
+        base_url: Base URL for links (e.g., https://decisionrecords.org)
+    """
+    if not email_config or not email_config.enabled:
+        logger.warning("Decision owner notification not sent: Email configuration is missing or disabled")
+        return False
+
+    name = owner_name or owner_email.split('@')[0]
+    decision_url = f"{base_url}/{decision.domain}/decision/{decision.id}" if base_url else None
+    creator_name = decision.creator.name if decision.creator else 'Unknown'
+
+    subject = f"You've been assigned as the owner of: {decision.title}"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">Decision Owner Assignment</h2>
+
+            <p>Hi {name},</p>
+
+            <p>You have been assigned as the <strong>decision owner</strong> for the following architecture decision:</p>
+
+            <div style="background-color: #f5f5f5; padding: 16px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="margin: 0 0 8px 0; color: #1976d2;">{decision.display_id or f'ADR-{decision.id}'}: {decision.title}</h3>
+                <p style="margin: 4px 0;"><strong>Status:</strong> {decision.status.capitalize()}</p>
+                <p style="margin: 4px 0;"><strong>Created by:</strong> {creator_name}</p>
+            </div>
+
+            {f'<div style="text-align: center; margin: 20px 0;"><a href="{decision_url}" style="display: inline-block; background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">View Decision</a></div>' if decision_url else ''}
+
+            <p style="color: #666; font-size: 14px;">
+                As the decision owner, you are recognized as the person who made this architectural decision.
+                You may be contacted for clarification or questions about this decision.
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px;">
+                This is an automated notification from Decision Records.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+Decision Owner Assignment
+
+Hi {name},
+
+You have been assigned as the decision owner for the following architecture decision:
+
+{decision.display_id or f'ADR-{decision.id}'}: {decision.title}
+Status: {decision.status.capitalize()}
+Created by: {creator_name}
+
+{f'View decision: {decision_url}' if decision_url else ''}
+
+As the decision owner, you are recognized as the person who made this architectural decision.
+You may be contacted for clarification or questions about this decision.
+
+---
+This is an automated notification from Decision Records.
+    """
+
+    return send_email(email_config, owner_email, subject, html_content, text_content)
+
+
+def send_setup_token_email(email_config, user_name, user_email, setup_url, expires_in_hours, app_name="Decision Records"):
     """Send a setup token email to a user so they can set up their login credentials."""
     subject = f"Set Up Your {app_name} Account"
 
@@ -405,8 +480,12 @@ If you didn't request this password reset, you can safely ignore this email. You
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
-def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions"):
-    """Send user feedback to the feedback inbox."""
+def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions", recipient_email=None):
+    """Send user feedback to the feedback inbox.
+
+    Args:
+        recipient_email: Override the default support email. If None, uses default.
+    """
     subject = f"[{app_name}] New Feedback from {sender_name}"
     consent_text = "Yes, okay to contact" if contact_consent else "No, do not contact"
     consent_badge = "✅ Can contact" if contact_consent else "❌ Do not contact"
@@ -461,8 +540,9 @@ Feedback Message:
 This feedback was submitted through the {app_name} website.
     """
 
-    # Send to the feedback inbox
-    return send_email(email_config, "feedback@architecture-decisions.org", subject, html_content, text_content)
+    # Send to the feedback inbox (use provided recipient or default)
+    target_email = recipient_email or "admin@decisionrecords.org"
+    return send_email(email_config, target_email, subject, html_content, text_content)
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
@@ -530,4 +610,4 @@ This sponsorship inquiry was submitted through the {app_name} website.
     """
 
     # Send to the admin inbox
-    return send_email(email_config, "adr-admin@architecture-decisions.org", subject, html_content, text_content)
+    return send_email(email_config, "adr-admin@decisionrecords.org", subject, html_content, text_content)

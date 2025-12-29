@@ -180,6 +180,61 @@ class TestUserModel:
         """has_password returns False when password not set."""
         assert sample_user.has_password() is False
 
+    def test_set_name_with_first_and_last_name(self, sample_user):
+        """set_name correctly sets first_name, last_name, and name."""
+        sample_user.set_name(first_name='John', last_name='Doe')
+        assert sample_user.first_name == 'John'
+        assert sample_user.last_name == 'Doe'
+        assert sample_user.name == 'John Doe'
+
+    def test_set_name_with_first_name_only(self, sample_user):
+        """set_name handles first_name only."""
+        sample_user.set_name(first_name='Jane', last_name=None)
+        assert sample_user.first_name == 'Jane'
+        assert sample_user.last_name is None
+        assert sample_user.name == 'Jane'
+
+    def test_set_name_with_full_name_parses_correctly(self, sample_user):
+        """set_name with full_name parses into first and last name."""
+        sample_user.set_name(full_name='Alice Smith')
+        assert sample_user.first_name == 'Alice'
+        assert sample_user.last_name == 'Smith'
+        assert sample_user.name == 'Alice Smith'
+
+    def test_set_name_with_full_name_single_word(self, sample_user):
+        """set_name with single word full_name uses it as first_name."""
+        sample_user.set_name(full_name='Madonna')
+        assert sample_user.first_name == 'Madonna'
+        assert sample_user.last_name == ''
+        assert sample_user.name == 'Madonna'
+
+    def test_set_name_with_full_name_multiple_parts(self, sample_user):
+        """set_name with multi-part name puts all after first space in last_name."""
+        sample_user.set_name(full_name='Mary Jane Watson')
+        assert sample_user.first_name == 'Mary'
+        assert sample_user.last_name == 'Jane Watson'
+        assert sample_user.name == 'Mary Jane Watson'
+
+    def test_get_full_name_with_first_and_last(self, sample_user):
+        """get_full_name returns combined first and last name."""
+        sample_user.first_name = 'John'
+        sample_user.last_name = 'Doe'
+        assert sample_user.get_full_name() == 'John Doe'
+
+    def test_get_full_name_with_first_only(self, sample_user):
+        """get_full_name returns first_name when last_name is empty."""
+        sample_user.first_name = 'Jane'
+        sample_user.last_name = None
+        sample_user.name = None
+        assert sample_user.get_full_name() == 'Jane'
+
+    def test_get_full_name_falls_back_to_legacy_name(self, sample_user):
+        """get_full_name returns legacy name when first/last not set."""
+        sample_user.first_name = None
+        sample_user.last_name = None
+        sample_user.name = 'Legacy Name'
+        assert sample_user.get_full_name() == 'Legacy Name'
+
     def test_get_membership_returns_correct_membership(self, session, sample_user, sample_tenant, sample_membership):
         """get_membership returns user's membership for tenant."""
         membership = sample_user.get_membership(sample_tenant.id)
@@ -220,10 +275,20 @@ class TestUserModel:
         assert 'id' in data
         assert 'email' in data
         assert 'name' in data
+        assert 'first_name' in data
+        assert 'last_name' in data
         assert 'sso_domain' in data
         assert 'auth_type' in data
         assert 'has_passkey' in data
         assert 'has_password' in data
+
+    def test_to_dict_includes_correct_name_values(self, sample_user):
+        """to_dict returns correct name values when first_name/last_name are set."""
+        sample_user.set_name(first_name='Test', last_name='User')
+        data = sample_user.to_dict()
+        assert data['first_name'] == 'Test'
+        assert data['last_name'] == 'User'
+        assert data['name'] == 'Test User'
 
     def test_to_dict_excludes_sensitive_data(self, sample_user):
         """to_dict does not include password hash."""

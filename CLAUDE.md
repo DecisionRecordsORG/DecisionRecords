@@ -11,7 +11,7 @@ This file contains instructions and context for Claude Code when working on this
 
 Architecture Decisions is a multi-tenant web application for managing Architecture Decision Records (ADRs) based on the arc42 format.
 
-- **Production URL**: https://architecture-decisions.org
+- **Production URL**: https://decisionrecords.org
 - **Backend**: Python/Flask with SQLAlchemy
 - **Frontend**: Angular 18 with Material UI
 - **Auth**: WebAuthn/Passkeys, OIDC SSO, local auth
@@ -130,11 +130,11 @@ az keyvault secret set \
 
 ## Domain & SSL Configuration
 
-- **Domain**: architecture-decisions.org
+- **Domain**: decisionrecords.org
 - **DNS Provider**: Cloudflare (Free plan)
 - **SSL Mode**: Full (strict) - Cloudflare validates Origin certificate
 - **Origin Certificate**: Cloudflare Origin Server certificate installed on App Gateway
-- **Certificate Files**: `~/.ssh/architecture-decisions.pem` (cert) and `~/.ssh/architecture-decisions.key` (private key)
+- **Certificate Files**: `~/.ssh/decisionrecords.pem` (cert) and `~/.ssh/decisionrecords.key` (private key)
 
 ## Common Tasks
 

@@ -1,7 +1,9 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
+import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
+import { MatDividerModule } from '@angular/material/divider';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
@@ -13,7 +15,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest } from '../../services/admin.service';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel } from '../../services/admin.service';
+import { ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest } from '../../models/decision.model';
@@ -30,7 +33,9 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     MatCardModule,
+    MatDividerModule,
     MatTabsModule,
     MatFormFieldModule,
     MatInputModule,
@@ -66,7 +71,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         </div>
       }
 
-      <mat-tab-group>
+      <mat-tab-group [(selectedIndex)]="selectedTabIndex">
         <!-- SSO Configuration Tab -->
         <mat-tab label="SSO Providers">
           <div class="tab-content">
@@ -139,14 +144,14 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <mat-slide-toggle formControlName="enabled">Enabled</mat-slide-toggle>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="ssoForm.invalid || savingSSOConfig">
                       <mat-spinner diameter="20" *ngIf="savingSSOConfig"></mat-spinner>
                       <mat-icon *ngIf="!savingSSOConfig">save</mat-icon>
                       <span *ngIf="!savingSSOConfig">{{ editingSSOId ? 'Update' : 'Add Provider' }}</span>
                     </button>
                     @if (editingSSOId) {
-                      <button mat-button type="button" (click)="cancelSSOEdit()">Cancel</button>
+                      <button mat-stroked-button type="button" (click)="cancelSSOEdit()">Cancel</button>
                     }
                   </div>
                 </form>
@@ -213,7 +218,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's decision records.</p>
+                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's architecture decisions.</p>
                 <h4>Use Cases</h4>
                 <ul>
                   <li>Decision status changes</li>
@@ -268,7 +273,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
                     <mat-form-field appearance="outline">
                       <mat-label>From Name</mat-label>
-                      <input matInput formControlName="from_name" placeholder="Decision Records">
+                      <input matInput formControlName="from_name" placeholder="Architecture Decisions">
                     </mat-form-field>
                   </div>
 
@@ -278,13 +283,13 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   </div>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="emailForm.invalid || savingEmailConfig">
                       <mat-spinner diameter="20" *ngIf="savingEmailConfig"></mat-spinner>
                       <mat-icon *ngIf="!savingEmailConfig">save</mat-icon>
                       <span *ngIf="!savingEmailConfig">Save Configuration</span>
                     </button>
-                    <button mat-button type="button" (click)="testEmail()"
+                    <button mat-stroked-button type="button" (click)="testEmail()"
                             [disabled]="!hasExistingEmailConfig || testingEmail">
                       <mat-spinner diameter="20" *ngIf="testingEmail"></mat-spinner>
                       <mat-icon *ngIf="!testingEmail">send</mat-icon>
@@ -453,19 +458,70 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                           </div>
                         </div>
                       </mat-radio-button>
+
+                      <mat-radio-button value="slack_oidc" class="auth-method-option"
+                                        [disabled]="!slackOidcGloballyEnabled || isProvisionalAdmin">
+                        <div class="option-content">
+                          <div class="option-icons">
+                            <img src="/assets/slack-logo.svg" alt="Slack" class="slack-icon-auth">
+                          </div>
+                          <div class="option-text">
+                            <strong>Slack Only</strong>
+                            @if (slackOidcGloballyEnabled) {
+                              <span class="option-desc">Only allow sign-in via Slack (SSO alternative)</span>
+                            } @else {
+                              <span class="option-desc disabled-hint">Slack integration not available</span>
+                            }
+                          </div>
+                        </div>
+                      </mat-radio-button>
                     </mat-radio-group>
                   </div>
+
+                  <!-- Slack Sign-in Toggle (when not in slack_oidc mode) -->
+                  @if (slackOidcGloballyEnabled && authConfigForm.value.auth_method !== 'slack_oidc' && authConfigForm.value.auth_method !== 'sso') {
+                    <div class="slack-oidc-toggle-section">
+                      <h4 class="options-header">Slack Sign-in</h4>
+                      <mat-slide-toggle formControlName="allow_slack_oidc">
+                        Allow "Sign in with Slack" option
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, users can sign in using their Slack account in addition to other methods.
+                      </p>
+                    </div>
+                  }
+
+                  <!-- Google Sign-in Toggle (when not in SSO mode) -->
+                  @if (googleOauthGloballyEnabled && authConfigForm.value.auth_method !== 'sso') {
+                    <div class="google-oauth-toggle-section">
+                      <h4 class="options-header">Google Sign-in</h4>
+                      <mat-slide-toggle formControlName="allow_google_oauth">
+                        Allow "Sign in with Google" option
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, users with Google Workspace accounts from your domain can sign in using Google.
+                        Personal Gmail accounts are not allowed.
+                      </p>
+                    </div>
+                  }
 
                   <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
 
+                      @if (isProvisionalAdmin) {
+                        <div class="provisional-admin-notice">
+                          <mat-icon>info</mat-icon>
+                          <span>These settings will become available once shared administration is established (add another admin or steward).</span>
+                        </div>
+                      }
+
                       <div class="toggle-with-tooltip">
                         <mat-slide-toggle formControlName="allow_registration"
-                                          [disabled]="isRegistrationToggleRestricted && !authConfigForm.value.allow_registration"
+                                          [disabled]="isProvisionalAdmin || (isRegistrationToggleRestricted && !authConfigForm.value.allow_registration)"
                                           data-testid="allow-registration-toggle">
                           Allow new user registration
                         </mat-slide-toggle>
-                        @if (isRegistrationToggleRestricted) {
+                        @if (isRegistrationToggleRestricted && !isProvisionalAdmin) {
                           <mat-icon class="restricted-icon"
                                     matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                     data-testid="registration-lock-icon">
@@ -480,11 +536,11 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="approval-toggle-section" *ngIf="authConfigForm.value.allow_registration">
                           <div class="toggle-with-tooltip">
                             <mat-slide-toggle formControlName="auto_approve_users"
-                                              [disabled]="isApprovalToggleRestricted && authConfigForm.value.auto_approve_users"
+                                              [disabled]="isProvisionalAdmin || (isApprovalToggleRestricted && authConfigForm.value.auto_approve_users)"
                                               data-testid="auto-approve-toggle">
                               Auto-approve new users from your domain
                             </mat-slide-toggle>
-                            @if (isApprovalToggleRestricted) {
+                            @if (isApprovalToggleRestricted && !isProvisionalAdmin) {
                               <mat-icon class="restricted-icon"
                                         matTooltip="This setting affects everyone in your organisation. It will become available once shared administration is established."
                                         data-testid="approval-lock-icon">
@@ -505,7 +561,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="app-name-section">
                         <mat-form-field appearance="outline" class="full-width">
                           <mat-label>Application Name</mat-label>
-                          <input matInput formControlName="rp_name" placeholder="Decision Records">
+                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions"
+                                 [readonly]="isProvisionalAdmin">
                           <mat-hint>Shown to users during passkey setup</mat-hint>
                         </mat-form-field>
                       </div>
@@ -594,14 +651,14 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <p class="option-hint">New decisions will automatically be assigned to the default space.</p>
 
                   <div class="form-actions">
-                    <button mat-raised-button color="primary" type="submit"
+                    <button mat-flat-button color="primary" type="submit"
                             [disabled]="spaceForm.invalid || savingSpace">
                       <mat-spinner diameter="20" *ngIf="savingSpace"></mat-spinner>
                       <mat-icon *ngIf="!savingSpace">save</mat-icon>
                       <span *ngIf="!savingSpace">{{ editingSpaceId ? 'Update' : 'Create Space' }}</span>
                     </button>
                     @if (editingSpaceId) {
-                      <button mat-button type="button" (click)="cancelSpaceEdit()">Cancel</button>
+                      <button mat-stroked-button type="button" (click)="cancelSpaceEdit()">Cancel</button>
                     }
                   </div>
                 </form>
@@ -669,7 +726,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p>Spaces help organize your decision records into logical groups.</p>
+                <p>Spaces help organize your architecture decisions into logical groups.</p>
                 <ul>
                   <li><strong>Default Space:</strong> New decisions are automatically assigned to this space</li>
                   <li><strong>Multiple Spaces:</strong> Decisions can belong to multiple spaces</li>
@@ -902,6 +959,164 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
             </mat-card>
           </div>
         </mat-tab>
+
+        <!-- Slack Integration Tab (only for tenant admins and when feature enabled) -->
+        @if (!authService.isMasterAccount && slackFeatureEnabled) {
+        <mat-tab label="Slack">
+          <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  About Slack Integration
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Connect Slack to enable your team to:</p>
+                <ul>
+                  <li><strong>Slash Commands:</strong> Use <code>/decision</code>, <code>/decision list</code>, <code>/decision view</code> directly in Slack</li>
+                  <li><strong>Notifications:</strong> Get notified when decisions are created or updated</li>
+                  <li><strong>Quick Access:</strong> View and manage decisions without leaving Slack</li>
+                </ul>
+              </mat-card-content>
+            </mat-card>
+
+            @if (loadingSlackSettings) {
+              <div class="loading-spinner">
+                <mat-spinner diameter="40"></mat-spinner>
+              </div>
+            } @else if (!slackSettings?.installed) {
+              <!-- Not Connected -->
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>link_off</mat-icon>
+                    Slack Not Connected
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p>Connect your Slack workspace to enable slash commands and notifications.</p>
+
+                  <div class="slack-connect-options">
+                    <div class="connect-option">
+                      <h4>Option A: Install Fresh</h4>
+                      <p>Install Decision Records to your Slack workspace. You need Slack admin permissions for this option.</p>
+
+                      <div class="slack-install-guidance">
+                        <h5>What happens when you click "Add to Slack":</h5>
+                        <ol>
+                          <li>You'll be redirected to Slack to authorize the app</li>
+                          <li>Select which workspace to install it to</li>
+                          <li>After installation, you'll be redirected back here</li>
+                          <li>The integration will be automatically connected</li>
+                        </ol>
+                      </div>
+
+                      <a mat-flat-button color="primary" href="/api/slack/install" target="_blank" rel="noopener noreferrer" data-testid="slack-install-button">
+                        <mat-icon>add</mat-icon>
+                        Add to Slack
+                      </a>
+
+                      <p class="slack-install-note">
+                        <mat-icon>info</mat-icon>
+                        <span>After installing, return to this page and refresh to see the connection status.</span>
+                      </p>
+                    </div>
+
+                    <mat-divider></mat-divider>
+
+                    <div class="connect-option">
+                      <h4>Option B: Claim Existing Installation</h4>
+                      <p>If your IT team already installed the app from the Slack App Directory, enter your Workspace ID to claim it:</p>
+                      <div class="claim-form">
+                        <mat-form-field appearance="outline">
+                          <mat-label>Slack Workspace ID</mat-label>
+                          <input matInput [(ngModel)]="slackClaimWorkspaceId" placeholder="e.g., T0A36UYCYLX" data-testid="slack-workspace-id-input">
+                          <mat-hint>Workspace IDs start with T</mat-hint>
+                        </mat-form-field>
+                        <button mat-stroked-button color="primary" (click)="claimSlackWorkspace()" [disabled]="claimingSlackWorkspace || !slackClaimWorkspaceId" data-testid="slack-claim-button">
+                          <mat-spinner diameter="20" *ngIf="claimingSlackWorkspace"></mat-spinner>
+                          <mat-icon *ngIf="!claimingSlackWorkspace">verified</mat-icon>
+                          <span>{{ claimingSlackWorkspace ? 'Claiming...' : 'Claim Workspace' }}</span>
+                        </button>
+                      </div>
+                      <p class="note"><mat-icon>info</mat-icon> Note: You need Slack admin permissions to install apps. If you're not a Slack admin, ask your IT team to install "Decision Records" and share the Workspace ID with you.</p>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+            } @else if (slackSettings) {
+              <!-- Connected -->
+              <mat-card class="form-card slack-connected-card">
+                <mat-card-header>
+                  <mat-card-title class="slack-connected-title">
+                    <mat-icon class="slack-connected-icon">check_circle</mat-icon>
+                    Connected to {{ slackSettings.workspace_name || 'Slack' }}
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="slack-status">
+                    <p><strong>Workspace:</strong> {{ slackSettings.workspace_name || 'Unknown' }}</p>
+                    <p><strong>Installed:</strong> {{ slackSettings.installed_at ? (slackSettings.installed_at | date:'medium') : 'Unknown' }}</p>
+                    @if (slackSettings.last_activity_at) {
+                      <p><strong>Last activity:</strong> {{ slackSettings.last_activity_at | date:'medium' }}</p>
+                    }
+                  </div>
+
+                  <h4>Notification Settings</h4>
+                  <form [formGroup]="slackForm" class="slack-form">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Notification Channel</mat-label>
+                      <mat-select formControlName="default_channel_id" data-testid="slack-channel-select">
+                        <mat-option value="">-- Select a channel --</mat-option>
+                        @for (channel of slackChannels; track channel.id) {
+                          <mat-option [value]="channel.id">
+                            {{ channel.is_private ? '🔒 ' : '#' }}{{ channel.name }}
+                          </mat-option>
+                        }
+                      </mat-select>
+                    </mat-form-field>
+
+                    <div class="toggle-group">
+                      <mat-slide-toggle formControlName="notifications_enabled" data-testid="slack-notifications-toggle">
+                        Enable notifications
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!slackForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_create" [disabled]="!slackForm.get('notifications_enabled')?.value" data-testid="slack-notify-create-toggle">
+                        Notify when decisions are created
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!slackForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_status_change" [disabled]="!slackForm.get('notifications_enabled')?.value" data-testid="slack-notify-status-toggle">
+                        Notify when decision status changes
+                      </mat-slide-toggle>
+                    </div>
+                  </form>
+                </mat-card-content>
+                <mat-card-actions>
+                  <button mat-flat-button color="primary" (click)="saveSlackSettings()" [disabled]="savingSlackSettings" data-testid="slack-save-button">
+                    <mat-spinner diameter="20" *ngIf="savingSlackSettings"></mat-spinner>
+                    <mat-icon *ngIf="!savingSlackSettings">save</mat-icon>
+                    <span *ngIf="!savingSlackSettings">Save Settings</span>
+                  </button>
+                  <button mat-stroked-button (click)="testSlackNotification()" [disabled]="testingSlack || !slackSettings.default_channel_id" data-testid="slack-test-button">
+                    <mat-spinner diameter="20" *ngIf="testingSlack"></mat-spinner>
+                    <mat-icon *ngIf="!testingSlack">send</mat-icon>
+                    <span *ngIf="!testingSlack">Send Test</span>
+                  </button>
+                  <button mat-stroked-button color="warn" (click)="disconnectSlack()" data-testid="slack-disconnect-button">
+                    <mat-icon>link_off</mat-icon>
+                    Disconnect
+                  </button>
+                </mat-card-actions>
+              </mat-card>
+            }
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -970,6 +1185,25 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       cursor: help;
     }
 
+    .provisional-admin-notice {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 12px;
+      background-color: #fff3e0;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      color: #e65100;
+      font-size: 13px;
+    }
+
+    .provisional-admin-notice mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
     /* Role badge styles */
     .role-admin {
       background-color: #e3f2fd !important;
@@ -991,12 +1225,161 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       color: #616161 !important;
     }
 
-    .tab-content {
-      padding: 24px 0;
+    /* Tab Styling */
+    ::ng-deep .mat-mdc-tab-group {
+      margin-top: 16px;
+      background: #f8fafc;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
     }
 
-    .form-card, .list-card {
+    ::ng-deep .mat-mdc-tab-header {
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: none;
+      border-radius: 12px 12px 0 0;
+      padding: 0 8px;
+    }
+
+    ::ng-deep .mat-mdc-tab-labels {
+      gap: 4px;
+    }
+
+    ::ng-deep .mat-mdc-tab {
+      min-width: 100px;
+      padding: 0 20px;
+      opacity: 1;
+      height: 52px;
+      border-radius: 8px 8px 0 0;
+      margin-top: 4px;
+    }
+
+    ::ng-deep .mat-mdc-tab:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    ::ng-deep .mat-mdc-tab .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.7) !important;
+      font-weight: 500 !important;
+      font-size: 13px !important;
+      letter-spacing: 0.3px;
+    }
+
+    ::ng-deep .mat-mdc-tab:hover .mdc-tab__text-label {
+      color: rgba(255, 255, 255, 0.95) !important;
+    }
+
+    ::ng-deep .mat-mdc-tab.mdc-tab--active {
+      background: rgba(96, 165, 250, 0.15);
+    }
+
+    ::ng-deep .mat-mdc-tab.mdc-tab--active .mdc-tab__text-label {
+      color: white !important;
+      font-weight: 600 !important;
+    }
+
+    ::ng-deep .mat-mdc-tab-body-wrapper {
+      background: #f8fafc;
+      min-height: 400px;
+    }
+
+    ::ng-deep .mat-mdc-tab-body-content {
+      padding: 24px;
+      overflow: hidden !important;
+    }
+
+    ::ng-deep .mat-mdc-tab-body.mat-mdc-tab-body-active {
+      overflow-y: hidden !important;
+    }
+
+    ::ng-deep .mdc-tab-indicator__content--underline {
+      border-color: #60a5fa !important;
+      border-width: 3px !important;
+    }
+
+    .tab-content {
+      padding: 0;
+    }
+
+    /* Info Card Styling */
+    .info-card {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
       margin-bottom: 24px;
+      box-shadow: none;
+    }
+
+    .info-card mat-card-header {
+      padding: 16px 20px 0;
+    }
+
+    .info-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #1e40af;
+    }
+
+    .info-card mat-card-title mat-icon {
+      color: #3b82f6;
+      font-size: 22px;
+      width: 22px;
+      height: 22px;
+    }
+
+    .info-card mat-card-content {
+      padding: 16px 20px 20px;
+      color: #1e3a5f;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .info-card h4 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1e40af;
+      margin: 16px 0 8px;
+    }
+
+    .info-card ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .info-card li {
+      margin-bottom: 4px;
+    }
+
+    /* Form Card Styling */
+    .form-card, .list-card {
+      background: white;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+
+    .form-card mat-card-header,
+    .list-card mat-card-header {
+      padding: 20px 24px 0;
+      border-bottom: 1px solid #f1f5f9;
+      margin-bottom: 0;
+    }
+
+    .form-card mat-card-title,
+    .list-card mat-card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1e293b;
+      padding-bottom: 16px;
+    }
+
+    .form-card mat-card-content,
+    .list-card mat-card-content {
+      padding: 24px;
     }
 
     .form-row {
@@ -1028,8 +1411,49 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
     .form-actions {
       display: flex;
-      gap: 16px;
+      gap: 12px;
       margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    /* Primary button styling - consistent across all tabs */
+    .form-actions button[mat-flat-button][color="primary"],
+    mat-card-actions button[mat-flat-button][color="primary"],
+    mat-card-actions a[mat-flat-button][color="primary"] {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+      border-radius: 8px;
+      padding: 0 24px;
+      height: 40px;
+      font-weight: 500;
+    }
+
+    /* Secondary button styling - consistent across all tabs */
+    .form-actions button[mat-stroked-button],
+    mat-card-actions button[mat-stroked-button] {
+      border-radius: 8px;
+      padding: 0 20px;
+      height: 40px;
+      border-color: #cbd5e1;
+      color: #475569;
+      font-weight: 500;
+    }
+
+    .form-actions button[mat-stroked-button]:hover,
+    mat-card-actions button[mat-stroked-button]:hover {
+      background: #f1f5f9;
+      border-color: #94a3b8;
+    }
+
+    /* Warn button styling */
+    mat-card-actions button[mat-stroked-button][color="warn"] {
+      border-color: #fca5a5;
+      color: #dc2626;
+    }
+
+    mat-card-actions button[mat-stroked-button][color="warn"]:hover {
+      background: #fef2f2;
+      border-color: #f87171;
     }
 
     .empty-message {
@@ -1314,6 +1738,31 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       height: 28px;
     }
 
+    .option-icons .slack-icon-auth {
+      width: 24px;
+      height: 24px;
+    }
+
+    .slack-oidc-toggle-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .slack-oidc-toggle-section .options-header {
+      margin-bottom: 12px;
+    }
+
+    .google-oauth-toggle-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .google-oauth-toggle-section .options-header {
+      margin-bottom: 12px;
+    }
+
     .icon-plus {
       font-size: 16px;
       color: #666;
@@ -1440,6 +1889,173 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       color: #555;
     }
 
+    /* Slack Integration Styles */
+    .loading-spinner {
+      display: flex;
+      justify-content: center;
+      padding: 48px;
+    }
+
+    /* Slack connected state styling */
+    .slack-connected-card {
+      border: 2px solid #4caf50 !important;
+    }
+
+    .slack-connected-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #2e7d32 !important;
+    }
+
+    .slack-connected-icon {
+      color: #4caf50 !important;
+      font-size: 28px;
+      height: 28px;
+      width: 28px;
+    }
+
+    .slack-status {
+      margin-bottom: 24px;
+      padding: 16px;
+      background: #e8f5e9;
+      border-radius: 8px;
+      border-left: 4px solid #4caf50;
+    }
+
+    .slack-status p {
+      margin: 8px 0;
+      font-size: 14px;
+    }
+
+    .slack-form {
+      margin-top: 16px;
+    }
+
+    .slack-form .toggle-group {
+      margin: 16px 0;
+    }
+
+    .slack-form .toggle-group.nested {
+      margin-left: 24px;
+    }
+
+    .slack-form .toggle-group.disabled {
+      opacity: 0.5;
+    }
+
+    .slack-connect-options {
+      margin-top: 24px;
+    }
+
+    .slack-connect-options .connect-option {
+      padding: 16px 0;
+    }
+
+    .slack-connect-options .connect-option h4 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .slack-connect-options .connect-option p {
+      margin: 0 0 12px 0;
+      color: #666;
+    }
+
+    .slack-connect-options mat-divider {
+      margin: 16px 0;
+    }
+
+    .slack-install-guidance {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    .slack-install-guidance h5 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .slack-install-guidance ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .slack-install-guidance li {
+      margin: 6px 0;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .slack-install-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .slack-install-note mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #ff9800;
+    }
+
+    .claim-form {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+    }
+
+    .claim-form mat-form-field {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .claim-form button {
+      margin-top: 6px;
+    }
+
+    .note {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 12px;
+      background: #e3f2fd;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+
+    .note mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    mat-card-actions {
+      display: flex;
+      gap: 12px;
+      padding: 16px !important;
+    }
+
+    code {
+      background: #e8e8e8;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -1460,6 +2076,10 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
       .option-icons {
         margin-bottom: 8px;
+      }
+
+      mat-card-actions {
+        flex-wrap: wrap;
       }
     }
   `]
@@ -1499,6 +2119,37 @@ export class SettingsComponent implements OnInit {
   processingRoleRequest: number | null = null;
   pendingRequestsCount = 0;
   pendingRoleRequestsCount = 0;
+
+  // Slack Integration
+  slackForm: FormGroup;
+  slackSettings: SlackSettings | null = null;
+  slackChannels: SlackChannel[] = [];
+  loadingSlackSettings = false;
+  savingSlackSettings = false;
+  testingSlack = false;
+  slackClaimWorkspaceId = '';
+  claimingSlackWorkspace = false;
+
+  // Feature flags
+  slackFeatureEnabled = false;
+  slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
+  googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
+
+  // Tab index for navigation
+  selectedTabIndex = 0;
+  // Tab map matches actual tab order in template:
+  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*
+  // (*) = conditional tabs for non-master accounts
+  private tabMap: { [key: string]: number } = {
+    'sso': 0,
+    'email': 1,
+    'users': 2,
+    'auth': 3,
+    'spaces': 4,
+    'access-requests': 5,
+    'role-requests': 6,
+    'slack': 7
+  };
 
   /**
    * Check if current user is a provisional admin
@@ -1547,7 +2198,9 @@ export class SettingsComponent implements OnInit {
     public authService: AuthService,
     private spaceService: SpaceService,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private http: HttpClient,
+    private route: ActivatedRoute
   ) {
     this.spaceForm = this.fb.group({
       name: ['', Validators.required],
@@ -1570,28 +2223,41 @@ export class SettingsComponent implements OnInit {
       smtp_username: ['', Validators.required],
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
-      from_name: ['Decision Records'],
+      from_name: ['Architecture Decisions'],
       use_tls: [true],
       enabled: [true]
     });
 
     this.authConfigForm = this.fb.group({
-      auth_method: ['both', Validators.required],  // 'both', 'webauthn', or 'sso'
+      auth_method: ['both', Validators.required],  // 'both', 'webauthn', 'sso', or 'slack_oidc'
       allow_registration: [true],
       auto_approve_users: [false],  // Inverted from require_approval for better UX
-      rp_name: ['Decision Records']
+      allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
+      allow_google_oauth: [true],   // Allow Google OAuth sign-in for tenant
+      rp_name: ['Architecture Decisions']
+    });
+
+    this.slackForm = this.fb.group({
+      default_channel_id: [''],
+      notifications_enabled: [true],
+      notify_on_create: [true],
+      notify_on_status_change: [true]
     });
   }
 
   ngOnInit(): void {
+    this.loadFeatureFlags();
     this.loadSSOConfigs();
     this.loadEmailConfig();
     this.loadUsers();
     this.loadAuthConfig();
+    this.checkSlackOidcStatus();
+    this.checkGoogleOauthStatus();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
       this.loadRoleRequests();
       this.loadSpaces();
+      this.loadSlackSettings();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -1600,6 +2266,79 @@ export class SettingsComponent implements OnInit {
         }
       }
     }
+
+    // Handle query params for tab navigation and success messages
+    this.route.queryParams.subscribe(params => {
+      const tab = params['tab'];
+      if (tab && this.tabMap[tab] !== undefined) {
+        this.selectedTabIndex = this.tabMap[tab];
+      }
+
+      if (params['slack_success'] === 'true') {
+        this.snackBar.open('Slack connected successfully!', 'Close', { duration: 5000 });
+        // Reload Slack settings to show the connected state
+        this.loadSlackSettings();
+      }
+
+      // Handle Slack error messages
+      const slackError = params['slack_error'];
+      if (slackError) {
+        let errorMessage = 'Failed to connect Slack workspace.';
+
+        if (slackError.startsWith('domain_mismatch')) {
+          // Parse domain mismatch error
+          const workspaceDomain = params['workspace_domain'];
+          const tenantDomain = params['tenant_domain'];
+          errorMessage = `Domain mismatch: The Slack workspace uses email domain "${workspaceDomain}" but your organization is "${tenantDomain}". You can only connect Slack workspaces where members use your organization's email domain.`;
+        } else if (slackError === 'workspace_claimed_by_other') {
+          errorMessage = 'This Slack workspace is already connected to another organization.';
+        } else if (slackError === 'oauth_failed') {
+          errorMessage = 'Slack authorization failed. Please try again.';
+        } else if (slackError === 'invalid_state') {
+          errorMessage = 'Authorization session expired. Please try again.';
+        } else if (slackError === 'not_configured') {
+          errorMessage = 'Slack integration is not configured. Please contact support.';
+        } else if (slackError === 'missing_code') {
+          errorMessage = 'Slack did not return an authorization code. Please try again.';
+        }
+
+        this.snackBar.open(errorMessage, 'Close', { duration: 10000, panelClass: ['error-snackbar'] });
+      }
+    });
+  }
+
+  loadFeatureFlags(): void {
+    this.http.get<{ commercial: boolean; slack: boolean }>('/api/features').subscribe({
+      next: (features) => {
+        this.slackFeatureEnabled = features.slack;
+      },
+      error: () => {
+        // Default to disabled if can't load features
+        this.slackFeatureEnabled = false;
+      }
+    });
+  }
+
+  checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcGloballyEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcGloballyEnabled = false;
+      }
+    });
+  }
+
+  checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthGloballyEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthGloballyEnabled = false;
+      }
+    });
   }
 
   loadSSOConfigs(): void {
@@ -1801,7 +2540,9 @@ export class SettingsComponent implements OnInit {
         if (this.authConfig) {
           // Convert from backend model to simplified UI model
           let uiAuthMethod = 'both';  // default
-          if (this.authConfig.auth_method === 'sso') {
+          if (this.authConfig.auth_method === 'slack_oidc') {
+            uiAuthMethod = 'slack_oidc';
+          } else if (this.authConfig.auth_method === 'sso') {
             uiAuthMethod = 'sso';
           } else if (this.authConfig.allow_passkey && !this.authConfig.allow_password) {
             uiAuthMethod = 'webauthn';  // passkey only
@@ -1813,6 +2554,8 @@ export class SettingsComponent implements OnInit {
             auth_method: uiAuthMethod,
             allow_registration: this.authConfig.allow_registration,
             auto_approve_users: !this.authConfig.require_approval,  // Invert for UI
+            allow_slack_oidc: this.authConfig.allow_slack_oidc !== false,  // Default true if undefined
+            allow_google_oauth: this.authConfig.allow_google_oauth !== false,  // Default true if undefined
             rp_name: this.authConfig.rp_name
           });
         }
@@ -1823,7 +2566,8 @@ export class SettingsComponent implements OnInit {
           auto_approve_users: false,  // Default to requiring approval
           auth_method: 'webauthn',
           allow_registration: true,
-          rp_name: 'Decision Records'
+          allow_google_oauth: true,  // Default true
+          rp_name: 'Architecture Decisions'
         });
       }
     });
@@ -1836,9 +2580,11 @@ export class SettingsComponent implements OnInit {
     const formValue = this.authConfigForm.value;
 
     // Convert from simplified UI model to backend model
-    let backendAuthMethod: 'sso' | 'webauthn' = 'webauthn';
+    let backendAuthMethod: string = 'webauthn';
     let allowPassword = true;
     let allowPasskey = true;
+    let allowSlackOidc = formValue.allow_slack_oidc;
+    let allowGoogleOauth = formValue.allow_google_oauth;
 
     switch (formValue.auth_method) {
       case 'both':
@@ -1855,6 +2601,14 @@ export class SettingsComponent implements OnInit {
         backendAuthMethod = 'sso';
         allowPassword = false;
         allowPasskey = false;
+        allowSlackOidc = false;  // SSO mode disables Slack OIDC
+        allowGoogleOauth = false;  // SSO mode disables Google OAuth
+        break;
+      case 'slack_oidc':
+        backendAuthMethod = 'slack_oidc';
+        allowPassword = false;
+        allowPasskey = false;
+        allowSlackOidc = true;  // Slack-only mode
         break;
     }
 
@@ -1864,7 +2618,9 @@ export class SettingsComponent implements OnInit {
       require_approval: !formValue.auto_approve_users,  // Invert for API
       rp_name: formValue.rp_name,
       allow_password: allowPassword,
-      allow_passkey: allowPasskey
+      allow_passkey: allowPasskey,
+      allow_slack_oidc: allowSlackOidc,
+      allow_google_oauth: allowGoogleOauth
     };
 
     this.adminService.saveAuthConfig(config).subscribe({
@@ -2161,6 +2917,140 @@ export class SettingsComponent implements OnInit {
             this.processingRoleRequest = null;
           }
         });
+      }
+    });
+  }
+
+  // Slack Integration Methods
+  loadSlackSettings(): void {
+    this.loadingSlackSettings = true;
+    this.adminService.getSlackSettings().subscribe({
+      next: (settings) => {
+        this.slackSettings = settings;
+        if (settings.installed) {
+          // Populate the form with existing settings
+          this.slackForm.patchValue({
+            default_channel_id: settings.default_channel_id || '',
+            notifications_enabled: settings.notifications_enabled ?? true,
+            notify_on_create: settings.notify_on_create ?? true,
+            notify_on_status_change: settings.notify_on_status_change ?? true
+          });
+          // Load available channels
+          this.loadSlackChannels();
+        }
+        this.loadingSlackSettings = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load Slack settings', 'Close', { duration: 3000 });
+        this.loadingSlackSettings = false;
+      }
+    });
+  }
+
+  loadSlackChannels(): void {
+    this.adminService.getSlackChannels().subscribe({
+      next: (response) => {
+        this.slackChannels = response.channels || [];
+      },
+      error: () => {
+        // Silently fail - channels list is optional
+        this.slackChannels = [];
+      }
+    });
+  }
+
+  saveSlackSettings(): void {
+    this.savingSlackSettings = true;
+    const formValue = this.slackForm.value;
+
+    // Find the channel name if a channel is selected
+    const selectedChannel = this.slackChannels.find(c => c.id === formValue.default_channel_id);
+
+    const settings = {
+      default_channel_id: formValue.default_channel_id || undefined,
+      default_channel_name: selectedChannel?.name,
+      notifications_enabled: formValue.notifications_enabled,
+      notify_on_create: formValue.notify_on_create,
+      notify_on_status_change: formValue.notify_on_status_change
+    };
+
+    this.adminService.updateSlackSettings(settings).subscribe({
+      next: (response) => {
+        this.slackSettings = response.settings;
+        this.snackBar.open('Slack settings saved', 'Close', { duration: 3000 });
+        this.savingSlackSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to save Slack settings', 'Close', { duration: 3000 });
+        this.savingSlackSettings = false;
+      }
+    });
+  }
+
+  testSlackNotification(): void {
+    this.testingSlack = true;
+    this.adminService.testSlackNotification().subscribe({
+      next: () => {
+        this.snackBar.open('Test notification sent to Slack', 'Close', { duration: 3000 });
+        this.testingSlack = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to send test notification', 'Close', { duration: 3000 });
+        this.testingSlack = false;
+      }
+    });
+  }
+
+  disconnectSlack(): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Disconnect Slack',
+        message: `Are you sure you want to disconnect Slack from your organization? This will disable all Slack commands and notifications.`,
+        confirmText: 'Disconnect',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(result => {
+      if (result) {
+        this.adminService.disconnectSlack().subscribe({
+          next: () => {
+            this.slackSettings = { installed: false };
+            this.slackChannels = [];
+            this.slackForm.reset({
+              default_channel_id: '',
+              notifications_enabled: true,
+              notify_on_create: true,
+              notify_on_status_change: true
+            });
+            this.snackBar.open('Slack disconnected successfully', 'Close', { duration: 3000 });
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to disconnect Slack', 'Close', { duration: 3000 });
+          }
+        });
+      }
+    });
+  }
+
+  claimSlackWorkspace(): void {
+    if (!this.slackClaimWorkspaceId?.trim()) {
+      this.snackBar.open('Please enter a Workspace ID', 'Close', { duration: 3000 });
+      return;
+    }
+
+    this.claimingSlackWorkspace = true;
+    this.adminService.claimSlackWorkspace(this.slackClaimWorkspaceId.trim()).subscribe({
+      next: (response) => {
+        this.snackBar.open(response.message || 'Workspace claimed successfully', 'Close', { duration: 5000 });
+        this.slackClaimWorkspaceId = '';
+        this.claimingSlackWorkspace = false;
+        // Reload slack settings to show the connected state
+        this.loadSlackSettings();
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to claim workspace', 'Close', { duration: 5000 });
+        this.claimingSlackWorkspace = false;
       }
     });
   }

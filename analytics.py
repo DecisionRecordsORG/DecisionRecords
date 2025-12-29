@@ -207,6 +207,19 @@ DEFAULT_EVENT_MAPPINGS = {
     # Public - Feedback & Sponsorship (2)
     'api_feedback': 'feedback_submitted',
     'api_sponsorship': 'sponsorship_inquiry_submitted',
+
+    # Slack Integration (11)
+    'api_slack_install': 'slack_install_started',
+    'api_slack_oauth_callback': 'slack_oauth_completed',
+    'api_slack_command': 'slack_command_received',
+    'api_slack_interaction': 'slack_interaction_received',
+    'api_slack_get_settings': 'slack_settings_viewed',
+    'api_slack_update_settings': 'slack_settings_updated',
+    'api_slack_disconnect': 'slack_disconnected',
+    'api_slack_test': 'slack_test_notification_sent',
+    'api_slack_channels': 'slack_channels_listed',
+    'api_slack_link_initiate': 'slack_link_initiated',
+    'api_slack_link_complete': 'slack_link_completed',
 }
 
 # Endpoint categories for frontend UI

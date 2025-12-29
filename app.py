@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken
 from datetime import datetime, timedelta
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -26,6 +26,7 @@ from security import (
 from keyvault_client import keyvault_client
 from analytics import track_endpoint
 from cloudflare_security import setup_cloudflare_security, require_cloudflare_access, get_cloudflare_config_for_api, invalidate_cloudflare_cache
+from feature_flags import require_slack, get_enabled_features, is_slack_enabled
 
 # Configure logging
 logging.basicConfig(
@@ -357,6 +358,54 @@ def init_database():
                         else:
                             logger.info("tenant_prefix column already exists")
 
+                        # Check and add allow_slack_oidc column to auth_configs
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'auth_configs' AND column_name = 'allow_slack_oidc'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_slack_oidc column to auth_configs...")
+                            conn.execute(db.text("""
+                                ALTER TABLE auth_configs
+                                ADD COLUMN allow_slack_oidc BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_slack_oidc column added successfully")
+                        else:
+                            logger.info("allow_slack_oidc column already exists")
+
+                        # Check and add allow_google_oauth column to auth_configs
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'auth_configs' AND column_name = 'allow_google_oauth'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_google_oauth column to auth_configs...")
+                            conn.execute(db.text("""
+                                ALTER TABLE auth_configs
+                                ADD COLUMN allow_google_oauth BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_google_oauth column added successfully")
+                        else:
+                            logger.info("allow_google_oauth column already exists")
+
+                        # Check and add allow_google_oauth column to tenant_settings
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'tenant_settings' AND column_name = 'allow_google_oauth'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding allow_google_oauth column to tenant_settings...")
+                            conn.execute(db.text("""
+                                ALTER TABLE tenant_settings
+                                ADD COLUMN allow_google_oauth BOOLEAN DEFAULT TRUE
+                            """))
+                            conn.commit()
+                            logger.info("allow_google_oauth column added successfully")
+                        else:
+                            logger.info("allow_google_oauth column already exists in tenant_settings")
+
                         # Check and add decision_number column to architecture_decisions
                         result = conn.execute(db.text("""
                             SELECT column_name FROM information_schema.columns
@@ -524,6 +573,247 @@ def init_database():
                                 conn.commit()
                                 logger.info(f"{col_name} column added successfully")
 
+                        # === Slack Workspace Claiming Migrations (v1.5.3) ===
+
+                        # Add status column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'status'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding status column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN status VARCHAR(20) DEFAULT 'active'
+                            """))
+                            conn.commit()
+                            logger.info("status column added successfully")
+
+                        # Add claimed_at column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'claimed_at'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding claimed_at column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN claimed_at TIMESTAMP
+                            """))
+                            conn.commit()
+                            logger.info("claimed_at column added successfully")
+
+                        # Add claimed_by_id column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'claimed_by_id'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding claimed_by_id column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN claimed_by_id INTEGER REFERENCES users(id)
+                            """))
+                            conn.commit()
+                            logger.info("claimed_by_id column added successfully")
+
+                        # Make tenant_id nullable for unclaimed workspaces
+                        # Note: PostgreSQL doesn't have a direct way to alter nullable, but we can use DROP/ADD
+                        # For safety, we'll just ensure the column exists - SQLAlchemy model already has nullable=True
+
+                        # === Decision Owner Migrations (v1.5.7) ===
+
+                        # Add owner_id column to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'owner_id'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding owner_id column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN owner_id INTEGER REFERENCES users(id)
+                            """))
+                            conn.commit()
+                            logger.info("owner_id column added successfully")
+                        else:
+                            logger.info("owner_id column already exists")
+
+                        # Add owner_email column to architecture_decisions
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'architecture_decisions' AND column_name = 'owner_email'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding owner_email column to architecture_decisions...")
+                            conn.execute(db.text("""
+                                ALTER TABLE architecture_decisions
+                                ADD COLUMN owner_email VARCHAR(255)
+                            """))
+                            conn.commit()
+                            logger.info("owner_email column added successfully")
+                        else:
+                            logger.info("owner_email column already exists")
+
+                        # === Slack Workspace Scope Tracking Migration (v1.5.7) ===
+
+                        # Add granted_scopes column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'granted_scopes'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding granted_scopes column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN granted_scopes TEXT
+                            """))
+                            conn.commit()
+                            logger.info("granted_scopes column added successfully")
+                        else:
+                            logger.info("granted_scopes column already exists")
+
+                        # Add scopes_updated_at column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'scopes_updated_at'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding scopes_updated_at column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN scopes_updated_at TIMESTAMP
+                            """))
+                            conn.commit()
+                            logger.info("scopes_updated_at column added successfully")
+                        else:
+                            logger.info("scopes_updated_at column already exists")
+
+                        # Add app_version column to slack_workspaces
+                        result = conn.execute(db.text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = 'slack_workspaces' AND column_name = 'app_version'
+                        """))
+                        if not result.fetchone():
+                            logger.info("Adding app_version column to slack_workspaces...")
+                            conn.execute(db.text("""
+                                ALTER TABLE slack_workspaces
+                                ADD COLUMN app_version VARCHAR(20)
+                            """))
+                            conn.commit()
+                            logger.info("app_version column added successfully")
+                        else:
+                            logger.info("app_version column already exists")
+
+                        # === Status Rename Migration (v1.5.7) ===
+                        # Rename 'deprecated' status to 'archived' for better UX
+                        logger.info("Checking for deprecated status values to migrate...")
+                        result = conn.execute(db.text("""
+                            UPDATE architecture_decisions
+                            SET status = 'archived'
+                            WHERE status = 'deprecated'
+                        """))
+                        if result.rowcount > 0:
+                            conn.commit()
+                            logger.info(f"Migrated {result.rowcount} decisions from 'deprecated' to 'archived'")
+                        else:
+                            logger.info("No deprecated status values to migrate")
+
+                        # === Create Missing Tenants Migration (v1.5.6) ===
+                        # Create Tenant records for users who exist but don't have a tenant
+                        logger.info("Checking for missing tenants...")
+                        result = conn.execute(db.text("""
+                            SELECT DISTINCT u.sso_domain
+                            FROM users u
+                            LEFT JOIN tenants t ON u.sso_domain = t.domain
+                            WHERE t.id IS NULL AND u.sso_domain IS NOT NULL
+                        """))
+                        missing_domains = [row[0] for row in result.fetchall()]
+
+                        for domain in missing_domains:
+                            logger.info(f"Creating missing tenant for domain: {domain}")
+                            # Create tenant (tenants table doesn't have updated_at column)
+                            # Note: maturity_state enum uses uppercase values (BOOTSTRAP, MATURE)
+                            conn.execute(db.text("""
+                                INSERT INTO tenants (domain, name, status, maturity_state, created_at)
+                                VALUES (:domain, :name, 'active', 'BOOTSTRAP', NOW())
+                                ON CONFLICT (domain) DO NOTHING
+                            """), {'domain': domain, 'name': domain})
+                            conn.commit()
+
+                        if missing_domains:
+                            logger.info(f"Created {len(missing_domains)} missing tenants: {missing_domains}")
+                        else:
+                            logger.info("No missing tenants to create")
+
+                        # === Create Missing TenantMemberships Migration (v1.5.6) ===
+                        # Create TenantMembership records for users who exist but don't have a membership
+                        logger.info("Checking for missing tenant memberships...")
+                        result = conn.execute(db.text("""
+                            SELECT u.id, u.email, u.sso_domain, u.is_admin, t.id as tenant_id
+                            FROM users u
+                            JOIN tenants t ON u.sso_domain = t.domain
+                            LEFT JOIN tenant_memberships tm ON u.id = tm.user_id AND t.id = tm.tenant_id
+                            WHERE tm.id IS NULL
+                        """))
+                        missing_memberships = result.fetchall()
+
+                        for user_id, email, domain, is_admin, tenant_id in missing_memberships:
+                            # Determine role: first admin user becomes PROVISIONAL_ADMIN, others become USER
+                            # Note: PostgreSQL enum uses the enum NAME (uppercase), not value
+                            role_enum = GlobalRole.PROVISIONAL_ADMIN if is_admin else GlobalRole.USER
+                            role = role_enum.name  # Get the name ('PROVISIONAL_ADMIN' or 'USER')
+                            logger.info(f"Creating missing membership for user {email} in tenant {domain} with role {role}")
+                            conn.execute(db.text("""
+                                INSERT INTO tenant_memberships (user_id, tenant_id, global_role, joined_at)
+                                VALUES (:user_id, :tenant_id, :role, NOW())
+                                ON CONFLICT DO NOTHING
+                            """), {'user_id': user_id, 'tenant_id': tenant_id, 'role': role})
+                            conn.commit()
+
+                        if missing_memberships:
+                            logger.info(f"Created {len(missing_memberships)} missing tenant memberships")
+                        else:
+                            logger.info("No missing tenant memberships to create")
+
+                        # === User Name Split Migration (v1.8.4) ===
+                        # Add first_name and last_name columns to users table
+                        for col_name, col_type in [
+                            ('first_name', 'VARCHAR(100)'),
+                            ('last_name', 'VARCHAR(100)')
+                        ]:
+                            result = conn.execute(db.text(f"""
+                                SELECT column_name FROM information_schema.columns
+                                WHERE table_name = 'users' AND column_name = '{col_name}'
+                            """))
+                            if not result.fetchone():
+                                logger.info(f"Adding {col_name} column to users...")
+                                conn.execute(db.text(f"""
+                                    ALTER TABLE users ADD COLUMN {col_name} {col_type}
+                                """))
+                                conn.commit()
+                                logger.info(f"{col_name} column added successfully")
+                            else:
+                                logger.info(f"{col_name} column already exists")
+
+                        # Migrate existing name data to first_name and last_name
+                        # Only migrate users where first_name is NULL but name is not NULL
+                        result = conn.execute(db.text("""
+                            UPDATE users
+                            SET first_name = SPLIT_PART(name, ' ', 1),
+                                last_name = CASE
+                                    WHEN POSITION(' ' IN name) > 0
+                                    THEN SUBSTRING(name FROM POSITION(' ' IN name) + 1)
+                                    ELSE ''
+                                END
+                            WHERE name IS NOT NULL AND first_name IS NULL
+                        """))
+                        if result.rowcount > 0:
+                            conn.commit()
+                            logger.info(f"Migrated {result.rowcount} users from name to first_name/last_name")
+                        else:
+                            logger.info("No users to migrate from name to first_name/last_name")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -553,7 +843,80 @@ def init_database():
                     logger.warning(f"System config initialization failed (non-critical): {str(config_error)}")
                     # Don't fail the entire initialization for this
                     db.session.rollback()
-                
+
+                # Seed blog posts if none exist
+                logger.info("Checking blog posts...")
+                try:
+                    from models import BlogPost
+                    if BlogPost.query.count() == 0:
+                        logger.info("Seeding default blog posts...")
+                        posts = [
+                            BlogPost(
+                                slug='how-should-teams-document-important-decisions',
+                                title='How Should Teams Document Important Decisions?',
+                                excerpt='Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
+                                author='Decision Records',
+                                category='Documentation',
+                                read_time='5 min read',
+                                image='/assets/blog/documenting-decisions.svg',
+                                meta_description='Most teams make important decisions but lose the context behind them. This article explains how teams should document decisions to preserve shared understanding as they grow.',
+                                published=True,
+                                featured=True,
+                                publish_date=datetime(2025, 11, 1)
+                            ),
+                            BlogPost(
+                                slug='how-to-track-decisions-at-a-startup',
+                                title='How to Track Decisions at a Startup',
+                                excerpt="Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we'll remember. That assumption rarely holds.",
+                                author='Decision Records',
+                                category='Startups',
+                                read_time='7 min read',
+                                image='/assets/blog/startup-decisions.svg',
+                                meta_description='Learn how startups can track important decisions without slowing down. A practical guide to lightweight decision records that preserve context and support fast-moving teams.',
+                                published=True,
+                                featured=False,
+                                publish_date=datetime(2025, 11, 8)
+                            ),
+                            BlogPost(
+                                slug='decision-habit-framework-fashion-brands',
+                                title='A Decision Habit Framework for Fast-Moving Fashion Brands',
+                                excerpt='Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
+                                author='Decision Records',
+                                category='Retail',
+                                read_time='5 min read',
+                                image='/assets/blog/fashion-decisions.svg',
+                                meta_description='Fashion brands make decisions under pressure every day. Learn how a lightweight decision habit can preserve context without slowing momentum.',
+                                published=True,
+                                featured=False,
+                                publish_date=datetime(2025, 11, 15)
+                            ),
+                        ]
+                        for post in posts:
+                            db.session.add(post)
+                        db.session.commit()
+                        logger.info(f"Seeded {len(posts)} blog posts")
+                    else:
+                        logger.info("Blog posts already exist")
+                    # Update existing posts to November 2025 if they have December 2024 dates
+                    posts_to_update = BlogPost.query.filter(
+                        BlogPost.publish_date < datetime(2025, 1, 1)
+                    ).all()
+                    if posts_to_update:
+                        logger.info(f"Updating {len(posts_to_update)} blog posts to November 2025 dates...")
+                        date_mapping = {
+                            'how-should-teams-document-important-decisions': datetime(2025, 11, 1),
+                            'how-to-track-decisions-at-a-startup': datetime(2025, 11, 8),
+                            'decision-habit-framework-fashion-brands': datetime(2025, 11, 15),
+                        }
+                        for post in posts_to_update:
+                            if post.slug in date_mapping:
+                                post.publish_date = date_mapping[post.slug]
+                        db.session.commit()
+                        logger.info("Blog post dates updated")
+                except Exception as blog_error:
+                    logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
+                    db.session.rollback()
+
                 _db_initialized = True
                 app_error_state['healthy'] = True
                 app_error_state['error'] = None
@@ -682,6 +1045,45 @@ def get_version():
     return jsonify(get_build_info()), 200
 
 
+@app.route('/api/features')
+def get_features():
+    """Get enabled feature flags for frontend UI conditional rendering."""
+    return jsonify(get_enabled_features()), 200
+
+
+# ==================== Blog API ====================
+
+@app.route('/api/blog/posts')
+def get_blog_posts():
+    """Get all published blog posts for the blog listing page.
+
+    Returns posts ordered by featured status (featured first), then by publish date (newest first).
+    """
+    from models import BlogPost
+
+    posts = BlogPost.query.filter_by(published=True).order_by(
+        BlogPost.featured.desc(),
+        BlogPost.publish_date.desc()
+    ).all()
+
+    return jsonify([post.to_dict() for post in posts]), 200
+
+
+@app.route('/api/blog/posts/<slug>')
+def get_blog_post(slug):
+    """Get a single blog post by slug.
+
+    Returns 404 if post not found or not published.
+    """
+    from models import BlogPost
+
+    post = BlogPost.query.filter_by(slug=slug, published=True).first()
+    if not post:
+        return jsonify({'error': 'Blog post not found'}), 404
+
+    return jsonify(post.to_dict()), 200
+
+
 # ==================== Feedback & Sponsorship ====================
 
 def _api_submit_feedback_impl():
@@ -724,8 +1126,14 @@ def _api_submit_feedback_impl():
         logger.warning("Feedback received but no email config available")
         return jsonify({'error': 'Email service temporarily unavailable'}), 503
 
+    # Get support email from SystemConfig (fallback to default)
+    support_email = SystemConfig.get(
+        SystemConfig.KEY_SUPPORT_EMAIL,
+        SystemConfig.DEFAULT_SUPPORT_EMAIL
+    )
+
     # Send the feedback email
-    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent)
+    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent, recipient_email=support_email)
 
     if success:
         logger.info(f"Feedback submitted successfully from {email}")
@@ -1095,6 +1503,619 @@ def api_get_csrf_token():
     return jsonify({'csrf_token': token})
 
 
+# ==================== Slack OIDC Authentication ====================
+# Sign in with Slack using OpenID Connect (OIDC)
+# This provides a frictionless signup/login experience for Slack users
+
+@app.route('/api/auth/slack-oidc-status', methods=['GET'])
+@track_endpoint('api_auth_slack_oidc_status')
+def slack_oidc_status():
+    """Check if Slack OIDC sign-in is enabled.
+
+    Returns whether Slack sign-in is available for the frontend to show/hide the button.
+    This is a public endpoint (no login required) since users need to see it before login.
+    """
+    # Check if Slack feature is enabled globally
+    if not is_slack_enabled():
+        return jsonify({'enabled': False, 'reason': 'slack_disabled'})
+
+    # Check if Slack credentials are configured
+    try:
+        from slack_security import get_slack_client_id
+        client_id = get_slack_client_id()
+        if not client_id:
+            return jsonify({'enabled': False, 'reason': 'not_configured'})
+    except Exception as e:
+        logger.error(f"Error checking Slack OIDC status: {e}")
+        return jsonify({'enabled': False, 'reason': 'configuration_error'})
+
+    return jsonify({'enabled': True})
+
+
+@app.route('/auth/slack/oidc')
+@track_endpoint('auth_slack_oidc_initiate')
+def slack_oidc_initiate():
+    """Initiate Slack OIDC login flow.
+
+    Redirects the user to Slack's authorization page to sign in.
+    After authentication, Slack redirects back to /auth/slack/oidc/callback
+    with the authorization code.
+    """
+    from slack_security import (
+        get_slack_client_id,
+        generate_slack_oidc_state,
+        SLACK_OIDC_AUTHORIZE_URL,
+        SLACK_OIDC_SCOPES
+    )
+
+    # Check if Slack sign-in is enabled
+    if not is_slack_enabled():
+        logger.warning("Slack OIDC attempted but Slack is disabled")
+        return redirect('/?error=slack_disabled')
+
+    # Get Slack client ID
+    client_id = get_slack_client_id()
+    if not client_id:
+        logger.error("Slack client ID not configured for OIDC")
+        return redirect('/?error=slack_not_configured')
+
+    # Get optional return_url from query params (where to redirect after login)
+    return_url = request.args.get('return_url', '/')
+
+    # Generate encrypted state for CSRF protection
+    try:
+        state = generate_slack_oidc_state(return_url=return_url)
+    except Exception as e:
+        logger.error(f"Failed to generate Slack OIDC state: {e}")
+        return redirect('/?error=internal_error')
+
+    # Build redirect URI (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/slack/oidc/callback"
+
+    # Build Slack authorization URL
+    import urllib.parse
+    auth_params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': SLACK_OIDC_SCOPES,
+        'redirect_uri': redirect_uri,
+        'state': state,
+        'nonce': secrets.token_urlsafe(16)  # Required by OIDC spec
+    }
+    auth_url = f"{SLACK_OIDC_AUTHORIZE_URL}?{urllib.parse.urlencode(auth_params)}"
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/slack/oidc/callback')
+@track_endpoint('auth_slack_oidc_callback')
+def slack_oidc_callback():
+    """Handle Slack OIDC callback.
+
+    This endpoint receives the authorization code from Slack after the user
+    authenticates. It exchanges the code for tokens, fetches user info,
+    and creates/logs in the user based on their email domain.
+
+    The tenant is derived from the email domain (existing logic).
+    First user of a domain becomes provisional admin (existing logic).
+    """
+    import requests
+    from slack_security import (
+        get_slack_client_id,
+        get_slack_client_secret,
+        verify_slack_oidc_state,
+        SLACK_OIDC_TOKEN_URL,
+        SLACK_OIDC_USERINFO_URL
+    )
+
+    # Get callback parameters
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description', '')
+
+    # Handle Slack errors
+    if error:
+        logger.warning(f"Slack OIDC error: {error} - {error_description}")
+        return redirect(f'/?error=slack_auth_error&message={error}')
+
+    if not code:
+        logger.warning("Slack OIDC callback missing code")
+        return redirect('/?error=missing_code')
+
+    # Verify state parameter (CSRF protection)
+    state_data = verify_slack_oidc_state(state)
+    if not state_data:
+        logger.warning("Invalid or expired Slack OIDC state")
+        return redirect('/?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Get Slack credentials
+    client_id = get_slack_client_id()
+    client_secret = get_slack_client_secret()
+
+    if not client_id or not client_secret:
+        logger.error("Slack credentials not configured for OIDC callback")
+        return redirect('/?error=slack_not_configured')
+
+    # Build redirect URI (must match the one used in authorization)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/slack/oidc/callback"
+
+    try:
+        # Exchange code for tokens
+        token_response = requests.post(
+            SLACK_OIDC_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'grant_type': 'authorization_code'
+            },
+            timeout=30
+        )
+
+        if not token_response.ok:
+            logger.error(f"Slack token exchange failed: {token_response.status_code}")
+            return redirect('/?error=token_exchange_failed')
+
+        token_data = token_response.json()
+        if not token_data.get('ok', True) or 'error' in token_data:
+            logger.error(f"Slack token error: {token_data.get('error')}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            logger.error("No access token in Slack OIDC response")
+            return redirect('/?error=no_access_token')
+
+        # Fetch user info
+        userinfo_response = requests.get(
+            SLACK_OIDC_USERINFO_URL,
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=30
+        )
+
+        if not userinfo_response.ok:
+            logger.error(f"Slack userinfo failed: {userinfo_response.status_code}")
+            return redirect('/?error=userinfo_failed')
+
+        userinfo = userinfo_response.json()
+        if not userinfo.get('ok', True) or 'error' in userinfo:
+            logger.error(f"Slack userinfo error: {userinfo.get('error')}")
+            return redirect('/?error=userinfo_failed')
+
+        # Extract user details
+        email = userinfo.get('email')
+        name = userinfo.get('name') or userinfo.get('given_name', '')
+        slack_user_id = userinfo.get('sub')  # Slack user ID from OIDC
+
+        if not email:
+            logger.warning("No email in Slack OIDC userinfo")
+            return redirect('/?error=no_email')
+
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+
+        # Check for public email domains (gmail, yahoo, etc.)
+        if DomainApproval.is_public_domain(domain):
+            logger.warning(f"Public email domain rejected for Slack OIDC: {domain}")
+            return redirect('/?error=public_email&message=Please use your work email address')
+
+        # Check for disposable email domains
+        if DomainApproval.is_disposable_domain(domain):
+            logger.warning(f"Disposable email domain rejected for Slack OIDC: {domain}")
+            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
+
+        # Check if this is the first user for this domain
+        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+        is_first_user = existing_domain_users == 0
+
+        # Get or create user
+        user = get_or_create_user(email, name, slack_user_id, domain)
+
+        # Create Tenant if it doesn't exist (v1.5 governance)
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=domain,  # Default name is domain
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            db.session.add(tenant)
+            db.session.flush()
+            logger.info(f"Created tenant for Slack OIDC domain: {domain}")
+
+            # Create default auth config for new tenant
+            auth_config = AuthConfig.query.filter_by(domain=domain).first()
+            if not auth_config:
+                auth_config = AuthConfig(
+                    domain=domain,
+                    auth_method='slack_oidc',  # Since they signed up via Slack
+                    allow_password=True,
+                    allow_passkey=True,
+                    allow_slack_oidc=True,
+                    allow_registration=True,
+                    require_approval=True,
+                    rp_name='Decision Records'
+                )
+                db.session.add(auth_config)
+                logger.info(f"Created AuthConfig for Slack OIDC domain: {domain}")
+
+            # Auto-approve corporate domain
+            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+            if not domain_approval:
+                domain_approval = DomainApproval(
+                    domain=domain,
+                    status='approved',
+                    requested_by_email=email,
+                    requested_by_name=name,
+                    auto_approved=True,
+                    reviewed_at=datetime.utcnow()
+                )
+                db.session.add(domain_approval)
+                logger.info(f"Auto-approved corporate domain via Slack OIDC: {domain}")
+
+        # Ensure TenantMembership exists
+        membership = TenantMembership.query.filter_by(
+            user_id=user.id,
+            tenant_id=tenant.id
+        ).first()
+
+        if not membership:
+            # Create membership with appropriate role
+            # First user becomes provisional admin
+            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=role
+            )
+            db.session.add(membership)
+            logger.info(f"Created TenantMembership for Slack OIDC user {email} in tenant {domain} with role {role.value}")
+
+        db.session.commit()
+
+        # Update auth_type to indicate Slack OIDC login
+        if not user.auth_type or user.auth_type == 'local':
+            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+            db.session.commit()
+
+        # Set session
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=user.is_admin)
+
+        logger.info(f"Slack OIDC login successful for {email}")
+
+        # Redirect to return URL or tenant home
+        # Add slack_welcome param to trigger welcome modal in frontend
+        if return_url and return_url != '/' and not return_url.startswith('/?'):
+            # User had a specific destination, append welcome flag
+            separator = '&' if '?' in return_url else '?'
+            return redirect(f'{return_url}{separator}slack_welcome=1')
+
+        # Redirect to tenant dashboard with welcome modal trigger
+        return redirect(f'/{domain}?slack_welcome=1')
+
+    except requests.RequestException as e:
+        logger.error(f"Slack OIDC request error: {e}")
+        return redirect('/?error=network_error')
+    except Exception as e:
+        logger.error(f"Slack OIDC callback error: {e}")
+        return redirect('/?error=internal_error')
+
+
+# ==================== Google OAuth Authentication ====================
+# Sign in with Google using OAuth 2.0
+# This provides an alternative auth option for users whose orgs restrict Slack OIDC
+
+@app.route('/api/auth/google-status', methods=['GET'])
+@track_endpoint('api_auth_google_status')
+def google_oauth_status():
+    """Check if Google OAuth sign-in is enabled.
+
+    Returns whether Google sign-in is available for the frontend to show/hide the button.
+    This is a public endpoint (no login required) since users need to see it before login.
+    """
+    try:
+        from google_oauth import is_google_oauth_configured
+        if not is_google_oauth_configured():
+            return jsonify({'enabled': False, 'reason': 'not_configured'})
+    except Exception as e:
+        logger.error(f"Error checking Google OAuth status: {e}")
+        return jsonify({'enabled': False, 'reason': 'configuration_error'})
+
+    return jsonify({'enabled': True})
+
+
+@app.route('/auth/google')
+@track_endpoint('auth_google_initiate')
+def google_oauth_initiate():
+    """Initiate Google OAuth login flow.
+
+    Redirects the user to Google's authorization page to sign in.
+    After authentication, Google redirects back to /auth/google/callback
+    with the authorization code.
+    """
+    from google_oauth import (
+        get_google_client_id,
+        generate_google_oauth_state,
+        is_google_oauth_configured,
+        GOOGLE_OAUTH_AUTHORIZE_URL,
+        GOOGLE_OAUTH_SCOPES
+    )
+
+    # Check if Google sign-in is enabled
+    if not is_google_oauth_configured():
+        logger.warning("Google OAuth attempted but not configured")
+        return redirect('/?error=google_not_configured')
+
+    # Get Google client ID
+    client_id = get_google_client_id()
+    if not client_id:
+        logger.error("Google client ID not configured for OAuth")
+        return redirect('/?error=google_not_configured')
+
+    # Get optional return_url from query params (where to redirect after login)
+    return_url = request.args.get('return_url', '/')
+
+    # Generate encrypted state for CSRF protection
+    try:
+        state = generate_google_oauth_state(return_url=return_url)
+    except Exception as e:
+        logger.error(f"Failed to generate Google OAuth state: {e}")
+        return redirect('/?error=internal_error')
+
+    # Build redirect URI (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/google/callback"
+
+    # Build Google authorization URL
+    import urllib.parse
+    auth_params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': GOOGLE_OAUTH_SCOPES,
+        'redirect_uri': redirect_uri,
+        'state': state,
+        'access_type': 'offline',  # Get refresh token
+        'prompt': 'select_account'  # Always show account selector
+    }
+    auth_url = f"{GOOGLE_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(auth_params)}"
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/google/callback')
+@track_endpoint('auth_google_callback')
+def google_oauth_callback():
+    """Handle Google OAuth callback.
+
+    This endpoint receives the authorization code from Google after the user
+    authenticates. It exchanges the code for tokens, fetches user info,
+    and creates/logs in the user based on their email domain.
+
+    IMPORTANT: Gmail accounts are blocked - only corporate/workspace Google accounts allowed.
+    The tenant is derived from the email domain (existing logic).
+    First user of a domain becomes provisional admin (existing logic).
+    """
+    import requests as http_requests
+    from google_oauth import (
+        get_google_client_id,
+        get_google_client_secret,
+        verify_google_oauth_state,
+        GOOGLE_OAUTH_TOKEN_URL,
+        GOOGLE_OAUTH_USERINFO_URL
+    )
+
+    # Get callback parameters
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description', '')
+
+    # Handle Google errors
+    if error:
+        logger.warning(f"Google OAuth error: {error} - {error_description}")
+        return redirect(f'/?error=google_auth_error&message={error}')
+
+    if not code:
+        logger.warning("Google OAuth callback missing code")
+        return redirect('/?error=missing_code')
+
+    # Verify state parameter (CSRF protection)
+    state_data = verify_google_oauth_state(state)
+    if not state_data:
+        logger.warning("Invalid or expired Google OAuth state")
+        return redirect('/?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Get Google credentials
+    client_id = get_google_client_id()
+    client_secret = get_google_client_secret()
+
+    if not client_id or not client_secret:
+        logger.error("Google credentials not configured for OAuth callback")
+        return redirect('/?error=google_not_configured')
+
+    # Build redirect URI (must match the one used in authorization)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/google/callback"
+
+    try:
+        # Exchange code for tokens
+        token_response = http_requests.post(
+            GOOGLE_OAUTH_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'grant_type': 'authorization_code'
+            },
+            timeout=30
+        )
+
+        if not token_response.ok:
+            logger.error(f"Google token exchange failed: {token_response.status_code}")
+            return redirect('/?error=token_exchange_failed')
+
+        token_data = token_response.json()
+        if 'error' in token_data:
+            logger.error(f"Google token error: {token_data.get('error')}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            logger.error("No access token in Google OAuth response")
+            return redirect('/?error=no_access_token')
+
+        # Fetch user info
+        userinfo_response = http_requests.get(
+            GOOGLE_OAUTH_USERINFO_URL,
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=30
+        )
+
+        if not userinfo_response.ok:
+            logger.error(f"Google userinfo failed: {userinfo_response.status_code}")
+            return redirect('/?error=userinfo_failed')
+
+        userinfo = userinfo_response.json()
+
+        # Extract user details
+        email = userinfo.get('email')
+        name = userinfo.get('name') or userinfo.get('given_name', '')
+        google_user_id = userinfo.get('sub')  # Google user ID
+
+        if not email:
+            logger.warning("No email in Google OAuth userinfo")
+            return redirect('/?error=no_email')
+
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+
+        # Check for public email domains (gmail, yahoo, etc.)
+        # IMPORTANT: Gmail accounts cannot sign up even though they authenticate with Google
+        if DomainApproval.is_public_domain(domain):
+            logger.warning(f"Public email domain rejected for Google OAuth: {domain}")
+            return redirect('/?error=public_email&message=Please use your work email address. Personal Gmail accounts are not allowed.')
+
+        # Check for disposable email domains
+        if DomainApproval.is_disposable_domain(domain):
+            logger.warning(f"Disposable email domain rejected for Google OAuth: {domain}")
+            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
+
+        # Check if this is the first user for this domain
+        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+        is_first_user = existing_domain_users == 0
+
+        # Get or create user
+        user = get_or_create_user(email, name, google_user_id, domain)
+
+        # Create Tenant if it doesn't exist (v1.5 governance)
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=domain,  # Default name is domain
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            db.session.add(tenant)
+            db.session.flush()
+            logger.info(f"Created tenant for Google OAuth domain: {domain}")
+
+            # Create default auth config for new tenant
+            auth_config = AuthConfig.query.filter_by(domain=domain).first()
+            if not auth_config:
+                auth_config = AuthConfig(
+                    domain=domain,
+                    auth_method='local',  # Default to local, allowing multiple auth methods
+                    allow_password=True,
+                    allow_passkey=True,
+                    allow_slack_oidc=True,
+                    allow_google_oauth=True,
+                    allow_registration=True,
+                    require_approval=True,
+                    rp_name='Decision Records'
+                )
+                db.session.add(auth_config)
+                logger.info(f"Created AuthConfig for Google OAuth domain: {domain}")
+
+            # Auto-approve corporate domain
+            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+            if not domain_approval:
+                domain_approval = DomainApproval(
+                    domain=domain,
+                    status='approved',
+                    requested_by_email=email,
+                    requested_by_name=name,
+                    auto_approved=True,
+                    reviewed_at=datetime.utcnow()
+                )
+                db.session.add(domain_approval)
+                logger.info(f"Auto-approved corporate domain via Google OAuth: {domain}")
+
+        # Ensure TenantMembership exists
+        membership = TenantMembership.query.filter_by(
+            user_id=user.id,
+            tenant_id=tenant.id
+        ).first()
+
+        if not membership:
+            # Create membership with appropriate role
+            # First user becomes provisional admin
+            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=role
+            )
+            db.session.add(membership)
+            logger.info(f"Created TenantMembership for Google OAuth user {email} in tenant {domain} with role {role.value}")
+
+        db.session.commit()
+
+        # Update auth_type to indicate Google OAuth login
+        if not user.auth_type or user.auth_type == 'local':
+            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+            db.session.commit()
+
+        # Set session
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=user.is_admin)
+
+        logger.info(f"Google OAuth login successful for {email}")
+
+        # Redirect to return URL or tenant home
+        if return_url and return_url != '/' and not return_url.startswith('/?'):
+            return redirect(return_url)
+
+        # Redirect to tenant dashboard
+        return redirect(f'/{domain}')
+
+    except http_requests.RequestException as e:
+        logger.error(f"Google OAuth request error: {e}")
+        return redirect('/?error=network_error')
+    except Exception as e:
+        logger.error(f"Google OAuth callback error: {e}")
+        return redirect('/?error=internal_error')
+
+
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
 
 if not SERVE_ANGULAR:
@@ -1192,15 +2213,20 @@ def api_create_decision():
     if not data:
         return jsonify({'error': 'No data provided'}), 400
 
-    # Sanitize and validate input
+    # Sanitize and validate input - only title is required
     sanitized, errors = sanitize_request_data(data, {
         'title': {'type': 'title', 'max_length': 255, 'required': True},
-        'context': {'type': 'text', 'max_length': 50000, 'required': True},
-        'decision': {'type': 'text', 'max_length': 50000, 'required': True},
-        'consequences': {'type': 'text', 'max_length': 50000, 'required': True},
+        'context': {'type': 'text', 'max_length': 50000, 'required': False},
+        'decision': {'type': 'text', 'max_length': 50000, 'required': False},
+        'consequences': {'type': 'text', 'max_length': 50000, 'required': False},
         'status': {'type': 'string', 'max_length': 50},
         'change_reason': {'type': 'text', 'max_length': 500},
+        'owner_email': {'type': 'email', 'required': False},
     })
+
+    # Handle owner_id separately (not part of sanitization)
+    owner_id = data.get('owner_id')
+    owner_email = sanitized.get('owner_email')
 
     if errors:
         return jsonify({'error': errors[0]}), 400
@@ -1225,16 +2251,26 @@ def api_create_decision():
     ).scalar() or 0
     next_number = max_number + 1
 
+    # Validate owner_id if provided (must be a user in the same tenant)
+    validated_owner_id = None
+    if owner_id:
+        owner_user = User.query.filter_by(id=owner_id, sso_domain=domain).first()
+        if owner_user:
+            validated_owner_id = owner_id
+        # If owner_id is invalid, we silently ignore it (don't fail the request)
+
     decision = ArchitectureDecision(
         title=sanitized['title'],
-        context=sanitized['context'],
-        decision=sanitized['decision'],
+        context=sanitized.get('context', ''),
+        decision=sanitized.get('decision', ''),
         status=status,
-        consequences=sanitized['consequences'],
+        consequences=sanitized.get('consequences', ''),
         decision_number=next_number,
         domain=domain,  # SECURITY: Always use authenticated user's domain
         created_by_id=g.current_user.id,
-        updated_by_id=g.current_user.id
+        updated_by_id=g.current_user.id,
+        owner_id=validated_owner_id,
+        owner_email=owner_email
     )
 
     # Handle infrastructure associations
@@ -1254,6 +2290,31 @@ def api_create_decision():
     if not email_config:
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_new_decision(db, decision, email_config)
+
+    # Notify decision owner if assigned (and it's not the creator)
+    if decision.owner_id or decision.owner_email:
+        try:
+            from notifications import notify_decision_owner
+            owner_email = decision.owner_email
+            owner_name = None
+            if decision.owner_id and decision.owner:
+                owner_email = decision.owner.email
+                owner_name = decision.owner.name
+                # Don't notify if owner is the creator
+                if decision.owner_id == decision.created_by_id:
+                    owner_email = None
+            if owner_email:
+                base_url = request.host_url.rstrip('/')
+                notify_decision_owner(email_config, decision, owner_email, owner_name, base_url)
+        except Exception as e:
+            logger.warning(f"Failed to notify decision owner: {e}")
+
+    # Send Slack notification if configured
+    try:
+        from slack_service import notify_decision_created
+        notify_decision_created(decision)
+    except Exception as e:
+        logger.warning(f"Failed to send Slack notification for new decision: {e}")
 
     return jsonify(decision.to_dict()), 201
 
@@ -1301,7 +2362,12 @@ def api_update_decision(decision_id):
         'consequences': {'type': 'text', 'max_length': 50000},
         'status': {'type': 'string', 'max_length': 50},
         'change_reason': {'type': 'text', 'max_length': 500},
+        'owner_email': {'type': 'email', 'required': False},
     })
+
+    # Handle owner_id separately
+    owner_id = data.get('owner_id')
+    owner_email = sanitized.get('owner_email')
 
     if errors:
         return jsonify({'error': errors[0]}), 400
@@ -1322,6 +2388,17 @@ def api_update_decision(decision_id):
                 status_changed = True
             break
 
+    # Check for owner changes and track if owner is being assigned/changed
+    owner_changed = False
+    old_owner_id = decision.owner_id
+    old_owner_email = decision.owner_email
+    if 'owner_id' in data and owner_id != decision.owner_id:
+        has_changes = True
+        owner_changed = True
+    if 'owner_email' in data and owner_email != decision.owner_email:
+        has_changes = True
+        owner_changed = True
+
     if not has_changes:
         return jsonify(decision.to_dict_with_history())
 
@@ -1340,6 +2417,18 @@ def api_update_decision(decision_id):
         decision.status = sanitized['status']
     if 'consequences' in sanitized:
         decision.consequences = sanitized['consequences']
+
+    # Handle owner updates
+    if 'owner_id' in data:
+        if owner_id:
+            # Validate owner_id is in the same tenant
+            owner_user = User.query.filter_by(id=owner_id, sso_domain=g.current_user.sso_domain).first()
+            if owner_user:
+                decision.owner_id = owner_id
+        else:
+            decision.owner_id = None
+    if 'owner_email' in data:
+        decision.owner_email = owner_email
 
     # Handle infrastructure associations
     if 'infrastructure_ids' in data:
@@ -1362,6 +2451,41 @@ def api_update_decision(decision_id):
     if not email_config:
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
     notify_subscribers_decision_updated(db, decision, email_config, change_reason, status_changed)
+
+    # Notify new decision owner if owner was changed
+    if owner_changed and (decision.owner_id or decision.owner_email):
+        # Only notify if it's a new owner (not same as old)
+        new_owner_email = decision.owner_email
+        new_owner_name = None
+        should_notify = True
+
+        if decision.owner_id and decision.owner:
+            new_owner_email = decision.owner.email
+            new_owner_name = decision.owner.name
+            # Don't notify if owner is the person making the update
+            if decision.owner_id == g.current_user.id:
+                should_notify = False
+            # Don't notify if owner hasn't actually changed (same user)
+            if decision.owner_id == old_owner_id:
+                should_notify = False
+        elif decision.owner_email and decision.owner_email == old_owner_email:
+            should_notify = False
+
+        if should_notify and new_owner_email:
+            try:
+                from notifications import notify_decision_owner
+                base_url = request.host_url.rstrip('/')
+                notify_decision_owner(email_config, decision, new_owner_email, new_owner_name, base_url)
+            except Exception as e:
+                logger.warning(f"Failed to notify decision owner on update: {e}")
+
+    # Send Slack notification if status changed
+    if status_changed:
+        try:
+            from slack_service import notify_decision_status_changed
+            notify_decision_status_changed(decision)
+        except Exception as e:
+            logger.warning(f"Failed to send Slack notification for status change: {e}")
 
     return jsonify(decision.to_dict_with_history())
 
@@ -1793,7 +2917,7 @@ def api_save_email_config():
     smtp_server = sanitize_title(data['smtp_server'], max_length=255)
     smtp_username = sanitize_title(data['smtp_username'], max_length=255)
     from_email_sanitized = sanitize_email(data['from_email'])
-    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+    from_name = sanitize_name(data.get('from_name', 'Decision Records'), max_length=100)
 
     if not from_email_sanitized:
         return jsonify({'error': 'Invalid from_email address'}), 400
@@ -1860,9 +2984,9 @@ def api_test_email():
     success = send_email(
         config,
         test_email,
-        'Architecture Decisions - Test Email',
-        '<h1>Test Email</h1><p>This is a test email from Architecture Decisions.</p>',
-        'Test Email\n\nThis is a test email from Architecture Decisions.'
+        'Decision Records - Test Email',
+        '<h1>Test Email</h1><p>This is a test email from Decision Records.</p>',
+        'Test Email\n\nThis is a test email from Decision Records.'
     )
 
     if success:
@@ -1911,7 +3035,7 @@ def api_save_system_email_config():
     # Sanitize inputs to prevent XSS attacks
     smtp_server = sanitize_title(data['smtp_server'], max_length=255)
     from_email_sanitized = sanitize_email(data['from_email'])
-    from_name = sanitize_name(data.get('from_name', 'Architecture Decisions'), max_length=100)
+    from_name = sanitize_name(data.get('from_name', 'Decision Records'), max_length=100)
 
     if not from_email_sanitized:
         return jsonify({'error': 'Invalid from_email address'}), 400
@@ -1966,9 +3090,9 @@ def api_test_system_email():
     success = send_email(
         config,
         test_email,
-        'Architecture Decisions - Test Email',
-        '<h1>Test Email</h1><p>This is a test email from Architecture Decisions system config.</p>',
-        'Test Email\n\nThis is a test email from Architecture Decisions system config.'
+        'Decision Records - Test Email',
+        '<h1>Test Email</h1><p>This is a test email from Decision Records system config.</p>',
+        'Test Email\n\nThis is a test email from Decision Records system config.'
     )
 
     if success:
@@ -2089,6 +3213,52 @@ def api_save_licensing_settings():
         'max_users_per_tenant': SystemConfig.get_int(
             SystemConfig.KEY_MAX_USERS_PER_TENANT,
             default=SystemConfig.DEFAULT_MAX_USERS_PER_TENANT
+        )
+    })
+
+
+@app.route('/api/admin/settings/support', methods=['GET'])
+@master_required
+def api_get_support_settings():
+    """Get support/contact email settings (super admin only)."""
+    return jsonify({
+        'support_email': SystemConfig.get(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            default=SystemConfig.DEFAULT_SUPPORT_EMAIL
+        ),
+        'defaults': {
+            'support_email': SystemConfig.DEFAULT_SUPPORT_EMAIL
+        }
+    })
+
+
+@app.route('/api/admin/settings/support', methods=['POST', 'PUT'])
+@master_required
+def api_save_support_settings():
+    """Update support/contact email settings (super admin only)."""
+    from security import sanitize_email
+
+    data = request.get_json() or {}
+
+    support_email = data.get('support_email', '').strip()
+
+    if support_email:
+        # Validate email format
+        sanitized = sanitize_email(support_email)
+        if not sanitized:
+            return jsonify({'error': 'Invalid email address format'}), 400
+
+        SystemConfig.set(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            sanitized,
+            description='Email address for contact form submissions'
+        )
+
+    return jsonify({
+        'message': 'Support settings updated successfully',
+        'support_email': SystemConfig.get(
+            SystemConfig.KEY_SUPPORT_EMAIL,
+            default=SystemConfig.DEFAULT_SUPPORT_EMAIL
         )
     })
 
@@ -2750,7 +3920,7 @@ def api_get_auth_config_public(domain):
         'domain': domain.lower(),
         'auth_method': 'webauthn',
         'allow_registration': True,
-        'rp_name': 'Architecture Decisions',
+        'rp_name': 'Decision Records',
     })
 
 
@@ -2788,13 +3958,37 @@ def _api_get_tenant_status_impl(domain):
     # Check global email verification setting
     email_verification_required = SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True)
 
+    # Check if tenant can process access requests (has full admins or stewards who can approve)
+    # This is INDEPENDENT of require_approval setting:
+    # - require_approval: tenant setting - whether new users must be approved (admin's choice)
+    # - can_process_access_requests: capability - whether the tenant has admins who CAN approve
+    #
+    # Edge case: If require_approval=true but can_process_access_requests=false (only provisional admin),
+    # the backend will auto-approve users since no one can approve them. The frontend should
+    # show "Join" instead of "Request Access" UI in this case.
+    can_process_access_requests = False
+    if has_users:
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if tenant:
+            approving_admin_count = TenantMembership.query.filter(
+                TenantMembership.tenant_id == tenant.id,
+                TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+            ).count()
+            can_process_access_requests = approving_admin_count > 0
+
+    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false
+    require_approval_setting = auth_config.require_approval if auth_config else True
+    effective_require_approval = require_approval_setting and can_process_access_requests
+
     return jsonify({
         'domain': domain,
         'has_users': has_users,
         'user_count': user_count,
         'auth_method': auth_config.auth_method if auth_config else 'webauthn',
         'allow_registration': auth_config.allow_registration if auth_config else True,
-        'require_approval': auth_config.require_approval if auth_config else True,
+        'require_approval': require_approval_setting,  # Tenant's configured setting
+        'effective_require_approval': effective_require_approval,  # Actual behavior (accounts for capability)
+        'can_process_access_requests': can_process_access_requests,  # Whether tenant has approvers
         'has_sso': sso_config is not None,
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
@@ -2883,12 +4077,12 @@ def send_verification_email(email, token, purpose, domain):
         return False
 
     base_url = request.host_url.rstrip('/')
-    verify_url = f"{base_url}/verify-email/{token}"
+    verify_url = f"{base_url}/api/auth/verify-email/{token}"
 
     if purpose == 'signup':
-        subject = 'Verify your email - Architecture Decisions'
+        subject = 'Verify your email - Decision Records'
         html_body = f"""
-        <h1>Welcome to Architecture Decisions</h1>
+        <h1>Welcome to Decision Records</h1>
         <p>Please verify your email address by clicking the button below:</p>
         <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify Email</a></p>
         <p>Or copy and paste this link into your browser:</p>
@@ -2896,11 +4090,11 @@ def send_verification_email(email, token, purpose, domain):
         <p>This link will expire in 24 hours.</p>
         <p>If you didn't request this, you can safely ignore this email.</p>
         """
-        text_body = f"Welcome to Architecture Decisions\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
+        text_body = f"Welcome to Decision Records\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
     elif purpose == 'access_request':
-        subject = 'Verify your email to request access - Architecture Decisions'
+        subject = 'Verify your email to request access - Decision Records'
         html_body = f"""
-        <h1>Request Access to Architecture Decisions</h1>
+        <h1>Request Access to Decision Records</h1>
         <p>Please verify your email address to submit your access request:</p>
         <p><a href="{verify_url}" style="background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Verify and Submit Request</a></p>
         <p>Or copy and paste this link into your browser:</p>
@@ -2910,7 +4104,7 @@ def send_verification_email(email, token, purpose, domain):
         """
         text_body = f"Request Access\n\nVerify your email by visiting: {verify_url}\n\nThis link expires in 24 hours."
     else:
-        subject = 'Verify your email - Architecture Decisions'
+        subject = 'Verify your email - Decision Records'
         html_body = f"""
         <h1>Email Verification</h1>
         <p>Please verify your email address by clicking the link below:</p>
@@ -2929,7 +4123,17 @@ def api_send_verification():
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+
     purpose = data.get('purpose', 'signup')  # signup, access_request, login
     reason = sanitize_text_field(data.get('reason', ''), max_length=1000)  # For access requests
 
@@ -2975,6 +4179,22 @@ def api_send_verification():
     if has_users and not existing_user:
         # Existing tenant, new user - must request access unless auto-signup is enabled
         require_approval = auth_config.require_approval if auth_config else True
+
+        # Check if tenant has any full admins who can approve requests
+        # If only provisional admins exist, auto-approve new users since no one can approve them
+        if require_approval:
+            tenant = Tenant.query.filter_by(domain=domain).first()
+            if tenant:
+                full_admin_count = TenantMembership.query.filter(
+                    TenantMembership.tenant_id == tenant.id,
+                    TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+                ).count()
+                if full_admin_count == 0:
+                    # No full admins or stewards - provisional admin only tenant
+                    # Auto-approve since no one can approve access requests
+                    require_approval = False
+                    logger.info(f"Auto-approving signup for {domain} - tenant has only provisional admin")
+
         if require_approval:
             purpose = 'access_request'
         else:
@@ -3100,6 +4320,84 @@ def api_resend_verification():
     return jsonify({'message': success_message})
 
 
+@app.route('/api/auth/request-setup-link', methods=['POST'])
+@track_endpoint('api_auth_request_setup_link')
+def api_request_setup_link():
+    """Request a new setup link for users who haven't set up their credentials yet.
+
+    This endpoint allows users to request a new setup link if their previous one
+    expired or they didn't receive it. This is for users who have verified their
+    email but haven't completed credential setup.
+    """
+    data = request.get_json() or {}
+    email = data.get('email', '').lower().strip()
+
+    if not email or '@' not in email:
+        return jsonify({'error': 'Valid email address is required'}), 400
+
+    # Generic success message (always return this to prevent email enumeration)
+    success_message = 'If your account exists and needs setup, a link has been sent to your email.'
+
+    # Find user by email
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        # Don't reveal that no user exists
+        logger.info(f"Setup link requested for non-existent email: {email}")
+        return jsonify({'message': success_message})
+
+    # Check if user already has credentials
+    has_passkey = len(user.webauthn_credentials) > 0 if user.webauthn_credentials else False
+    has_password = user.has_password()
+
+    if has_passkey or has_password:
+        # User already has credentials - don't send setup link
+        logger.info(f"Setup link requested for user with existing credentials: {email}")
+        return jsonify({'message': success_message})
+
+    # Rate limiting: Check for recent setup tokens (5 minutes)
+    recent_token = SetupToken.query.filter(
+        SetupToken.user_id == user.id,
+        SetupToken.created_at > datetime.utcnow() - timedelta(minutes=5)
+    ).first()
+
+    if recent_token:
+        logger.info(f"Rate limited setup link request for: {email}")
+        return jsonify({'message': success_message})
+
+    # Get email config for sending
+    email_config = EmailConfig.query.filter_by(domain=user.sso_domain, enabled=True).first()
+    if not email_config:
+        email_config = EmailConfig.query.filter_by(enabled=True).first()
+
+    if not email_config:
+        logger.warning(f"No email config available to send setup link for: {email}")
+        return jsonify({'message': success_message})
+
+    # Generate new setup token
+    setup_token = SetupToken.create_for_user(user)
+    setup_token_str = setup_token._token_string
+    setup_url = f"{request.host_url.rstrip('/')}/{user.sso_domain}/setup?token={setup_token_str}"
+
+    # Send setup email
+    from notifications import send_setup_token_email
+    success = send_setup_token_email(
+        email_config=email_config,
+        user_name=user.name or user.email.split('@')[0],
+        user_email=user.email,
+        setup_url=setup_url,
+        expires_in_hours=SetupToken.TOKEN_VALIDITY_HOURS
+    )
+
+    if success:
+        logger.info(f"Setup link sent to: {email}")
+    else:
+        logger.error(f"Failed to send setup link to: {email}")
+
+    # Always return success to prevent email enumeration
+    return jsonify({'message': success_message})
+
+
 @app.route('/api/auth/direct-signup', methods=['POST'])
 def api_direct_signup():
     """Direct signup (when email verification is disabled)."""
@@ -3111,12 +4409,27 @@ def api_direct_signup():
     data = request.get_json() or {}
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+        # Parse first_name and last_name from legacy name
+        if name:
+            parts = name.strip().split(None, 1)
+            first_name = parts[0] if parts else ''
+            last_name = parts[1] if len(parts) > 1 else ''
+
     password = data.get('password', '').strip() if data.get('password') else None
     auth_preference = data.get('auth_preference', 'passkey')  # 'passkey' or 'password'
 
-    if not email or not name:
-        return jsonify({'error': 'Email and name are required'}), 400
+    if not email or not first_name:
+        return jsonify({'error': 'Email and first name are required'}), 400
 
     # Only require password if user chose password auth
     if auth_preference == 'password':
@@ -3186,12 +4499,13 @@ def api_direct_signup():
     # Create user account directly (first user becomes admin)
     user = User(
         email=email,
-        name=name,
         sso_domain=domain,
         auth_type='webauthn' if auth_preference == 'passkey' else 'local',
         is_admin=True,  # First user becomes admin
         email_verified=True  # Mark as verified since verification is disabled
     )
+    # Set name using helper method for first_name/last_name handling
+    user.set_name(first_name=first_name, last_name=last_name)
     if auth_preference == 'password' and password:
         user.set_password(password)
     db.session.add(user)
@@ -3206,7 +4520,7 @@ def api_direct_signup():
             allow_passkey=True,
             allow_registration=True,
             require_approval=True,
-            rp_name='Architecture Decisions'
+            rp_name='Decision Records'
         )
         db.session.add(auth_config)
 
@@ -3284,6 +4598,7 @@ def api_verify_email(token):
     if verification.purpose == 'signup':
         # Create user account (if doesn't exist)
         user = User.query.filter_by(email=verification.email).first()
+        is_new_user = user is None
         if not user:
             # Determine if this is the first user for the domain
             is_first_user = User.query.filter_by(sso_domain=verification.domain).count() == 0
@@ -3297,6 +4612,7 @@ def api_verify_email(token):
                 email_verified=True
             )
             db.session.add(user)
+            db.session.flush()  # Get user ID before creating membership
 
             # Create default auth config if this is a new tenant
             if is_first_user:
@@ -3309,7 +4625,7 @@ def api_verify_email(token):
                         allow_passkey=True,
                         allow_registration=True,
                         require_approval=True,
-                        rp_name='Architecture Decisions'
+                        rp_name='Decision Records'
                     )
                     db.session.add(auth_config)
 
@@ -3326,6 +4642,34 @@ def api_verify_email(token):
                     )
                     db.session.add(domain_approval)
                     app.logger.info(f"Auto-approved corporate domain via email verification: {verification.domain}")
+
+            # Create Tenant if it doesn't exist (v1.5 governance)
+            tenant = Tenant.query.filter_by(domain=verification.domain).first()
+            if not tenant:
+                tenant = Tenant(
+                    domain=verification.domain,
+                    name=verification.domain,  # Default name is domain
+                    status='active',
+                    maturity_state=MaturityState.BOOTSTRAP
+                )
+                db.session.add(tenant)
+                db.session.flush()
+                app.logger.info(f"Created tenant for domain: {verification.domain}")
+
+            # Create TenantMembership for the user
+            membership = TenantMembership.query.filter_by(
+                user_id=user.id,
+                tenant_id=tenant.id
+            ).first()
+            if not membership:
+                role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+                membership = TenantMembership(
+                    user_id=user.id,
+                    tenant_id=tenant.id,
+                    global_role=role
+                )
+                db.session.add(membership)
+                app.logger.info(f"Created TenantMembership for {verification.email} with role {role.value}")
         else:
             user.email_verified = True
             if verification.name:
@@ -3333,15 +4677,23 @@ def api_verify_email(token):
 
         db.session.commit()
 
+        # Generate SetupToken for user to set up credentials
+        setup_token = SetupToken.create_for_user(user)
+        setup_token_str = setup_token._token_string
+        setup_url = f'/{verification.domain}/setup?token={setup_token_str}'
+
+        app.logger.info(f"Email verified for {verification.email}, redirecting to setup page")
+
         if request.method == 'POST':
             return jsonify({
                 'message': 'Email verified successfully',
                 'email': verification.email,
                 'domain': verification.domain,
                 'purpose': 'signup',
-                'redirect': f'/{verification.domain}/login?verified=1'
+                'redirect': setup_url,
+                'setup_token': setup_token_str
             })
-        return redirect(f'/{verification.domain}/login?verified=1&email={verification.email}')
+        return redirect(setup_url)
 
     elif verification.purpose == 'access_request':
         # Create access request
@@ -3407,12 +4759,27 @@ def api_submit_access_request():
 
     # Sanitize inputs to prevent XSS and injection attacks
     email = sanitize_email(data.get('email', ''))
-    name = sanitize_name(data.get('name', ''), max_length=255)
+    # Support both legacy 'name' field and new first_name/last_name fields
+    first_name = sanitize_name(data.get('first_name', ''), max_length=100)
+    last_name = sanitize_name(data.get('last_name', ''), max_length=100)
+    legacy_name = sanitize_name(data.get('name', ''), max_length=255)
+
+    # Derive name from first_name/last_name or use legacy name field
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    else:
+        name = legacy_name
+        # Parse first_name and last_name from legacy name
+        if name:
+            parts = name.strip().split(None, 1)
+            first_name = parts[0] if parts else ''
+            last_name = parts[1] if len(parts) > 1 else ''
+
     reason = sanitize_text_field(data.get('reason', ''), max_length=1000)
     domain = data.get('domain', '').lower().strip()
 
-    if not email or not name:
-        return jsonify({'error': 'Email and name are required'}), 400
+    if not email or not first_name:
+        return jsonify({'error': 'Email and first name are required'}), 400
 
     # Extract and validate domain from email
     email_domain = email.split('@')[1] if '@' in email else ''
@@ -3439,6 +4806,21 @@ def api_submit_access_request():
     auth_config = AuthConfig.query.filter_by(domain=domain).first()
     require_approval = auth_config.require_approval if auth_config else True
 
+    # Check if tenant has any full admins who can approve requests
+    # If only provisional admins exist, auto-approve new users since no one can approve them
+    if require_approval:
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if tenant:
+            full_admin_count = TenantMembership.query.filter(
+                TenantMembership.tenant_id == tenant.id,
+                TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
+            ).count()
+            if full_admin_count == 0:
+                # No full admins or stewards - provisional admin only tenant
+                # Auto-approve since no one can approve access requests
+                require_approval = False
+                logger.info(f"Auto-approving access request for {domain} - tenant has only provisional admin")
+
     if not require_approval:
         # Auto-approval enabled: create user immediately and send setup email
         from models import SetupToken
@@ -3457,11 +4839,12 @@ def api_submit_access_request():
         # Create the user account
         new_user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             auth_type='webauthn',
             is_admin=False
         )
+        # Set name using helper method for first_name/last_name handling
+        new_user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(new_user)
         db.session.flush()  # Get the user ID before creating token
 
@@ -3958,11 +5341,12 @@ def api_approve_access_request(request_id):
     # Create the user account
     new_user = User(
         email=access_request.email,
-        name=access_request.name,
         sso_domain=access_request.domain,
         auth_type='webauthn',
         is_admin=False
     )
+    # Parse name from access request into first_name/last_name
+    new_user.set_name(full_name=access_request.name)
     db.session.add(new_user)
     db.session.flush()  # Get the user ID before creating token
 
@@ -4844,7 +6228,7 @@ def api_get_auth_config():
             'auth_method': 'webauthn',
             'allow_registration': True,
             'require_approval': True,
-            'rp_name': 'Architecture Decisions',
+            'rp_name': 'Decision Records',
         })
     return jsonify(config.to_dict())
 
@@ -4864,14 +6248,18 @@ def api_save_auth_config():
         domain = g.current_user.sso_domain
 
     auth_method = data.get('auth_method', 'webauthn')
-    if auth_method not in ['sso', 'webauthn']:
-        return jsonify({'error': 'auth_method must be "sso" or "webauthn"'}), 400
+    if auth_method not in ['sso', 'webauthn', 'slack_oidc', 'local']:
+        return jsonify({'error': 'auth_method must be "sso", "webauthn", "slack_oidc", or "local"'}), 400
 
     # If setting to SSO, check if SSO config exists for this domain
     if auth_method == 'sso':
         sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
         if not sso_config:
             return jsonify({'error': 'Cannot set auth method to SSO without a valid SSO configuration'}), 400
+
+    # If setting to slack_oidc, check if Slack feature is enabled
+    if auth_method == 'slack_oidc' and not is_slack_enabled():
+        return jsonify({'error': 'Slack integration is not enabled'}), 400
 
     config = AuthConfig.query.filter_by(domain=domain).first()
 
@@ -4881,7 +6269,9 @@ def api_save_auth_config():
             auth_method=auth_method,
             allow_registration=data.get('allow_registration', True),
             require_approval=data.get('require_approval', True),
-            rp_name=data.get('rp_name', 'Architecture Decisions'),
+            rp_name=data.get('rp_name', 'Decision Records'),
+            allow_slack_oidc=data.get('allow_slack_oidc', True),
+            allow_google_oauth=data.get('allow_google_oauth', True),
         )
         db.session.add(config)
     else:
@@ -4892,6 +6282,14 @@ def api_save_auth_config():
             config.require_approval = bool(data['require_approval'])
         if 'rp_name' in data:
             config.rp_name = data['rp_name']
+        if 'allow_slack_oidc' in data:
+            config.allow_slack_oidc = bool(data['allow_slack_oidc'])
+        if 'allow_google_oauth' in data:
+            config.allow_google_oauth = bool(data['allow_google_oauth'])
+        if 'allow_password' in data:
+            config.allow_password = bool(data['allow_password'])
+        if 'allow_passkey' in data:
+            config.allow_passkey = bool(data['allow_passkey'])
 
     db.session.commit()
 
@@ -5593,8 +6991,11 @@ def api_update_tenant_auth_config():
         db.session.add(auth_config)
 
     if 'auth_method' in data:
-        if data['auth_method'] not in ['local', 'sso', 'webauthn']:
+        if data['auth_method'] not in ['local', 'sso', 'webauthn', 'slack_oidc']:
             return jsonify({'error': 'Invalid auth method'}), 400
+        # If setting to slack_oidc, check if Slack feature is enabled
+        if data['auth_method'] == 'slack_oidc' and not is_slack_enabled():
+            return jsonify({'error': 'Slack integration is not enabled'}), 400
         auth_config.auth_method = data['auth_method']
 
     if 'allow_password' in data:
@@ -5602,6 +7003,12 @@ def api_update_tenant_auth_config():
 
     if 'allow_passkey' in data:
         auth_config.allow_passkey = bool(data['allow_passkey'])
+
+    if 'allow_slack_oidc' in data:
+        auth_config.allow_slack_oidc = bool(data['allow_slack_oidc'])
+
+    if 'allow_google_oauth' in data:
+        auth_config.allow_google_oauth = bool(data['allow_google_oauth'])
 
     if 'allow_registration' in data:
         auth_config.allow_registration = bool(data['allow_registration'])
@@ -6065,9 +7472,23 @@ if SERVE_ANGULAR:
         if path.startswith('api/'):
             return jsonify({'error': 'Not found'}), 404
 
-        # Try to serve static files (JS, CSS, images, etc.)
-        if path and os.path.exists(os.path.join(FRONTEND_DIR, path)):
-            return send_from_directory(FRONTEND_DIR, path)
+        # Security: Block path traversal attempts before any filesystem checks
+        # This prevents information disclosure via os.path.isfile probing
+        if path and ('..' in path or path.startswith('/')):
+            return send_from_directory(FRONTEND_DIR, 'index.html')
+
+        # Check for prerendered routes FIRST (SSR/prerender creates path/index.html)
+        # This enables proper meta tags for social sharing on blog posts etc.
+        if path:
+            prerendered_path = os.path.join(FRONTEND_DIR, path, 'index.html')
+            if os.path.isfile(prerendered_path):
+                return send_from_directory(os.path.join(FRONTEND_DIR, path), 'index.html')
+
+        # Try to serve static files (JS, CSS, images, etc.) - must be a file, not directory
+        if path:
+            static_path = os.path.join(FRONTEND_DIR, path)
+            if os.path.isfile(static_path):
+                return send_from_directory(FRONTEND_DIR, path)
 
         # Fallback to index.html for Angular SPA routing
         # This handles all frontend routes like /, /superadmin, /{tenant}/login, etc.
@@ -6124,7 +7545,21 @@ def create_test_user():
 
     email = data.get('email')
     password = data.get('password')
-    name = data.get('name', email.split('@')[0] if email else 'Test User')
+    # Support both legacy name and new first_name/last_name fields
+    first_name = data.get('first_name', '')
+    last_name = data.get('last_name', '')
+    legacy_name = data.get('name', '')
+    if first_name or last_name:
+        name = f"{first_name} {last_name}".strip()
+    elif legacy_name:
+        name = legacy_name
+        parts = name.strip().split(None, 1)
+        first_name = parts[0] if parts else email.split('@')[0] if email else 'Test'
+        last_name = parts[1] if len(parts) > 1 else ''
+    else:
+        name = email.split('@')[0] if email else 'Test User'
+        first_name = name
+        last_name = ''
     role = data.get('role', 'user')
     domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
 
@@ -6157,11 +7592,11 @@ def create_test_user():
         # Create user
         user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             password_hash=generate_password_hash(password),
             auth_type='local'
         )
+        user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(user)
         db.session.flush()
 
@@ -6254,8 +7689,25 @@ def create_incomplete_test_user():
         return jsonify({'error': f'Invalid JSON: {str(e)}'}), 400
 
     email = data.get('email')
-    name = data.get('name', email.split('@')[0] if email else 'Test User')
     domain = data.get('domain', email.split('@')[1] if email and '@' in email else 'test.com')
+
+    # Support both legacy name and new first_name/last_name fields
+    first_name = data.get('first_name', '')
+    last_name = data.get('last_name', '')
+    legacy_name = data.get('name', '')
+
+    if first_name or last_name:
+        # New format: first_name and last_name provided
+        pass  # Use them as-is
+    elif legacy_name:
+        # Legacy format: parse name into first_name/last_name
+        parts = legacy_name.strip().split(None, 1)
+        first_name = parts[0] if parts else (email.split('@')[0] if email else 'Test')
+        last_name = parts[1] if len(parts) > 1 else ''
+    else:
+        # Default: use email prefix as first name
+        first_name = email.split('@')[0] if email else 'Test'
+        last_name = 'User'
 
     if not email:
         return jsonify({'error': 'email required'}), 400
@@ -6287,11 +7739,11 @@ def create_incomplete_test_user():
         # Create user WITHOUT password (incomplete state)
         user = User(
             email=email,
-            name=name,
             sso_domain=domain,
             password_hash=None,  # No password - incomplete user
             auth_type=None  # No auth type yet
         )
+        user.set_name(first_name=first_name, last_name=last_name)
         db.session.add(user)
         db.session.flush()
 
@@ -6343,6 +7795,1026 @@ def create_incomplete_test_user():
         db.session.rollback()
         logger.error(f"Create incomplete test user failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# SLACK INTEGRATION ENDPOINTS
+# =============================================================================
+
+@app.route('/api/slack/install')
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_install')
+def slack_install():
+    """Start Slack OAuth installation flow."""
+    from keyvault_client import keyvault_client
+    from slack_security import generate_oauth_state
+
+    try:
+        client_id = keyvault_client.get_slack_client_id()
+        if not client_id:
+            logger.error("Slack client ID not found in Key Vault")
+            return jsonify({'error': 'Slack integration not configured. Please set up Slack credentials in Key Vault.'}), 500
+
+        user = get_current_user()
+        tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+        if not tenant:
+            return jsonify({'error': 'Tenant not found'}), 404
+
+        # Generate state with tenant_id
+        state = generate_oauth_state(tenant.id, user.id)
+
+        # Slack OAuth scopes
+        scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
+
+        # Force https for production (request.host_url may be http behind proxy)
+        base_url = request.host_url.rstrip('/')
+        if not base_url.startswith('https://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = f"{base_url}/api/slack/oauth/callback"
+
+        auth_url = (
+            f"https://slack.com/oauth/v2/authorize"
+            f"?client_id={client_id}"
+            f"&scope={scopes}"
+            f"&redirect_uri={redirect_uri}"
+            f"&state={state}"
+        )
+
+        return redirect(auth_url)
+    except Exception as e:
+        logger.error(f"Slack install error: {str(e)}")
+        return jsonify({'error': f'Failed to start Slack installation: {str(e)}'}), 500
+
+
+@app.route('/api/slack/oauth/callback')
+@require_slack
+@track_endpoint('api_slack_oauth_callback')
+def slack_oauth_callback():
+    """Handle Slack OAuth callback.
+
+    Supports two scenarios:
+    1. Installation initiated from Decision Records settings (has state with tenant_id)
+    2. Installation from Slack App Directory (no state, workspace stored as pending_claim)
+    """
+    from keyvault_client import keyvault_client
+    from slack_security import verify_oauth_state, encrypt_token
+    from slack_sdk import WebClient
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+
+    if error:
+        logger.error(f"Slack OAuth error: {error}")
+        return redirect('/settings?slack_error=' + error)
+
+    if not code:
+        return redirect('/settings?slack_error=missing_code')
+
+    # Check for state - if present, this is an install from Decision Records
+    # If not present, this is an install from Slack App Directory
+    tenant_id = None
+    user_id = None
+
+    if state:
+        state_data = verify_oauth_state(state)
+        if not state_data:
+            return redirect('/settings?slack_error=invalid_state')
+        tenant_id = state_data.get('tenant_id')
+        user_id = state_data.get('user_id')
+
+    client_id = keyvault_client.get_slack_client_id()
+    client_secret = keyvault_client.get_slack_client_secret()
+
+    if not client_id or not client_secret:
+        return redirect('/settings?slack_error=not_configured')
+
+    try:
+        # Exchange code for token
+        client = WebClient()
+        # Force https for production (request.host_url may be http behind proxy)
+        base_url = request.host_url.rstrip('/')
+        if not base_url.startswith('https://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = f"{base_url}/api/slack/oauth/callback"
+
+        response = client.oauth_v2_access(
+            client_id=client_id,
+            client_secret=client_secret,
+            code=code,
+            redirect_uri=redirect_uri
+        )
+
+        if not response['ok']:
+            logger.error(f"Slack OAuth failed: {response.get('error')}")
+            return redirect('/settings?slack_error=oauth_failed')
+
+        # Extract workspace info
+        workspace_id = response['team']['id']
+        workspace_name = response['team']['name']
+        bot_token = response['access_token']
+
+        # Extract granted scopes from OAuth response
+        granted_scopes = response.get('scope', '').split(',') if response.get('scope') else []
+        logger.info(f"Slack OAuth granted scopes: {granted_scopes}")
+
+        # Get current app version for tracking
+        from slack_upgrade import CURRENT_APP_VERSION
+
+        # Encrypt and store
+        encrypted_token = encrypt_token(bot_token)
+
+        # === Domain Validation ===
+        # Verify the Slack workspace's primary email domain matches the tenant's domain
+        # This prevents consultants/IT admins from accidentally claiming workspaces
+        # for the wrong organization
+        workspace_domain = None
+        if tenant_id:
+            tenant = Tenant.query.get(tenant_id)
+            if tenant:
+                try:
+                    # Use the bot token to fetch workspace users and identify primary domain
+                    auth_client = WebClient(token=bot_token)
+
+                    # Get the workspace's domain from team info
+                    team_info = auth_client.team_info()
+                    if team_info['ok']:
+                        # Slack team domain (e.g., 'acme' for acme.slack.com)
+                        slack_team_domain = team_info.get('team', {}).get('domain', '')
+
+                        # Also check email_domain if set (enterprise grid)
+                        email_domain = team_info.get('team', {}).get('email_domain', '')
+
+                        # Try to get primary domain from workspace users
+                        # Fetch a sample of users to determine the dominant email domain
+                        users_response = auth_client.users_list(limit=100)
+                        if users_response['ok']:
+                            domain_counts = {}
+                            for member in users_response.get('members', []):
+                                if member.get('deleted') or member.get('is_bot'):
+                                    continue
+                                profile = member.get('profile', {})
+                                user_email = profile.get('email', '')
+                                if user_email and '@' in user_email:
+                                    user_domain = user_email.split('@')[1].lower()
+                                    # Skip common public domains
+                                    if user_domain not in ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com']:
+                                        domain_counts[user_domain] = domain_counts.get(user_domain, 0) + 1
+
+                            # Find the most common domain
+                            if domain_counts:
+                                workspace_domain = max(domain_counts, key=domain_counts.get)
+                                logger.info(f"Detected workspace primary domain: {workspace_domain} (from {domain_counts[workspace_domain]} users)")
+
+                        # Use email_domain as fallback if set
+                        if not workspace_domain and email_domain:
+                            workspace_domain = email_domain.lower()
+                            logger.info(f"Using Slack email_domain: {workspace_domain}")
+
+                except Exception as e:
+                    logger.warning(f"Could not verify workspace domain: {e}")
+                    # Continue without validation - will still work, just less secure
+
+                # Validate domain match
+                if workspace_domain:
+                    tenant_domain = tenant.domain.lower()
+                    if workspace_domain != tenant_domain:
+                        logger.warning(
+                            f"Domain mismatch: Slack workspace domain '{workspace_domain}' "
+                            f"does not match tenant domain '{tenant_domain}'. "
+                            f"Workspace: {workspace_name} ({workspace_id})"
+                        )
+                        # Return error with helpful message
+                        error_msg = (
+                            f"domain_mismatch&workspace_domain={workspace_domain}"
+                            f"&tenant_domain={tenant_domain}"
+                        )
+                        return redirect(f'/settings?slack_error={error_msg}')
+
+        # Check for existing workspace by workspace_id (Slack team_id)
+        existing_by_workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+        if tenant_id:
+            # Installation initiated from Decision Records settings
+            # Check if this tenant already has a different workspace
+            existing_by_tenant = SlackWorkspace.query.filter_by(tenant_id=tenant_id).first()
+
+            if existing_by_workspace:
+                # Workspace already exists
+                if existing_by_workspace.tenant_id == tenant_id:
+                    # Same tenant, just update (may be an upgrade with new scopes)
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
+                elif existing_by_workspace.tenant_id is None or not existing_by_workspace.is_active:
+                    # Unclaimed or disconnected workspace - claim it for this tenant
+                    # Note: A disconnected workspace (is_active=False) can be reclaimed
+                    old_tenant_id = existing_by_workspace.tenant_id
+                    existing_by_workspace.tenant_id = tenant_id
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    existing_by_workspace.status = SlackWorkspace.STATUS_ACTIVE
+                    existing_by_workspace.claimed_at = datetime.utcnow()
+                    existing_by_workspace.claimed_by_id = user_id
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
+                    if old_tenant_id:
+                        logger.info(f"Re-claimed disconnected workspace {workspace_name} from tenant {old_tenant_id} for tenant {tenant_id}")
+                    else:
+                        logger.info(f"Claimed unclaimed workspace {workspace_name} for tenant {tenant_id}")
+                else:
+                    # Workspace belongs to another tenant AND is active
+                    logger.warning(f"Workspace {workspace_id} already belongs to tenant {existing_by_workspace.tenant_id} and is active")
+                    return redirect('/settings?slack_error=workspace_claimed_by_other')
+
+            elif existing_by_tenant:
+                # Tenant has a different workspace, update it
+                existing_by_tenant.workspace_id = workspace_id
+                existing_by_tenant.workspace_name = workspace_name
+                existing_by_tenant.bot_token_encrypted = encrypted_token
+                existing_by_tenant.is_active = True
+                existing_by_tenant.installed_at = datetime.utcnow()
+                existing_by_tenant.status = SlackWorkspace.STATUS_ACTIVE
+                # Track scopes and version
+                existing_by_tenant.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                existing_by_tenant.scopes_updated_at = datetime.utcnow()
+                existing_by_tenant.app_version = CURRENT_APP_VERSION
+            else:
+                # New workspace for this tenant
+                workspace = SlackWorkspace(
+                    tenant_id=tenant_id,
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    bot_token_encrypted=encrypted_token,
+                    is_active=True,
+                    status=SlackWorkspace.STATUS_ACTIVE,
+                    claimed_at=datetime.utcnow(),
+                    claimed_by_id=user_id,
+                    # Track scopes and version
+                    granted_scopes=','.join(granted_scopes) if granted_scopes else None,
+                    scopes_updated_at=datetime.utcnow(),
+                    app_version=CURRENT_APP_VERSION
+                )
+                db.session.add(workspace)
+
+            db.session.commit()
+            logger.info(f"Slack workspace {workspace_name} connected to tenant {tenant_id}")
+
+            # Get tenant domain for redirect
+            tenant = Tenant.query.get(tenant_id)
+            if tenant:
+                return redirect(f'/{tenant.domain}/admin?tab=slack&slack_success=true')
+            return redirect('/settings?slack_success=true')
+
+        else:
+            # Installation from Slack App Directory (no tenant association)
+            if existing_by_workspace:
+                # Workspace already exists
+                if existing_by_workspace.tenant_id:
+                    # Already claimed by a tenant, just update the token and scopes
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
+                    db.session.commit()
+                    logger.info(f"Updated existing workspace {workspace_name} (already claimed by tenant {existing_by_workspace.tenant_id})")
+                    # Redirect to a page showing the workspace is already connected
+                    return redirect(f'/slack/installed?workspace={workspace_id}&already_claimed=true')
+                else:
+                    # Still unclaimed, update token and scopes
+                    existing_by_workspace.workspace_name = workspace_name
+                    existing_by_workspace.bot_token_encrypted = encrypted_token
+                    existing_by_workspace.is_active = True
+                    existing_by_workspace.installed_at = datetime.utcnow()
+                    # Track scopes and version
+                    existing_by_workspace.granted_scopes = ','.join(granted_scopes) if granted_scopes else None
+                    existing_by_workspace.scopes_updated_at = datetime.utcnow()
+                    existing_by_workspace.app_version = CURRENT_APP_VERSION
+                    db.session.commit()
+                    logger.info(f"Updated existing unclaimed workspace {workspace_name}")
+                    return redirect(f'/slack/installed?workspace={workspace_id}')
+            else:
+                # New unclaimed workspace
+                workspace = SlackWorkspace(
+                    tenant_id=None,  # No tenant yet
+                    workspace_id=workspace_id,
+                    workspace_name=workspace_name,
+                    bot_token_encrypted=encrypted_token,
+                    is_active=True,
+                    status=SlackWorkspace.STATUS_PENDING_CLAIM,
+                    # Track scopes and version
+                    granted_scopes=','.join(granted_scopes) if granted_scopes else None,
+                    scopes_updated_at=datetime.utcnow(),
+                    app_version=CURRENT_APP_VERSION
+                )
+                db.session.add(workspace)
+                db.session.commit()
+                logger.info(f"Created unclaimed Slack workspace {workspace_name} ({workspace_id})")
+                return redirect(f'/slack/installed?workspace={workspace_id}')
+
+    except Exception as e:
+        logger.error(f"Slack OAuth callback error: {str(e)}")
+        db.session.rollback()
+        return redirect('/settings?slack_error=callback_failed')
+
+
+@app.route('/api/slack/webhook/commands', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_command')
+def slack_commands():
+    """Handle Slack slash commands."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    # Parse form data (Slack sends form-encoded data)
+    team_id = request.form.get('team_id')
+    user_id = request.form.get('user_id')
+    channel_id = request.form.get('channel_id')
+    text = request.form.get('text', '').strip()
+    trigger_id = request.form.get('trigger_id')
+    response_url = request.form.get('response_url', '')
+
+    # Find workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+    if not workspace:
+        return jsonify({
+            'response_type': 'ephemeral',
+            'text': 'This workspace is not connected to Decision Records. Please install the app from your Decision Records settings page.'
+        })
+
+    # Check if workspace has a tenant (is claimed)
+    if not workspace.tenant_id:
+        return jsonify({
+            'response_type': 'ephemeral',
+            'text': f'This Slack workspace needs to be claimed by a Decision Records organization.\n\nYour Workspace ID is: `{team_id}`\n\nShare this with your Decision Records admin to connect the workspace.'
+        })
+
+    # Update last activity
+    workspace.last_activity_at = datetime.utcnow()
+    db.session.commit()
+
+    # Create service and handle command
+    service = SlackService(workspace)
+    response, _ = service.handle_command(text, user_id, trigger_id, response_url, channel_id)
+
+    if response is None:
+        return '', 200
+
+    return jsonify(response)
+
+
+@app.route('/api/slack/webhook/interactions', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_interaction')
+def slack_interactions():
+    """Handle Slack interactive components (modals, buttons)."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+    import json
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    # Parse payload
+    payload = json.loads(request.form.get('payload', '{}'))
+    payload_type = payload.get('type')
+    team_id = payload.get('team', {}).get('id')
+
+    # Find workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+    if not workspace:
+        return '', 200
+
+    # Update last activity
+    workspace.last_activity_at = datetime.utcnow()
+    db.session.commit()
+
+    service = SlackService(workspace)
+
+    result = None
+    if payload_type == 'view_submission':
+        result = service.handle_modal_submission(payload)
+    elif payload_type == 'block_actions':
+        result = service.handle_block_action(payload)
+    elif payload_type == 'message_action':
+        result = service.handle_message_action(payload)
+    elif payload_type == 'shortcut':
+        # Global shortcuts (type: global in manifest)
+        result = service.handle_message_action(payload)
+
+    # Slack expects a 200 response - return result if it's a dict, otherwise empty 200
+    if result is not None:
+        return jsonify(result), 200
+    return '', 200
+
+
+@app.route('/api/slack/webhook/events', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_events')
+def slack_events():
+    """Handle Slack Events API (app_home_opened, etc.)."""
+    from slack_security import verify_slack_signature
+    from slack_service import SlackService
+    import json
+
+    # Verify request signature
+    if not verify_slack_signature(request):
+        return jsonify({'error': 'Invalid signature'}), 403
+
+    data = request.get_json()
+
+    # Handle URL verification challenge (required when setting up Events API)
+    if data.get('type') == 'url_verification':
+        return jsonify({'challenge': data.get('challenge')}), 200
+
+    # Handle actual events
+    if data.get('type') == 'event_callback':
+        event = data.get('event', {})
+        team_id = data.get('team_id')
+
+        # Find workspace
+        workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
+        if not workspace:
+            logger.warning(f"Event from unknown workspace: {team_id}")
+            return '', 200
+
+        # Update last activity
+        workspace.last_activity_at = datetime.utcnow()
+        db.session.commit()
+
+        service = SlackService(workspace)
+        service.handle_event(event)
+
+    return '', 200
+
+
+@app.route('/api/slack/settings', methods=['GET'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_get_settings')
+def slack_get_settings():
+    """Get Slack integration settings."""
+    from keyvault_client import keyvault_client
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+
+    if not workspace:
+        try:
+            client_id = keyvault_client.get_slack_client_id()
+        except Exception:
+            client_id = None
+        return jsonify({
+            'installed': False,
+            'install_url': '/api/slack/install' if client_id else None
+        })
+
+    return jsonify({
+        'installed': True,
+        'workspace_id': workspace.workspace_id,
+        'workspace_name': workspace.workspace_name,
+        'default_channel_id': workspace.default_channel_id,
+        'default_channel_name': workspace.default_channel_name,
+        'notifications_enabled': workspace.notifications_enabled,
+        'notify_on_create': workspace.notify_on_create,
+        'notify_on_status_change': workspace.notify_on_status_change,
+        'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None,
+        'last_activity_at': workspace.last_activity_at.isoformat() if workspace.last_activity_at else None
+    })
+
+
+@app.route('/api/slack/settings', methods=['PUT'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_update_settings')
+def slack_update_settings():
+    """Update Slack integration settings."""
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    data = request.get_json()
+
+    if 'default_channel_id' in data:
+        workspace.default_channel_id = data['default_channel_id']
+    if 'default_channel_name' in data:
+        workspace.default_channel_name = data['default_channel_name']
+    if 'notifications_enabled' in data:
+        workspace.notifications_enabled = data['notifications_enabled']
+    if 'notify_on_create' in data:
+        workspace.notify_on_create = data['notify_on_create']
+    if 'notify_on_status_change' in data:
+        workspace.notify_on_status_change = data['notify_on_status_change']
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Settings updated',
+        'settings': {
+            'installed': True,
+            'workspace_id': workspace.workspace_id,
+            'workspace_name': workspace.workspace_name,
+            'default_channel_id': workspace.default_channel_id,
+            'default_channel_name': workspace.default_channel_name,
+            'notifications_enabled': workspace.notifications_enabled,
+            'notify_on_create': workspace.notify_on_create,
+            'notify_on_status_change': workspace.notify_on_status_change,
+            'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None,
+            'last_activity_at': workspace.last_activity_at.isoformat() if workspace.last_activity_at else None
+        }
+    })
+
+
+@app.route('/api/slack/disconnect', methods=['POST'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_disconnect')
+def slack_disconnect():
+    """Disconnect Slack workspace."""
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    workspace.is_active = False
+    workspace.bot_token_encrypted = ''
+    db.session.commit()
+
+    logger.info(f"Slack workspace disconnected from tenant {tenant.id}")
+
+    return jsonify({'message': 'Slack disconnected successfully'})
+
+
+@app.route('/api/superadmin/slack/reassign', methods=['POST'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_reassign')
+def superadmin_slack_reassign():
+    """Super-admin endpoint to reassign a Slack workspace to a different tenant.
+
+    Used for:
+    - Fixing incorrectly assigned workspaces
+    - Development/testing when same workspace needs to be tested with different tenants
+
+    Request body:
+    {
+        "workspace_id": "T12345678",
+        "target_tenant_domain": "newcompany.com"
+    }
+    """
+    data = request.get_json()
+    workspace_id = data.get('workspace_id', '').strip()
+    target_domain = data.get('target_tenant_domain', '').strip()
+
+    if not workspace_id:
+        return jsonify({'error': 'workspace_id is required'}), 400
+    if not target_domain:
+        return jsonify({'error': 'target_tenant_domain is required'}), 400
+
+    # Find the workspace
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+    if not workspace:
+        return jsonify({'error': f'Workspace {workspace_id} not found'}), 404
+
+    # Find the target tenant
+    target_tenant = Tenant.query.filter_by(domain=target_domain).first()
+    if not target_tenant:
+        return jsonify({'error': f'Tenant {target_domain} not found'}), 404
+
+    # Get old tenant info for logging
+    old_tenant_id = workspace.tenant_id
+    old_tenant_domain = None
+    if old_tenant_id:
+        old_tenant = Tenant.query.get(old_tenant_id)
+        old_tenant_domain = old_tenant.domain if old_tenant else 'Unknown'
+
+    # Reassign the workspace
+    workspace.tenant_id = target_tenant.id
+    workspace.is_active = True
+    workspace.status = SlackWorkspace.STATUS_ACTIVE
+    workspace.claimed_at = datetime.utcnow()
+    db.session.commit()
+
+    logger.warning(
+        f"SUPER-ADMIN: Reassigned Slack workspace {workspace_id} "
+        f"from tenant '{old_tenant_domain}' ({old_tenant_id}) "
+        f"to tenant '{target_domain}' ({target_tenant.id})"
+    )
+
+    return jsonify({
+        'message': 'Workspace reassigned successfully',
+        'workspace_id': workspace_id,
+        'old_tenant': old_tenant_domain,
+        'new_tenant': target_domain
+    })
+
+
+@app.route('/api/superadmin/slack/workspaces', methods=['GET'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_list')
+def superadmin_slack_list_workspaces():
+    """Super-admin endpoint to list all Slack workspaces and their tenant assignments."""
+    workspaces = SlackWorkspace.query.all()
+
+    result = []
+    for ws in workspaces:
+        tenant_domain = None
+        if ws.tenant_id:
+            tenant = Tenant.query.get(ws.tenant_id)
+            tenant_domain = tenant.domain if tenant else 'Unknown'
+
+        # Get claimed_by user info
+        claimed_by_info = None
+        if ws.claimed_by:
+            claimed_by_info = {
+                'id': ws.claimed_by.id,
+                'name': ws.claimed_by.name,
+                'email': ws.claimed_by.email
+            }
+
+        # Get linked users count and details
+        linked_users = []
+        total_linked = 0
+        for mapping in ws.user_mappings.filter(SlackUserMapping.user_id.isnot(None)).all():
+            total_linked += 1
+            if mapping.user:
+                linked_users.append({
+                    'id': mapping.user.id,
+                    'name': mapping.user.name,
+                    'email': mapping.user.email,
+                    'slack_user_id': mapping.slack_user_id,
+                    'link_method': mapping.link_method,
+                    'linked_at': mapping.linked_at.isoformat() if mapping.linked_at else None
+                })
+
+        result.append({
+            'id': ws.id,
+            'workspace_id': ws.workspace_id,
+            'workspace_name': ws.workspace_name,
+            'tenant_id': ws.tenant_id,
+            'tenant_domain': tenant_domain,
+            'is_active': ws.is_active,
+            'status': ws.status,
+            'installed_at': ws.installed_at.isoformat() if ws.installed_at else None,
+            'claimed_at': ws.claimed_at.isoformat() if ws.claimed_at else None,
+            'claimed_by': claimed_by_info,
+            'linked_users_count': total_linked,
+            'linked_users': linked_users
+        })
+
+    return jsonify(result)
+
+
+@app.route('/api/superadmin/slack/workspaces/<int:workspace_id>', methods=['DELETE'])
+@require_slack
+@login_required
+@master_required
+@track_endpoint('api_superadmin_slack_delete')
+def superadmin_slack_delete_workspace(workspace_id):
+    """Super-admin endpoint to remove a Slack workspace assignment (soft delete)."""
+    workspace = SlackWorkspace.query.get(workspace_id)
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    old_tenant_id = workspace.tenant_id
+    old_tenant_domain = None
+    if old_tenant_id:
+        tenant = Tenant.query.get(old_tenant_id)
+        old_tenant_domain = tenant.domain if tenant else 'Unknown'
+
+    # Soft delete - mark as disconnected and remove tenant assignment
+    workspace.is_active = False
+    workspace.status = SlackWorkspace.STATUS_DISCONNECTED
+    workspace.tenant_id = None
+
+    db.session.commit()
+
+    logger.info(f"Super-admin removed Slack workspace {workspace.workspace_name} ({workspace.workspace_id}) from tenant {old_tenant_domain}")
+
+    return jsonify({
+        'message': f'Slack workspace {workspace.workspace_name} has been disconnected',
+        'workspace_id': workspace.workspace_id,
+        'previous_tenant': old_tenant_domain
+    })
+
+
+@app.route('/api/slack/claim', methods=['POST'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_claim')
+def slack_claim_workspace():
+    """Claim an unclaimed Slack workspace by workspace_id.
+
+    Used when IT admin installed from Slack App Directory and DR admin needs to claim it.
+    """
+    data = request.get_json()
+    workspace_id = data.get('workspace_id', '').strip()
+
+    if not workspace_id:
+        return jsonify({'error': 'Workspace ID is required'}), 400
+
+    # Validate workspace_id format (Slack team IDs start with T)
+    if not workspace_id.startswith('T') or len(workspace_id) < 9:
+        return jsonify({'error': 'Invalid workspace ID format. Slack workspace IDs start with T.'}), 400
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Check if tenant already has a Slack workspace
+    existing_tenant_workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if existing_tenant_workspace and existing_tenant_workspace.is_active:
+        return jsonify({
+            'error': 'Your organization already has a Slack workspace connected. Disconnect it first to claim a different workspace.',
+            'current_workspace': existing_tenant_workspace.workspace_name
+        }), 400
+
+    # Find the workspace to claim
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+    if not workspace:
+        return jsonify({
+            'error': 'Workspace not found. Please ensure the Slack app has been installed in your workspace.'
+        }), 404
+
+    if workspace.tenant_id and workspace.tenant_id != tenant.id:
+        return jsonify({
+            'error': 'This workspace has already been claimed by another organization.'
+        }), 409
+
+    if workspace.tenant_id == tenant.id:
+        return jsonify({
+            'message': 'This workspace is already connected to your organization.',
+            'workspace': workspace.to_dict()
+        }), 200
+
+    # Claim the workspace
+    workspace.tenant_id = tenant.id
+    workspace.status = SlackWorkspace.STATUS_ACTIVE
+    workspace.claimed_at = datetime.utcnow()
+    workspace.claimed_by_id = user.id
+    workspace.is_active = True
+
+    # If tenant had an old inactive workspace, remove it
+    if existing_tenant_workspace and not existing_tenant_workspace.is_active:
+        db.session.delete(existing_tenant_workspace)
+
+    db.session.commit()
+
+    logger.info(f"Workspace {workspace.workspace_name} ({workspace_id}) claimed by tenant {tenant.id} (user {user.id})")
+
+    return jsonify({
+        'message': f'Successfully claimed workspace "{workspace.workspace_name}"',
+        'workspace': workspace.to_dict()
+    })
+
+
+@app.route('/api/slack/workspace/<workspace_id>', methods=['GET'])
+@require_slack
+@track_endpoint('api_slack_workspace_info')
+def slack_workspace_info(workspace_id):
+    """Get public info about a Slack workspace.
+
+    Used by the /slack/installed landing page to show workspace status.
+    Only returns limited info for security (no tokens, no tenant details).
+    """
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id).first()
+
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    return jsonify({
+        'workspace_id': workspace.workspace_id,
+        'workspace_name': workspace.workspace_name,
+        'is_claimed': workspace.tenant_id is not None,
+        'status': workspace.status,
+        'installed_at': workspace.installed_at.isoformat() if workspace.installed_at else None
+    })
+
+
+@app.route('/api/slack/test', methods=['POST'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_test')
+def slack_test():
+    """Send a test notification to Slack."""
+    from slack_service import SlackService
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    if not workspace.default_channel_id:
+        return jsonify({'error': 'No notification channel configured'}), 400
+
+    try:
+        service = SlackService(workspace)
+        service.send_test_notification()
+        return jsonify({'message': 'Test notification sent'})
+    except Exception as e:
+        logger.error(f"Slack test notification failed: {str(e)}")
+        return jsonify({'error': 'Failed to send test notification'}), 500
+
+
+@app.route('/api/slack/channels', methods=['GET'])
+@require_slack
+@login_required
+@admin_required
+@track_endpoint('api_slack_channels')
+def slack_channels():
+    """Get list of Slack channels for channel selection."""
+    from slack_service import SlackService
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = SlackWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Slack not connected'}), 404
+
+    try:
+        service = SlackService(workspace)
+        channels = service.get_channels()
+        return jsonify({'channels': channels})
+    except Exception as e:
+        logger.error(f"Failed to get Slack channels: {str(e)}")
+        return jsonify({'error': 'Failed to get channels'}), 500
+
+
+@app.route('/api/slack/link/initiate', methods=['GET'])
+@require_slack
+@track_endpoint('api_slack_link_initiate')
+def slack_link_initiate():
+    """Initiate user linking from Slack to ADR.
+
+    Redirects to the dedicated Slack link account page.
+    """
+    token = request.args.get('token')
+    if not token:
+        return redirect('/slack/link?error=missing_token')
+
+    # Redirect to the dedicated link account page with the token
+    return redirect(f'/slack/link?token={token}')
+
+
+@app.route('/api/slack/link/validate', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_link_validate')
+def slack_link_validate():
+    """Validate a Slack link token and return info for the link page."""
+    from slack_security import verify_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    if not token:
+        return jsonify({'valid': False, 'error': 'No token provided'}), 400
+
+    link_data = verify_link_token(token)
+    if not link_data:
+        return jsonify({'valid': False, 'error': 'Invalid or expired link token'}), 400
+
+    workspace_id = link_data.get('workspace_id')
+    slack_user_id = link_data.get('slack_user_id')
+    slack_email = link_data.get('slack_email')
+
+    # Get workspace info
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id, is_active=True).first()
+    if not workspace:
+        return jsonify({'valid': False, 'error': 'Workspace not found'}), 404
+
+    # Check if user is already logged in
+    user = get_current_user()
+    is_logged_in = user is not None
+
+    response = {
+        'valid': True,
+        'workspace_name': workspace.workspace_name or 'Slack Workspace',
+        'workspace_id': workspace_id,
+        'slack_user_id': slack_user_id,
+        'slack_email': slack_email,
+        'is_logged_in': is_logged_in
+    }
+
+    if is_logged_in:
+        response['user_email'] = user.email
+        response['user_name'] = user.name or user.email
+        response['tenant_domain'] = user.sso_domain
+
+    return jsonify(response)
+
+
+@app.route('/api/slack/link/complete', methods=['POST'])
+@require_slack
+@track_endpoint('api_slack_link_complete')
+def slack_link_complete():
+    """Complete user linking after login.
+
+    Accepts token in request body (for new flow) or from session (legacy).
+    """
+    from slack_security import verify_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    # Try to get link data from token first (new flow)
+    link_data = None
+    if token:
+        link_data = verify_link_token(token)
+
+    # Fall back to session (legacy flow)
+    if not link_data:
+        link_data = session.pop('slack_link_data', None)
+
+    if not link_data:
+        return jsonify({'error': 'No valid link token or session data'}), 400
+
+    workspace_id = link_data.get('workspace_id')
+    slack_user_id = link_data.get('slack_user_id')
+
+    workspace = SlackWorkspace.query.filter_by(workspace_id=workspace_id, is_active=True).first()
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'You must be logged in to link your account'}), 401
+
+    # Create or update mapping
+    mapping = SlackUserMapping.query.filter_by(
+        slack_workspace_id=workspace.id,
+        slack_user_id=slack_user_id
+    ).first()
+
+    if mapping:
+        mapping.user_id = user.id
+        mapping.link_method = 'browser_auth'
+        mapping.linked_at = datetime.utcnow()
+    else:
+        mapping = SlackUserMapping(
+            slack_workspace_id=workspace.id,
+            slack_user_id=slack_user_id,
+            user_id=user.id,
+            link_method='browser_auth',
+            linked_at=datetime.utcnow()
+        )
+        db.session.add(mapping)
+
+    db.session.commit()
+
+    logger.info(f"User {user.id} linked Slack account {slack_user_id} in workspace {workspace_id}")
+
+    return jsonify({'message': 'Account linked successfully'})
 
 
 if __name__ == '__main__':

@@ -42,11 +42,11 @@ def sample_user(session):
     """Create a sample user."""
     user = User(
         email='test@example.com',
-        name='Test User',
         sso_domain='example.com',
         auth_type='local',
         email_verified=True
     )
+    user.set_name(first_name='Test', last_name='User')
     session.add(user)
     session.commit()
     return user
@@ -101,11 +101,11 @@ def admin_user(session, sample_tenant):
     """Create an admin user with membership."""
     user = User(
         email='admin@example.com',
-        name='Admin User',
         sso_domain='example.com',
         auth_type='local',
         email_verified=True
     )
+    user.set_name(first_name='Admin', last_name='User')
     session.add(user)
     session.flush()
 
@@ -124,11 +124,11 @@ def steward_user(session, sample_tenant):
     """Create a steward user with membership."""
     user = User(
         email='steward@example.com',
-        name='Steward User',
         sso_domain='example.com',
         auth_type='local',
         email_verified=True
     )
+    user.set_name(first_name='Steward', last_name='User')
     session.add(user)
     session.flush()
 

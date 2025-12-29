@@ -38,13 +38,22 @@ import { User, MasterAccount } from '../../models/decision.model';
     MatProgressSpinnerModule
   ],
   template: `
-    <mat-toolbar color="primary" class="navbar">
+    <mat-toolbar class="navbar">
       <a [routerLink]="homeLink" class="brand">
-        <mat-icon>article</mat-icon>
+        <svg class="logo-icon" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <path d="M9.91,25.94v-2.65l-2.52-.81c-.3,.14-.55,.35-.75,.61l-1.38,1.89c-.36,.49-.37,1.15-.02,1.66l.66,.96c.31,.46,.95,.57,1.39,.24l2.61-1.9Z" fill="#93c5fd"/>
+          <path d="M14.26,31.5l3.65-2.14-1.67-3.44-3.05-2.94c-.47-.45-1.09-.7-1.75-.7h-3.18c-.3,0-.6,.07-.87,.21l2.52,3.46,3.65,5.02c.18,.24,.42,.43,.69,.54h0Z" fill="#60a5fa"/>
+          <path d="M55.68,33.44l-1.25,3.18,1.25,3.16,3.08-3.08c.37-.37,.31-.99-.12-1.28l-2.95-1.98Z" fill="#93c5fd"/>
+          <path d="M55.68,33.44l-1.25,3.18,1.25,3.16,1.4-1.4v-4l-1.4-.94Z" fill="#3b82f6"/>
+          <path d="M55.42,28.04l-8.87,4.84-4.21,7.07,4.66,7.98c.32,.54,.9,.88,1.53,.88h6.14c.56,0,1.01-.46,1.01-1.02V28.81c-.01-.28-.1-.55-.26-.78h0Z" fill="#60a5fa"/>
+          <path d="M40.51,22.17l-14.62,9.61v16c0,.56,.45,1.02,1.01,1.02h4.69c.65,0,1.28-.24,1.77-.68l8.97-8.17,13.08-11.91c-.16-.27-.4-.47-.69-.59l-14.22-5.28Z" fill="#93c5fd" fill-opacity="0.6"/>
+          <path d="M38.88,15.48l-10.22,5.95-4.47,8.72,1.74,1.62,4.27,3.96c.44,.41,1.09,.5,1.63,.24l9.47-4.65c.53-.26,.82-.84,.71-1.42l-1.5-7.73-1.15-5.97c-.07-.29-.24-.54-.48-.71h0Z" fill="#60a5fa"/>
+          <path d="M21.06,15.2c-.61,0-1.15,.38-1.35,.96l-3.46,9.76-1.98,5.59c.28,.12,.6,.16,.9,.11l9.01-1.46h0l14.7-14.67c-.21-.17-.46-.27-.73-.28H21.06Z" fill="#93c5fd" fill-opacity="0.5"/>
+          <path d="M7.4,22.48l1.21,4.41,1.31-.95-2.52-3.46Z" fill="#fbbf24"/>
+          <path d="M14.26,31.5l1.98-5.59-1.6-1.54-.38,7.13Z" fill="#fbbf24"/>
+          <path d="M55.42,28.04l-10.75,15.9-2.33-3.99,13.08-11.91Z" fill="#2563eb"/>
+        </svg>
         <span class="brand-text">Decision Records</span>
-        @if (!authService.isMasterAccount && userDomain) {
-          <span class="tenant-badge">{{ userDomain }}</span>
-        }
       </a>
 
       <span class="spacer"></span>
@@ -200,24 +209,41 @@ import { User, MasterAccount } from '../../models/decision.model';
       position: sticky;
       top: 0;
       z-index: 1000;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
       color: white;
       text-decoration: none;
       font-size: 18px;
       font-weight: 500;
+      transition: opacity 0.2s ease;
     }
 
-    .tenant-badge {
-      font-size: 12px;
-      background: rgba(255, 255, 255, 0.2);
-      padding: 2px 8px;
-      border-radius: 4px;
-      margin-left: 8px;
+    .brand:hover {
+      opacity: 0.9;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      transition: transform 0.2s ease;
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+    }
+
+    .brand:hover .logo-icon {
+      transform: scale(1.05);
+    }
+
+    .brand-text {
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: white;
     }
 
     .spacer {
@@ -226,20 +252,38 @@ import { User, MasterAccount } from '../../models/decision.model';
 
     .nav-links {
       display: flex;
-      gap: 8px;
+      gap: 4px;
       margin-right: 16px;
     }
 
     .nav-links a {
-      color: rgba(255, 255, 255, 0.9);
+      color: rgba(255, 255, 255, 0.8);
+      border-radius: 8px;
+      transition: all 0.2s ease;
     }
 
-    .nav-links a.active {
+    .nav-links a:hover {
+      color: white;
       background: rgba(255, 255, 255, 0.1);
     }
 
-    .user-button {
+    .nav-links a.active {
       color: white;
+      background: rgba(96, 165, 250, 0.2);
+    }
+
+    .user-button {
+      color: rgba(255, 255, 255, 0.85) !important;
+      border-radius: 8px;
+    }
+
+    .user-button:hover {
+      color: white !important;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .user-button mat-icon {
+      color: rgba(255, 255, 255, 0.85) !important;
     }
 
     .user-name {
@@ -251,21 +295,23 @@ import { User, MasterAccount } from '../../models/decision.model';
     }
 
     .badge {
-      background: #ff4081;
-      color: white;
-      border-radius: 50%;
-      padding: 2px 6px;
+      background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+      color: #1e293b;
+      border-radius: 10px;
+      padding: 2px 7px;
       font-size: 11px;
       margin-left: 4px;
+      font-weight: 600;
     }
 
     .menu-badge {
-      background: #ff4081;
-      color: white;
+      background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+      color: #1e293b;
       border-radius: 4px;
       padding: 2px 6px;
       font-size: 11px;
       margin-left: 8px;
+      font-weight: 600;
     }
 
     .menu-header {
@@ -273,7 +319,7 @@ import { User, MasterAccount } from '../../models/decision.model';
       align-items: center;
       gap: 8px;
       padding: 8px 16px;
-      color: #666;
+      color: #64748b;
       font-size: 13px;
     }
 
@@ -281,6 +327,7 @@ import { User, MasterAccount } from '../../models/decision.model';
       font-size: 18px;
       width: 18px;
       height: 18px;
+      color: #3b82f6;
     }
 
     @media (max-width: 600px) {
@@ -296,24 +343,32 @@ import { User, MasterAccount } from '../../models/decision.model';
         display: none;
       }
 
-      .tenant-badge {
-        margin-left: 0;
+      .logo-icon {
+        width: 32px;
+        height: 32px;
       }
     }
 
     /* Feedback button */
     .feedback-btn {
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.75) !important;
       margin-right: 8px;
+      border-radius: 8px;
+      transition: all 0.2s ease;
     }
 
     .feedback-btn mat-icon {
       margin-right: 4px;
+      color: rgba(255, 255, 255, 0.75) !important;
     }
 
     .feedback-btn:hover {
-      color: white;
-      background: rgba(255, 255, 255, 0.1);
+      color: #fbbf24 !important;
+      background: rgba(251, 191, 36, 0.15);
+    }
+
+    .feedback-btn:hover mat-icon {
+      color: #fbbf24 !important;
     }
 
     /* Feedback dialog styles */

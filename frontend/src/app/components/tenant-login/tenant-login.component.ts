@@ -19,6 +19,8 @@ interface TenantAuthConfig {
   auth_method: string;
   allow_password: boolean;
   allow_passkey: boolean;
+  allow_slack_oidc: boolean;
+  allow_google_oauth: boolean;
   allow_registration: boolean;
   has_sso: boolean;
   sso_provider: string | null;
@@ -31,7 +33,7 @@ interface UserStatus {
   has_password: boolean;
 }
 
-type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto-approved' | 'recovery' | 'resend-verification';
+type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto-approved' | 'recovery' | 'resend-verification' | 'access-pending';
 
 @Component({
   selector: 'app-tenant-login',
@@ -63,11 +65,13 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             } @else if (currentView === 'login') {
               Welcome back, {{ currentEmail }}
             } @else if (currentView === 'request-access') {
-              Request access to join
+              {{ effectiveRequireApproval ? 'Request access to join' : 'Join your organization' }}
             } @else if (currentView === 'recovery') {
               Reset your credentials
             } @else if (currentView === 'resend-verification') {
               Resend verification email
+            } @else if (currentView === 'access-pending') {
+              Awaiting approval
             } @else {
               Request submitted
             }
@@ -110,6 +114,27 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                 <span *ngIf="!isLoading">Sign In</span>
               </button>
             </form>
+
+            <!-- Social Sign-in Options -->
+            @if ((slackOidcEnabled && authConfig?.allow_slack_oidc) || (googleOauthEnabled && authConfig?.allow_google_oauth)) {
+              <div class="social-divider">
+                <span>or</span>
+              </div>
+
+              @if (slackOidcEnabled && authConfig?.allow_slack_oidc) {
+                <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                  <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                  <span>Sign in with Slack</span>
+                </button>
+              }
+
+              @if (googleOauthEnabled && authConfig?.allow_google_oauth) {
+                <button mat-stroked-button class="google-signin-btn full-width" (click)="signInWithGoogle()">
+                  <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
+                  <span>Sign in with Google</span>
+                </button>
+              }
+            }
 
             <p class="resend-link">
               <button mat-button (click)="showResendVerification()">
@@ -177,6 +202,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                     Please check your email for a setup link.
                   </span>
                 </div>
+                <button mat-raised-button color="accent" class="full-width resend-setup-btn"
+                        (click)="requestSetupLink()" [disabled]="isLoading">
+                  <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
+                  <mat-icon *ngIf="!isLoading">send</mat-icon>
+                  <span *ngIf="!isLoading">Resend Setup Link</span>
+                </button>
               }
 
               <button mat-button class="back-button" (click)="goBack()">
@@ -257,12 +288,16 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             </div>
           }
 
-          <!-- Request Access View -->
+          <!-- Request Access / Join View -->
           @if (currentView === 'request-access') {
             <div class="request-section">
               <p class="info-text">
                 <mat-icon>info</mat-icon>
-                <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access to join your organisation.</span>
+                @if (effectiveRequireApproval) {
+                  <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Request access to join your organisation.</span>
+                } @else {
+                  <span>You don't have an account with <strong>{{ tenant }}</strong> yet. Create your account to join your organisation.</span>
+                }
               </p>
 
               <form [formGroup]="requestForm" (ngSubmit)="submitAccessRequest()">
@@ -272,24 +307,33 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-row">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="first_name" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Reason for Access (Optional)</mat-label>
-                  <textarea matInput formControlName="reason" rows="3"
-                            placeholder="Brief description of why you need access"></textarea>
-                  <mat-icon matPrefix>message</mat-icon>
-                </mat-form-field>
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="last_name" placeholder="Last name">
+                  </mat-form-field>
+                </div>
+
+                @if (effectiveRequireApproval) {
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Reason for Access (Optional)</mat-label>
+                    <textarea matInput formControlName="reason" rows="3"
+                              placeholder="Brief description of why you need access"></textarea>
+                    <mat-icon matPrefix>message</mat-icon>
+                  </mat-form-field>
+                }
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="requestForm.invalid || isLoading" class="full-width">
                   <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
-                  <mat-icon *ngIf="!isLoading">send</mat-icon>
-                  <span *ngIf="!isLoading">Submit Request</span>
+                  <mat-icon *ngIf="!isLoading">{{ effectiveRequireApproval ? 'send' : 'person_add' }}</mat-icon>
+                  <span *ngIf="!isLoading">{{ effectiveRequireApproval ? 'Submit Request' : 'Create Account' }}</span>
                 </button>
               </form>
 
@@ -323,6 +367,24 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               <p>
                 Your account has been created for <strong>{{ tenant }}</strong>.
                 Check your email for a link to set up your login credentials.
+              </p>
+              <button mat-raised-button color="primary" routerLink="/">
+                <mat-icon>home</mat-icon>
+                Back to Home
+              </button>
+            </div>
+          }
+
+          <!-- Access Pending View - shown after email verification when admin approval required -->
+          @if (currentView === 'access-pending') {
+            <div class="request-sent-section">
+              <mat-icon class="pending-icon">hourglass_top</mat-icon>
+              <h3>Email Verified!</h3>
+              <p>
+                Your email has been verified and your access request for <strong>{{ tenant }}</strong> has been submitted.
+              </p>
+              <p class="pending-note">
+                An administrator will review your request. You'll receive an email once approved.
               </p>
               <button mat-raised-button color="primary" routerLink="/">
                 <mat-icon>home</mat-icon>
@@ -388,6 +450,17 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
 
     .full-width {
       width: 100%;
+    }
+
+    .name-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .half-width {
+      flex: 1;
+      min-width: 0;
     }
 
     mat-form-field {
@@ -516,6 +589,20 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       margin-bottom: 16px;
     }
 
+    .pending-icon {
+      font-size: 64px;
+      width: 64px;
+      height: 64px;
+      color: #ff9800;
+      margin-bottom: 16px;
+    }
+
+    .pending-note {
+      font-size: 14px;
+      color: #888;
+      margin-top: 8px;
+    }
+
     .request-sent-section h3 {
       margin: 0 0 12px 0;
       color: #333;
@@ -536,6 +623,92 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       padding: 12px 24px;
       font-size: 16px;
       margin-top: 8px;
+    }
+
+    /* Slack Sign-in Button Styles */
+    .social-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 20px 0;
+      color: #94a3b8;
+      font-size: 13px;
+      text-transform: lowercase;
+    }
+
+    .social-divider::before,
+    .social-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e2e8f0;
+    }
+
+    .slack-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
+      background: #fff !important;
+      color: #1e293b !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+    }
+
+    .slack-signin-btn:hover {
+      background: #f8fafc !important;
+      border-color: #cbd5e1 !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    .slack-signin-btn .slack-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .slack-signin-btn span {
+      display: inline-block;
+    }
+
+    /* Google Sign-in Button Styles - Following Google Brand Guidelines */
+    .google-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #dadce0 !important;
+      border-radius: 4px !important;
+      background: #fff !important;
+      color: #3c4043 !important;
+      font-weight: 500 !important;
+      font-size: 14px !important;
+      font-family: 'Google Sans', Roboto, Arial, sans-serif !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .google-signin-btn:hover {
+      background: #f8f9fa !important;
+      border-color: #dadce0 !important;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, 0.3);
+    }
+
+    .google-signin-btn .google-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .google-signin-btn span {
+      display: inline-block;
     }
 
     .recovery-link {
@@ -597,6 +770,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       color: #666;
       font-size: 14px;
     }
+
+    .resend-setup-btn {
+      margin-top: 16px;
+      padding: 12px 24px;
+      font-size: 14px;
+    }
   `]
 })
 export class TenantLoginComponent implements OnInit {
@@ -618,6 +797,11 @@ export class TenantLoginComponent implements OnInit {
   showPasswordLogin = false;  // Default to showing passkey
 
   webAuthnSupported = false;
+  slackOidcEnabled = false;  // Global Slack OIDC availability
+  googleOauthEnabled = false;  // Global Google OAuth availability
+  // Whether approval is effectively required (tenant wants approval AND has admins who can approve)
+  // If false, users will be auto-approved, so show "Join" UI instead of "Request Access"
+  effectiveRequireApproval = true;
 
   constructor(
     private fb: FormBuilder,
@@ -637,7 +821,8 @@ export class TenantLoginComponent implements OnInit {
 
     this.requestForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
+      first_name: ['', Validators.required],
+      last_name: ['', Validators.required],
       reason: ['']
     });
 
@@ -657,6 +842,12 @@ export class TenantLoginComponent implements OnInit {
     // Load tenant auth config
     this.loadAuthConfig();
 
+    // Check global Slack OIDC availability
+    this.checkSlackOidcStatus();
+
+    // Check global Google OAuth availability
+    this.checkGoogleOauthStatus();
+
     // Pre-fill email from query params
     const email = this.route.snapshot.queryParamMap.get('email');
     if (email) {
@@ -672,6 +863,55 @@ export class TenantLoginComponent implements OnInit {
     if (this.route.snapshot.queryParamMap.get('passkey_setup') === 'success') {
       this.success = 'Passkey created successfully! Sign in with your new passkey below.';
     }
+
+    // Check for access_requested param - show access pending view
+    if (this.route.snapshot.queryParamMap.get('access_requested') === '1') {
+      this.currentView = 'access-pending';
+    }
+
+    // Check for OAuth auth errors
+    const errorParam = this.route.snapshot.queryParamMap.get('error');
+    if (errorParam === 'slack_auth_error') {
+      this.error = 'Slack authentication failed. Please try again.';
+    } else if (errorParam === 'google_auth_error') {
+      this.error = 'Google authentication failed. Please try again.';
+    } else if (errorParam === 'public_email') {
+      this.error = this.route.snapshot.queryParamMap.get('message') || 'Please use your work email address.';
+    }
+  }
+
+  private checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcEnabled = false;
+      }
+    });
+  }
+
+  signInWithSlack(): void {
+    // Include return URL to redirect back to tenant after login
+    const returnUrl = `/${this.tenant}/decisions`;
+    window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
+  }
+
+  private checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthEnabled = false;
+      }
+    });
+  }
+
+  signInWithGoogle(): void {
+    // Include return URL to redirect back to tenant after login
+    const returnUrl = `/${this.tenant}/decisions`;
+    window.location.href = `/auth/google?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
   loadAuthConfig(): void {
@@ -686,6 +926,8 @@ export class TenantLoginComponent implements OnInit {
           auth_method: 'local',
           allow_password: true,
           allow_passkey: true,
+          allow_slack_oidc: true,
+          allow_google_oauth: true,
           allow_registration: true,
           has_sso: false,
           sso_provider: null,
@@ -732,10 +974,24 @@ export class TenantLoginComponent implements OnInit {
             this.showPasswordLogin = true;
           }
         } else {
-          // User doesn't exist, show request access form
-          this.isLoading = false;
-          this.currentView = 'request-access';
-          this.requestForm.patchValue({ email });
+          // User doesn't exist - fetch tenant status to determine signup flow
+          // effective_require_approval accounts for both tenant setting AND whether approval is possible
+          this.http.get<{ effective_require_approval: boolean; require_approval: boolean; can_process_access_requests: boolean }>(
+            `/api/auth/tenant/${this.tenant}`
+          ).subscribe({
+            next: (tenantStatus) => {
+              this.effectiveRequireApproval = tenantStatus.effective_require_approval;
+              this.isLoading = false;
+              this.currentView = 'request-access';
+              this.requestForm.patchValue({ email });
+            },
+            error: () => {
+              // Default to showing request access (safer assumption)
+              this.isLoading = false;
+              this.currentView = 'request-access';
+              this.requestForm.patchValue({ email });
+            }
+          });
         }
       },
       error: (err) => {
@@ -801,11 +1057,12 @@ export class TenantLoginComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, reason } = this.requestForm.value;
+    const { email, first_name, last_name, reason } = this.requestForm.value;
 
     this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string}>('/api/auth/access-request', {
       email,
-      name,
+      first_name,
+      last_name,
       reason,
       domain: this.tenant
     }).subscribe({
@@ -894,6 +1151,26 @@ export class TenantLoginComponent implements OnInit {
         this.isLoading = false;
         // Always show success message to prevent email enumeration
         this.success = err.error?.message || 'If a pending verification exists for this email, a new link has been sent.';
+      }
+    });
+  }
+
+  requestSetupLink(): void {
+    if (!this.currentEmail) return;
+
+    this.isLoading = true;
+    this.error = '';
+    this.success = '';
+
+    this.http.post<{ message: string }>('/api/auth/request-setup-link', { email: this.currentEmail }).subscribe({
+      next: (response) => {
+        this.isLoading = false;
+        this.success = response.message || 'If your account exists, a setup link has been sent to your email.';
+      },
+      error: (err) => {
+        this.isLoading = false;
+        // Always show success message to prevent email enumeration
+        this.success = err.error?.message || 'If your account exists, a setup link has been sent to your email.';
       }
     });
   }

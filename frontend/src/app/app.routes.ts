@@ -17,6 +17,56 @@ export const routes: Routes = [
     path: 'licensing',
     loadComponent: () => import('./components/licensing/licensing.component').then(m => m.LicensingComponent)
   },
+  // FAQ page
+  {
+    path: 'faq',
+    loadComponent: () => import('./components/faq/faq.component').then(m => m.FaqComponent)
+  },
+  // Solutions page
+  {
+    path: 'solutions',
+    loadComponent: () => import('./components/solutions/solutions.component').then(m => m.SolutionsComponent)
+  },
+  // Security features page (product page, not legal)
+  {
+    path: 'security-features',
+    loadComponent: () => import('./components/security/security.component').then(m => m.SecurityComponent)
+  },
+  // Integrations pages
+  {
+    path: 'integrations',
+    loadComponent: () => import('./components/integrations/integrations.component').then(m => m.IntegrationsComponent)
+  },
+  {
+    path: 'integrations/slack',
+    loadComponent: () => import('./components/slack-integration/slack-integration.component').then(m => m.SlackIntegrationComponent)
+  },
+  // Blog pages
+  {
+    path: 'blog',
+    loadComponent: () => import('./components/blog/blog-list/blog-list.component').then(m => m.BlogListComponent)
+  },
+  {
+    path: 'blog/:slug',
+    loadComponent: () => import('./components/blog/blog-post/blog-post.component').then(m => m.BlogPostComponent)
+  },
+  // Legal pages
+  {
+    path: 'terms',
+    loadComponent: () => import('./components/terms-of-service/terms-of-service.component').then(m => m.TermsOfServiceComponent)
+  },
+  {
+    path: 'security',
+    loadComponent: () => import('./components/security-policy/security-policy.component').then(m => m.SecurityPolicyComponent)
+  },
+  {
+    path: 'dpa',
+    loadComponent: () => import('./components/data-processing/data-processing.component').then(m => m.DataProcessingComponent)
+  },
+  {
+    path: 'sla',
+    loadComponent: () => import('./components/service-level-agreement/service-level-agreement.component').then(m => m.ServiceLevelAgreementComponent)
+  },
   // Super admin login
   {
     path: 'superadmin',
@@ -46,6 +96,16 @@ export const routes: Routes = [
     path: 'superadmin/settings',
     loadComponent: () => import('./components/superadmin-settings/superadmin-settings.component').then(m => m.SuperadminSettingsComponent),
     canActivate: [masterGuard]
+  },
+  // Slack installation landing page (for unclaimed workspace installs)
+  {
+    path: 'slack/installed',
+    loadComponent: () => import('./components/slack-installed/slack-installed.component').then(m => m.SlackInstalledComponent)
+  },
+  // Slack account linking page (when user clicks "Link Account" from Slack)
+  {
+    path: 'slack/link',
+    loadComponent: () => import('./components/slack-link-account/slack-link-account.component').then(m => m.SlackLinkAccountComponent)
   },
   // Tenant-specific routes
   // NOTE: Order matters! More specific routes must come BEFORE less specific ones.

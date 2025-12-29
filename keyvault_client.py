@@ -166,6 +166,40 @@ class KeyVaultClient:
         """
         return self.get_secret('log-forwarding-api-key', fallback_env_var='LOG_FORWARDING_API_KEY')
 
+    # =========================================================================
+    # SLACK INTEGRATION SECRETS
+    # =========================================================================
+
+    def get_slack_client_id(self):
+        """
+        Get Slack OAuth client ID from Key Vault or environment.
+
+        Priority:
+        1. Key Vault 'slack-client-id'
+        2. Environment variable 'SLACK_CLIENT_ID'
+        """
+        return self.get_secret('slack-client-id', fallback_env_var='SLACK_CLIENT_ID')
+
+    def get_slack_client_secret(self):
+        """
+        Get Slack OAuth client secret from Key Vault or environment.
+
+        Priority:
+        1. Key Vault 'slack-client-secret'
+        2. Environment variable 'SLACK_CLIENT_SECRET'
+        """
+        return self.get_secret('slack-client-secret', fallback_env_var='SLACK_CLIENT_SECRET')
+
+    def get_slack_signing_secret(self):
+        """
+        Get Slack signing secret for request verification from Key Vault or environment.
+
+        Priority:
+        1. Key Vault 'slack-signing-secret'
+        2. Environment variable 'SLACK_SIGNING_SECRET'
+        """
+        return self.get_secret('slack-signing-secret', fallback_env_var='SLACK_SIGNING_SECRET')
+
 
 # Global instance
 keyvault_client = KeyVaultClient()

@@ -1,6 +1,6 @@
 import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
 import { CommonModule, TitleCasePipe } from '@angular/common';
-import { RouterModule, ActivatedRoute } from '@angular/router';
+import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { MatTableModule } from '@angular/material/table';
 import { MatButtonModule } from '@angular/material/button';
@@ -56,19 +56,25 @@ import { Decision, User, Space } from '../../models/decision.model';
       <mat-card class="filter-card" appearance="outlined">
         <mat-card-content>
           <div class="filter-row">
-            <mat-form-field appearance="outline" class="search-field">
-              <mat-label>Search decisions</mat-label>
-              <input matInput [(ngModel)]="searchTerm" (input)="filterDecisions()" placeholder="Search by title, context, or decision...">
-              <mat-icon matPrefix>search</mat-icon>
+            <div class="search-wrapper">
+              <mat-icon class="search-icon">search</mat-icon>
+              <input
+                class="search-input"
+                [(ngModel)]="searchTerm"
+                (input)="filterDecisions()"
+                placeholder="Search decisions..."
+                type="text"
+              >
               @if (searchTerm) {
-                <button matSuffix mat-icon-button (click)="searchTerm = ''; filterDecisions()">
+                <button class="clear-btn" (click)="searchTerm = ''; filterDecisions()">
                   <mat-icon>close</mat-icon>
                 </button>
               }
-            </mat-form-field>
+            </div>
 
-            <div class="results-count">
-              {{ filteredDecisions.length }} of {{ decisions.length }} decisions
+            <div class="results-badge">
+              <span class="count">{{ filteredDecisions.length }}</span>
+              <span class="label">of {{ decisions.length }} records</span>
             </div>
           </div>
 
@@ -84,32 +90,45 @@ import { Decision, User, Space } from '../../models/decision.model';
               <mat-chip
                 [highlighted]="statusFilter === 'proposed'"
                 (click)="filterByStatus('proposed')"
-                class="filter-chip status-proposed-chip">
+                class="filter-chip status-proposed-chip"
+                matTooltip="Decisions under discussion, awaiting approval">
                 <mat-icon matChipAvatar>schedule</mat-icon>
                 Proposed
               </mat-chip>
               <mat-chip
                 [highlighted]="statusFilter === 'accepted'"
                 (click)="filterByStatus('accepted')"
-                class="filter-chip status-accepted-chip">
+                class="filter-chip status-accepted-chip"
+                matTooltip="Approved decisions that are currently in effect">
                 <mat-icon matChipAvatar>check_circle</mat-icon>
                 Accepted
               </mat-chip>
               <mat-chip
-                [highlighted]="statusFilter === 'deprecated'"
-                (click)="filterByStatus('deprecated')"
-                class="filter-chip status-deprecated-chip">
-                <mat-icon matChipAvatar>warning</mat-icon>
-                Deprecated
+                [highlighted]="statusFilter === 'archived'"
+                (click)="filterByStatus('archived')"
+                class="filter-chip status-archived-chip"
+                matTooltip="Decisions that are no longer in use but kept for reference">
+                <mat-icon matChipAvatar>archive</mat-icon>
+                Archived
               </mat-chip>
               <mat-chip
                 [highlighted]="statusFilter === 'superseded'"
                 (click)="filterByStatus('superseded')"
-                class="filter-chip status-superseded-chip">
+                class="filter-chip status-superseded-chip"
+                matTooltip="Decisions replaced by a newer decision">
                 <mat-icon matChipAvatar>swap_horiz</mat-icon>
                 Superseded
               </mat-chip>
             </mat-chip-set>
+
+            <mat-chip
+              [highlighted]="showMyDecisionsOnly"
+              (click)="toggleMyDecisions()"
+              class="filter-chip my-decisions-chip"
+              matTooltip="Show only decisions you created">
+              <mat-icon matChipAvatar>person</mat-icon>
+              My Decisions
+            </mat-chip>
           </div>
 
           @if (spaces.length > 1) {
@@ -207,6 +226,62 @@ import { Decision, User, Space } from '../../models/decision.model';
           }
         </div>
       }
+
+      <!-- Slack Welcome Modal -->
+      <ng-template #slackWelcomeDialog>
+        <div class="slack-welcome-dialog">
+          <div class="slack-welcome-header">
+            <div class="slack-logo">
+              <svg viewBox="0 0 127 127" width="48" height="48">
+                <path d="M27.2 80c0 7.3-5.9 13.2-13.2 13.2C6.7 93.2.8 87.3.8 80c0-7.3 5.9-13.2 13.2-13.2h13.2V80zm6.6 0c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2v33c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V80z" fill="#E01E5A"/>
+                <path d="M47 27c-7.3 0-13.2-5.9-13.2-13.2C33.8 6.5 39.7.6 47 .6c7.3 0 13.2 5.9 13.2 13.2V27H47zm0 6.7c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H13.9C6.6 60.1.7 54.2.7 46.9c0-7.3 5.9-13.2 13.2-13.2H47z" fill="#36C5F0"/>
+                <path d="M99.9 46.9c0-7.3 5.9-13.2 13.2-13.2 7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H99.9V46.9zm-6.6 0c0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V13.8C66.9 6.5 72.8.6 80.1.6c7.3 0 13.2 5.9 13.2 13.2v33.1z" fill="#2EB67D"/>
+                <path d="M80.1 99.8c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2-7.3 0-13.2-5.9-13.2-13.2V99.8h13.2zm0-6.6c-7.3 0-13.2-5.9-13.2-13.2 0-7.3 5.9-13.2 13.2-13.2h33.1c7.3 0 13.2 5.9 13.2 13.2 0 7.3-5.9 13.2-13.2 13.2H80.1z" fill="#ECB22E"/>
+              </svg>
+            </div>
+            <h2>Welcome to Decision Records!</h2>
+          </div>
+
+          <p class="slack-welcome-intro">
+            You've successfully signed in with Slack. Your account is now connected and ready to go.
+          </p>
+
+          <div class="slack-welcome-benefits">
+            <div class="benefit-item">
+              <mat-icon>bolt</mat-icon>
+              <div>
+                <strong>Create decisions from Slack</strong>
+                <p>Use <code>/decision</code> to capture decisions without leaving Slack</p>
+              </div>
+            </div>
+            <div class="benefit-item">
+              <mat-icon>notifications_active</mat-icon>
+              <div>
+                <strong>Stay informed</strong>
+                <p>Get notified in Slack when decisions are created or updated</p>
+              </div>
+            </div>
+            <div class="benefit-item">
+              <mat-icon>search</mat-icon>
+              <div>
+                <strong>Find decisions fast</strong>
+                <p>Search and view decisions with <code>/decision search</code> or <code>/decision list</code></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="slack-welcome-tagline">
+            <mat-icon>auto_awesome</mat-icon>
+            <span>Long-term decision memory for your organisation</span>
+          </div>
+
+          <div class="slack-welcome-actions">
+            <button mat-raised-button color="primary" (click)="dismissSlackWelcome()">
+              Let's Go!
+            </button>
+          </div>
+        </div>
+      </ng-template>
 
       <!-- Admin Onboarding Modal -->
       <ng-template #adminOnboardingDialog>
@@ -313,16 +388,95 @@ import { Decision, User, Space } from '../../models/decision.model';
       gap: 16px;
     }
 
-    .search-field {
+    .search-wrapper {
       flex: 1;
       max-width: 400px;
       min-width: 250px;
+      display: flex;
+      align-items: center;
+      position: relative;
+      background: #f8f9fa;
+      border: 2px solid #e9ecef;
+      border-radius: 12px;
+      padding: 0 16px;
+      height: 48px;
+      transition: all 0.2s ease;
     }
 
-    .results-count {
-      font-size: 14px;
+    .search-wrapper:focus-within {
+      border-color: #1976d2;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.1);
+    }
+
+    .search-icon {
+      color: #9e9e9e;
+      margin-right: 12px;
+      font-size: 22px;
+    }
+
+    .search-wrapper:focus-within .search-icon {
+      color: #1976d2;
+    }
+
+    .search-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      font-size: 15px;
+      color: #333;
+      outline: none;
+      height: 100%;
+    }
+
+    .search-input::placeholder {
+      color: #9e9e9e;
+    }
+
+    .clear-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #e0e0e0;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.2s ease;
+    }
+
+    .clear-btn:hover {
+      background: #bdbdbd;
+    }
+
+    .clear-btn mat-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
       color: #666;
+    }
+
+    .results-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+      border-radius: 24px;
       white-space: nowrap;
+    }
+
+    .results-badge .count {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1565c0;
+    }
+
+    .results-badge .label {
+      font-size: 13px;
+      color: #5c8bc7;
     }
 
     .status-filters {
@@ -352,6 +506,17 @@ import { Decision, User, Space } from '../../models/decision.model';
       font-size: 18px;
       width: 18px;
       height: 18px;
+    }
+
+    .my-decisions-chip {
+      margin-left: 16px;
+      border-left: 1px solid #ddd;
+      padding-left: 16px;
+    }
+
+    .my-decisions-chip[highlighted] {
+      background: #e8f5e9 !important;
+      color: #2e7d32 !important;
     }
 
     .space-filter {
@@ -548,7 +713,7 @@ import { Decision, User, Space } from '../../models/decision.model';
 
     .status-proposed { background: #fff3e0; color: #e65100; }
     .status-accepted { background: #e8f5e9; color: #2e7d32; }
-    .status-deprecated { background: #ffebee; color: #c62828; }
+    .status-archived { background: #eceff1; color: #546e7a; }
     .status-superseded { background: #e3f2fd; color: #1565c0; }
 
     .card-meta {
@@ -570,6 +735,118 @@ import { Decision, User, Space } from '../../models/decision.model';
     .card-meta .date {
       font-size: 11px;
       color: #999;
+    }
+
+    /* Slack Welcome Modal */
+    .slack-welcome-dialog {
+      padding: 32px;
+      text-align: center;
+    }
+
+    .slack-welcome-header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .slack-logo {
+      width: 48px;
+      height: 48px;
+    }
+
+    .slack-welcome-header h2 {
+      margin: 0;
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .slack-welcome-intro {
+      color: #475569;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin: 0 0 24px;
+    }
+
+    .slack-welcome-benefits {
+      text-align: left;
+      margin-bottom: 24px;
+    }
+
+    .benefit-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 8px;
+      margin-bottom: 8px;
+    }
+
+    .benefit-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .benefit-item mat-icon {
+      color: #4A154B;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .benefit-item strong {
+      display: block;
+      color: #1e293b;
+      font-size: 0.95rem;
+      margin-bottom: 2px;
+    }
+
+    .benefit-item p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: #64748b;
+      line-height: 1.4;
+    }
+
+    .benefit-item code {
+      background: #e2e8f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      color: #4A154B;
+    }
+
+    .slack-welcome-tagline {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 16px;
+      background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .slack-welcome-tagline mat-icon {
+      color: #0284c7;
+    }
+
+    .slack-welcome-tagline span {
+      color: #0369a1;
+      font-weight: 500;
+      font-size: 0.95rem;
+    }
+
+    .slack-welcome-actions {
+      display: flex;
+      justify-content: center;
+    }
+
+    .slack-welcome-actions button {
+      padding: 0 32px;
+      height: 44px;
+      font-size: 1rem;
+      font-weight: 500;
     }
 
     /* Admin Onboarding Modal */
@@ -706,18 +983,19 @@ import { Decision, User, Space } from '../../models/decision.model';
         align-items: stretch;
       }
 
-      .search-field {
+      .search-wrapper {
         max-width: none;
       }
 
-      .results-count {
-        text-align: center;
+      .results-badge {
+        justify-content: center;
       }
     }
   `]
 })
 export class DecisionListComponent implements OnInit {
   @ViewChild('adminOnboardingDialog') adminOnboardingDialog!: TemplateRef<any>;
+  @ViewChild('slackWelcomeDialog') slackWelcomeDialog!: TemplateRef<any>;
 
   decisions: Decision[] = [];
   filteredDecisions: Decision[] = [];
@@ -725,15 +1003,18 @@ export class DecisionListComponent implements OnInit {
   searchTerm = '';
   statusFilter = '';
   spaceFilter: number | null = null;
+  showMyDecisionsOnly = false;
   spaces: Space[] = [];
   userDomain = '';
   onboardingDialogRef: MatDialogRef<any> | null = null;
+  slackWelcomeDialogRef: MatDialogRef<any> | null = null;
 
   constructor(
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
     private route: ActivatedRoute,
+    private router: Router,
     private http: HttpClient,
     private dialog: MatDialog
   ) {}
@@ -744,6 +1025,21 @@ export class DecisionListComponent implements OnInit {
     // Get tenant from route params - this is the reliable source
     this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
     console.log('[DecisionList] userDomain from route:', this.userDomain);
+
+    // Check for slack_welcome query param (from Slack OIDC login)
+    this.route.queryParams.subscribe(params => {
+      if (params['slack_welcome'] === '1') {
+        // Clean up the URL by removing the query param
+        this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { slack_welcome: null },
+          queryParamsHandling: 'merge',
+          replaceUrl: true
+        });
+        // Show welcome modal after a short delay
+        setTimeout(() => this.showSlackWelcome(), 300);
+      }
+    });
 
     // Check if admin needs to see onboarding modal
     this.checkAdminOnboarding();
@@ -770,6 +1066,21 @@ export class DecisionListComponent implements OnInit {
       setTimeout(() => {
         this.showAdminOnboarding();
       }, 500);
+    }
+  }
+
+  showSlackWelcome(): void {
+    this.slackWelcomeDialogRef = this.dialog.open(this.slackWelcomeDialog, {
+      width: '480px',
+      disableClose: false,
+      panelClass: 'slack-welcome-dialog-panel'
+    });
+  }
+
+  dismissSlackWelcome(): void {
+    if (this.slackWelcomeDialogRef) {
+      this.slackWelcomeDialogRef.close();
+      this.slackWelcomeDialogRef = null;
     }
   }
 
@@ -821,6 +1132,8 @@ export class DecisionListComponent implements OnInit {
   }
 
   filterDecisions(): void {
+    const currentUserId = this.authService.currentUser?.user?.id;
+
     this.filteredDecisions = this.decisions.filter(d => {
       const matchesSearch = !this.searchTerm ||
         d.title.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
@@ -832,8 +1145,16 @@ export class DecisionListComponent implements OnInit {
       const matchesSpace = this.spaceFilter === null ||
         (d.spaces && d.spaces.some(s => s.id === this.spaceFilter));
 
-      return matchesSearch && matchesStatus && matchesSpace;
+      const matchesMyDecisions = !this.showMyDecisionsOnly ||
+        (d.created_by && d.created_by.id === currentUserId);
+
+      return matchesSearch && matchesStatus && matchesSpace && matchesMyDecisions;
     });
+  }
+
+  toggleMyDecisions(): void {
+    this.showMyDecisionsOnly = !this.showMyDecisionsOnly;
+    this.filterDecisions();
   }
 
   filterByStatus(status: string): void {
@@ -861,7 +1182,7 @@ export class DecisionListComponent implements OnInit {
     const icons: Record<string, string> = {
       'proposed': 'schedule',
       'accepted': 'check_circle',
-      'deprecated': 'warning',
+      'archived': 'archive',
       'superseded': 'swap_horiz'
     };
     return icons[status] || 'help';
@@ -871,10 +1192,11 @@ export class DecisionListComponent implements OnInit {
     this.searchTerm = '';
     this.statusFilter = '';
     this.spaceFilter = null;
+    this.showMyDecisionsOnly = false;
     this.filterDecisions();
   }
 
   hasActiveFilters(): boolean {
-    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null;
+    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null || this.showMyDecisionsOnly;
   }
 }

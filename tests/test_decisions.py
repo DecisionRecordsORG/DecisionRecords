@@ -392,5 +392,5 @@ class TestDecisionModel:
         """VALID_STATUSES contains expected values."""
         assert 'proposed' in ArchitectureDecision.VALID_STATUSES
         assert 'accepted' in ArchitectureDecision.VALID_STATUSES
-        assert 'deprecated' in ArchitectureDecision.VALID_STATUSES
+        assert 'archived' in ArchitectureDecision.VALID_STATUSES
         assert 'superseded' in ArchitectureDecision.VALID_STATUSES

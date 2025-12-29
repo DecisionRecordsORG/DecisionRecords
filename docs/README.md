@@ -24,8 +24,8 @@ Welcome to the comprehensive documentation for the Architecture Decisions multi-
 ## 🚀 Quick Start
 
 ### Access URLs
-- **Production**: https://architecture-decisions.org
-- **Super Admin**: https://architecture-decisions.org/superadmin
+- **Production**: https://decisionrecords.org
+- **Super Admin**: https://decisionrecords.org/superadmin
 
 ### Key Features
 

@@ -1,0 +1,98 @@
+<svg width="480" height="320" viewBox="0 0 480 320" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Timeline base -->
+  <line x1="60" y1="160" x2="420" y2="160" stroke="#E2E8F0" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Time markers -->
+  <circle cx="100" cy="160" r="6" fill="#CBD5E1"/>
+  <circle cx="200" cy="160" r="6" fill="#CBD5E1"/>
+  <circle cx="300" cy="160" r="6" fill="#CBD5E1"/>
+  <circle cx="400" cy="160" r="6" fill="#2563EB"/>
+
+  <!-- Time labels -->
+  <text x="100" y="185" font-family="system-ui" font-size="11" fill="#94A3B8" text-anchor="middle">2022</text>
+  <text x="200" y="185" font-family="system-ui" font-size="11" fill="#94A3B8" text-anchor="middle">2023</text>
+  <text x="300" y="185" font-family="system-ui" font-size="11" fill="#94A3B8" text-anchor="middle">2024</text>
+  <text x="400" y="185" font-family="system-ui" font-size="11" fill="#2563EB" font-weight="500" text-anchor="middle">Today</text>
+
+  <!-- Decision cards floating above timeline -->
+  <!-- Decision 1 - 2022 -->
+  <g transform="translate(65, 60)">
+    <rect width="70" height="50" rx="8" fill="white" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="10" y="12" width="30" height="6" rx="3" fill="#CBD5E1"/>
+    <rect x="10" y="24" width="50" height="4" rx="2" fill="#E2E8F0"/>
+    <rect x="10" y="32" width="40" height="4" rx="2" fill="#E2E8F0"/>
+    <circle cx="55" cy="12" r="5" fill="#22C55E"/>
+    <path d="M52 12L54 14L58 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <line x1="100" y1="110" x2="100" y2="154" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- Decision 2 - 2023 -->
+  <g transform="translate(165, 70)">
+    <rect width="70" height="50" rx="8" fill="white" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="10" y="12" width="35" height="6" rx="3" fill="#CBD5E1"/>
+    <rect x="10" y="24" width="50" height="4" rx="2" fill="#E2E8F0"/>
+    <rect x="10" y="32" width="45" height="4" rx="2" fill="#E2E8F0"/>
+    <circle cx="55" cy="12" r="5" fill="#22C55E"/>
+    <path d="M52 12L54 14L58 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <line x1="200" y1="120" x2="200" y2="154" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- Decision 3 - 2024 -->
+  <g transform="translate(265, 55)">
+    <rect width="70" height="50" rx="8" fill="white" stroke="#E2E8F0" stroke-width="1.5"/>
+    <rect x="10" y="12" width="40" height="6" rx="3" fill="#CBD5E1"/>
+    <rect x="10" y="24" width="50" height="4" rx="2" fill="#E2E8F0"/>
+    <rect x="10" y="32" width="35" height="4" rx="2" fill="#E2E8F0"/>
+    <circle cx="55" cy="12" r="5" fill="#22C55E"/>
+    <path d="M52 12L54 14L58 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <line x1="300" y1="105" x2="300" y2="154" stroke="#E2E8F0" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- Current decision - Today (highlighted) -->
+  <g transform="translate(365, 65)">
+    <rect width="70" height="50" rx="8" fill="white" stroke="#2563EB" stroke-width="2"/>
+    <rect x="10" y="12" width="32" height="6" rx="3" fill="#2563EB"/>
+    <rect x="10" y="24" width="50" height="4" rx="2" fill="#BFDBFE"/>
+    <rect x="10" y="32" width="42" height="4" rx="2" fill="#BFDBFE"/>
+    <circle cx="55" cy="12" r="5" fill="#2563EB"/>
+    <path d="M52 12L54 14L58 10" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <line x1="400" y1="115" x2="400" y2="154" stroke="#2563EB" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- People icons below timeline (showing change) -->
+  <!-- Team 2022 - faded -->
+  <g transform="translate(80, 200)" opacity="0.4">
+    <circle cx="10" cy="10" r="8" fill="#94A3B8"/>
+    <circle cx="30" cy="10" r="8" fill="#94A3B8"/>
+  </g>
+
+  <!-- Team 2023 - slightly faded -->
+  <g transform="translate(175, 200)" opacity="0.5">
+    <circle cx="10" cy="10" r="8" fill="#94A3B8"/>
+    <circle cx="30" cy="10" r="8" fill="#94A3B8"/>
+    <circle cx="50" cy="10" r="8" fill="#94A3B8"/>
+  </g>
+
+  <!-- Team 2024 - more visible -->
+  <g transform="translate(270, 200)" opacity="0.6">
+    <circle cx="10" cy="10" r="8" fill="#94A3B8"/>
+    <circle cx="30" cy="10" r="8" fill="#64748B"/>
+    <circle cx="50" cy="10" r="8" fill="#94A3B8"/>
+    <circle cx="70" cy="10" r="8" fill="#94A3B8"/>
+  </g>
+
+  <!-- Team Today - full color -->
+  <g transform="translate(365, 200)">
+    <circle cx="10" cy="10" r="8" fill="#64748B"/>
+    <circle cx="30" cy="10" r="8" fill="#2563EB"/>
+    <circle cx="50" cy="10" r="8" fill="#64748B"/>
+    <circle cx="70" cy="10" r="8" fill="#64748B"/>
+  </g>
+
+  <!-- Label for people -->
+  <text x="240" y="250" font-family="system-ui" font-size="12" fill="#94A3B8" text-anchor="middle">Teams change. Decisions remain.</text>
+
+  <!-- Arrow showing continuity -->
+  <path d="M60 275 L420 275" stroke="#E2E8F0" stroke-width="1" stroke-dasharray="2 2"/>
+  <path d="M415 270 L425 275 L415 280" stroke="#2563EB" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

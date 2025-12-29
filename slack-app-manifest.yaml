@@ -1,0 +1,66 @@
+display_information:
+  name: Decision Records
+  description: Create and manage Decision Records directly from Slack
+  background_color: "#1a1a2e"
+  long_description: |
+    Decision Records integrates your team's decision-making process with Slack.
+
+    Features:
+    - Create new Decision Records with /decision or the global shortcut
+    - List recent decisions with /decision list
+    - View decision details with /decision view <id>
+    - Search decisions with /decision search <query>
+    - Save Slack messages as decisions using message shortcuts
+    - Get notified when decisions are created or updated
+
+    Each team member's Slack account is automatically linked to their Decision Records account by email.
+
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Decision Records
+    always_online: true
+  shortcuts:
+    - name: Create Decision Record
+      type: global
+      callback_id: create_decision_global
+      description: Create a new Decision Record from anywhere
+    - name: Save as Decision
+      type: message
+      callback_id: save_as_decision
+      description: Create a Decision Record from this message
+  slash_commands:
+    - command: /decision
+      url: https://decisionrecords.org/api/slack/webhook/commands
+      description: Manage Decision Records
+      usage_hint: "[create | list | view <id> | search <query>]"
+      should_escape: false
+
+oauth_config:
+  redirect_urls:
+    - https://decisionrecords.org/api/slack/oauth/callback
+    - https://decisionrecords.org/auth/slack/oidc/callback
+  scopes:
+    bot:
+      - chat:write
+      - commands
+      - users:read
+      - users:read.email
+      - im:write
+      - channels:read
+      - groups:read
+
+settings:
+  event_subscriptions:
+    request_url: https://decisionrecords.org/api/slack/webhook/events
+    bot_events:
+      - app_home_opened
+  interactivity:
+    is_enabled: true
+    request_url: https://decisionrecords.org/api/slack/webhook/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

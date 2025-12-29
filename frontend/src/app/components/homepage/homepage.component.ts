@@ -11,6 +11,7 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatDialogModule, MatDialog, MatDialogRef } from '@angular/material/dialog';
 import { MatSelectModule } from '@angular/material/select';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { TenantStatus, EmailVerificationResponse } from '../../models/decision.model';
 import { AuthService } from '../../services/auth.service';
 
@@ -30,7 +31,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     MatInputModule,
     MatProgressSpinnerModule,
     MatDialogModule,
-    MatSelectModule
+    MatSelectModule,
+    MatCheckboxModule
   ],
   template: `
     <div class="homepage">
@@ -38,20 +40,19 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       <section class="hero">
         <div class="hero-container">
           <div class="hero-content-centered">
-            <p class="hero-initiative">
-              <span class="initiative-badge">Open Initiative</span>
-              DecisionRecords.org
-            </p>
+            <div class="hero-logo-container">
+              <img src="/assets/decision-records-logo-white.svg" alt="Decision Records" class="hero-logo">
+            </div>
             <h1><span class="typewriter-text">{{ displayedDecisionType }}</span> <span class="highlight">Records</span></h1>
             <p class="hero-tagline">
-              Long-term decision memory for organisations
+              Helping teams remember why decisions were made
             </p>
             <p class="hero-subtitle">
               Organisations make decisions every day. Most are forgotten. The important ones deserve better.
             </p>
             <div class="hero-cta">
               <button mat-raised-button class="cta-button" (click)="openGetStartedDialog()">
-                <span>Get Started</span>
+                <span>Get Started. It's FREE!</span>
                 <mat-icon>arrow_forward</mat-icon>
               </button>
               <button mat-stroked-button class="cta-button-secondary" (click)="openSignInDialog()">
@@ -72,21 +73,23 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             </div>
           </div>
 
-          <!-- Screenshot inside hero -->
-          <div class="hero-screenshot">
-            <div class="browser-frame">
-              <div class="browser-header">
-                <div class="browser-dots">
-                  <span class="dot red"></span>
-                  <span class="dot yellow"></span>
-                  <span class="dot green"></span>
+          <!-- Screenshot inside hero - glass pane with cutoff at section bottom -->
+          <div class="hero-screenshot-wrapper">
+            <div class="hero-screenshot-glass">
+              <div class="browser-frame">
+                <div class="browser-header">
+                  <div class="browser-dots">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                  </div>
+                  <div class="browser-address">
+                    <span>decisionrecords.org/brandnewcorp.com</span>
+                  </div>
                 </div>
-                <div class="browser-address">
-                  <span>decisionrecords.org/brandnewcorp.com</span>
+                <div class="browser-content">
+                  <img src="/assets/homepage-decisions-dash.png" alt="Decision Records Dashboard" />
                 </div>
-              </div>
-              <div class="browser-content">
-                <img src="/assets/screenshot-dashboard.png" alt="Decision Records Dashboard" />
               </div>
             </div>
           </div>
@@ -162,6 +165,25 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <mat-icon *ngIf="!isLoading">arrow_forward</mat-icon>
                 </button>
               </form>
+
+              <!-- Social Sign-in Options -->
+              @if (slackOidcEnabled || googleOauthEnabled) {
+                <div class="social-divider">
+                  <span>or</span>
+                </div>
+                @if (slackOidcEnabled) {
+                  <button mat-stroked-button class="slack-signin-btn full-width" (click)="signInWithSlack()">
+                    <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo">
+                    <span>Sign in with Slack</span>
+                  </button>
+                }
+                @if (googleOauthEnabled) {
+                  <button mat-stroked-button class="google-signin-btn full-width" (click)="signInWithGoogle()">
+                    <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
+                    <span>Sign in with Google</span>
+                  </button>
+                }
+              }
             }
 
             <!-- Signup View (first user for domain) -->
@@ -195,11 +217,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-row">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="first_name" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="last_name" placeholder="Last name">
+                  </mat-form-field>
+                </div>
 
                 @if (tenantStatus?.email_verification_required === false && usePasswordSignup) {
                   <mat-form-field appearance="outline" class="full-width">
@@ -224,6 +253,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                     }
                   </span>
                 </p>
+
+                <div class="tos-checkbox">
+                  <mat-checkbox formControlName="acceptTos" color="primary">
+                    I agree to the <a routerLink="/terms" target="_blank">Terms of Service</a> and <a routerLink="/dpa" target="_blank">Data Processing Agreement</a>
+                  </mat-checkbox>
+                </div>
 
                 <button mat-raised-button color="primary" type="submit"
                         [disabled]="signupForm.invalid || isLoading || (tenantStatus?.email_verification_required === false && usePasswordSignup && signupForm.get('password')?.value?.length < 8)" class="full-width submit-btn">
@@ -295,11 +330,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-row">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="first_name" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="last_name" placeholder="Last name">
+                  </mat-form-field>
+                </div>
 
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Reason for Access (Optional)</mat-label>
@@ -340,11 +382,18 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
-                <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Full Name</mat-label>
-                  <input matInput formControlName="name" placeholder="Your name">
-                  <mat-icon matPrefix>person</mat-icon>
-                </mat-form-field>
+                <div class="name-row">
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>First Name</mat-label>
+                    <input matInput formControlName="first_name" placeholder="First name">
+                    <mat-icon matPrefix>person</mat-icon>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="half-width">
+                    <mat-label>Last Name</mat-label>
+                    <input matInput formControlName="last_name" placeholder="Last name">
+                  </mat-form-field>
+                </div>
 
                 <p class="info-text">
                   <mat-icon>verified_user</mat-icon>
@@ -352,7 +401,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </p>
 
                 <button mat-raised-button color="primary" type="submit"
-                        [disabled]="accessRequestForm.get('email')?.invalid || accessRequestForm.get('name')?.invalid || isLoading" class="full-width submit-btn">
+                        [disabled]="accessRequestForm.get('email')?.invalid || accessRequestForm.get('first_name')?.invalid || accessRequestForm.get('last_name')?.invalid || isLoading" class="full-width submit-btn">
                   <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
                   <mat-icon *ngIf="!isLoading">person_add</mat-icon>
                   <span *ngIf="!isLoading">Join Organization</span>
@@ -567,29 +616,98 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
-      <!-- In Practice -->
-      <section class="section usage-section">
+      <!-- How Simple It Is -->
+      <section class="section capture-section">
         <div class="container">
-          <h2>In practice</h2>
-          <div class="usage-timeline">
-            <div class="usage-item">
-              <span class="usage-trigger">After the meeting</span>
-              <span class="usage-outcome">One person writes it down before everyone forgets.</span>
+          <div class="capture-layout">
+            <div class="capture-content">
+              <span class="capture-badge">Simple by Design</span>
+              <h2>Capture a decision in minutes</h2>
+              <p class="capture-intro">
+                A decision record isn't a document. It's four things written down before everyone forgets.
+              </p>
+              <div class="capture-list">
+                <div class="capture-item">
+                  <span class="capture-number">1</span>
+                  <div class="capture-text">
+                    <strong>What was decided</strong>
+                    <span>The choice that was made</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">2</span>
+                  <div class="capture-text">
+                    <strong>Why it made sense</strong>
+                    <span>The reasoning at the time</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">3</span>
+                  <div class="capture-text">
+                    <strong>What else was considered</strong>
+                    <span>Alternatives that were rejected</span>
+                  </div>
+                </div>
+                <div class="capture-item">
+                  <span class="capture-number">4</span>
+                  <div class="capture-text">
+                    <strong>Assumptions at the time</strong>
+                    <span>What you believed to be true</span>
+                  </div>
+                </div>
+              </div>
+              <p class="capture-note">
+                <mat-icon>schedule</mat-icon>
+                <span>Most teams add <strong>2-3 records a month</strong>. Enough to matter. Not enough to slow down.</span>
+              </p>
             </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Someone new joins</span>
-              <span class="usage-outcome">Three records. Six months of context.</span>
-            </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Priorities shift</span>
-              <span class="usage-outcome">Old decisions get marked superseded. The reasoning stays.</span>
-            </div>
-            <div class="usage-item">
-              <span class="usage-trigger">Auditors ask "why"</span>
-              <span class="usage-outcome">You show them the record, not a search through emails.</span>
+            <div class="capture-visual">
+              <img src="/assets/simple-capture.svg" alt="Simple decision capture form" />
             </div>
           </div>
-          <p class="usage-note">Most teams add 2-3 records a month. Enough to matter. Not enough to slow down.</p>
+        </div>
+      </section>
+
+      <!-- Slack Integration Section -->
+      <section class="section slack-section">
+        <div class="slack-bg-gradient">
+          <div class="container slack-container">
+            <div class="slack-content">
+              <div class="slack-badge">
+                <mat-icon>flash_on</mat-icon>
+                <span>New Integration</span>
+              </div>
+              <h2>Capture decisions where your team already works</h2>
+              <p class="slack-tagline">
+                Create and manage decision records directly from Slack.
+                No context switching. No forgotten conversations.
+              </p>
+              <div class="slack-features">
+                <div class="slack-feature">
+                  <mat-icon>bolt</mat-icon>
+                  <span>Type <code>/decision</code> to get started</span>
+                </div>
+                <div class="slack-feature">
+                  <mat-icon>touch_app</mat-icon>
+                  <span>Create from any message with one click</span>
+                </div>
+                <div class="slack-feature">
+                  <mat-icon>notifications_active</mat-icon>
+                  <span>Get notified when decisions change</span>
+                </div>
+              </div>
+              <a href="https://slack.com/oauth/v2/authorize?client_id=10124404087394.10108984440711&scope=channels:read,chat:write,commands,groups:read,im:write,users:read,users:read.email&user_scope=" target="_blank" class="slack-cta">
+                <img src="/assets/slack-logo.svg" alt="Slack" class="slack-logo-btn">
+                <span>Add to Slack</span>
+              </a>
+            </div>
+            <div class="slack-visual">
+              <img src="/assets/decisionrecords-with-slack-transpatent.png" alt="Decision Records + Slack" class="slack-hero-image">
+              <div class="slack-screenshot-wrapper">
+                <img src="/assets/slackscreenshot-decisionrecords.png" alt="Create Decision modal in Slack" class="slack-screenshot">
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -600,7 +718,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             <div class="trust-intro">
               <h2>Security, Trust & Governance</h2>
               <p class="trust-statement">
-                Decision Records is a <strong>non-profit, independent initiative</strong>. No organisation owns or controls the platform.
+                Decision Records is <strong>open source and independent</strong>. No single organisation owns or controls the platform.
               </p>
               <p class="trust-subtext">
                 Your decision records may contain sensitive strategic information. We take security seriously and operate with full transparency.
@@ -650,10 +768,10 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                 </div>
               </div>
               <div class="trust-item">
-                <mat-icon>volunteer_activism</mat-icon>
+                <mat-icon>code</mat-icon>
                 <div>
-                  <strong>Sustainable, transparent funding</strong>
-                  <span>The project covers operating costs through sponsorships and community support</span>
+                  <strong>Open source, self-hostable</strong>
+                  <span>Run the platform on your own infrastructure or use our managed cloud service</span>
                 </div>
               </div>
               <div class="trust-item">
@@ -668,85 +786,25 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         </div>
       </section>
 
-      <!-- Who Is This For -->
-      <section class="section audience-section">
+      <!-- Organisational Memory -->
+      <section class="section memory-section">
         <div class="container">
-          <div class="audience-header">
-            <h2>Sound Familiar?</h2>
-            <p class="audience-intro">If any of these resonate, you're in the right place.</p>
-          </div>
-
-          <div class="needs-grid">
-            <div class="need-card need-card-1">
-              <div class="need-icon">
-                <mat-icon>help_outline</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>"Why did we decide this?"</h3>
-                <p>Teams tired of rehashing old debates — from boardrooms to project standups.</p>
-              </div>
+          <div class="memory-content">
+            <div class="memory-text">
+              <h2>Memory that outlasts any individual</h2>
+              <p class="memory-lead">
+                People move on. Teams reorganise. Priorities shift. But the reasoning behind your decisions shouldn't disappear with them.
+              </p>
+              <p class="memory-detail">
+                Decision records create institutional memory that survives role changes, team growth, and the passage of time. New team members understand not just what exists, but why it came to be.
+              </p>
             </div>
-
-            <div class="need-card need-card-2">
-              <div class="need-icon">
-                <mat-icon>directions_walk</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Knowledge walks out the door</h3>
-                <p>Organizations losing context when people move on — especially growing teams.</p>
-              </div>
+            <div class="memory-visual">
+              <img src="/assets/organisational-memory.svg" alt="Decisions persist over time as teams change" />
             </div>
-
-            <div class="need-card need-card-3">
-              <div class="need-icon">
-                <mat-icon>description</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Decisions need a paper trail</h3>
-                <p>Regulated industries and client work requiring audit trails and accountability.</p>
-              </div>
-            </div>
-
-            <div class="need-card need-card-4">
-              <div class="need-icon">
-                <mat-icon>public</mat-icon>
-              </div>
-              <div class="need-content">
-                <h3>Alignment across distance</h3>
-                <p>Distributed teams and async collaborators staying in sync on what matters.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="audience-cta">
-            <img src="/assets/brain-memory.svg" alt="Connected thinking" class="floating-brain" />
-            <p>Decision records give your team a shared memory that outlasts any individual.</p>
           </div>
         </div>
       </section>
-
-      <!-- Footer -->
-      <footer class="homepage-footer">
-        <div class="container">
-          <div class="footer-grid">
-            <div class="footer-mission-col">
-              <p class="footer-mission">
-                DecisionRecords.org is an open initiative to make decision-making
-                transparent, durable, and reusable across organisations.
-              </p>
-              <small class="footer-copyright">&copy; {{ currentYear }} DecisionRecords.org <span class="footer-separator">|</span> <a routerLink="/licensing" class="footer-link">License Model</a></small>
-            </div>
-            <div class="footer-support-col">
-              <h4>Support the Initiative</h4>
-              <p class="footer-support-text">Help us keep the platform free, independent, and sustainable.</p>
-              <button mat-stroked-button class="sponsorship-button" (click)="openSponsorshipDialog()">
-                <mat-icon>volunteer_activism</mat-icon>
-                Sponsorship & Support
-              </button>
-            </div>
-          </div>
-        </div>
-      </footer>
 
       <!-- Sponsorship Dialog Template -->
       <ng-template #sponsorshipDialog>
@@ -771,12 +829,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
             <div class="sponsorship-content">
               <div class="sponsorship-text">
                 <p>
-                  Decision Records is a <strong>non-profit initiative</strong>. The platform is free to use,
-                  and we do not monetise user data or sell access.
+                  Decision Records is <strong>open source</strong> and can be self-hosted for free.
+                  Our managed cloud service offers a hassle-free experience with professional support.
                 </p>
                 <p>
-                  Use this form to <strong>support the project</strong> through sponsorship, or to <strong>discuss extended limits</strong>
-                  if your organisation needs more users or wants to explore enterprise features.
+                  Use this form to <strong>inquire about pricing</strong> for our hosted service,
+                  <strong>discuss enterprise features</strong>, or <strong>explore partnership opportunities</strong>.
                 </p>
                 <p>
                   We'd love to hear from you and will respond directly.
@@ -807,12 +865,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
                     <mat-label>Area of Interest</mat-label>
                     <mat-select formControlName="area_of_interest">
                       <mat-option value="">Select an option...</mat-option>
-                      <mat-option value="Extended limits / More users">Extended limits / More users</mat-option>
-                      <mat-option value="General sponsorship">General sponsorship</mat-option>
+                      <mat-option value="Cloud pricing inquiry">Cloud pricing inquiry</mat-option>
                       <mat-option value="Enterprise features">Enterprise features</mat-option>
+                      <mat-option value="Self-hosting support">Self-hosting support</mat-option>
+                      <mat-option value="Partnership opportunity">Partnership opportunity</mat-option>
                       <mat-option value="Public sector use">Public sector use</mat-option>
-                      <mat-option value="Research">Research</mat-option>
-                      <mat-option value="Internal adoption">Internal adoption</mat-option>
+                      <mat-option value="Research / Academia">Research / Academia</mat-option>
                       <mat-option value="Other">Other</mat-option>
                     </mat-select>
                     <mat-icon matPrefix>category</mat-icon>
@@ -848,6 +906,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .homepage {
       min-height: 100vh;
       background: #f8fafc;
+      font-family: 'Inter', sans-serif;
     }
 
     /* Hero Section - Salient rich blue gradient */
@@ -856,7 +915,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: white;
       padding: 100px 24px 80px;
       position: relative;
-      overflow: visible;
+      overflow: hidden;
     }
 
     .hero::before {
@@ -886,6 +945,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-content-centered h1 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 4.5rem;
       font-weight: 700;
       margin: 0 0 24px;
@@ -900,6 +960,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-tagline {
+      font-family: 'Inter', sans-serif;
       font-size: 1.75rem;
       font-weight: 400;
       margin: 0 0 20px;
@@ -908,6 +969,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .hero-subtitle {
+      font-family: 'Inter', sans-serif;
       font-size: 1.25rem;
       color: #bfdbfe;
       line-height: 1.7;
@@ -952,6 +1014,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #1e40af !important;
       box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15) !important;
       transition: all 0.2s ease !important;
+      min-height: 48px !important;
     }
 
     .cta-button:hover {
@@ -971,6 +1034,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       border-radius: 8px !important;
       border-color: rgba(255, 255, 255, 0.4) !important;
       color: white !important;
+      min-height: 48px !important;
     }
 
     .cta-button-secondary:hover {
@@ -1114,36 +1178,25 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       }
     }
 
-    .hero-initiative {
+    .hero-logo-container {
       display: flex;
-      align-items: center;
       justify-content: center;
-      gap: 12px;
       margin-bottom: 24px;
-      font-size: 0.9rem;
-      color: #bfdbfe;
-      letter-spacing: 0.5px;
     }
 
-    .initiative-badge {
-      display: inline-block;
-      padding: 6px 14px;
-      background: rgba(255, 255, 255, 0.15);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 100px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: white;
+    .hero-logo {
+      width: 150px;
+      height: 150px;
+      filter: drop-shadow(0 4px 12px rgba(255, 255, 255, 0.3));
     }
 
-    /* Dialog Styles */
+    /* Dialog Styles - Style Guide Aligned */
     .dialog-container {
       padding: 32px 32px 24px;
       min-width: 320px;
       max-width: 420px;
       position: relative;
+      font-family: 'Inter', sans-serif;
     }
 
     @media (max-width: 480px) {
@@ -1156,43 +1209,50 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .dialog-close {
       position: absolute;
-      top: 8px;
-      right: 8px;
+      top: 12px;
+      right: 12px;
       color: #94a3b8;
       z-index: 10;
+      transition: all 0.2s ease;
     }
 
     .dialog-close:hover {
-      color: #64748b;
-      background: #f1f5f9;
+      color: #3b82f6;
+      background: #eff6ff;
     }
 
     .dialog-header {
-      margin-bottom: 20px;
+      margin-bottom: 24px;
       padding-right: 32px;
     }
 
     .dialog-header h2 {
-      font-size: 1.35rem;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
-      margin: 0 0 6px;
+      margin: 0 0 8px;
       padding: 0;
+      letter-spacing: -0.01em;
     }
 
     .dialog-subtitle {
+      font-family: 'Inter', sans-serif;
       color: #64748b;
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       margin: 0;
-      line-height: 1.4;
+      line-height: 1.5;
     }
 
     ::ng-deep .mat-mdc-dialog-container {
       border-radius: 16px !important;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25) !important;
     }
 
     ::ng-deep .mat-mdc-dialog-surface {
       padding: 0 !important;
+      background: #ffffff !important;
+      border: 1px solid #e2e8f0 !important;
     }
 
     ::ng-deep mat-dialog-content {
@@ -1202,66 +1262,109 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       overflow: visible !important;
     }
 
-    /* Signup Card - Salient style */
+    /* Signup Card - Style Guide */
     .signup-card {
       padding: 32px;
       border-radius: 16px;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
       border: 1px solid #e2e8f0;
+      font-family: 'Inter', sans-serif;
     }
 
     mat-card-header {
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
 
     mat-card-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
+      letter-spacing: -0.01em;
     }
 
     mat-card-subtitle {
+      font-family: 'Inter', sans-serif;
       color: #64748b;
       font-size: 0.95rem;
+      line-height: 1.5;
     }
 
     .error-message {
       background-color: #fef2f2;
-      color: #dc2626;
+      color: #ef4444;
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 16px;
       font-size: 14px;
       font-weight: 500;
+      border: 1px solid rgba(239, 68, 68, 0.2);
     }
 
     .success-message {
       background-color: #f0fdf4;
-      color: #16a34a;
+      color: #22c55e;
       padding: 12px 16px;
       border-radius: 8px;
       margin-bottom: 16px;
       font-size: 14px;
       font-weight: 500;
+      border: 1px solid rgba(34, 197, 94, 0.2);
     }
 
     .full-width {
       width: 100%;
     }
 
+    .name-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .half-width {
+      flex: 1;
+      min-width: 0;
+    }
+
     mat-form-field {
       margin-bottom: 8px;
+      font-family: 'Inter', sans-serif;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-text-field {
+      border-radius: 8px !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: #e2e8f0 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__leading,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__notch,
+    ::ng-deep .mat-mdc-form-field.mat-focused .mdc-text-field--outlined .mdc-notched-outline .mdc-notched-outline__trailing {
+      border-color: #3b82f6 !important;
+    }
+
+    ::ng-deep .mat-mdc-form-field .mdc-floating-label {
+      font-family: 'Inter', sans-serif !important;
     }
 
     .submit-btn {
-      margin-top: 12px;
-      padding: 12px 24px;
-      font-size: 14px;
+      margin-top: 16px;
+      padding: 14px 32px;
+      font-family: 'Inter', sans-serif;
+      font-size: 16px;
       font-weight: 500;
-      border-radius: 100px;
-      background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%) !important;
-      letter-spacing: 0.1px;
+      border-radius: 8px;
+      background: #3b82f6 !important;
+      letter-spacing: 0;
       color: #ffffff !important;
+      min-height: 48px !important;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.3);
+      transition: all 0.2s ease;
     }
 
     .submit-btn span,
@@ -1283,13 +1386,119 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .submit-btn:hover {
-      background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%) !important;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+      background: #2563eb !important;
+      box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+      transform: translateY(-2px);
     }
 
     .submit-btn:disabled {
-      background: linear-gradient(135deg, #64748b 0%, #475569 100%) !important;
+      background: #94a3b8 !important;
       color: rgba(255, 255, 255, 0.7) !important;
+      box-shadow: none;
+      transform: none;
+    }
+
+    /* Slack Sign-in Button Styles */
+    .social-divider {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin: 24px 0;
+      color: #94a3b8;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      text-transform: lowercase;
+    }
+
+    .social-divider::before,
+    .social-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e2e8f0;
+    }
+
+    .slack-signin-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 32px !important;
+      border: none !important;
+      border-radius: 8px !important;
+      background: #4A154B !important;
+      color: white !important;
+      font-family: 'Inter', sans-serif !important;
+      font-weight: 500 !important;
+      font-size: 16px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      box-shadow: 0 4px 14px rgba(74, 21, 75, 0.25);
+    }
+
+    .slack-signin-btn:hover {
+      background: #611f69 !important;
+      box-shadow: 0 6px 20px rgba(74, 21, 75, 0.35);
+      transform: translateY(-2px);
+    }
+
+    .slack-signin-btn .slack-logo {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .slack-signin-btn span {
+      color: white !important;
+    }
+
+    ::ng-deep .slack-signin-btn .mdc-button__label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+    }
+
+    /* Google Sign-in Button - follows Google brand guidelines */
+    .google-signin-btn {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 32px !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 8px !important;
+      background: white !important;
+      color: #334155 !important;
+      font-family: 'Inter', sans-serif !important;
+      font-weight: 500 !important;
+      font-size: 16px !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .google-signin-btn:hover {
+      background: #f8fafc !important;
+      border-color: #94a3b8 !important;
+      box-shadow: 0 1px 3px rgba(60, 64, 67, 0.15);
+    }
+
+    .google-signin-btn .google-logo {
+      width: 20px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+
+    .google-signin-btn span {
+      color: #3c4043 !important;
+    }
+
+    ::ng-deep .google-signin-btn .mdc-button__label {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 10px !important;
     }
 
     .tenant-info {
@@ -1342,6 +1551,29 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin-top: 1px;
     }
 
+    .tos-checkbox {
+      margin: 16px 0;
+      padding: 12px 16px;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .tos-checkbox mat-checkbox {
+      font-size: 14px;
+      color: #475569;
+    }
+
+    .tos-checkbox a {
+      color: #2563eb;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .tos-checkbox a:hover {
+      text-decoration: underline;
+    }
+
     .back-button {
       margin-top: 16px;
       color: #64748b;
@@ -1385,28 +1617,42 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin: 24px 0;
     }
 
-    /* Hero Screenshot - inside hero section */
-    .hero-screenshot {
+    /* Hero Screenshot - glass pane with cutoff at bottom */
+    .hero-screenshot-wrapper {
       max-width: 1100px;
-      margin: 60px auto 0;
+      margin: 24px auto 0;
       padding: 0 24px;
       position: relative;
       z-index: 5;
     }
 
+    .hero-screenshot-glass {
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-bottom: none;
+      border-radius: 20px 20px 0 0;
+      padding: 16px;
+      padding-bottom: 0;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+    }
+
     .browser-frame {
-      border-radius: 16px;
+      border-radius: 16px 16px 0 0;
       overflow: hidden;
-      box-shadow:
-        0 25px 80px -12px rgba(0, 0, 0, 0.4),
-        0 0 0 1px rgba(255, 255, 255, 0.15),
-        0 0 60px rgba(59, 130, 246, 0.2);
-      background: rgba(30, 41, 59, 0.6);
-      backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-bottom: none;
+      box-shadow: 0 0 60px rgba(59, 130, 246, 0.15);
     }
 
     .browser-header {
-      background: rgba(71, 85, 105, 0.5);
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
       padding: 12px 16px;
       display: flex;
       align-items: center;
@@ -1458,6 +1704,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 2.25rem;
       font-weight: 700;
       color: #0f172a;
@@ -1783,65 +2030,122 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       background: #2563eb;
     }
 
-    /* Usage Section */
-    .usage-section {
+    /* Capture Section */
+    .capture-section {
       background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
     }
 
-    .usage-section h2 {
-      text-align: center;
-      margin-bottom: 48px;
+    .capture-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
     }
 
-    .usage-timeline {
-      max-width: 680px;
-      margin: 0 auto 48px;
-      position: relative;
-      padding-left: 0;
+    .capture-badge {
+      display: inline-block;
+      background: #EFF6FF;
+      color: #2563EB;
+      padding: 6px 14px;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 16px;
     }
 
-    .usage-timeline::before {
-      content: '';
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      top: 12px;
-      bottom: 12px;
-      width: 1px;
-      background: #cbd5e1;
+    .capture-content h2 {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 16px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
     }
 
-    .usage-item {
+    .capture-intro {
+      font-size: 1.1rem;
+      color: #475569;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+
+    .capture-list {
       display: flex;
-      align-items: baseline;
-      padding: 18px 0;
+      flex-direction: column;
+      gap: 20px;
+      margin-bottom: 32px;
     }
 
-    .usage-trigger {
-      width: 50%;
-      text-align: right;
+    .capture-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+    }
+
+    .capture-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      height: 32px;
+      background: #EFF6FF;
+      color: #2563EB;
+      border-radius: 50%;
+      font-weight: 600;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+
+    .capture-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding-top: 4px;
+    }
+
+    .capture-text strong {
+      font-size: 1rem;
       font-weight: 600;
       color: #1e293b;
-      font-size: 0.95rem;
-      padding-right: 32px;
     }
 
-    .usage-outcome {
-      width: 50%;
+    .capture-text span {
+      font-size: 0.9rem;
       color: #64748b;
-      font-size: 0.95rem;
-      line-height: 1.5;
-      padding-left: 32px;
     }
 
-    .usage-note {
-      font-size: 1rem;
+    .capture-note {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.95rem;
       color: #475569;
-      text-align: center;
-      max-width: 600px;
-      margin: 0 auto;
-      line-height: 1.6;
-      font-weight: 500;
+      background: #fff;
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .capture-note mat-icon {
+      color: #2563EB;
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .capture-note span {
+      line-height: 1.5;
+    }
+
+    .capture-visual {
+      display: flex;
+      justify-content: center;
+    }
+
+    .capture-visual img {
+      max-width: 100%;
+      height: auto;
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.08));
     }
 
     /* Trust Section */
@@ -2052,144 +2356,72 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       line-height: 1.4;
     }
 
-    /* Audience Section */
-    .audience-section {
+    /* Memory Section */
+    .memory-section {
       background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
-      padding-bottom: 80px;
+      padding: 80px 0;
     }
 
-    .audience-header {
-      text-align: center;
-      margin-bottom: 48px;
-    }
-
-    .audience-header h2 {
-      margin-bottom: 12px;
-    }
-
-    .audience-intro {
-      font-size: 1.1rem;
-      color: #64748b;
-    }
-
-    .needs-grid {
+    .memory-content {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 24px;
-      max-width: 900px;
-      margin: 0 auto;
-    }
-
-    .need-card {
-      display: flex;
-      align-items: flex-start;
-      gap: 20px;
-      padding: 28px;
-      background: white;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
-      transition: all 0.3s ease;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .need-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 4px;
-      height: 100%;
-      transition: width 0.3s ease;
-    }
-
-    .need-card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-    }
-
-    .need-card:hover::before {
-      width: 6px;
-    }
-
-    .need-card-1::before { background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%); }
-    .need-card-2::before { background: linear-gradient(180deg, #8b5cf6 0%, #7c3aed 100%); }
-    .need-card-3::before { background: linear-gradient(180deg, #06b6d4 0%, #0891b2 100%); }
-    .need-card-4::before { background: linear-gradient(180deg, #10b981 0%, #059669 100%); }
-
-    .need-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 12px;
-      display: flex;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 60px;
       align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
     }
 
-    .need-card-1 .need-icon { background: #eff6ff; }
-    .need-card-2 .need-icon { background: #f5f3ff; }
-    .need-card-3 .need-icon { background: #ecfeff; }
-    .need-card-4 .need-icon { background: #ecfdf5; }
-
-    .need-card-1 .need-icon mat-icon { color: #2563eb; }
-    .need-card-2 .need-icon mat-icon { color: #7c3aed; }
-    .need-card-3 .need-icon mat-icon { color: #0891b2; }
-    .need-card-4 .need-icon mat-icon { color: #059669; }
-
-    .need-icon mat-icon {
-      font-size: 24px;
-      width: 24px;
-      height: 24px;
-    }
-
-    .need-content h3 {
-      font-size: 1.1rem;
-      font-weight: 600;
+    .memory-text h2 {
+      font-size: 2rem;
+      font-weight: 700;
       color: #0f172a;
-      margin: 0 0 8px;
-      line-height: 1.4;
+      margin: 0 0 20px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
     }
 
-    .need-content p {
-      font-size: 0.95rem;
+    .memory-lead {
+      font-size: 1.15rem;
+      color: #475569;
+      line-height: 1.7;
+      margin: 0 0 16px;
+    }
+
+    .memory-detail {
+      font-size: 1rem;
       color: #64748b;
-      line-height: 1.6;
+      line-height: 1.7;
       margin: 0;
     }
 
-    .audience-cta {
+    .memory-visual {
       display: flex;
-      align-items: center;
       justify-content: center;
-      gap: 24px;
-      margin-top: 48px;
-      padding: 32px;
-      background: linear-gradient(135deg, #eff6ff 0%, #f5f3ff 100%);
-      border-radius: 16px;
-      max-width: 700px;
-      margin-left: auto;
-      margin-right: auto;
+      align-items: center;
     }
 
-    .floating-brain {
-      width: 80px;
-      height: 80px;
-      flex-shrink: 0;
-      animation: float 3s ease-in-out infinite;
+    .memory-visual img {
+      width: 100%;
+      max-width: 520px;
+      height: auto;
     }
 
-    @keyframes float {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-8px); }
-    }
+    @media (max-width: 800px) {
+      .memory-content {
+        grid-template-columns: 1fr;
+        gap: 40px;
+        text-align: center;
+      }
 
-    .audience-cta p {
-      font-size: 1.1rem;
-      color: #1e293b;
-      line-height: 1.6;
-      margin: 0;
-      font-weight: 500;
+      .memory-text h2 {
+        font-size: 1.75rem;
+      }
+
+      .memory-visual {
+        order: -1;
+      }
+
+      .memory-visual img {
+        max-width: 360px;
+      }
     }
 
     /* Governance Section */
@@ -2285,12 +2517,201 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       font-style: italic;
     }
 
+    /* Slack Integration Section - Inspired by ClickUp */
+    .slack-section {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .slack-bg-gradient {
+      /* Match the edge colors of decisionrecords-and-slack.png */
+      background: linear-gradient(135deg, #0822B5 0%, #0C3EDC 30%, #1436D9 50%, #1E5CF4 70%, #0A22C7 100%);
+      padding: 80px 24px 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .slack-bg-gradient::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background:
+        radial-gradient(ellipse 70% 50% at 30% 20%, rgba(30, 92, 244, 0.4) 0%, transparent 60%),
+        radial-gradient(ellipse 50% 40% at 70% 60%, rgba(20, 54, 217, 0.3) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .slack-container {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 48px;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slack-content {
+      color: white;
+    }
+
+    .slack-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.25) 0%, rgba(245, 158, 11, 0.2) 100%);
+      border: 1px solid rgba(251, 191, 36, 0.5);
+      border-radius: 100px;
+      backdrop-filter: blur(8px);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #fef3c7;
+      margin-bottom: 24px;
+    }
+
+    .slack-badge mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #fbbf24;
+    }
+
+    .slack-content h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 2.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin: 0 0 20px;
+      color: white;
+    }
+
+    .slack-tagline {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.25rem;
+      color: #bfdbfe;
+      line-height: 1.6;
+      margin: 0 0 32px;
+    }
+
+    .slack-features {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .slack-feature {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1rem;
+      color: #e0f2fe;
+    }
+
+    .slack-feature mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: #60a5fa;
+    }
+
+    .slack-feature code {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 0.9em;
+    }
+
+    .slack-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 28px;
+      background: white;
+      color: #1e40af;
+      font-weight: 600;
+      font-size: 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+      transition: all 0.2s ease;
+    }
+
+    .slack-cta:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    .slack-logo-btn {
+      width: 22px;
+      height: 22px;
+    }
+
+    .slack-visual {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .slack-hero-image {
+      width: 100%;
+      max-width: 480px;
+      height: auto;
+      margin-bottom: -30px;
+      /* No border-radius or shadow - let the image blend naturally with background */
+    }
+
+    .slack-screenshot-wrapper {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+      transform: translateY(80px);
+    }
+
+    .slack-screenshot {
+      width: 100%;
+      height: auto;
+      border-radius: 12px;
+      display: block;
+    }
+
     /* Footer - Salient dark theme */
     .homepage-footer {
       background: #0f172a;
       color: white;
       padding: 64px 24px;
       text-align: center;
+    }
+
+    .footer-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .footer-logo {
+      width: 40px;
+      height: 40px;
+    }
+
+    .footer-brand-text {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e2e8f0;
     }
 
     .footer-mission {
@@ -2307,8 +2728,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .footer-grid {
       display: grid;
-      grid-template-columns: 1.5fr 1fr;
-      gap: 60px;
+      grid-template-columns: 2fr 1fr 1fr 1.5fr;
+      gap: 32px;
       align-items: start;
       text-align: left;
     }
@@ -2322,18 +2743,28 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       color: #64748b;
     }
 
-    .footer-separator {
-      margin: 0 8px;
-      color: #475569;
+    .footer-resources-col h4,
+    .footer-legal-col h4 {
+      color: #e2e8f0;
+      margin: 0 0 12px;
+      font-size: 1rem;
+      font-weight: 600;
     }
 
-    .footer-link {
-      color: #64748b;
+    .footer-legal-links {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .footer-legal-links a {
+      color: #94a3b8;
       text-decoration: none;
+      font-size: 0.9rem;
       transition: color 0.2s;
     }
 
-    .footer-link:hover {
+    .footer-legal-links a:hover {
       color: #93c5fd;
     }
 
@@ -2361,6 +2792,9 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     .sponsorship-button {
       border-color: rgba(255, 255, 255, 0.3) !important;
       color: #e2e8f0 !important;
+      min-height: 48px !important;
+      padding: 12px 24px !important;
+      border-radius: 8px !important;
     }
 
     .sponsorship-button:hover {
@@ -2371,20 +2805,21 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
       margin-right: 8px;
     }
 
-    /* Dialog icon */
+    /* Dialog icon - Style Guide */
     .dialog-icon {
-      color: #2563eb;
-      font-size: 28px;
-      width: 28px;
-      height: 28px;
+      color: #3b82f6;
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
     }
 
-    /* Sponsorship Dialog - Two Column Layout */
+    /* Sponsorship Dialog - Two Column Layout - Style Guide */
     .sponsorship-dialog {
       padding: 32px;
       position: relative;
       min-width: 700px;
       max-width: 800px;
+      font-family: 'Inter', sans-serif;
     }
 
     .sponsorship-header {
@@ -2396,10 +2831,12 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-header h2 {
-      font-size: 1.35rem;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
       color: #0f172a;
       margin: 0;
+      letter-spacing: -0.01em;
     }
 
     .sponsorship-content {
@@ -2414,7 +2851,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-text p {
-      color: #475569;
+      font-family: 'Inter', sans-serif;
+      color: #334155;
       font-size: 0.95rem;
       line-height: 1.7;
       margin: 0 0 16px;
@@ -2425,7 +2863,8 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
     }
 
     .sponsorship-text strong {
-      color: #1e40af;
+      color: #3b82f6;
+      font-weight: 600;
     }
 
     .sponsorship-form {
@@ -2434,6 +2873,7 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
 
     .sponsorship-form mat-form-field {
       margin-bottom: 4px;
+      font-family: 'Inter', sans-serif;
     }
 
     @media (max-width: 768px) {
@@ -2518,13 +2958,30 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         text-align: center;
       }
 
+      .footer-legal-links {
+        align-items: center;
+      }
+
       .browser-frame {
         margin: 0 -8px;
         border-radius: 12px;
       }
 
-      .usage-timeline {
-        max-width: 100%;
+      .capture-layout {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .capture-visual {
+        order: -1;
+      }
+
+      .capture-visual img {
+        max-width: 400px;
+      }
+
+      .capture-content h2 {
+        font-size: 1.75rem;
       }
 
       .problem-layout {
@@ -2563,34 +3020,67 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         flex-direction: column;
         text-align: center;
       }
+
+      .slack-container {
+        grid-template-columns: 1fr;
+        gap: 32px;
+        text-align: center;
+      }
+
+      .slack-content {
+        text-align: center;
+      }
+
+      .slack-content h2 {
+        font-size: 2rem;
+      }
+
+      .slack-badge {
+        justify-content: center;
+      }
+
+      .slack-features {
+        align-items: center;
+      }
+
+      .slack-cta {
+        justify-content: center;
+      }
+
+      .slack-visual {
+        order: -1;
+      }
+
+      .slack-hero-image {
+        max-width: 320px;
+        margin-bottom: -20px;
+      }
+
+      .slack-screenshot-wrapper {
+        max-width: 300px;
+        transform: translateY(40px);
+      }
     }
 
     @media (max-width: 600px) {
-      .usage-timeline::before {
-        display: none;
+      .capture-visual img {
+        max-width: 100%;
       }
 
-      .usage-item {
+      .capture-content h2 {
+        font-size: 1.5rem;
+      }
+
+      .capture-intro {
+        font-size: 1rem;
+      }
+
+      .capture-note {
         flex-direction: column;
-        gap: 6px;
-        padding: 16px 0;
-        border-bottom: 1px solid #e2e8f0;
+        text-align: center;
+        gap: 8px;
       }
 
-      .usage-item:last-child {
-        border-bottom: none;
-      }
-
-      .usage-trigger {
-        width: 100%;
-        text-align: left;
-        padding-right: 0;
-      }
-
-      .usage-outcome {
-        width: 100%;
-        padding-left: 0;
-      }
       .hero {
         padding: 60px 16px 40px;
       }
@@ -2618,13 +3108,20 @@ type ViewState = 'email' | 'signup' | 'verification_sent' | 'access_request' | '
         justify-content: center;
       }
 
-      .hero-screenshot {
+      .hero-screenshot-wrapper {
         margin: 40px auto 0;
         padding: 0 8px;
       }
 
-      .browser-frame {
-        border-radius: 8px;
+      .hero-screenshot-glass {
+        transform: translateY(40px);
+        padding: 8px;
+        padding-bottom: 0;
+        border-radius: 12px 12px 0 0;
+      }
+
+      .hero-screenshot-wrapper .browser-frame {
+        border-radius: 8px 8px 0 0;
       }
 
       .browser-header {
@@ -2753,6 +3250,15 @@ export class HomepageComponent implements OnInit {
   sponsorshipError = '';
   sponsorshipSuccess = '';
 
+  // Slack OIDC state
+  slackOidcEnabled = false;
+
+  // Mobile menu state
+  mobileMenuOpen = false;
+
+  // Google OAuth state
+  googleOauthEnabled = false;
+
   // Carousel state
   currentSlide = 0;
 
@@ -2762,7 +3268,7 @@ export class HomepageComponent implements OnInit {
     'supplier Decision',
     'policy Decision',
     'technology Decision',
-    'architecture Decision',
+    'design Decision',
     'Decision'
   ];
   currentTypeIndex = 0;
@@ -2785,13 +3291,16 @@ export class HomepageComponent implements OnInit {
 
     this.signupForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
-      password: ['', [Validators.minLength(8)]]
+      first_name: ['', Validators.required],
+      last_name: ['', Validators.required],
+      password: ['', [Validators.minLength(8)]],
+      acceptTos: [false, Validators.requiredTrue]
     });
 
     this.accessRequestForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
-      name: ['', Validators.required],
+      first_name: ['', Validators.required],
+      last_name: ['', Validators.required],
       reason: ['']
     });
 
@@ -2806,15 +3315,74 @@ export class HomepageComponent implements OnInit {
 
   ngOnInit(): void {
     this.route.queryParams.subscribe(params => {
+      // Handle signin query param from nav
+      if (params['signin'] === 'true') {
+        // Small delay to ensure view is ready
+        setTimeout(() => this.openSignInDialog(), 100);
+        // Clear the query param
+        this.router.navigate(['/'], { replaceUrl: true });
+        return;
+      }
+
       if (params['error'] === 'invalid_token') {
         this.error = 'Invalid verification link. Please try again.';
       } else if (params['error'] === 'expired_token') {
         this.error = 'Verification link has expired. Please request a new one.';
+      } else if (params['error'] === 'slack_disabled') {
+        this.error = 'Slack sign-in is currently disabled.';
+      } else if (params['error'] === 'slack_not_configured') {
+        this.error = 'Slack sign-in is not configured.';
+      } else if (params['error'] === 'public_email') {
+        this.error = params['message'] || 'Please use your work email address.';
+      } else if (params['error'] === 'slack_auth_error') {
+        this.error = 'Slack authentication failed. Please try again.';
+      } else if (params['error'] === 'google_not_configured') {
+        this.error = 'Google sign-in is not configured.';
+      } else if (params['error'] === 'google_auth_error') {
+        this.error = 'Google authentication failed. Please try again.';
       }
     });
 
+    // Check if Slack OIDC sign-in is enabled
+    this.checkSlackOidcStatus();
+
+    // Check if Google OAuth sign-in is enabled
+    this.checkGoogleOauthStatus();
+
     // Start typewriter animation
     this.startTypewriterAnimation();
+  }
+
+  private checkSlackOidcStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/slack-oidc-status').subscribe({
+      next: (response) => {
+        this.slackOidcEnabled = response.enabled;
+      },
+      error: () => {
+        this.slackOidcEnabled = false;
+      }
+    });
+  }
+
+  signInWithSlack(): void {
+    // Redirect to Slack OIDC initiation endpoint
+    window.location.href = '/auth/slack/oidc';
+  }
+
+  private checkGoogleOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/google-status').subscribe({
+      next: (response) => {
+        this.googleOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.googleOauthEnabled = false;
+      }
+    });
+  }
+
+  signInWithGoogle(): void {
+    // Redirect to Google OAuth initiation endpoint
+    window.location.href = '/auth/google';
   }
 
   private startTypewriterAnimation(): void {
@@ -2912,7 +3480,10 @@ export class HomepageComponent implements OnInit {
                 return;
               }
 
-              if (status.require_approval) {
+              // Use effective_require_approval which accounts for:
+              // - Tenant's require_approval setting
+              // - Whether tenant has admins who can actually approve (not just provisional admin)
+              if (status.effective_require_approval) {
                 this.currentView = 'access_request';
                 this.accessRequestForm.patchValue({ email });
               } else {
@@ -2954,12 +3525,13 @@ export class HomepageComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, password } = this.signupForm.value;
+    const { email, first_name, last_name, password } = this.signupForm.value;
 
     if (this.tenantStatus && !this.tenantStatus.email_verification_required) {
       this.http.post<{ message: string; redirect: string; user?: any; setup_passkey?: boolean }>('/api/auth/direct-signup', {
         email,
-        name,
+        first_name,
+        last_name,
         password: this.usePasswordSignup ? password : null,
         auth_preference: this.usePasswordSignup ? 'password' : 'passkey'
       }).subscribe({
@@ -3008,7 +3580,8 @@ export class HomepageComponent implements OnInit {
 
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email,
-      name,
+      first_name,
+      last_name,
       purpose: 'signup'
     }).subscribe({
       next: (response) => {
@@ -3035,11 +3608,12 @@ export class HomepageComponent implements OnInit {
     this.isLoading = true;
     this.error = '';
 
-    const { email, name, reason } = this.accessRequestForm.value;
+    const { email, first_name, last_name, reason } = this.accessRequestForm.value;
 
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email,
-      name,
+      first_name,
+      last_name,
       purpose: 'access_request',
       reason
     }).subscribe({
@@ -3063,18 +3637,21 @@ export class HomepageComponent implements OnInit {
 
   submitJoinOrganization(): void {
     const emailCtrl = this.accessRequestForm.get('email');
-    const nameCtrl = this.accessRequestForm.get('name');
-    if (emailCtrl?.invalid || nameCtrl?.invalid) return;
+    const firstNameCtrl = this.accessRequestForm.get('first_name');
+    const lastNameCtrl = this.accessRequestForm.get('last_name');
+    if (emailCtrl?.invalid || firstNameCtrl?.invalid || lastNameCtrl?.invalid) return;
 
     this.isLoading = true;
     this.error = '';
 
     const email = emailCtrl?.value;
-    const name = nameCtrl?.value;
+    const first_name = firstNameCtrl?.value;
+    const last_name = lastNameCtrl?.value;
 
     this.http.post<{ message: string; auto_approved?: boolean }>('/api/auth/access-request', {
       email,
-      name
+      first_name,
+      last_name
     }).subscribe({
       next: (response) => {
         this.isLoading = false;
@@ -3111,7 +3688,8 @@ export class HomepageComponent implements OnInit {
 
     this.http.post<EmailVerificationResponse>('/api/auth/send-verification', {
       email: formData.email,
-      name: formData.name,
+      first_name: formData.first_name,
+      last_name: formData.last_name,
       purpose: this.tenantStatus?.has_users ? 'access_request' : 'signup',
       reason: this.accessRequestForm.value.reason
     }).subscribe({
@@ -3175,11 +3753,16 @@ export class HomepageComponent implements OnInit {
     this.currentSlide = index;
   }
 
+  toggleMobileMenu(): void {
+    this.mobileMenuOpen = !this.mobileMenuOpen;
+  }
+
   openGetStartedDialog(): void {
     this.currentView = 'email';
     this.error = '';
     this.success = '';
     this.isSignInMode = false;
+    this.mobileMenuOpen = false;
     this.dialogRef = this.dialog.open(this.getStartedDialog, {
       width: '450px',
       maxWidth: '90vw',
