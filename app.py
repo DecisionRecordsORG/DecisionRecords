@@ -191,8 +191,8 @@ except Exception as e:
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Global exception handler to prevent stack trace leakage."""
-    # Log the full error details server-side
-    logger.error(f"Unhandled exception: {str(e)}")
+    # Log the full error details server-side with request context
+    logger.error(f"Unhandled exception: {str(e)} | Path: {request.path} | Method: {request.method}")
     logger.error(traceback.format_exc())
 
     # Capture to PostHog if enabled
