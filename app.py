@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -8815,6 +8815,424 @@ def slack_link_complete():
     logger.info(f"User {user.id} linked Slack account {slack_user_id} in workspace {workspace_id}")
 
     return jsonify({'message': 'Account linked successfully'})
+
+
+# ==================== API Routes - AI/LLM Integration ====================
+
+# Import AI services
+from ai import AIConfig, AIApiKeyService, AIInteractionLogger
+
+
+# --- Super Admin AI Configuration ---
+
+@app.route('/api/admin/ai/config', methods=['GET'])
+@master_required
+def api_get_ai_system_config():
+    """Get system-level AI configuration (super admin only)."""
+    return jsonify(AIConfig.get_system_ai_config())
+
+
+@app.route('/api/admin/ai/config', methods=['POST', 'PUT'])
+@master_required
+def api_update_ai_system_config():
+    """Update system-level AI configuration (super admin only)."""
+    data = request.get_json() or {}
+
+    # Define valid config keys
+    valid_keys = {
+        'ai_features_enabled': SystemConfig.KEY_AI_FEATURES_ENABLED,
+        'ai_slack_bot_enabled': SystemConfig.KEY_AI_SLACK_BOT_ENABLED,
+        'ai_mcp_server_enabled': SystemConfig.KEY_AI_MCP_SERVER_ENABLED,
+        'ai_external_api_enabled': SystemConfig.KEY_AI_EXTERNAL_API_ENABLED,
+        'ai_assisted_creation_enabled': SystemConfig.KEY_AI_ASSISTED_CREATION_ENABLED,
+        'llm_provider': SystemConfig.KEY_AI_LLM_PROVIDER,
+        'llm_model': SystemConfig.KEY_AI_LLM_MODEL,
+        'llm_endpoint': SystemConfig.KEY_AI_LLM_ENDPOINT,
+        'llm_api_key_secret': SystemConfig.KEY_AI_LLM_API_KEY_SECRET,
+    }
+
+    for key, config_key in valid_keys.items():
+        if key in data:
+            value = data[key]
+            # Convert booleans to string
+            if isinstance(value, bool):
+                value = 'true' if value else 'false'
+            # Validate LLM provider
+            if key == 'llm_provider':
+                try:
+                    LLMProvider(value)
+                except ValueError:
+                    return jsonify({'error': f'Invalid LLM provider: {value}'}), 400
+            AIConfig.set_system_config(config_key, str(value))
+
+    return jsonify({
+        'message': 'AI configuration updated',
+        **AIConfig.get_system_ai_config()
+    })
+
+
+@app.route('/api/admin/ai/stats', methods=['GET'])
+@master_required
+def api_get_ai_system_stats():
+    """Get system-wide AI usage statistics (super admin only)."""
+    # Get stats across all tenants
+    from sqlalchemy import func
+
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.fromisoformat(start_date_str)
+        except ValueError:
+            return jsonify({'error': 'Invalid start_date format'}), 400
+
+    if end_date_str:
+        try:
+            end_date = datetime.fromisoformat(end_date_str)
+        except ValueError:
+            return jsonify({'error': 'Invalid end_date format'}), 400
+
+    if not start_date:
+        start_date = datetime.utcnow() - timedelta(days=30)
+    if not end_date:
+        end_date = datetime.utcnow()
+
+    logs = AIInteractionLog.query.filter(
+        AIInteractionLog.created_at >= start_date,
+        AIInteractionLog.created_at <= end_date
+    ).all()
+
+    # Aggregate stats
+    by_tenant = {}
+    by_channel = {}
+    by_action = {}
+    total_tokens = 0
+
+    for log in logs:
+        by_tenant[log.tenant_id] = by_tenant.get(log.tenant_id, 0) + 1
+        by_channel[log.channel] = by_channel.get(log.channel, 0) + 1
+        by_action[log.action] = by_action.get(log.action, 0) + 1
+        if log.tokens_input:
+            total_tokens += log.tokens_input
+        if log.tokens_output:
+            total_tokens += log.tokens_output
+
+    return jsonify({
+        'period_start': start_date.isoformat(),
+        'period_end': end_date.isoformat(),
+        'total_interactions': len(logs),
+        'tenants_using_ai': len(by_tenant),
+        'by_channel': by_channel,
+        'by_action': by_action,
+        'total_tokens': total_tokens,
+    })
+
+
+# --- Tenant Admin AI Configuration ---
+
+@app.route('/api/tenant/ai/config', methods=['GET'])
+@login_required
+def api_get_tenant_ai_config():
+    """Get AI configuration for current tenant (admin only)."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    # Get both system and tenant config
+    system_config = AIConfig.get_system_ai_config()
+    tenant_config = AIConfig.get_tenant_ai_config(tenant)
+
+    return jsonify({
+        'system': system_config,
+        'tenant': tenant_config,
+        'system_ai_enabled': system_config['ai_features_enabled'],
+    })
+
+
+@app.route('/api/tenant/ai/config', methods=['POST', 'PUT'])
+@login_required
+def api_update_tenant_ai_config():
+    """Update AI configuration for current tenant (admin only)."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    # Check if system-level AI is enabled
+    if not AIConfig.get_system_ai_enabled():
+        return jsonify({'error': 'AI features are not enabled at system level'}), 403
+
+    data = request.get_json() or {}
+
+    # Update tenant AI settings
+    AIConfig.update_tenant_ai_config(
+        tenant,
+        ai_features_enabled=data.get('ai_features_enabled', tenant.ai_features_enabled),
+        ai_slack_queries_enabled=data.get('ai_slack_queries_enabled', tenant.ai_slack_queries_enabled),
+        ai_assisted_creation_enabled=data.get('ai_assisted_creation_enabled', tenant.ai_assisted_creation_enabled),
+        ai_external_access_enabled=data.get('ai_external_access_enabled', tenant.ai_external_access_enabled),
+        ai_require_anonymization=data.get('ai_require_anonymization', tenant.ai_require_anonymization),
+        ai_log_interactions=data.get('ai_log_interactions', tenant.ai_log_interactions),
+    )
+
+    # Log the action
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type='update_ai_config',
+        target_entity='tenant',
+        target_id=tenant.id,
+        details={
+            'changes': {k: v for k, v in data.items() if k.startswith('ai_')}
+        }
+    )
+
+    return jsonify({
+        'message': 'Tenant AI configuration updated',
+        **AIConfig.get_tenant_ai_config(tenant)
+    })
+
+
+@app.route('/api/tenant/ai/stats', methods=['GET'])
+@login_required
+def api_get_tenant_ai_stats():
+    """Get AI usage statistics for current tenant (admin only)."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.fromisoformat(start_date_str)
+        except ValueError:
+            return jsonify({'error': 'Invalid start_date format'}), 400
+
+    if end_date_str:
+        try:
+            end_date = datetime.fromisoformat(end_date_str)
+        except ValueError:
+            return jsonify({'error': 'Invalid end_date format'}), 400
+
+    return jsonify(AIInteractionLogger.get_tenant_stats(tenant.id, start_date, end_date))
+
+
+# --- User AI Preferences ---
+
+@app.route('/api/user/ai/preferences', methods=['GET'])
+@login_required
+def api_get_user_ai_preferences():
+    """Get AI preferences for current user."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership:
+        return jsonify({'error': 'You are not a member of this tenant'}), 403
+
+    # Check if AI is available for this user
+    ai_available = AIConfig.is_ai_available_for_user(user, tenant)
+
+    return jsonify({
+        'ai_opt_out': membership.ai_opt_out,
+        'ai_available': ai_available,
+        'tenant_ai_enabled': AIConfig.get_tenant_ai_enabled(tenant),
+        'system_ai_enabled': AIConfig.get_system_ai_enabled(),
+    })
+
+
+@app.route('/api/user/ai/preferences', methods=['POST', 'PUT'])
+@login_required
+def api_update_user_ai_preferences():
+    """Update AI preferences for current user."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    data = request.get_json() or {}
+
+    ai_opt_out = data.get('ai_opt_out')
+    if ai_opt_out is not None:
+        AIConfig.set_user_ai_opt_out(user, tenant, bool(ai_opt_out))
+
+    membership = get_current_membership()
+    return jsonify({
+        'message': 'AI preferences updated',
+        'ai_opt_out': membership.ai_opt_out,
+    })
+
+
+# --- User AI API Keys ---
+
+@app.route('/api/user/ai/keys', methods=['GET'])
+@login_required
+def api_list_ai_api_keys():
+    """List AI API keys for current user."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Check if external AI access is enabled
+    if not AIConfig.get_tenant_external_access_enabled(tenant):
+        return jsonify({'error': 'External AI access is not enabled for this organization'}), 403
+
+    keys = AIApiKeyService.list_user_keys(user, tenant)
+    return jsonify([AIApiKeyService.serialize_key(k) for k in keys])
+
+
+@app.route('/api/user/ai/keys', methods=['POST'])
+@login_required
+def api_create_ai_api_key():
+    """Create a new AI API key for current user."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    # Check if external AI access is enabled
+    if not AIConfig.get_tenant_external_access_enabled(tenant):
+        return jsonify({'error': 'External AI access is not enabled for this organization'}), 403
+
+    # Check if user has opted out
+    if AIConfig.get_user_ai_opt_out(user, tenant):
+        return jsonify({'error': 'You have opted out of AI features. Update your preferences to create API keys.'}), 403
+
+    data = request.get_json() or {}
+    name = data.get('name', 'API Key')
+    scopes = data.get('scopes', ['read', 'search'])
+    expires_in_days = data.get('expires_in_days')
+
+    # Validate scopes
+    valid_scopes = {'read', 'search', 'write'}
+    if not all(s in valid_scopes for s in scopes):
+        return jsonify({'error': 'Invalid scopes. Valid values: read, search, write'}), 400
+
+    # Limit number of keys per user
+    existing_keys = AIApiKeyService.list_user_keys(user, tenant)
+    if len(existing_keys) >= 5:
+        return jsonify({'error': 'Maximum number of API keys (5) reached. Please revoke an existing key.'}), 400
+
+    api_key, full_key = AIApiKeyService.create_key(
+        user=user,
+        tenant=tenant,
+        name=name,
+        scopes=scopes,
+        expires_in_days=expires_in_days
+    )
+
+    # Return the full key only on creation - it won't be shown again
+    return jsonify({
+        'message': 'API key created successfully. Save this key - it will not be shown again.',
+        'key': full_key,
+        **AIApiKeyService.serialize_key(api_key)
+    }), 201
+
+
+@app.route('/api/user/ai/keys/<key_id>', methods=['DELETE'])
+@login_required
+def api_revoke_ai_api_key(key_id):
+    """Revoke an AI API key."""
+    user = get_current_user()
+
+    api_key = AIApiKeyService.get_key_by_id(key_id, user)
+    if not api_key:
+        return jsonify({'error': 'API key not found'}), 404
+
+    if api_key.revoked_at:
+        return jsonify({'error': 'API key is already revoked'}), 400
+
+    AIApiKeyService.revoke_key(api_key)
+
+    return jsonify({'message': 'API key revoked successfully'})
+
+
+# --- AI Interaction Logs (Tenant Admin) ---
+
+@app.route('/api/tenant/ai/logs', methods=['GET'])
+@login_required
+def api_get_tenant_ai_logs():
+    """Get AI interaction logs for current tenant (admin only)."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    # Check if logging is enabled
+    if not tenant.ai_log_interactions:
+        return jsonify({'error': 'AI interaction logging is disabled for this organization'}), 400
+
+    limit = min(int(request.args.get('limit', 100)), 500)
+    offset = int(request.args.get('offset', 0))
+    channel = request.args.get('channel')
+    action = request.args.get('action')
+
+    channel_enum = None
+    action_enum = None
+
+    if channel:
+        try:
+            channel_enum = AIChannel(channel)
+        except ValueError:
+            return jsonify({'error': f'Invalid channel: {channel}'}), 400
+
+    if action:
+        try:
+            action_enum = AIAction(action)
+        except ValueError:
+            return jsonify({'error': f'Invalid action: {action}'}), 400
+
+    logs = AIInteractionLogger.get_tenant_logs(
+        tenant_id=tenant.id,
+        limit=limit,
+        offset=offset,
+        channel=channel_enum,
+        action=action_enum
+    )
+
+    return jsonify({
+        'logs': [AIInteractionLogger.serialize_log(log) for log in logs],
+        'limit': limit,
+        'offset': offset,
+    })
 
 
 if __name__ == '__main__':

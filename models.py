@@ -39,6 +39,37 @@ class RequestedRole(enum.Enum):
     STEWARD = 'steward'
     ADMIN = 'admin'
 
+
+# ============================================================================
+# ENUMS for AI/LLM Integration
+# ============================================================================
+
+class LLMProvider(enum.Enum):
+    """Supported LLM providers for AI features."""
+    NONE = 'none'
+    OPENAI = 'openai'
+    ANTHROPIC = 'anthropic'
+    AZURE_OPENAI = 'azure_openai'
+    CUSTOM = 'custom'
+
+
+class AIChannel(enum.Enum):
+    """Channels through which AI interactions occur."""
+    SLACK = 'slack'
+    MCP = 'mcp'
+    API = 'api'
+    WEB = 'web'
+
+
+class AIAction(enum.Enum):
+    """Types of AI actions for logging."""
+    SEARCH = 'search'
+    READ = 'read'
+    CREATE = 'create'
+    UPDATE = 'update'
+    SUMMARIZE = 'summarize'
+
+
 # Default master account credentials
 DEFAULT_MASTER_USERNAME = os.environ.get('MASTER_USERNAME', 'admin')
 DEFAULT_MASTER_PASSWORD = os.environ.get('MASTER_PASSWORD', 'changeme')
@@ -114,6 +145,25 @@ class SystemConfig(db.Model):
     DEFAULT_LOG_FORWARDING_LOG_LEVEL = 'INFO'  # DEBUG, INFO, WARNING, ERROR
     DEFAULT_LOG_FORWARDING_SERVICE_NAME = 'architecture-decisions'
     DEFAULT_LOG_FORWARDING_ENVIRONMENT = 'production'
+
+    # AI/LLM Integration configuration keys (Super Admin level)
+    KEY_AI_FEATURES_ENABLED = 'ai_features_enabled'  # Master switch for all AI features
+    KEY_AI_SLACK_BOT_ENABLED = 'ai_slack_bot_enabled'  # Slack natural language queries
+    KEY_AI_MCP_SERVER_ENABLED = 'ai_mcp_server_enabled'  # MCP server for developer tools
+    KEY_AI_EXTERNAL_API_ENABLED = 'ai_external_api_enabled'  # API for custom GPTs/agents
+    KEY_AI_ASSISTED_CREATION_ENABLED = 'ai_assisted_creation_enabled'  # LLM-assisted decision creation
+    KEY_AI_LLM_PROVIDER = 'ai_llm_provider'  # none, openai, anthropic, azure_openai, custom
+    KEY_AI_LLM_MODEL = 'ai_llm_model'  # Model identifier (e.g., gpt-4o, claude-3-sonnet)
+    KEY_AI_LLM_API_KEY_SECRET = 'ai_llm_api_key_secret'  # Key Vault secret name for LLM API key
+    KEY_AI_LLM_ENDPOINT = 'ai_llm_endpoint'  # Custom endpoint URL (for Azure/custom providers)
+
+    # AI/LLM defaults - all OFF by default (opt-in only)
+    DEFAULT_AI_FEATURES_ENABLED = False
+    DEFAULT_AI_SLACK_BOT_ENABLED = False
+    DEFAULT_AI_MCP_SERVER_ENABLED = False
+    DEFAULT_AI_EXTERNAL_API_ENABLED = False
+    DEFAULT_AI_ASSISTED_CREATION_ENABLED = False
+    DEFAULT_AI_LLM_PROVIDER = 'none'
 
     @staticmethod
     def get(key, default=None):
@@ -244,6 +294,15 @@ class Tenant(db.Model):
     deleted_by_admin = db.Column(db.String(255), nullable=True)  # Super admin who deleted (username or identifier)
     deletion_expires_at = db.Column(db.DateTime, nullable=True)  # When deletion becomes permanent (default: 30 days)
 
+    # AI/LLM Integration settings (Tenant Admin level)
+    # These only apply if Super Admin has enabled the corresponding feature globally
+    ai_features_enabled = db.Column(db.Boolean, default=False)  # Master switch for tenant
+    ai_slack_queries_enabled = db.Column(db.Boolean, default=False)  # Allow Slack AI queries
+    ai_assisted_creation_enabled = db.Column(db.Boolean, default=False)  # Allow AI-assisted decision creation
+    ai_external_access_enabled = db.Column(db.Boolean, default=False)  # Allow external AI API access
+    ai_require_anonymization = db.Column(db.Boolean, default=True)  # Require PII anonymization before LLM
+    ai_log_interactions = db.Column(db.Boolean, default=True)  # Log all AI interactions for audit
+
     # Relationships (defined after related models exist)
     # memberships - backref from TenantMembership
     # spaces - backref from Space
@@ -344,6 +403,9 @@ class TenantMembership(db.Model):
     deletion_rate_limited_at = db.Column(db.DateTime, nullable=True)  # When user was rate-limited
     deletion_count_window_start = db.Column(db.DateTime, nullable=True)  # Start of rate limit window
     deletion_count = db.Column(db.Integer, default=0)  # Number of deletions in current window
+
+    # AI/LLM preferences (User level)
+    ai_opt_out = db.Column(db.Boolean, default=False)  # User can opt out of AI features
 
     # Relationships
     user = db.relationship('User', backref=db.backref('memberships', lazy='dynamic'))
@@ -1599,4 +1661,187 @@ class BlogPost(db.Model):
             'publishDateISO': self.publish_date.isoformat() if self.publish_date else None,
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# ============================================================================
+# AI/LLM INTEGRATION MODELS
+# ============================================================================
+
+class AIApiKey(db.Model):
+    """
+    API keys for external AI tools to access decision records.
+
+    Key security features:
+    - Key is hashed (SHA256), only prefix stored for identification
+    - Keys shown once on creation, never retrievable
+    - Scoped to specific permissions (read, search, create)
+    - Automatic expiration support
+    - Immediate revocation capability
+    """
+    __tablename__ = 'ai_api_keys'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+
+    # Key identification (the actual key is never stored, only its hash)
+    key_hash = db.Column(db.String(64), nullable=False, unique=True)  # SHA256 hash
+    key_prefix = db.Column(db.String(8), nullable=False)  # First 8 chars for display (e.g., "dr_abc12")
+
+    # Metadata
+    name = db.Column(db.String(100), nullable=False)  # User-provided name for the key
+    description = db.Column(db.String(500), nullable=True)  # Optional description
+
+    # Permissions (JSON array of scopes)
+    # Valid scopes: read, search, create, update
+    scopes = db.Column(db.JSON, default=lambda: ['read', 'search'])
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_used_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True)  # None = never expires
+    revoked_at = db.Column(db.DateTime, nullable=True)  # Set when key is revoked
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('ai_api_keys', lazy='dynamic'))
+    tenant = db.relationship('Tenant', backref=db.backref('ai_api_keys', lazy='dynamic'))
+
+    # Indexes for faster lookups
+    __table_args__ = (
+        db.Index('idx_ai_api_key_hash', 'key_hash'),
+        db.Index('idx_ai_api_key_user', 'user_id'),
+        db.Index('idx_ai_api_key_tenant', 'tenant_id'),
+    )
+
+    @property
+    def is_valid(self):
+        """Check if key is currently valid (not expired, not revoked)."""
+        if self.revoked_at:
+            return False
+        if self.expires_at and datetime.now(timezone.utc).replace(tzinfo=None) > self.expires_at:
+            return False
+        return True
+
+    @property
+    def display_key(self):
+        """Display-safe key representation (prefix + masked)."""
+        return f"{self.key_prefix}..."
+
+    def has_scope(self, scope):
+        """Check if key has a specific scope."""
+        return scope in (self.scopes or [])
+
+    def update_last_used(self):
+        """Update the last_used_at timestamp."""
+        self.last_used_at = datetime.now(timezone.utc)
+
+    def revoke(self):
+        """Revoke this API key."""
+        self.revoked_at = datetime.now(timezone.utc)
+
+    def to_dict(self, include_sensitive=False):
+        """Serialize to dictionary."""
+        data = {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'key_prefix': self.key_prefix,
+            'display_key': self.display_key,
+            'scopes': self.scopes,
+            'is_valid': self.is_valid,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'revoked_at': self.revoked_at.isoformat() if self.revoked_at else None,
+        }
+        if include_sensitive:
+            data['user_id'] = self.user_id
+            data['tenant_id'] = self.tenant_id
+        return data
+
+
+class AIInteractionLog(db.Model):
+    """
+    Audit log for all AI interactions with the platform.
+
+    Captures:
+    - Who initiated the interaction (user, tenant)
+    - What channel was used (Slack, MCP, API, Web)
+    - What action was performed (search, read, create, etc.)
+    - What data was accessed (decision IDs)
+    - LLM usage metrics (provider, model, tokens)
+    """
+    __tablename__ = 'ai_interaction_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Who
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Null for anonymous/API-only
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True)
+    api_key_id = db.Column(db.Integer, db.ForeignKey('ai_api_keys.id'), nullable=True)  # If via API key
+
+    # What channel
+    channel = db.Column(db.Enum(AIChannel), nullable=False)
+
+    # What action
+    action = db.Column(db.Enum(AIAction), nullable=False)
+
+    # Query/request details (anonymized if configured)
+    query_text = db.Column(db.Text, nullable=True)  # The search query or request (may be anonymized)
+    query_anonymized = db.Column(db.Boolean, default=False)  # Whether query was anonymized before logging
+
+    # What was accessed
+    decision_ids = db.Column(db.JSON, nullable=True)  # Array of decision IDs accessed
+    decision_count = db.Column(db.Integer, default=0)  # Number of decisions in response
+
+    # LLM usage (if applicable)
+    llm_provider = db.Column(db.String(50), nullable=True)
+    llm_model = db.Column(db.String(100), nullable=True)
+    tokens_input = db.Column(db.Integer, nullable=True)
+    tokens_output = db.Column(db.Integer, nullable=True)
+
+    # Performance
+    duration_ms = db.Column(db.Integer, nullable=True)  # Request duration in milliseconds
+
+    # Result
+    success = db.Column(db.Boolean, default=True)
+    error_message = db.Column(db.String(500), nullable=True)  # If success=False
+
+    # Timestamp
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('ai_interactions', lazy='dynamic'))
+    tenant = db.relationship('Tenant', backref=db.backref('ai_interactions', lazy='dynamic'))
+    api_key = db.relationship('AIApiKey', backref=db.backref('interactions', lazy='dynamic'))
+
+    # Indexes for analytics queries
+    __table_args__ = (
+        db.Index('idx_ai_log_tenant_created', 'tenant_id', 'created_at'),
+        db.Index('idx_ai_log_user_created', 'user_id', 'created_at'),
+        db.Index('idx_ai_log_channel', 'channel'),
+        db.Index('idx_ai_log_action', 'action'),
+    )
+
+    def to_dict(self):
+        """Serialize to dictionary."""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'tenant_id': self.tenant_id,
+            'channel': self.channel.value if self.channel else None,
+            'action': self.action.value if self.action else None,
+            'query_text': self.query_text,
+            'query_anonymized': self.query_anonymized,
+            'decision_ids': self.decision_ids,
+            'decision_count': self.decision_count,
+            'llm_provider': self.llm_provider,
+            'llm_model': self.llm_model,
+            'tokens_input': self.tokens_input,
+            'tokens_output': self.tokens_output,
+            'duration_ms': self.duration_ms,
+            'success': self.success,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
         }
