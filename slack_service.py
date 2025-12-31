@@ -236,6 +236,7 @@ class SlackService:
             'view': self._handle_view,
             'search': self._handle_search,
             'create': self._handle_create,
+            'ai': self._handle_ai,  # AI-powered natural language queries
         }
 
         handler = handlers.get(subcommand, self._handle_menu)
@@ -329,7 +330,8 @@ class SlackService:
                         "`/decision list [status]` - List by status\n"
                         "`/decision list space:[name]` - List by space\n"
                         "`/decision view <id>` - View a specific decision\n"
-                        "`/decision search <query>` - Search decisions"
+                        "`/decision search <query>` - Search decisions\n"
+                        "`/decision ai <query>` - AI-powered natural language search"
                     )
                 }
             },
@@ -589,6 +591,80 @@ class SlackService:
         except SlackApiError as e:
             logger.error(f"Failed to open create modal: {e}")
             return {'response_type': 'ephemeral', 'text': 'Failed to open creation form. Please try again.'}, True
+
+    def _handle_ai(self, args: str, user: User, trigger_id: str, channel_id: str = None):
+        """
+        Handle AI-powered natural language queries.
+
+        Usage:
+          /decision ai <query>              - Natural language search
+          /decision ai summarize ADR-42     - Summarize a decision
+          /decision ai explain ADR-42       - Explain decision consequences
+        """
+        from ai.slack import get_slack_ai_handler
+
+        if not args.strip():
+            return {
+                'response_type': 'ephemeral',
+                'blocks': [
+                    {
+                        "type": "header",
+                        "text": {"type": "plain_text", "text": "AI-Powered Queries"}
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*Available AI commands:*"
+                        }
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                "`/decision ai <query>` - Natural language search\n"
+                                "`/decision ai summarize <id>` - Summarize a decision\n"
+                                "`/decision ai explain <id>` - Explain decision impact\n\n"
+                                "*Examples:*\n"
+                                "• `/decision ai What decisions did we make about authentication?`\n"
+                                "• `/decision ai Show me recent accepted decisions`\n"
+                                "• `/decision ai summarize ADR-42`"
+                            )
+                        }
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {"type": "mrkdwn", "text": ":robot_face: AI features require organization admin to enable them."}
+                        ]
+                    }
+                ]
+            }, True
+
+        # Get AI handler
+        ai_handler = get_slack_ai_handler(self.workspace)
+
+        if not ai_handler:
+            return {
+                'response_type': 'ephemeral',
+                'text': ':no_entry: AI features are not available for this workspace.\n\n'
+                        '_Contact your organization admin to enable AI features._'
+            }, True
+
+        # Handle the AI query
+        response, is_ephemeral = ai_handler.handle_ai_search(args, user)
+
+        # Check if we need to show decision detail
+        if response and response.get('_show_detail') and response.get('_decision_id'):
+            # Return decision detail blocks
+            decision_id = response['_decision_id']
+            decision = db.session.get(ArchitectureDecision, decision_id)
+            if decision:
+                blocks = self._format_decision_detail_blocks(decision)
+                return {'response_type': 'ephemeral', 'blocks': blocks}, True
+
+        return response, is_ephemeral
 
     def _open_create_modal(self, trigger_id: str, user: User, channel_id: str = None):
         """Open the create decision modal."""

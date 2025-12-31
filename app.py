@@ -184,6 +184,13 @@ except ImportError as e:
 except Exception as e:
     logger.error(f"Failed to initialize log forwarding: {e}")
 
+# ==================== External AI API Blueprint ====================
+# Register the external AI API Blueprint for Custom GPTs and AI agents
+
+from ai.api import ai_api
+app.register_blueprint(ai_api)
+logger.info("AI API Blueprint registered at /api/ai")
+
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
@@ -9233,6 +9240,86 @@ def api_get_tenant_ai_logs():
         'limit': limit,
         'offset': offset,
     })
+
+
+# --- MCP Server Endpoint ---
+
+@app.route('/api/mcp', methods=['POST'])
+def api_mcp_handler():
+    """
+    MCP (Model Context Protocol) endpoint for developer tools.
+
+    Handles MCP JSON-RPC requests from tools like Claude Code, Cursor, and VS Code.
+    Authentication is via API key in the Authorization header.
+
+    Supported methods:
+    - tools/list: List available tools
+    - tools/call: Execute a tool
+    """
+    from ai.mcp import handle_mcp_request
+    from ai.config import AIConfig
+
+    # Check system-level MCP availability
+    if not AIConfig.get_system_ai_enabled():
+        return jsonify({
+            'jsonrpc': '2.0',
+            'id': request.json.get('id') if request.is_json else None,
+            'error': {
+                'code': -32600,
+                'message': 'AI features are not enabled'
+            }
+        }), 400
+
+    if not AIConfig.get_system_mcp_server_enabled():
+        return jsonify({
+            'jsonrpc': '2.0',
+            'id': request.json.get('id') if request.is_json else None,
+            'error': {
+                'code': -32600,
+                'message': 'MCP server is not enabled'
+            }
+        }), 400
+
+    # Get API key from Authorization header
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return jsonify({
+            'jsonrpc': '2.0',
+            'id': request.json.get('id') if request.is_json else None,
+            'error': {
+                'code': -32600,
+                'message': 'Missing or invalid Authorization header. Use: Bearer <api_key>'
+            }
+        }), 401
+
+    api_key = auth_header[7:]  # Remove 'Bearer ' prefix
+
+    if not request.is_json:
+        return jsonify({
+            'jsonrpc': '2.0',
+            'id': None,
+            'error': {
+                'code': -32700,
+                'message': 'Parse error: Request must be valid JSON'
+            }
+        }), 400
+
+    request_data = request.get_json()
+
+    # Handle the MCP request
+    response = handle_mcp_request(request_data, api_key)
+
+    # Determine status code based on response
+    if 'error' in response:
+        error_code = response['error'].get('code', -32000)
+        if error_code == -32600:  # Invalid Request
+            return jsonify(response), 400
+        elif error_code == -32601:  # Method not found
+            return jsonify(response), 404
+        else:
+            return jsonify(response), 200  # Tool errors still return 200
+
+    return jsonify(response)
 
 
 if __name__ == '__main__':
