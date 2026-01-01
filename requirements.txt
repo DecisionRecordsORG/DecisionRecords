@@ -16,6 +16,10 @@ posthog>=3.0.0
 # Slack SDK for Slack integration
 slack-sdk>=3.21.0
 cryptography>=41.0.0
+# Microsoft Teams integration dependencies
+httpx>=0.25.0
+PyJWT>=2.8.0
+msal>=1.25.0
 # OpenTelemetry for log forwarding
 opentelemetry-sdk>=1.20.0
 opentelemetry-exporter-otlp>=1.20.0

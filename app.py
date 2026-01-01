@@ -7,7 +7,7 @@ import traceback
 import psycopg2
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -26,7 +26,7 @@ from security import (
 from keyvault_client import keyvault_client
 from analytics import track_endpoint
 from cloudflare_security import setup_cloudflare_security, require_cloudflare_access, get_cloudflare_config_for_api, invalidate_cloudflare_cache
-from feature_flags import require_slack, get_enabled_features, is_slack_enabled
+from feature_flags import require_slack, require_teams, get_enabled_features, is_slack_enabled, is_teams_enabled
 
 # Configure logging
 logging.basicConfig(
@@ -964,7 +964,13 @@ def is_session_expired():
         return True
     try:
         expiry_time = datetime.fromisoformat(expires_at)
-        return datetime.now(timezone.utc).replace(tzinfo=None) > expiry_time
+        # Both datetimes must be timezone-aware for proper comparison
+        now = datetime.now(timezone.utc)
+        # Ensure expiry_time is also timezone-aware (it should be from isoformat)
+        if expiry_time.tzinfo is None:
+            # If stored without timezone (shouldn't happen), treat as UTC
+            expiry_time = expiry_time.replace(tzinfo=timezone.utc)
+        return now > expiry_time
     except (ValueError, TypeError):
         return True  # Invalid expiry format - expire the session
 
@@ -9320,6 +9326,721 @@ def api_mcp_handler():
             return jsonify(response), 200  # Tool errors still return 200
 
     return jsonify(response)
+
+
+# =============================================================================
+# MICROSOFT TEAMS INTEGRATION ENDPOINTS
+# =============================================================================
+
+@app.route('/api/teams/webhook', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_webhook')
+def teams_webhook():
+    """Handle all Bot Framework activities from Teams.
+
+    This is the main webhook endpoint for the Teams bot.
+    All messages, invokes, and events come through here.
+    """
+    import asyncio
+    from teams_security import validate_teams_jwt
+    from teams_service import TeamsService
+
+    # Validate JWT Bearer token from Bot Framework
+    auth_header = request.headers.get('Authorization', '')
+    claims = asyncio.run(asyncio.coroutine(lambda: validate_teams_jwt(auth_header))())
+
+    if not claims:
+        logger.warning("Invalid Teams webhook authorization")
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    activity = request.get_json()
+    if not activity:
+        return jsonify({'error': 'Invalid request body'}), 400
+
+    activity_type = activity.get('type', '')
+    channel_data = activity.get('channelData', {})
+    ms_tenant_id = channel_data.get('tenant', {}).get('id')
+
+    # Find the Teams workspace for this tenant
+    workspace = None
+    if ms_tenant_id:
+        workspace = TeamsWorkspace.query.filter_by(
+            ms_tenant_id=ms_tenant_id,
+            is_active=True
+        ).first()
+
+    if not workspace:
+        # For installation events, we may not have a workspace yet
+        if activity_type != 'installationUpdate':
+            logger.warning(f"No Teams workspace found for MS tenant {ms_tenant_id}")
+            return jsonify({'error': 'Workspace not configured'}), 404
+
+    try:
+        service = TeamsService(workspace) if workspace else None
+
+        if activity_type == 'message':
+            if service:
+                response = asyncio.run(service.handle_message(activity))
+                return _teams_card_response(response)
+            return '', 200
+
+        elif activity_type == 'invoke':
+            if service:
+                response = asyncio.run(service.handle_invoke(activity))
+                return jsonify(response), 200
+            return jsonify({'status': 200}), 200
+
+        elif activity_type == 'conversationUpdate':
+            if service:
+                response = asyncio.run(service.handle_conversation_update(activity))
+                if isinstance(response, dict) and response.get('type') == 'AdaptiveCard':
+                    return _teams_card_response(response)
+            return '', 200
+
+        elif activity_type == 'installationUpdate':
+            # Bot installed or uninstalled
+            action = activity.get('action', '')
+            if action == 'add':
+                # Store service URL for future proactive messaging
+                service_url = activity.get('serviceUrl')
+                if ms_tenant_id and service_url:
+                    # Create or update workspace entry
+                    workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=ms_tenant_id).first()
+                    if workspace:
+                        workspace.service_url = service_url
+                    else:
+                        workspace = TeamsWorkspace(
+                            ms_tenant_id=ms_tenant_id,
+                            service_url=service_url,
+                            status=TeamsWorkspace.STATUS_PENDING_CONSENT
+                        )
+                        db.session.add(workspace)
+                    db.session.commit()
+            return '', 200
+
+        return '', 200
+
+    except Exception as e:
+        logger.error(f"Teams webhook error: {str(e)}")
+        capture_exception(e, endpoint_name='teams_webhook')
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+def _teams_card_response(card):
+    """Return an Adaptive Card as a Teams response."""
+    return jsonify({
+        'type': 'message',
+        'attachments': [{
+            'contentType': 'application/vnd.microsoft.card.adaptive',
+            'content': card
+        }]
+    })
+
+
+@app.route('/api/teams/oauth/start', methods=['GET'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_oauth_start')
+def teams_oauth_start():
+    """Start Azure AD OAuth consent flow for Teams integration."""
+    from teams_security import (
+        get_teams_bot_app_id, generate_teams_oauth_state
+    )
+
+    try:
+        app_id = get_teams_bot_app_id()
+        if not app_id:
+            logger.error("Teams Bot app ID not found")
+            return jsonify({'error': 'Teams integration not configured'}), 500
+
+        user = get_current_user()
+        tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+        if not tenant:
+            return jsonify({'error': 'Tenant not found'}), 404
+
+        # Generate state with tenant_id
+        state = generate_teams_oauth_state(tenant.id, user.id)
+
+        # Force https for production
+        base_url = request.host_url.rstrip('/')
+        if not base_url.startswith('https://') and 'localhost' not in base_url:
+            base_url = base_url.replace('http://', 'https://')
+        redirect_uri = f"{base_url}/api/teams/oauth/callback"
+
+        # Azure AD OAuth URL
+        # Using 'common' endpoint for multi-tenant consent
+        auth_url = (
+            f"https://login.microsoftonline.com/common/adminconsent"
+            f"?client_id={app_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&state={state}"
+        )
+
+        return redirect(auth_url)
+
+    except Exception as e:
+        logger.error(f"Teams OAuth start error: {str(e)}")
+        return jsonify({'error': f'Failed to start Teams connection: {str(e)}'}), 500
+
+
+@app.route('/api/teams/oauth/callback')
+@require_teams
+@track_endpoint('api_teams_oauth_callback')
+def teams_oauth_callback():
+    """Handle Azure AD admin consent callback."""
+    from teams_security import verify_teams_oauth_state
+
+    # Check for error
+    error = request.args.get('error')
+    if error:
+        error_description = request.args.get('error_description', error)
+        logger.error(f"Teams OAuth error: {error_description}")
+        return redirect(f'/settings?teams_error={error}')
+
+    # Get admin consent parameters
+    ms_tenant_id = request.args.get('tenant')
+    state = request.args.get('state')
+
+    if not ms_tenant_id:
+        return redirect('/settings?teams_error=missing_tenant')
+
+    # Verify state
+    state_data = verify_teams_oauth_state(state)
+    if not state_data:
+        return redirect('/settings?teams_error=invalid_state')
+
+    tenant_id = state_data.get('tenant_id')
+    user_id = state_data.get('user_id')
+
+    tenant = db.session.get(Tenant, tenant_id)
+    if not tenant:
+        return redirect('/settings?teams_error=tenant_not_found')
+
+    try:
+        # Create or update Teams workspace
+        workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=ms_tenant_id).first()
+
+        if workspace:
+            # Update existing
+            if workspace.tenant_id and workspace.tenant_id != tenant_id:
+                return redirect('/settings?teams_error=workspace_already_claimed')
+            workspace.tenant_id = tenant_id
+            workspace.status = TeamsWorkspace.STATUS_ACTIVE
+            workspace.consent_granted_at = datetime.now(timezone.utc)
+            workspace.consent_granted_by_id = user_id
+        else:
+            # Create new
+            workspace = TeamsWorkspace(
+                tenant_id=tenant_id,
+                ms_tenant_id=ms_tenant_id,
+                status=TeamsWorkspace.STATUS_ACTIVE,
+                consent_granted_at=datetime.now(timezone.utc),
+                consent_granted_by_id=user_id,
+                app_version='1.0.0'
+            )
+            db.session.add(workspace)
+
+        db.session.commit()
+
+        logger.info(f"Teams workspace {ms_tenant_id} connected to tenant {tenant_id}")
+        return redirect('/settings?tab=teams&teams_success=connected')
+
+    except Exception as e:
+        logger.error(f"Teams OAuth callback error: {str(e)}")
+        db.session.rollback()
+        return redirect('/settings?teams_error=connection_failed')
+
+
+@app.route('/api/teams/settings', methods=['GET'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_settings_get')
+def teams_settings_get():
+    """Get Teams integration settings for tenant."""
+    from teams_security import get_teams_bot_app_id
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+
+    app_id = get_teams_bot_app_id()
+
+    if workspace:
+        return jsonify({
+            'connected': True,
+            'workspace': workspace.to_dict(),
+            'install_url': '/api/teams/oauth/start' if app_id else None
+        })
+    else:
+        return jsonify({
+            'connected': False,
+            'workspace': None,
+            'install_url': '/api/teams/oauth/start' if app_id else None
+        })
+
+
+@app.route('/api/teams/settings', methods=['PUT'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_settings_put')
+def teams_settings_put():
+    """Update Teams notification settings."""
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Teams workspace not connected'}), 404
+
+    data = request.get_json()
+
+    # Update notification settings
+    if 'notifications_enabled' in data:
+        workspace.notifications_enabled = data['notifications_enabled']
+    if 'notify_on_create' in data:
+        workspace.notify_on_create = data['notify_on_create']
+    if 'notify_on_status_change' in data:
+        workspace.notify_on_status_change = data['notify_on_status_change']
+    if 'default_channel_id' in data:
+        workspace.default_channel_id = data['default_channel_id']
+    if 'default_channel_name' in data:
+        workspace.default_channel_name = data['default_channel_name']
+    if 'default_team_id' in data:
+        workspace.default_team_id = data['default_team_id']
+    if 'default_team_name' in data:
+        workspace.default_team_name = data['default_team_name']
+
+    db.session.commit()
+
+    return jsonify({'message': 'Settings updated', 'workspace': workspace.to_dict()})
+
+
+@app.route('/api/teams/disconnect', methods=['POST'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_disconnect')
+def teams_disconnect():
+    """Disconnect Teams workspace from tenant."""
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Teams workspace not connected'}), 404
+
+    # Soft delete - mark as inactive and disconnected
+    workspace.is_active = False
+    workspace.status = TeamsWorkspace.STATUS_DISCONNECTED
+    workspace.tenant_id = None
+    db.session.commit()
+
+    logger.info(f"Teams workspace disconnected from tenant {tenant.id}")
+
+    return jsonify({'message': 'Teams workspace disconnected'})
+
+
+@app.route('/api/teams/channels', methods=['GET'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_channels')
+def teams_channels():
+    """Get list of Teams channels for notification configuration.
+
+    Note: This requires Microsoft Graph API access which may need additional setup.
+    For now, returns a placeholder response.
+    """
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Teams workspace not connected'}), 404
+
+    # Get stored conversation references as available channels
+    channels = []
+    for ref in workspace.conversation_references.filter_by(context_type='channel').all():
+        channels.append({
+            'id': ref.channel_id,
+            'conversation_id': ref.conversation_id,
+            'team_id': ref.team_id,
+            'name': f"Channel {ref.channel_id[:8]}..."  # Placeholder name
+        })
+
+    return jsonify({'channels': channels})
+
+
+@app.route('/api/teams/test', methods=['POST'])
+@require_teams
+@login_required
+@admin_required
+@track_endpoint('api_teams_test')
+def teams_test():
+    """Send a test notification to the configured Teams channel."""
+    import asyncio
+    from teams_service import TeamsService
+    from teams_cards import build_success_card
+
+    user = get_current_user()
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+    if not workspace:
+        return jsonify({'error': 'Teams workspace not connected'}), 404
+
+    if not workspace.default_channel_id:
+        return jsonify({'error': 'No default channel configured'}), 400
+
+    # Get conversation reference
+    conv_ref = TeamsConversationReference.query.filter_by(
+        teams_workspace_id=workspace.id,
+        channel_id=workspace.default_channel_id
+    ).first()
+
+    if not conv_ref:
+        return jsonify({'error': 'No conversation reference for configured channel'}), 400
+
+    try:
+        import json
+        service = TeamsService(workspace)
+        reference = json.loads(conv_ref.reference_json)
+        card = build_success_card(
+            "Test Notification",
+            f"This is a test notification from Decision Records. Sent by {user.email}."
+        )
+
+        success = asyncio.run(service._send_proactive_message(reference, card))
+
+        if success:
+            return jsonify({'message': 'Test notification sent successfully'})
+        else:
+            return jsonify({'error': 'Failed to send test notification'}), 500
+
+    except Exception as e:
+        logger.error(f"Teams test notification error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/teams/link/initiate', methods=['GET'])
+@require_teams
+@track_endpoint('api_teams_link_initiate')
+def teams_link_initiate():
+    """Initiate user account linking from Teams.
+
+    Redirects to the dedicated Teams link page with the token.
+    """
+    token = request.args.get('token')
+    if not token:
+        return jsonify({'error': 'Missing link token'}), 400
+
+    # Redirect to the Teams link page
+    return redirect(f'/teams/link?token={token}')
+
+
+@app.route('/api/teams/link/validate', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_link_validate')
+def teams_link_validate():
+    """Validate a Teams link token and return workspace info."""
+    from teams_security import verify_teams_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    if not token:
+        return jsonify({'error': 'Missing token'}), 400
+
+    token_data = verify_teams_link_token(token)
+    if not token_data:
+        return jsonify({'error': 'Invalid or expired token'}), 400
+
+    workspace_id = token_data.get('teams_workspace_id')
+    workspace = db.session.get(TeamsWorkspace, workspace_id)
+
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    tenant = workspace.tenant if workspace.tenant_id else None
+
+    response = {
+        'valid': True,
+        'ms_tenant_id': workspace.ms_tenant_id,
+        'ms_tenant_name': workspace.ms_tenant_name,
+        'tenant_domain': tenant.domain if tenant else None,
+        'tenant_name': tenant.name if tenant else None,
+        'aad_email': token_data.get('aad_email')
+    }
+
+    # Check if user is logged in
+    user = get_current_user()
+    if user:
+        response['user_logged_in'] = True
+        response['user_email'] = user.email
+        response['user_name'] = user.name or user.email
+        response['tenant_domain'] = user.sso_domain
+
+    return jsonify(response)
+
+
+@app.route('/api/teams/link/complete', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_link_complete')
+def teams_link_complete():
+    """Complete user linking after login."""
+    from teams_security import verify_teams_link_token
+
+    data = request.get_json() or {}
+    token = data.get('token')
+
+    if not token:
+        return jsonify({'error': 'Missing token'}), 400
+
+    token_data = verify_teams_link_token(token)
+    if not token_data:
+        return jsonify({'error': 'Invalid or expired token'}), 400
+
+    workspace_id = token_data.get('teams_workspace_id')
+    aad_object_id = token_data.get('aad_object_id')
+
+    workspace = db.session.get(TeamsWorkspace, workspace_id)
+    if not workspace:
+        return jsonify({'error': 'Workspace not found'}), 404
+
+    user = get_current_user()
+    if not user:
+        return jsonify({'error': 'You must be logged in to link your account'}), 401
+
+    # Create or update mapping
+    mapping = TeamsUserMapping.query.filter_by(
+        teams_workspace_id=workspace.id,
+        aad_object_id=aad_object_id
+    ).first()
+
+    if mapping:
+        mapping.user_id = user.id
+        mapping.link_method = 'browser_auth'
+        mapping.linked_at = datetime.now(timezone.utc)
+    else:
+        mapping = TeamsUserMapping(
+            teams_workspace_id=workspace.id,
+            aad_object_id=aad_object_id,
+            aad_email=token_data.get('aad_email'),
+            user_id=user.id,
+            link_method='browser_auth',
+            linked_at=datetime.now(timezone.utc)
+        )
+        db.session.add(mapping)
+
+    db.session.commit()
+
+    logger.info(f"User {user.id} linked Teams account {aad_object_id} in workspace {workspace.id}")
+
+    return jsonify({'message': 'Account linked successfully'})
+
+
+# =============================================================================
+# TEAMS OIDC (Sign in with Microsoft)
+# =============================================================================
+
+@app.route('/api/auth/teams-oidc-status', methods=['GET'])
+@track_endpoint('api_auth_teams_oidc_status')
+def teams_oidc_status():
+    """Check if Teams OIDC is enabled."""
+    from teams_security import get_teams_bot_app_id
+
+    app_id = get_teams_bot_app_id()
+    commercial_enabled = os.environ.get('COMMERCIAL_FEATURES_ENABLED', '').lower() == 'true'
+
+    return jsonify({
+        'enabled': bool(app_id) and commercial_enabled
+    })
+
+
+@app.route('/auth/teams/oidc', methods=['GET'])
+@require_teams
+@track_endpoint('auth_teams_oidc')
+def teams_oidc_start():
+    """Start Microsoft OIDC authentication flow."""
+    from teams_security import (
+        get_teams_bot_app_id, generate_teams_oidc_state,
+        TEAMS_OIDC_SCOPES
+    )
+
+    app_id = get_teams_bot_app_id()
+    if not app_id:
+        return jsonify({'error': 'Teams OIDC not configured'}), 500
+
+    # Get return URL from query params
+    return_url = request.args.get('return_url', '/')
+
+    # Generate state
+    state = generate_teams_oidc_state(return_url=return_url)
+
+    # Force https for production
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/teams/oidc/callback"
+
+    # Build authorization URL
+    auth_url = (
+        f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize"
+        f"?client_id={app_id}"
+        f"&response_type=code"
+        f"&redirect_uri={redirect_uri}"
+        f"&response_mode=query"
+        f"&scope={TEAMS_OIDC_SCOPES.replace(' ', '%20')}"
+        f"&state={state}"
+    )
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/teams/oidc/callback', methods=['GET'])
+@require_teams
+@track_endpoint('auth_teams_oidc_callback')
+def teams_oidc_callback():
+    """Handle Microsoft OIDC callback."""
+    from teams_security import (
+        verify_teams_oidc_state, exchange_teams_oidc_code,
+        get_teams_user_info
+    )
+
+    error = request.args.get('error')
+    if error:
+        error_description = request.args.get('error_description', error)
+        logger.error(f"Teams OIDC error: {error_description}")
+        return redirect(f'/login?error={error}')
+
+    code = request.args.get('code')
+    state = request.args.get('state')
+
+    if not code:
+        return redirect('/login?error=missing_code')
+
+    # Verify state
+    state_data = verify_teams_oidc_state(state)
+    if not state_data:
+        return redirect('/login?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Force https for production
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    redirect_uri = f"{base_url}/auth/teams/oidc/callback"
+
+    # Exchange code for tokens
+    id_claims, access_token = exchange_teams_oidc_code(code, redirect_uri)
+
+    if not id_claims:
+        return redirect('/login?error=token_exchange_failed')
+
+    # Extract user info from ID token claims
+    email = id_claims.get('email') or id_claims.get('preferred_username')
+    name = id_claims.get('name')
+    ms_tenant_id = id_claims.get('tid')
+
+    if not email:
+        # Try to get email from Graph API
+        user_info = get_teams_user_info(access_token)
+        if user_info:
+            email = user_info.get('mail') or user_info.get('userPrincipalName')
+            name = name or user_info.get('displayName')
+
+    if not email:
+        return redirect('/login?error=no_email')
+
+    # Extract domain from email
+    email_parts = email.split('@')
+    if len(email_parts) != 2:
+        return redirect('/login?error=invalid_email')
+
+    domain = email_parts[1].lower()
+
+    # Check if domain is a public email provider
+    try:
+        from free_email_domains import FREE_EMAIL_DOMAINS
+        if domain in FREE_EMAIL_DOMAINS:
+            return redirect('/login?error=personal_email')
+    except ImportError:
+        pass
+
+    # Find or create user
+    user = User.query.filter_by(email=email.lower()).first()
+
+    if user:
+        # Existing user - log them in
+        user.last_login = datetime.now(timezone.utc)
+        if not user.name and name:
+            user.name = name
+        db.session.commit()
+    else:
+        # New user - check if tenant exists
+        tenant = Tenant.query.filter_by(domain=domain).first()
+
+        if not tenant:
+            # Create tenant for new domain
+            tenant = Tenant(
+                domain=domain,
+                name=domain.split('.')[0].title()
+            )
+            db.session.add(tenant)
+            db.session.flush()
+
+            # Create default space
+            default_space = Space(
+                tenant_id=tenant.id,
+                name='General',
+                is_default=True
+            )
+            db.session.add(default_space)
+
+        # Create user
+        user = User(
+            email=email.lower(),
+            name=name,
+            sso_domain=domain,
+            auth_method='teams_oidc',
+            email_verified=True,  # Microsoft verified the email
+            last_login=datetime.now(timezone.utc)
+        )
+        db.session.add(user)
+        db.session.flush()
+
+        # Add tenant membership
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            role='admin' if TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0 else 'member'
+        )
+        db.session.add(membership)
+        db.session.commit()
+
+    # Set session
+    session['user_id'] = user.id
+    session['auth_method'] = 'teams_oidc'
+    session.permanent = True
+
+    logger.info(f"User {user.id} logged in via Teams OIDC")
+
+    return redirect(return_url)
 
 
 if __name__ == '__main__':

@@ -162,6 +162,81 @@ print([row[0] for row in cursor.fetchall()])
 "
 ```
 
+## Local Development
+
+### Running the Backend Locally
+
+In production, the app runs behind Cloudflare which provides security controls. For local development, you need to disable these checks.
+
+#### Option 1: Use run_local.py (Recommended)
+
+```bash
+source .venv/bin/activate
+python run_local.py
+```
+
+This script automatically sets all required environment variables.
+
+#### Option 2: Manual with Environment Variables
+
+```bash
+source .venv/bin/activate && \
+DATABASE_URL="sqlite:////$(pwd)/instance/architecture_decisions.db" \
+SECRET_KEY="local-dev-secret-key-12345" \
+SKIP_CLOUDFLARE_CHECK="true" \
+ENVIRONMENT="development" \
+DEBUG="true" \
+FLASK_DEBUG=1 \
+flask run --host=0.0.0.0 --port=5001
+```
+
+**Note**: The DATABASE_URL requires 4 slashes for absolute paths (`sqlite:////absolute/path`).
+
+#### Required Environment Variables for Local Dev
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `SKIP_CLOUDFLARE_CHECK` | `true` | Disables Cloudflare origin IP validation |
+| `DATABASE_URL` | `sqlite:////absolute/path/to/instance/architecture_decisions.db` | Use local SQLite (4 slashes for absolute path) |
+| `SECRET_KEY` | Any string | Flask session signing (use any value locally) |
+| `ENVIRONMENT` | `development` | Enables development mode |
+| `DEBUG` | `true` | Enables debug logging |
+
+#### Default Master Account
+
+- **Username**: `admin`
+- **Password**: `changeme`
+
+#### Common Error: "Direct access not allowed"
+
+If you see "Direct access not allowed. Please use decisionrecords.org", it means `SKIP_CLOUDFLARE_CHECK` is not set to `true`. The Cloudflare security middleware blocks direct access in production mode.
+
+### Running Frontend + Backend Together
+
+**IMPORTANT**: For login/session cookies to work, you MUST access the app through the Angular dev server (port 4200), not directly on the backend (port 5001). The Angular proxy handles routing API calls while maintaining the same-origin policy for cookies.
+
+1. **Terminal 1 - Backend** (port 5001):
+   ```bash
+   source .venv/bin/activate && \
+   DATABASE_URL="sqlite:////$(pwd)/instance/architecture_decisions.db" \
+   SECRET_KEY="local-dev-secret-key-12345" \
+   SKIP_CLOUDFLARE_CHECK="true" \
+   ENVIRONMENT="development" \
+   flask run --host=0.0.0.0 --port=5001
+   ```
+
+2. **Terminal 2 - Frontend** (port 4200):
+   ```bash
+   cd frontend
+   npm start
+   ```
+
+3. **Access the app at `http://localhost:4200`** (NOT port 5001!)
+   - Superadmin login: `http://localhost:4200/superadmin`
+   - Regular login: `http://localhost:4200/login`
+
+The Angular dev server proxies `/api` and `/auth` calls to the Flask backend via `proxy.conf.json`. This makes everything appear same-origin to the browser, so session cookies work correctly.
+
 ## File Structure
 
 Key files to understand:

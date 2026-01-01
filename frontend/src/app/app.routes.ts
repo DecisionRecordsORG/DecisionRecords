@@ -49,6 +49,10 @@ export const routes: Routes = [
     path: 'integrations/ai-api',
     loadComponent: () => import('./components/ai-api-integration/ai-api-integration.component').then(m => m.AiApiIntegrationComponent)
   },
+  {
+    path: 'integrations/teams',
+    loadComponent: () => import('./components/teams-integration/teams-integration.component').then(m => m.TeamsIntegrationComponent)
+  },
   // Blog pages
   {
     path: 'blog',
@@ -114,6 +118,16 @@ export const routes: Routes = [
   {
     path: 'slack/link',
     loadComponent: () => import('./components/slack-link-account/slack-link-account.component').then(m => m.SlackLinkAccountComponent)
+  },
+  // Teams installation landing page (for unclaimed workspace installs)
+  {
+    path: 'teams/installed',
+    loadComponent: () => import('./components/teams-installed/teams-installed.component').then(m => m.TeamsInstalledComponent)
+  },
+  // Teams account linking page (when user clicks "Link Account" from Teams)
+  {
+    path: 'teams/link',
+    loadComponent: () => import('./components/teams-link-account/teams-link-account.component').then(m => m.TeamsLinkAccountComponent)
   },
   // Tenant-specific routes
   // NOTE: Order matters! More specific routes must come BEFORE less specific ones.

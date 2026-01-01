@@ -35,11 +35,20 @@ class KeyVaultClient:
         if self._initialized and self._client is not None:
             return True
 
-        # Reset state for retry
+        # If already tried and failed, don't retry (prevents Azure CLI auth in local dev)
+        if self._initialized and self._client is None:
+            return False
+
+        # Mark as initialized (prevents infinite retries)
         self._initialized = True
         self._init_error = None
         self._client = None
         self._credential = None
+
+        # Skip initialization if vault_url is empty (local development)
+        if not self.vault_url:
+            logger.info("Azure Key Vault disabled (empty AZURE_KEYVAULT_URL). Using environment variables.")
+            return False
 
         try:
             self._credential = DefaultAzureCredential()

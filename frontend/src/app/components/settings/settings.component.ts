@@ -15,7 +15,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel } from '../../services/admin.service';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel, TeamsSettings, TeamsChannel } from '../../services/admin.service';
 import { ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
@@ -1117,6 +1117,133 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
           </div>
         </mat-tab>
         }
+
+        <!-- Microsoft Teams Integration Tab -->
+        @if (!authService.isMasterAccount && teamsFeatureEnabled) {
+        <mat-tab label="Teams">
+          <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>info</mat-icon>
+                  Microsoft Teams Integration
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Connect your Decision Records organization with Microsoft Teams to:</p>
+                <ul>
+                  <li>Create decisions directly from Teams using &#64;DecisionRecords bot</li>
+                  <li>Receive notifications in Teams channels when decisions are created or updated</li>
+                  <li>Search and browse decisions without leaving Teams</li>
+                </ul>
+              </mat-card-content>
+            </mat-card>
+
+            @if (loadingTeamsSettings) {
+              <div class="loading-spinner">
+                <mat-spinner diameter="40"></mat-spinner>
+              </div>
+            } @else if (!teamsSettings?.installed) {
+              <!-- Not connected -->
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>Connect Microsoft Teams</mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="teams-connect-options">
+                    <div class="connect-option">
+                      <h4>Connect via Azure AD Consent</h4>
+                      <p>Grant admin consent to connect your Microsoft 365 tenant with Decision Records.</p>
+                      <div class="teams-install-guidance">
+                        <h5>Steps to connect:</h5>
+                        <ol>
+                          <li>Click the button below to start the Azure AD consent flow</li>
+                          <li>Sign in with your Microsoft 365 admin account</li>
+                          <li>Grant the required permissions</li>
+                          <li>You'll be redirected back here once complete</li>
+                        </ol>
+                      </div>
+                      <a mat-flat-button color="primary" href="/api/teams/oauth/start" target="_blank" rel="noopener noreferrer" data-testid="teams-connect-button">
+                        <img src="/assets/teams-logo.svg" alt="" class="teams-btn-icon">
+                        Connect with Microsoft Teams
+                      </a>
+                      <p class="teams-install-note">
+                        <mat-icon>info</mat-icon>
+                        Requires Microsoft 365 admin privileges to grant consent.
+                      </p>
+                    </div>
+                  </div>
+                </mat-card-content>
+              </mat-card>
+            } @else if (teamsSettings) {
+              <!-- Connected -->
+              <mat-card class="form-card teams-connected-card">
+                <mat-card-header>
+                  <mat-card-title class="teams-connected-title">
+                    <mat-icon class="teams-connected-icon">check_circle</mat-icon>
+                    Connected to {{ teamsSettings.ms_tenant_name || 'Microsoft 365' }}
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="teams-status">
+                    <p><strong>Tenant:</strong> {{ teamsSettings.ms_tenant_name || 'Unknown' }}</p>
+                    <p><strong>Connected:</strong> {{ teamsSettings.installed_at ? (teamsSettings.installed_at | date:'medium') : 'Unknown' }}</p>
+                    @if (teamsSettings.last_activity_at) {
+                      <p><strong>Last activity:</strong> {{ teamsSettings.last_activity_at | date:'medium' }}</p>
+                    }
+                  </div>
+
+                  <form [formGroup]="teamsForm" class="teams-form">
+                    <mat-form-field appearance="outline" class="full-width">
+                      <mat-label>Default Notification Channel</mat-label>
+                      <mat-select formControlName="default_channel_id" data-testid="teams-channel-select">
+                        <mat-option value="">None</mat-option>
+                        @for (channel of teamsChannels; track channel.id) {
+                          <option [value]="channel.id">{{ channel.team_name }} / {{ channel.name }}</option>
+                        }
+                      </mat-select>
+                    </mat-form-field>
+
+                    <div class="toggle-group">
+                      <mat-slide-toggle formControlName="notifications_enabled" data-testid="teams-notifications-toggle">
+                        Enable channel notifications
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!teamsForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_create" [disabled]="!teamsForm.get('notifications_enabled')?.value" data-testid="teams-notify-create-toggle">
+                        Notify when decisions are created
+                      </mat-slide-toggle>
+                    </div>
+
+                    <div class="toggle-group nested" [class.disabled]="!teamsForm.get('notifications_enabled')?.value">
+                      <mat-slide-toggle formControlName="notify_on_status_change" [disabled]="!teamsForm.get('notifications_enabled')?.value" data-testid="teams-notify-status-toggle">
+                        Notify when decision status changes
+                      </mat-slide-toggle>
+                    </div>
+                  </form>
+                </mat-card-content>
+                <mat-card-actions>
+                  <button mat-flat-button color="primary" (click)="saveTeamsSettings()" [disabled]="savingTeamsSettings" data-testid="teams-save-button">
+                    <mat-spinner diameter="20" *ngIf="savingTeamsSettings"></mat-spinner>
+                    <mat-icon *ngIf="!savingTeamsSettings">save</mat-icon>
+                    <span *ngIf="!savingTeamsSettings">Save Settings</span>
+                  </button>
+                  <button mat-stroked-button (click)="testTeamsNotification()" [disabled]="testingTeams || !teamsSettings.default_channel_id" data-testid="teams-test-button">
+                    <mat-spinner diameter="20" *ngIf="testingTeams"></mat-spinner>
+                    <mat-icon *ngIf="!testingTeams">send</mat-icon>
+                    <span *ngIf="!testingTeams">Send Test</span>
+                  </button>
+                  <button mat-stroked-button color="warn" (click)="disconnectTeams()" data-testid="teams-disconnect-button">
+                    <mat-icon>link_off</mat-icon>
+                    Disconnect
+                  </button>
+                </mat-card-actions>
+              </mat-card>
+            }
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -2056,6 +2183,117 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       font-size: 13px;
     }
 
+    /* Teams Integration Styles */
+    .teams-connected-card {
+      border-color: #5558AF;
+    }
+
+    .teams-connected-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .teams-connected-icon {
+      color: #4caf50;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    .teams-status {
+      padding: 12px 0;
+      margin-bottom: 16px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .teams-status p {
+      margin: 4px 0;
+      font-size: 14px;
+    }
+
+    .teams-form {
+      margin-top: 16px;
+    }
+
+    .teams-form .toggle-group {
+      margin: 12px 0;
+    }
+
+    .teams-form .toggle-group.nested {
+      margin-left: 24px;
+    }
+
+    .teams-form .toggle-group.disabled {
+      opacity: 0.6;
+    }
+
+    .teams-connect-options {
+      margin-top: 16px;
+    }
+
+    .teams-connect-options .connect-option {
+      margin-bottom: 24px;
+    }
+
+    .teams-connect-options .connect-option h4 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .teams-connect-options .connect-option p {
+      margin: 0 0 12px 0;
+      color: #666;
+    }
+
+    .teams-install-guidance {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+    }
+
+    .teams-install-guidance h5 {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .teams-install-guidance ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .teams-install-guidance li {
+      margin: 6px 0;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .teams-install-note {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .teams-install-note mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #ff9800;
+    }
+
+    .teams-btn-icon {
+      width: 20px;
+      height: 20px;
+      margin-right: 8px;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -2130,8 +2368,17 @@ export class SettingsComponent implements OnInit {
   slackClaimWorkspaceId = '';
   claimingSlackWorkspace = false;
 
+  // Teams Integration
+  teamsForm: FormGroup;
+  teamsSettings: TeamsSettings | null = null;
+  teamsChannels: TeamsChannel[] = [];
+  loadingTeamsSettings = false;
+  savingTeamsSettings = false;
+  testingTeams = false;
+
   // Feature flags
   slackFeatureEnabled = false;
+  teamsFeatureEnabled = false;
   slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
   googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
 
@@ -2148,7 +2395,8 @@ export class SettingsComponent implements OnInit {
     'spaces': 4,
     'access-requests': 5,
     'role-requests': 6,
-    'slack': 7
+    'slack': 7,
+    'teams': 8
   };
 
   /**
@@ -2243,6 +2491,13 @@ export class SettingsComponent implements OnInit {
       notify_on_create: [true],
       notify_on_status_change: [true]
     });
+
+    this.teamsForm = this.fb.group({
+      default_channel_id: [''],
+      notifications_enabled: [true],
+      notify_on_create: [true],
+      notify_on_status_change: [true]
+    });
   }
 
   ngOnInit(): void {
@@ -2258,6 +2513,7 @@ export class SettingsComponent implements OnInit {
       this.loadRoleRequests();
       this.loadSpaces();
       this.loadSlackSettings();
+      this.loadTeamsSettings();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -2308,13 +2564,15 @@ export class SettingsComponent implements OnInit {
   }
 
   loadFeatureFlags(): void {
-    this.http.get<{ commercial: boolean; slack: boolean }>('/api/features').subscribe({
+    this.http.get<{ commercial: boolean; slack: boolean; teams: boolean }>('/api/features').subscribe({
       next: (features) => {
         this.slackFeatureEnabled = features.slack;
+        this.teamsFeatureEnabled = features.teams;
       },
       error: () => {
         // Default to disabled if can't load features
         this.slackFeatureEnabled = false;
+        this.teamsFeatureEnabled = false;
       }
     });
   }
@@ -3051,6 +3309,118 @@ export class SettingsComponent implements OnInit {
       error: (err) => {
         this.snackBar.open(err.error?.error || 'Failed to claim workspace', 'Close', { duration: 5000 });
         this.claimingSlackWorkspace = false;
+      }
+    });
+  }
+
+  // Teams Integration Methods
+  loadTeamsSettings(): void {
+    this.loadingTeamsSettings = true;
+    this.adminService.getTeamsSettings().subscribe({
+      next: (settings) => {
+        this.teamsSettings = settings;
+        // Load channels if connected
+        if (settings.installed) {
+          this.teamsForm.patchValue({
+            default_channel_id: settings.default_channel_id || '',
+            notifications_enabled: settings.notifications_enabled !== false,
+            notify_on_create: settings.notify_on_create !== false,
+            notify_on_status_change: settings.notify_on_status_change !== false
+          });
+          this.loadTeamsChannels();
+        }
+        this.loadingTeamsSettings = false;
+      },
+      error: () => {
+        this.loadingTeamsSettings = false;
+        this.teamsSettings = { installed: false };
+      }
+    });
+  }
+
+  loadTeamsChannels(): void {
+    this.adminService.getTeamsChannels().subscribe({
+      next: (response) => {
+        this.teamsChannels = response.channels || [];
+      },
+      error: () => {
+        this.teamsChannels = [];
+      }
+    });
+  }
+
+  saveTeamsSettings(): void {
+    this.savingTeamsSettings = true;
+    const formValue = this.teamsForm.value;
+
+    // Find selected channel name
+    const selectedChannel = this.teamsChannels.find(c => c.id === formValue.default_channel_id);
+
+    const settings = {
+      default_channel_id: formValue.default_channel_id,
+      default_channel_name: selectedChannel?.name || '',
+      default_team_id: selectedChannel?.team_id || '',
+      default_team_name: selectedChannel?.team_name || '',
+      notifications_enabled: formValue.notifications_enabled,
+      notify_on_create: formValue.notify_on_create,
+      notify_on_status_change: formValue.notify_on_status_change
+    };
+
+    this.adminService.updateTeamsSettings(settings).subscribe({
+      next: (response) => {
+        this.teamsSettings = response.settings;
+        this.snackBar.open('Teams settings saved', 'Close', { duration: 3000 });
+        this.savingTeamsSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to save settings', 'Close', { duration: 5000 });
+        this.savingTeamsSettings = false;
+      }
+    });
+  }
+
+  testTeamsNotification(): void {
+    this.testingTeams = true;
+    this.adminService.testTeamsNotification().subscribe({
+      next: () => {
+        this.snackBar.open('Test notification sent to Teams', 'Close', { duration: 3000 });
+        this.testingTeams = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to send test notification', 'Close', { duration: 5000 });
+        this.testingTeams = false;
+      }
+    });
+  }
+
+  disconnectTeams(): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Disconnect Microsoft Teams',
+        message: 'Are you sure you want to disconnect your Microsoft 365 tenant? Users will no longer be able to use the Teams bot.',
+        confirmButton: 'Disconnect',
+        confirmColor: 'warn'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(confirmed => {
+      if (confirmed) {
+        this.adminService.disconnectTeams().subscribe({
+          next: () => {
+            this.snackBar.open('Microsoft Teams disconnected', 'Close', { duration: 3000 });
+            this.teamsSettings = { installed: false };
+            this.teamsChannels = [];
+            this.teamsForm.reset({
+              default_channel_id: '',
+              notifications_enabled: true,
+              notify_on_create: true,
+              notify_on_status_change: true
+            });
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to disconnect Teams', 'Close', { duration: 5000 });
+          }
+        });
       }
     });
   }

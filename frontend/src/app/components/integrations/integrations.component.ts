@@ -573,15 +573,17 @@ export class IntegrationsComponent {
     {
       name: 'Microsoft Teams',
       icon: 'groups',
-      iconType: 'material',
-      status: 'coming-soon',
+      iconType: 'svg',
+      svgPath: '/assets/teams-logo.svg',
+      status: 'available',
       description: 'Bring decision records to your Teams workspace. Create and manage decisions without leaving Teams.',
       features: [
         'Create decisions from Teams messages',
         'Teams bot for quick access',
         'Channel notifications for updates',
         'SSO with Microsoft accounts'
-      ]
+      ],
+      link: '/integrations/teams'
     },
     {
       name: 'Jira',

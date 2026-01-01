@@ -175,6 +175,27 @@ export class AdminService {
   getSlackChannels(): Observable<{ channels: SlackChannel[] }> {
     return this.http.get<{ channels: SlackChannel[] }>('/api/slack/channels');
   }
+
+  // Microsoft Teams Integration
+  getTeamsSettings(): Observable<TeamsSettings> {
+    return this.http.get<TeamsSettings>('/api/teams/settings');
+  }
+
+  updateTeamsSettings(settings: TeamsSettingsUpdate): Observable<{ message: string; settings: TeamsSettings }> {
+    return this.http.put<{ message: string; settings: TeamsSettings }>('/api/teams/settings', settings);
+  }
+
+  disconnectTeams(): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>('/api/teams/disconnect', {});
+  }
+
+  testTeamsNotification(): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>('/api/teams/test', {});
+  }
+
+  getTeamsChannels(): Observable<{ channels: TeamsChannel[] }> {
+    return this.http.get<{ channels: TeamsChannel[] }>('/api/teams/channels');
+  }
 }
 
 export interface SlackSettings {
@@ -203,4 +224,36 @@ export interface SlackChannel {
   id: string;
   name: string;
   is_private: boolean;
+}
+
+export interface TeamsSettings {
+  installed: boolean;
+  ms_tenant_id?: string;
+  ms_tenant_name?: string;
+  default_channel_id?: string;
+  default_channel_name?: string;
+  default_team_id?: string;
+  default_team_name?: string;
+  notifications_enabled?: boolean;
+  notify_on_create?: boolean;
+  notify_on_status_change?: boolean;
+  installed_at?: string;
+  last_activity_at?: string;
+}
+
+export interface TeamsSettingsUpdate {
+  default_channel_id?: string;
+  default_channel_name?: string;
+  default_team_id?: string;
+  default_team_name?: string;
+  notifications_enabled?: boolean;
+  notify_on_create?: boolean;
+  notify_on_status_change?: boolean;
+}
+
+export interface TeamsChannel {
+  id: string;
+  name: string;
+  team_id: string;
+  team_name: string;
 }

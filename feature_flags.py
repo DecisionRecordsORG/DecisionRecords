@@ -63,6 +63,11 @@ def is_slack_enabled():
     return is_commercial_enabled()
 
 
+def is_teams_enabled():
+    """Check if Microsoft Teams integration is enabled."""
+    return is_commercial_enabled()
+
+
 def require_commercial(f):
     """
     Decorator to require commercial features for an endpoint.
@@ -91,6 +96,20 @@ def require_slack(f):
     return decorated_function
 
 
+def require_teams(f):
+    """
+    Decorator to require Teams integration for an endpoint.
+
+    Returns 404 if Teams is disabled (hides endpoint existence).
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_teams_enabled():
+            return jsonify({'error': 'Not found'}), 404
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def invalidate_cache():
     """Clear cached feature flag values."""
     global _commercial_enabled
@@ -106,4 +125,5 @@ def get_enabled_features():
     return {
         'commercial': is_commercial_enabled(),
         'slack': is_slack_enabled(),
+        'teams': is_teams_enabled(),
     }

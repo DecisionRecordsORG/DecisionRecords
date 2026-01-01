@@ -538,6 +538,97 @@ User notification subscriptions.
 
 ---
 
+## Microsoft Teams Integration Tables
+
+### `teams_workspaces`
+
+Microsoft Teams workspace (tenant) installation for a Decision Records tenant.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER | NO | auto | Primary key |
+| tenant_id | INTEGER | YES | - | FK to tenants.id (unique) |
+| ms_tenant_id | VARCHAR(50) | NO | - | Azure AD tenant ID (GUID) |
+| ms_tenant_name | VARCHAR(255) | YES | NULL | Display name |
+| service_url | VARCHAR(500) | YES | NULL | Bot Framework service URL |
+| bot_id | VARCHAR(100) | YES | NULL | Bot's Azure AD app ID |
+| status | VARCHAR(20) | NO | 'pending_consent' | Status code |
+| consent_granted_at | TIMESTAMP | YES | NULL | Consent timestamp |
+| consent_granted_by_id | INTEGER | YES | NULL | FK to users.id |
+| default_channel_id | VARCHAR(100) | YES | NULL | Default Teams channel ID |
+| default_channel_name | VARCHAR(255) | YES | NULL | Default channel display name |
+| default_team_id | VARCHAR(100) | YES | NULL | Parent team ID |
+| default_team_name | VARCHAR(255) | YES | NULL | Parent team display name |
+| notifications_enabled | BOOLEAN | NO | TRUE | Enable notifications |
+| notify_on_create | BOOLEAN | NO | TRUE | Notify on decision create |
+| notify_on_status_change | BOOLEAN | NO | TRUE | Notify on status change |
+| is_active | BOOLEAN | NO | TRUE | Is workspace active |
+| installed_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | Installation timestamp |
+| last_activity_at | TIMESTAMP | YES | NULL | Last activity timestamp |
+| app_version | VARCHAR(20) | YES | NULL | Teams app version |
+
+**Indexes:** `tenant_id` (unique), `ms_tenant_id` (unique)
+
+**Statuses:**
+- `pending_consent`: Awaiting admin consent
+- `active`: Connected and operational
+- `disconnected`: Disconnected by user
+
+---
+
+### `teams_user_mappings`
+
+Maps Teams users to Decision Records platform users.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER | NO | auto | Primary key |
+| teams_workspace_id | INTEGER | NO | - | FK to teams_workspaces.id |
+| aad_object_id | VARCHAR(50) | NO | - | Azure AD user object ID (GUID) |
+| aad_user_principal_name | VARCHAR(320) | YES | NULL | UPN (often email) |
+| aad_email | VARCHAR(320) | YES | NULL | Email from Graph profile |
+| aad_display_name | VARCHAR(255) | YES | NULL | Display name |
+| user_id | INTEGER | YES | NULL | FK to users.id (when linked) |
+| link_method | VARCHAR(20) | YES | NULL | How user was linked |
+| created_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | Creation timestamp |
+| linked_at | TIMESTAMP | YES | NULL | When account was linked |
+
+**Indexes:** `teams_workspace_id`, `aad_object_id`
+**Constraints:** `UNIQUE(teams_workspace_id, aad_object_id)`
+
+**Link Methods:**
+- `auto_email`: Automatically linked by email match
+- `auto_upn`: Automatically linked by UPN match
+- `browser_auth`: Linked via browser authentication flow
+
+---
+
+### `teams_conversation_references`
+
+Stores conversation references for proactive messaging to Teams channels.
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| id | INTEGER | NO | auto | Primary key |
+| teams_workspace_id | INTEGER | NO | - | FK to teams_workspaces.id |
+| conversation_id | VARCHAR(500) | NO | - | Teams conversation ID |
+| channel_id | VARCHAR(100) | YES | NULL | Channel ID if in channel |
+| team_id | VARCHAR(100) | YES | NULL | Team ID if in team |
+| reference_json | TEXT | NO | - | Serialized conversation reference |
+| context_type | VARCHAR(20) | NO | - | Context type code |
+| created_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | Creation timestamp |
+| updated_at | TIMESTAMP | NO | CURRENT_TIMESTAMP | Last update timestamp |
+
+**Indexes:** `teams_workspace_id`
+**Constraints:** `UNIQUE(teams_workspace_id, conversation_id)`
+
+**Context Types:**
+- `channel`: Team channel conversation
+- `personal`: 1:1 chat with bot
+- `group`: Group chat
+
+---
+
 ## Migration Notes
 
 ### Auto-migrations on App Startup

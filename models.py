@@ -1619,6 +1619,170 @@ class SlackUserMapping(db.Model):
         }
 
 
+# ============================================================================
+# MICROSOFT TEAMS INTEGRATION MODELS
+# ============================================================================
+
+class TeamsWorkspace(db.Model):
+    """Microsoft Teams workspace (tenant) installation for a Decision Records tenant."""
+
+    __tablename__ = 'teams_workspaces'
+
+    # Status values
+    STATUS_PENDING_CONSENT = 'pending_consent'
+    STATUS_ACTIVE = 'active'
+    STATUS_DISCONNECTED = 'disconnected'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True, unique=True, index=True)
+
+    # Azure AD / Microsoft 365 tenant info
+    ms_tenant_id = db.Column(db.String(50), nullable=False, unique=True, index=True)  # Azure AD tenant ID (GUID)
+    ms_tenant_name = db.Column(db.String(255), nullable=True)  # Display name
+
+    # Service URL for proactive messaging (varies by region)
+    service_url = db.Column(db.String(500), nullable=True)  # e.g., https://smba.trafficmanager.net/amer/
+
+    # Bot installation info
+    bot_id = db.Column(db.String(100), nullable=True)  # Bot's Azure AD app ID
+
+    # Status tracking
+    status = db.Column(db.String(20), default=STATUS_PENDING_CONSENT)
+    consent_granted_at = db.Column(db.DateTime, nullable=True)
+    consent_granted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # Notification settings
+    default_channel_id = db.Column(db.String(100), nullable=True)  # Teams channel ID
+    default_channel_name = db.Column(db.String(255), nullable=True)
+    default_team_id = db.Column(db.String(100), nullable=True)  # Parent team ID
+    default_team_name = db.Column(db.String(255), nullable=True)
+    notifications_enabled = db.Column(db.Boolean, default=True)
+    notify_on_create = db.Column(db.Boolean, default=True)
+    notify_on_status_change = db.Column(db.Boolean, default=True)
+
+    # State
+    is_active = db.Column(db.Boolean, default=True)
+    installed_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_activity_at = db.Column(db.DateTime, nullable=True)
+
+    # App version tracking
+    app_version = db.Column(db.String(20), nullable=True)
+
+    # Relationships
+    tenant = db.relationship('Tenant', backref=db.backref('teams_workspace', uselist=False))
+    consent_granted_by = db.relationship('User', foreign_keys=[consent_granted_by_id])
+    user_mappings = db.relationship('TeamsUserMapping', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
+    conversation_references = db.relationship('TeamsConversationReference', backref='workspace', lazy='dynamic', cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'tenant_id': self.tenant_id,
+            'ms_tenant_id': self.ms_tenant_id,
+            'ms_tenant_name': self.ms_tenant_name,
+            'status': self.status,
+            'consent_granted_at': self.consent_granted_at.isoformat() if self.consent_granted_at else None,
+            'default_channel_id': self.default_channel_id,
+            'default_channel_name': self.default_channel_name,
+            'default_team_id': self.default_team_id,
+            'default_team_name': self.default_team_name,
+            'notifications_enabled': self.notifications_enabled,
+            'notify_on_create': self.notify_on_create,
+            'notify_on_status_change': self.notify_on_status_change,
+            'is_active': self.is_active,
+            'installed_at': self.installed_at.isoformat() if self.installed_at else None,
+            'last_activity_at': self.last_activity_at.isoformat() if self.last_activity_at else None,
+            'app_version': self.app_version,
+        }
+
+
+class TeamsUserMapping(db.Model):
+    """Maps Teams users to Decision Records platform users."""
+
+    __tablename__ = 'teams_user_mappings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    teams_workspace_id = db.Column(db.Integer, db.ForeignKey('teams_workspaces.id'), nullable=False, index=True)
+
+    # Azure AD user identifiers
+    aad_object_id = db.Column(db.String(50), nullable=False, index=True)  # Azure AD user object ID (GUID)
+    aad_user_principal_name = db.Column(db.String(320), nullable=True)  # UPN (often email)
+    aad_email = db.Column(db.String(320), nullable=True)  # Email from Graph profile
+    aad_display_name = db.Column(db.String(255), nullable=True)
+
+    # Linked Decision Records user (nullable - may not be linked yet)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # How the user was linked
+    link_method = db.Column(db.String(20), nullable=True)  # 'auto_email', 'auto_upn', 'browser_auth'
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    linked_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('teams_mappings', lazy='dynamic'))
+
+    # Unique constraint: one mapping per Teams user per workspace
+    __table_args__ = (
+        db.UniqueConstraint('teams_workspace_id', 'aad_object_id', name='uq_teams_user_workspace'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'teams_workspace_id': self.teams_workspace_id,
+            'aad_object_id': self.aad_object_id,
+            'aad_user_principal_name': self.aad_user_principal_name,
+            'aad_email': self.aad_email,
+            'aad_display_name': self.aad_display_name,
+            'user_id': self.user_id,
+            'link_method': self.link_method,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'linked_at': self.linked_at.isoformat() if self.linked_at else None,
+        }
+
+
+class TeamsConversationReference(db.Model):
+    """Stores conversation references for proactive messaging to Teams channels."""
+
+    __tablename__ = 'teams_conversation_references'
+
+    id = db.Column(db.Integer, primary_key=True)
+    teams_workspace_id = db.Column(db.Integer, db.ForeignKey('teams_workspaces.id'), nullable=False, index=True)
+
+    # Conversation identifiers
+    conversation_id = db.Column(db.String(500), nullable=False)  # Teams conversation ID
+    channel_id = db.Column(db.String(100), nullable=True)  # Channel ID if in a channel
+    team_id = db.Column(db.String(100), nullable=True)  # Team ID if in a team
+
+    # Serialized ConversationReference object (JSON)
+    # Contains: activityId, user, bot, conversation, channelId, serviceUrl
+    reference_json = db.Column(db.Text, nullable=False)
+
+    # Context type
+    context_type = db.Column(db.String(20), nullable=False)  # 'channel', 'personal', 'group'
+
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Unique constraint: one reference per conversation per workspace
+    __table_args__ = (
+        db.UniqueConstraint('teams_workspace_id', 'conversation_id', name='uq_teams_conversation'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'teams_workspace_id': self.teams_workspace_id,
+            'conversation_id': self.conversation_id,
+            'channel_id': self.channel_id,
+            'team_id': self.team_id,
+            'context_type': self.context_type,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class BlogPost(db.Model):
     """Blog posts for the marketing website."""
 

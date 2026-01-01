@@ -1,6 +1,6 @@
 # Security Features Documentation
 
-Comprehensive overview of security implementations in the Architecture Decisions application.
+Comprehensive overview of security implementations in the Decisions Records application.
 
 ## Table of Contents
 - [Security Architecture](#security-architecture)
