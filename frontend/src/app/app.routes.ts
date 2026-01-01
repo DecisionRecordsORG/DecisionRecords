@@ -41,6 +41,14 @@ export const routes: Routes = [
     path: 'integrations/slack',
     loadComponent: () => import('./components/slack-integration/slack-integration.component').then(m => m.SlackIntegrationComponent)
   },
+  {
+    path: 'integrations/mcp',
+    loadComponent: () => import('./components/mcp-integration/mcp-integration.component').then(m => m.McpIntegrationComponent)
+  },
+  {
+    path: 'integrations/ai-api',
+    loadComponent: () => import('./components/ai-api-integration/ai-api-integration.component').then(m => m.AiApiIntegrationComponent)
+  },
   // Blog pages
   {
     path: 'blog',

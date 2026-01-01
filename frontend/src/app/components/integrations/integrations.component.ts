@@ -543,6 +543,34 @@ export class IntegrationsComponent {
       link: '/integrations/slack'
     },
     {
+      name: 'MCP Server',
+      icon: 'terminal',
+      iconType: 'material',
+      status: 'available',
+      description: 'Connect Claude Code, Cursor, VS Code and other MCP-compatible tools to your decision records.',
+      features: [
+        'Search decisions from your IDE',
+        'Read full decision context inline',
+        'Create decisions while coding',
+        'Works with any MCP-compatible tool'
+      ],
+      link: '/integrations/mcp'
+    },
+    {
+      name: 'AI API / Custom GPTs',
+      icon: 'auto_awesome',
+      iconType: 'material',
+      status: 'available',
+      description: 'Build Custom GPTs and AI agents that can search, read, and create decision records.',
+      features: [
+        'REST API for AI integrations',
+        'OpenAPI schema for Custom GPTs',
+        'Create AI assistants with decision access',
+        'Workflow automation support'
+      ],
+      link: '/integrations/ai-api'
+    },
+    {
       name: 'Microsoft Teams',
       icon: 'groups',
       iconType: 'material',
