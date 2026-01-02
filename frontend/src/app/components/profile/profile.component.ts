@@ -16,12 +16,26 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { Clipboard, ClipboardModule } from '@angular/cdk/clipboard';
 import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { AdminService } from '../../services/admin.service';
 import { Subscription, User, WebAuthnCredential, GlobalRole } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { RoleRequestDialogComponent } from '../shared/role-request-dialog.component';
+
+// API Key interface
+interface AIApiKey {
+  id: number;
+  name: string;
+  key_prefix: string;
+  scopes: string[];
+  created_at: string;
+  expires_at?: string;
+  last_used_at?: string;
+  is_revoked: boolean;
+  is_expired: boolean;
+}
 
 // Password policy constants
 const PASSWORD_MIN_LENGTH = 8;
@@ -49,6 +63,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
     MatTooltipModule,
     MatFormFieldModule,
     MatInputModule,
+    ClipboardModule,
     RoleRequestDialogComponent
   ],
   template: `
@@ -376,6 +391,113 @@ const PASSWORD_REQUIRES_NUMBER = true;
             }
           </mat-card-content>
         </mat-card>
+        }
+
+        <!-- API Keys Section (hidden during setup mode) -->
+        @if (!setupMode && aiExternalAccessEnabled) {
+          <mat-card class="api-keys-card">
+            <mat-card-header>
+              <mat-card-title>
+                <mat-icon>vpn_key</mat-icon>
+                API Keys
+              </mat-card-title>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="section-description">
+                API keys allow external applications to access decision records on your behalf.
+                Keep your keys secure and revoke any that are no longer needed.
+              </p>
+
+              @if (isLoadingApiKeys) {
+                <div class="loading">
+                  <mat-spinner diameter="40"></mat-spinner>
+                </div>
+              } @else {
+                <!-- New key display (shown immediately after creation) -->
+                @if (newlyCreatedKey) {
+                  <div class="new-key-banner">
+                    <div class="new-key-header">
+                      <mat-icon>check_circle</mat-icon>
+                      <span>API Key Created Successfully</span>
+                    </div>
+                    <p class="new-key-warning">
+                      <strong>Save this key now!</strong> It will not be shown again.
+                    </p>
+                    <div class="new-key-display">
+                      <code>{{ newlyCreatedKey }}</code>
+                      <button mat-icon-button (click)="copyApiKey(newlyCreatedKey)" matTooltip="Copy to clipboard">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                    <button mat-button color="primary" (click)="dismissNewKey()">
+                      I've saved my key
+                    </button>
+                  </div>
+                }
+
+                <!-- API Keys list -->
+                @if (apiKeys.length > 0) {
+                  <mat-list class="api-keys-list">
+                    @for (key of apiKeys; track key.id) {
+                      <mat-list-item [class.revoked]="key.is_revoked" [class.expired]="key.is_expired">
+                        <mat-icon matListItemIcon>vpn_key</mat-icon>
+                        <div matListItemTitle>
+                          {{ key.name }}
+                          @if (key.is_revoked) {
+                            <mat-chip class="status-chip revoked-chip">Revoked</mat-chip>
+                          } @else if (key.is_expired) {
+                            <mat-chip class="status-chip expired-chip">Expired</mat-chip>
+                          }
+                        </div>
+                        <div matListItemLine>
+                          <span class="key-prefix">{{ key.key_prefix }}...</span>
+                          &middot; Created: {{ key.created_at | date:'mediumDate' }}
+                          @if (key.last_used_at) {
+                            &middot; Last used: {{ key.last_used_at | date:'mediumDate' }}
+                          }
+                        </div>
+                        @if (!key.is_revoked) {
+                          <button mat-icon-button matListItemMeta
+                                  (click)="revokeApiKey(key)"
+                                  matTooltip="Revoke this key">
+                            <mat-icon>delete</mat-icon>
+                          </button>
+                        }
+                      </mat-list-item>
+                    }
+                  </mat-list>
+                } @else if (!newlyCreatedKey) {
+                  <p class="no-keys">No API keys yet. Create one to integrate with external tools.</p>
+                }
+
+                <!-- Create new key section -->
+                @if (!isCreatingKey) {
+                  <div class="create-key-section">
+                    <mat-form-field appearance="outline" class="key-name-field">
+                      <mat-label>Key Name</mat-label>
+                      <input matInput [(ngModel)]="newKeyName" placeholder="e.g., My MCP Server">
+                    </mat-form-field>
+                    <button mat-raised-button color="primary" (click)="createApiKey()"
+                            [disabled]="!newKeyName.trim() || apiKeys.length >= 5">
+                      <mat-icon>add</mat-icon>
+                      Create API Key
+                    </button>
+                  </div>
+                  @if (apiKeys.length >= 5) {
+                    <p class="max-keys-warning">
+                      <mat-icon>warning</mat-icon>
+                      Maximum of 5 API keys reached. Revoke an existing key to create a new one.
+                    </p>
+                  }
+                } @else {
+                  <div class="loading">
+                    <mat-spinner diameter="24"></mat-spinner>
+                    <span>Creating key...</span>
+                  </div>
+                }
+              }
+            </mat-card-content>
+          </mat-card>
         }
       }
     </div>
@@ -717,6 +839,133 @@ const PASSWORD_REQUIRES_NUMBER = true;
     mat-divider {
       margin: 0;
     }
+
+    /* API Keys Section */
+    .api-keys-card {
+      margin-bottom: 24px;
+    }
+
+    .api-keys-card mat-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .new-key-banner {
+      background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+      border: 1px solid #4caf50;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .new-key-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #2e7d32;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .new-key-warning {
+      color: #333;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .new-key-display {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: white;
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      overflow-x: auto;
+    }
+
+    .new-key-display code {
+      font-family: monospace;
+      font-size: 14px;
+      word-break: break-all;
+      flex: 1;
+    }
+
+    .api-keys-list {
+      margin-bottom: 16px;
+    }
+
+    .api-keys-list mat-list-item.revoked,
+    .api-keys-list mat-list-item.expired {
+      opacity: 0.6;
+    }
+
+    .key-prefix {
+      font-family: monospace;
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    .status-chip {
+      font-size: 10px;
+      height: 18px;
+      margin-left: 8px;
+    }
+
+    .revoked-chip {
+      background-color: #ffebee !important;
+      color: #c62828 !important;
+    }
+
+    .expired-chip {
+      background-color: #fff3e0 !important;
+      color: #e65100 !important;
+    }
+
+    .no-keys {
+      text-align: center;
+      color: #999;
+      padding: 24px;
+      background: #fafafa;
+      border-radius: 8px;
+      margin-bottom: 16px;
+    }
+
+    .create-key-section {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      margin-top: 16px;
+    }
+
+    .key-name-field {
+      flex: 1;
+    }
+
+    .create-key-section button {
+      margin-top: 4px;
+    }
+
+    .max-keys-warning {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #e65100;
+      font-size: 13px;
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: #fff3e0;
+      border-radius: 4px;
+    }
+
+    .max-keys-warning mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
   `]
 })
 export class ProfileComponent implements OnInit {
@@ -735,6 +984,14 @@ export class ProfileComponent implements OnInit {
   setupMode = false;
   pendingDomain = false;
   tenantAdmins: { name: string; role: string }[] = [];
+
+  // API Key Management
+  apiKeys: AIApiKey[] = [];
+  isLoadingApiKeys = true;
+  isCreatingKey = false;
+  newKeyName = '';
+  newlyCreatedKey: string | null = null;
+  aiExternalAccessEnabled = false;
 
   /**
    * Check if user can request a role elevation
@@ -765,7 +1022,8 @@ export class ProfileComponent implements OnInit {
     private route: ActivatedRoute,
     private router: Router,
     private fb: FormBuilder,
-    private http: HttpClient
+    private http: HttpClient,
+    private clipboard: Clipboard
   ) {
     // Password form with validation
     // Pattern: at least one uppercase, one lowercase, one number
@@ -803,6 +1061,9 @@ export class ProfileComponent implements OnInit {
       if (this.canRequestRole) {
         this.loadTenantAdmins();
       }
+
+      // Check AI external access and load API keys
+      this.checkAiAccess();
 
       // Check for setup mode (new account passkey setup)
       this.route.queryParams.subscribe(async params => {
@@ -1061,5 +1322,113 @@ export class ProfileComponent implements OnInit {
         });
       }
     });
+  }
+
+  // ============ API Key Management Methods ============
+
+  /**
+   * Check if AI external access is enabled for the user
+   */
+  checkAiAccess(): void {
+    // Check if external API access is available for user
+    this.http.get<{ available: boolean }>('/api/user/ai/access').subscribe({
+      next: (response) => {
+        this.aiExternalAccessEnabled = response.available;
+        if (this.aiExternalAccessEnabled) {
+          this.loadApiKeys();
+        } else {
+          this.isLoadingApiKeys = false;
+        }
+      },
+      error: () => {
+        // If we can't check, assume disabled
+        this.aiExternalAccessEnabled = false;
+        this.isLoadingApiKeys = false;
+      }
+    });
+  }
+
+  /**
+   * Load user's API keys
+   */
+  loadApiKeys(): void {
+    this.isLoadingApiKeys = true;
+    this.http.get<AIApiKey[]>('/api/user/ai/keys').subscribe({
+      next: (keys) => {
+        this.apiKeys = keys;
+        this.isLoadingApiKeys = false;
+      },
+      error: () => {
+        this.apiKeys = [];
+        this.isLoadingApiKeys = false;
+      }
+    });
+  }
+
+  /**
+   * Create a new API key
+   */
+  createApiKey(): void {
+    if (!this.newKeyName.trim()) return;
+
+    this.isCreatingKey = true;
+    this.http.post<{ key: string } & AIApiKey>('/api/user/ai/keys', {
+      name: this.newKeyName.trim()
+    }).subscribe({
+      next: (response) => {
+        this.newlyCreatedKey = response.key;
+        this.newKeyName = '';
+        this.isCreatingKey = false;
+        this.loadApiKeys();  // Reload the list
+        this.snackBar.open('API key created successfully!', 'Close', { duration: 3000 });
+      },
+      error: (err) => {
+        this.isCreatingKey = false;
+        this.snackBar.open(err.error?.error || 'Failed to create API key', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  /**
+   * Revoke an API key
+   */
+  revokeApiKey(key: AIApiKey): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Revoke API Key',
+        message: `Are you sure you want to revoke the API key "${key.name}"? This action cannot be undone and any applications using this key will stop working.`,
+        confirmText: 'Revoke',
+        cancelText: 'Cancel'
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(confirmed => {
+      if (confirmed) {
+        this.http.delete(`/api/user/ai/keys/${key.id}`).subscribe({
+          next: () => {
+            this.snackBar.open('API key revoked', 'Close', { duration: 2000 });
+            this.loadApiKeys();
+          },
+          error: (err) => {
+            this.snackBar.open(err.error?.error || 'Failed to revoke API key', 'Close', { duration: 3000 });
+          }
+        });
+      }
+    });
+  }
+
+  /**
+   * Copy API key to clipboard
+   */
+  copyApiKey(key: string): void {
+    this.clipboard.copy(key);
+    this.snackBar.open('API key copied to clipboard', 'Close', { duration: 2000 });
+  }
+
+  /**
+   * Dismiss the newly created key banner
+   */
+  dismissNewKey(): void {
+    this.newlyCreatedKey = null;
   }
 }

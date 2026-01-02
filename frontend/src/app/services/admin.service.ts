@@ -196,6 +196,19 @@ export class AdminService {
   getTeamsChannels(): Observable<{ channels: TeamsChannel[] }> {
     return this.http.get<{ channels: TeamsChannel[] }>('/api/teams/channels');
   }
+
+  // AI Integration Settings
+  getAISettings(): Observable<AISettings> {
+    return this.http.get<AISettings>('/api/tenant/ai/config');
+  }
+
+  updateAISettings(settings: AISettingsUpdate): Observable<{ message: string; config: AISettings }> {
+    return this.http.put<{ message: string; config: AISettings }>('/api/tenant/ai/config', settings);
+  }
+
+  getAIStats(): Observable<AIStats> {
+    return this.http.get<AIStats>('/api/tenant/ai/stats');
+  }
 }
 
 export interface SlackSettings {
@@ -228,6 +241,7 @@ export interface SlackChannel {
 
 export interface TeamsSettings {
   installed: boolean;
+  install_url?: string | null;  // null when Teams is not configured in Azure
   ms_tenant_id?: string;
   ms_tenant_name?: string;
   default_channel_id?: string;
@@ -256,4 +270,38 @@ export interface TeamsChannel {
   name: string;
   team_id: string;
   team_name: string;
+}
+
+// AI Integration Settings
+export interface AISettings {
+  // System-level (read-only for tenant admins)
+  system_ai_enabled: boolean;
+  system_slack_bot_enabled: boolean;
+  system_mcp_enabled: boolean;
+  system_external_api_enabled: boolean;
+  // Tenant-level (configurable by tenant admins)
+  ai_features_enabled: boolean;
+  ai_slack_queries_enabled: boolean;
+  ai_assisted_creation_enabled: boolean;
+  ai_external_access_enabled: boolean;
+  ai_require_anonymization: boolean;
+  ai_log_interactions: boolean;
+}
+
+export interface AISettingsUpdate {
+  ai_features_enabled?: boolean;
+  ai_slack_queries_enabled?: boolean;
+  ai_assisted_creation_enabled?: boolean;
+  ai_external_access_enabled?: boolean;
+  ai_require_anonymization?: boolean;
+  ai_log_interactions?: boolean;
+}
+
+export interface AIStats {
+  total_interactions: number;
+  by_channel: { [key: string]: number };
+  by_action: { [key: string]: number };
+  by_user: { user_id: number; email: string; count: number }[];
+  api_keys_active: number;
+  api_keys_total: number;
 }

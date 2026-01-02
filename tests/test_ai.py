@@ -1210,3 +1210,420 @@ class TestAIInteractionLogEdgeCases:
         assert stats['total_interactions'] == 0
         assert stats['unique_users'] == 0
         assert stats['total_tokens'] == 0
+
+
+# ============================================================================
+# SUPER ADMIN AI SETTINGS API TESTS
+# ============================================================================
+
+# These tests use the api_app fixture pattern from test_api_integration.py
+# to test the actual HTTP endpoints with all routes registered.
+
+from models import MasterAccount, DEFAULT_MASTER_USERNAME, DEFAULT_MASTER_PASSWORD
+
+
+@pytest.fixture(scope='function')
+def api_app():
+    """Create application with actual routes for API testing.
+
+    Unlike the base conftest.py app fixture, this imports the actual app
+    with all routes registered, so we can test the full HTTP cycle.
+    """
+    # Set testing environment BEFORE importing app
+    os.environ['FLASK_ENV'] = 'testing'
+    os.environ['TESTING'] = 'True'
+    os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-ai-api-tests-12345'
+
+    # Import app module to get the configured Flask app
+    import app as app_module
+    test_app = app_module.app
+
+    # Reset the global _db_initialized flag to ensure proper initialization
+    app_module._db_initialized = False
+
+    # Ensure testing mode is on and relax session cookie settings for testing
+    test_app.config['TESTING'] = True
+    test_app.config['SECRET_KEY'] = 'test-secret-key-for-ai-api-tests-12345'
+    test_app.config['SESSION_COOKIE_SAMESITE'] = None
+    test_app.config['SESSION_COOKIE_HTTPONLY'] = False
+
+    with test_app.app_context():
+        db.create_all()
+        app_module.init_database()
+        yield test_app
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+
+
+@pytest.fixture
+def api_client(api_app):
+    """Create test client for making HTTP requests."""
+    return api_app.test_client()
+
+
+@pytest.fixture
+def master_account(api_app):
+    """Get the default master account created by initialize_database()."""
+    master = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
+    if not master:
+        master = MasterAccount(
+            username=DEFAULT_MASTER_USERNAME,
+            name='System Administrator'
+        )
+        master.set_password('changeme')
+        db.session.add(master)
+        db.session.commit()
+    return master
+
+
+@pytest.fixture
+def master_client(api_app, master_account):
+    """Create authenticated client for master account."""
+    client = api_app.test_client()
+
+    # Authenticate via the actual login endpoint
+    response = client.post('/auth/local', json={
+        'username': master_account.username,
+        'password': DEFAULT_MASTER_PASSWORD
+    })
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Master login failed: {response.status_code} - {response.data}")
+
+    return client
+
+
+@pytest.fixture
+def api_test_tenant(api_app):
+    """Create a test tenant for API tests."""
+    tenant = Tenant(
+        domain='apitest.com',
+        name='API Test Corp',
+        status='active',
+        maturity_state=MaturityState.BOOTSTRAP
+    )
+    db.session.add(tenant)
+    db.session.commit()
+    return tenant
+
+
+@pytest.fixture
+def api_test_user(api_app, api_test_tenant):
+    """Create a regular test user for API tests."""
+    user = User(
+        email='user@apitest.com',
+        sso_domain='apitest.com',
+        auth_type='local',
+        email_verified=True
+    )
+    user.set_name(first_name='Test', last_name='User')
+    user.set_password('testpassword123')
+    db.session.add(user)
+    db.session.flush()
+
+    membership = TenantMembership(
+        user_id=user.id,
+        tenant_id=api_test_tenant.id,
+        global_role=GlobalRole.USER
+    )
+    db.session.add(membership)
+    db.session.commit()
+    return user
+
+
+@pytest.fixture
+def user_client(api_app, api_test_user):
+    """Create authenticated client for regular user."""
+    client = api_app.test_client()
+
+    # Regular users login via /api/auth/login endpoint
+    response = client.post('/api/auth/login', json={
+        'email': api_test_user.email,
+        'password': 'testpassword123'
+    })
+
+    if response.status_code != 200:
+        raise RuntimeError(f"User login failed: {response.status_code} - {response.data}")
+
+    return client
+
+
+class TestSuperAdminAISettingsAPI:
+    """Test super admin AI settings endpoints (/api/admin/settings/ai)."""
+
+    def test_get_ai_settings_requires_auth(self, api_client):
+        """GET /api/admin/settings/ai requires authentication."""
+        response = api_client.get('/api/admin/settings/ai')
+        assert response.status_code == 401
+
+    def test_get_ai_settings_requires_master(self, user_client):
+        """GET /api/admin/settings/ai requires master account."""
+        response = user_client.get('/api/admin/settings/ai')
+        assert response.status_code == 403
+
+    def test_get_ai_settings_success(self, master_client):
+        """GET /api/admin/settings/ai returns settings for master user."""
+        response = master_client.get('/api/admin/settings/ai')
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert 'ai_features_enabled' in data
+        assert 'external_api_enabled' in data
+        assert 'mcp_server_enabled' in data
+        assert 'slack_bot_enabled' in data
+
+        # Default values should be False
+        assert data['ai_features_enabled'] is False
+        assert data['external_api_enabled'] is False
+        assert data['mcp_server_enabled'] is False
+        assert data['slack_bot_enabled'] is False
+
+    def test_save_ai_settings_requires_auth(self, api_client):
+        """POST /api/admin/settings/ai requires authentication."""
+        response = api_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 401
+
+    def test_save_ai_settings_requires_master(self, user_client):
+        """POST /api/admin/settings/ai requires master account."""
+        response = user_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 403
+
+    def test_save_ai_settings_enable_all(self, master_client):
+        """POST /api/admin/settings/ai can enable all AI features."""
+        response = master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True,
+            'external_api_enabled': True,
+            'mcp_server_enabled': True,
+            'slack_bot_enabled': True
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['message'] == 'AI settings updated successfully'
+        assert data['ai_features_enabled'] is True
+        assert data['external_api_enabled'] is True
+        assert data['mcp_server_enabled'] is True
+        assert data['slack_bot_enabled'] is True
+
+        # Verify settings are persisted
+        response = master_client.get('/api/admin/settings/ai')
+        data = response.get_json()
+        assert data['ai_features_enabled'] is True
+        assert data['external_api_enabled'] is True
+        assert data['mcp_server_enabled'] is True
+        assert data['slack_bot_enabled'] is True
+
+    def test_save_ai_settings_disable_all(self, master_client):
+        """POST /api/admin/settings/ai can disable all AI features."""
+        # First enable all
+        master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True,
+            'external_api_enabled': True,
+            'mcp_server_enabled': True,
+            'slack_bot_enabled': True
+        })
+
+        # Then disable all
+        response = master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': False,
+            'external_api_enabled': False,
+            'mcp_server_enabled': False,
+            'slack_bot_enabled': False
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['ai_features_enabled'] is False
+        assert data['external_api_enabled'] is False
+        assert data['mcp_server_enabled'] is False
+        assert data['slack_bot_enabled'] is False
+
+    def test_save_ai_settings_partial_update(self, master_client):
+        """POST /api/admin/settings/ai can update individual settings."""
+        # Enable only ai_features_enabled
+        response = master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['ai_features_enabled'] is True
+        # Others should still be false (their default)
+        assert data['external_api_enabled'] is False
+
+        # Now enable external_api_enabled separately
+        response = master_client.post('/api/admin/settings/ai', json={
+            'external_api_enabled': True
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        # Both should now be true
+        assert data['ai_features_enabled'] is True
+        assert data['external_api_enabled'] is True
+
+    def test_put_method_also_works(self, master_client):
+        """PUT /api/admin/settings/ai works the same as POST."""
+        response = master_client.put('/api/admin/settings/ai', json={
+            'ai_features_enabled': True,
+            'mcp_server_enabled': True
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert data['ai_features_enabled'] is True
+        assert data['mcp_server_enabled'] is True
+
+
+class TestTenantAdminAISettingsAPI:
+    """Test tenant admin AI settings endpoints (/api/tenant/ai/config)."""
+
+    @pytest.fixture
+    def admin_test_tenant(self, api_app):
+        """Create a test tenant with admin user for AI tests."""
+        tenant = Tenant(
+            domain='admintest.com',
+            name='Admin Test Corp',
+            status='active',
+            maturity_state=MaturityState.BOOTSTRAP
+        )
+        db.session.add(tenant)
+        db.session.commit()
+        return tenant
+
+    @pytest.fixture
+    def admin_test_user(self, api_app, admin_test_tenant):
+        """Create an admin user for tenant AI settings tests."""
+        user = User(
+            email='admin@admintest.com',
+            sso_domain='admintest.com',
+            auth_type='local',
+            email_verified=True
+        )
+        user.set_name(first_name='Admin', last_name='User')
+        user.set_password('adminpassword123')
+        db.session.add(user)
+        db.session.flush()
+
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=admin_test_tenant.id,
+            global_role=GlobalRole.ADMIN
+        )
+        db.session.add(membership)
+        db.session.commit()
+        return user
+
+    @pytest.fixture
+    def admin_client(self, api_app, admin_test_user):
+        """Create authenticated client for admin user."""
+        client = api_app.test_client()
+
+        response = client.post('/api/auth/login', json={
+            'email': admin_test_user.email,
+            'password': 'adminpassword123'
+        })
+
+        if response.status_code != 200:
+            raise RuntimeError(f"Admin login failed: {response.status_code} - {response.data}")
+
+        return client
+
+    def test_get_tenant_ai_config_requires_auth(self, api_client):
+        """GET /api/tenant/ai/config requires authentication."""
+        response = api_client.get('/api/tenant/ai/config')
+        assert response.status_code == 401
+
+    def test_get_tenant_ai_config_requires_admin(self, user_client):
+        """GET /api/tenant/ai/config requires admin role."""
+        response = user_client.get('/api/tenant/ai/config')
+        assert response.status_code == 403
+
+    def test_get_tenant_ai_config_success(self, admin_client):
+        """GET /api/tenant/ai/config returns config for admin."""
+        response = admin_client.get('/api/tenant/ai/config')
+        assert response.status_code == 200
+
+        data = response.get_json()
+        assert 'system' in data
+        assert 'tenant' in data
+        assert 'system_ai_enabled' in data
+
+    def test_update_tenant_ai_config_requires_auth(self, api_client):
+        """POST /api/tenant/ai/config requires authentication."""
+        response = api_client.post('/api/tenant/ai/config', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 401
+
+    def test_update_tenant_ai_config_requires_admin(self, user_client):
+        """POST /api/tenant/ai/config requires admin role."""
+        response = user_client.post('/api/tenant/ai/config', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 403
+
+    def test_update_tenant_ai_config_requires_system_enabled(self, admin_client):
+        """POST /api/tenant/ai/config fails if system AI is disabled."""
+        # System AI is disabled by default
+        response = admin_client.post('/api/tenant/ai/config', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 403
+        data = response.get_json()
+        assert 'system level' in data['error'].lower()
+
+    def test_update_tenant_ai_config_success(self, api_app, admin_client, master_client):
+        """POST /api/tenant/ai/config can update tenant settings when system AI is enabled."""
+        # First enable system-level AI as super admin
+        response = master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True,
+            'external_api_enabled': True,
+            'slack_bot_enabled': True
+        })
+        assert response.status_code == 200
+
+        # Now tenant admin can enable tenant-level settings
+        response = admin_client.post('/api/tenant/ai/config', json={
+            'ai_features_enabled': True,
+            'ai_external_access_enabled': True
+        })
+        assert response.status_code == 200
+
+        data = response.get_json()
+        # Check the message is present (may vary slightly)
+        assert 'message' in data
+        assert 'updated' in data['message'].lower()
+        # Config values are returned at top level (not nested in 'config')
+        assert data['ai_features_enabled'] is True
+        assert data['ai_external_access_enabled'] is True
+
+    def test_update_tenant_ai_config_partial_update(self, api_app, admin_client, master_client):
+        """POST /api/tenant/ai/config can update individual settings."""
+        # Enable system AI first (including external API to test tenant-level)
+        master_client.post('/api/admin/settings/ai', json={
+            'ai_features_enabled': True,
+            'external_api_enabled': True
+        })
+
+        # Enable only ai_features_enabled
+        response = admin_client.post('/api/tenant/ai/config', json={
+            'ai_features_enabled': True
+        })
+        assert response.status_code == 200
+
+        # Enable external access separately
+        response = admin_client.post('/api/tenant/ai/config', json={
+            'ai_external_access_enabled': True
+        })
+        assert response.status_code == 200
+
+        # Verify settings are returned in response (config at top level)
+        data = response.get_json()
+        assert data['ai_features_enabled'] is True
+        assert data['ai_external_access_enabled'] is True

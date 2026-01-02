@@ -15,7 +15,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel, TeamsSettings, TeamsChannel } from '../../services/admin.service';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel, TeamsSettings, TeamsChannel, AISettings, AISettingsUpdate } from '../../services/admin.service';
 import { ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
@@ -1150,29 +1150,42 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   <mat-card-title>Connect Microsoft Teams</mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
-                  <div class="teams-connect-options">
-                    <div class="connect-option">
-                      <h4>Connect via Azure AD Consent</h4>
-                      <p>Grant admin consent to connect your Microsoft 365 tenant with Decision Records.</p>
-                      <div class="teams-install-guidance">
-                        <h5>Steps to connect:</h5>
-                        <ol>
-                          <li>Click the button below to start the Azure AD consent flow</li>
-                          <li>Sign in with your Microsoft 365 admin account</li>
-                          <li>Grant the required permissions</li>
-                          <li>You'll be redirected back here once complete</li>
-                        </ol>
-                      </div>
-                      <a mat-flat-button color="primary" href="/api/teams/oauth/start" target="_blank" rel="noopener noreferrer" data-testid="teams-connect-button">
-                        <img src="/assets/teams-logo.svg" alt="" class="teams-btn-icon">
-                        Connect with Microsoft Teams
-                      </a>
-                      <p class="teams-install-note">
-                        <mat-icon>info</mat-icon>
-                        Requires Microsoft 365 admin privileges to grant consent.
+                  @if (teamsSettings?.install_url === null) {
+                    <!-- Teams not configured in Azure -->
+                    <div class="teams-not-configured">
+                      <mat-icon class="warning-icon">warning</mat-icon>
+                      <h4>Teams Integration Not Configured</h4>
+                      <p>The Microsoft Teams integration has not been set up for this instance.</p>
+                      <p class="teams-admin-note">
+                        If you are the system administrator, please run the Teams deployment script
+                        to configure the Azure Bot Service and required credentials.
                       </p>
                     </div>
-                  </div>
+                  } @else {
+                    <div class="teams-connect-options">
+                      <div class="connect-option">
+                        <h4>Connect via Azure AD Consent</h4>
+                        <p>Grant admin consent to connect your Microsoft 365 tenant with Decision Records.</p>
+                        <div class="teams-install-guidance">
+                          <h5>Steps to connect:</h5>
+                          <ol>
+                            <li>Click the button below to start the Azure AD consent flow</li>
+                            <li>Sign in with your Microsoft 365 admin account</li>
+                            <li>Grant the required permissions</li>
+                            <li>You'll be redirected back here once complete</li>
+                          </ol>
+                        </div>
+                        <a mat-flat-button color="primary" [href]="teamsSettings?.install_url" data-testid="teams-connect-button">
+                          <img src="/assets/teams-logo.svg" alt="" class="teams-btn-icon">
+                          Connect with Microsoft Teams
+                        </a>
+                        <p class="teams-install-note">
+                          <mat-icon>info</mat-icon>
+                          Requires Microsoft 365 admin privileges to grant consent.
+                        </p>
+                      </div>
+                    </div>
+                  }
                 </mat-card-content>
               </mat-card>
             } @else if (teamsSettings) {
@@ -1240,6 +1253,187 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                   </button>
                 </mat-card-actions>
               </mat-card>
+            }
+          </div>
+        </mat-tab>
+        }
+
+        <!-- AI & Integrations Tab -->
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="AI & API">
+          <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>auto_awesome</mat-icon>
+                  AI & External API Access
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Configure AI features and external API access for your organization:</p>
+                <ul>
+                  <li><strong>MCP Server:</strong> Connect development tools like Claude Code, Cursor, and VS Code</li>
+                  <li><strong>External API:</strong> Build Custom GPTs and AI agents that access your decisions</li>
+                  <li><strong>AI-Assisted Creation:</strong> Use AI to help draft decision records</li>
+                </ul>
+              </mat-card-content>
+            </mat-card>
+
+            @if (loadingAiSettings) {
+              <div class="loading-spinner">
+                <mat-spinner diameter="40"></mat-spinner>
+              </div>
+            } @else if (aiSettings) {
+              <!-- System Status Banner -->
+              @if (!aiSettings.system_ai_enabled) {
+                <mat-card class="warning-card">
+                  <mat-card-content>
+                    <div class="warning-content">
+                      <mat-icon>warning</mat-icon>
+                      <div>
+                        <strong>AI features are disabled at the system level</strong>
+                        <p>Contact your system administrator to enable AI features for your organization.</p>
+                      </div>
+                    </div>
+                  </mat-card-content>
+                </mat-card>
+              } @else {
+                <!-- AI Settings Form -->
+                <mat-card class="form-card">
+                  <mat-card-header>
+                    <mat-card-title>
+                      <mat-icon>settings</mat-icon>
+                      AI Feature Settings
+                    </mat-card-title>
+                  </mat-card-header>
+                  <mat-card-content>
+                    <div class="settings-form">
+                      <!-- Master Toggle -->
+                      <div class="toggle-group master-toggle">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_features_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-features-toggle">
+                          Enable AI Features
+                        </mat-slide-toggle>
+                        <p class="toggle-description">Master switch for all AI features in your organization</p>
+                      </div>
+
+                      <mat-divider></mat-divider>
+
+                      <!-- External Access (MCP/API) -->
+                      <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_external_access_enabled"
+                          [disabled]="!aiSettings.ai_features_enabled || !aiSettings.system_external_api_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-external-access-toggle">
+                          Enable External API Access
+                        </mat-slide-toggle>
+                        <p class="toggle-description">
+                          Allow users to create API keys for MCP servers and Custom GPTs
+                          @if (!aiSettings.system_external_api_enabled) {
+                            <span class="system-disabled">(System-level disabled)</span>
+                          }
+                        </p>
+                      </div>
+
+                      <!-- Slack AI Queries -->
+                      <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_slack_queries_enabled"
+                          [disabled]="!aiSettings.ai_features_enabled || !aiSettings.system_slack_bot_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-slack-queries-toggle">
+                          Enable Slack AI Queries
+                        </mat-slide-toggle>
+                        <p class="toggle-description">
+                          Allow natural language queries about decisions in Slack
+                          @if (!aiSettings.system_slack_bot_enabled) {
+                            <span class="system-disabled">(System-level disabled)</span>
+                          }
+                        </p>
+                      </div>
+
+                      <!-- AI-Assisted Creation -->
+                      <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_assisted_creation_enabled"
+                          [disabled]="!aiSettings.ai_features_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-assisted-creation-toggle">
+                          Enable AI-Assisted Decision Creation
+                        </mat-slide-toggle>
+                        <p class="toggle-description">Use AI to help draft and refine decision records</p>
+                      </div>
+
+                      <mat-divider></mat-divider>
+
+                      <!-- Privacy & Logging -->
+                      <h4>Privacy & Logging</h4>
+
+                      <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_log_interactions"
+                          [disabled]="!aiSettings.ai_features_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-log-interactions-toggle">
+                          Log AI Interactions
+                        </mat-slide-toggle>
+                        <p class="toggle-description">Keep audit logs of all AI/API interactions for compliance</p>
+                      </div>
+
+                      <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                        <mat-slide-toggle
+                          [(ngModel)]="aiSettings.ai_require_anonymization"
+                          [disabled]="!aiSettings.ai_features_enabled"
+                          (change)="onAiSettingChange()"
+                          data-testid="ai-require-anonymization-toggle">
+                          Require Data Anonymization
+                        </mat-slide-toggle>
+                        <p class="toggle-description">Anonymize sensitive data before sending to external AI services</p>
+                      </div>
+                    </div>
+                  </mat-card-content>
+                  <mat-card-actions>
+                    <button mat-flat-button color="primary" (click)="saveAiSettings()" [disabled]="savingAiSettings" data-testid="ai-save-button">
+                      <mat-spinner diameter="20" *ngIf="savingAiSettings"></mat-spinner>
+                      <mat-icon *ngIf="!savingAiSettings">save</mat-icon>
+                      <span *ngIf="!savingAiSettings">Save Settings</span>
+                    </button>
+                  </mat-card-actions>
+                </mat-card>
+
+                <!-- API Access Info -->
+                @if (aiSettings.ai_features_enabled && aiSettings.ai_external_access_enabled) {
+                  <mat-card class="form-card">
+                    <mat-card-header>
+                      <mat-card-title>
+                        <mat-icon>vpn_key</mat-icon>
+                        API Access
+                      </mat-card-title>
+                    </mat-card-header>
+                    <mat-card-content>
+                      <p>External API access is enabled. Users can generate personal API keys from their profile to:</p>
+                      <ul>
+                        <li>Connect MCP-compatible tools (Claude Code, Cursor, VS Code)</li>
+                        <li>Build Custom GPTs with decision access</li>
+                        <li>Create custom integrations using the REST API</li>
+                      </ul>
+                      <p class="api-links">
+                        <a href="/integrations/mcp" target="_blank">
+                          <mat-icon>terminal</mat-icon>
+                          MCP Server Documentation
+                        </a>
+                        <a href="/integrations/ai-api" target="_blank">
+                          <mat-icon>auto_awesome</mat-icon>
+                          AI API Documentation
+                        </a>
+                      </p>
+                    </mat-card-content>
+                  </mat-card>
+                }
+              }
             }
           </div>
         </mat-tab>
@@ -2294,6 +2488,41 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       margin-right: 8px;
     }
 
+    .teams-not-configured {
+      text-align: center;
+      padding: 32px 16px;
+    }
+
+    .teams-not-configured .warning-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: #ff9800;
+      margin-bottom: 16px;
+    }
+
+    .teams-not-configured h4 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .teams-not-configured p {
+      margin: 0 0 8px 0;
+      color: #666;
+      font-size: 14px;
+    }
+
+    .teams-not-configured .teams-admin-note {
+      margin-top: 16px;
+      padding: 12px;
+      background: #fff3e0;
+      border-radius: 8px;
+      font-size: 13px;
+      color: #e65100;
+    }
+
     /* Responsive adjustments */
     @media (max-width: 768px) {
       .auth-info-grid {
@@ -2319,6 +2548,95 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       mat-card-actions {
         flex-wrap: wrap;
       }
+    }
+
+    /* AI Settings Styles */
+    .settings-form {
+      padding: 8px 0;
+    }
+
+    .settings-form .toggle-group {
+      padding: 12px 0;
+    }
+
+    .settings-form .toggle-group.master-toggle {
+      padding-bottom: 16px;
+    }
+
+    .settings-form .toggle-group.disabled {
+      opacity: 0.5;
+    }
+
+    .toggle-description {
+      margin: 4px 0 0 48px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .toggle-description .system-disabled {
+      color: #ff9800;
+      font-weight: 500;
+    }
+
+    .settings-form h4 {
+      margin: 16px 0 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .warning-card {
+      background: #fff3e0;
+      border-left: 4px solid #ff9800;
+      margin-bottom: 16px;
+    }
+
+    .warning-content {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .warning-content mat-icon {
+      color: #ff9800;
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+    }
+
+    .warning-content strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .warning-content p {
+      margin: 0;
+      color: #666;
+    }
+
+    .api-links {
+      display: flex;
+      gap: 24px;
+      margin-top: 16px;
+    }
+
+    .api-links a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #1976d2;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .api-links a:hover {
+      text-decoration: underline;
+    }
+
+    .api-links mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
     }
   `]
 })
@@ -2382,10 +2700,16 @@ export class SettingsComponent implements OnInit {
   slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
   googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
 
+  // AI Settings
+  aiSettings: AISettings | null = null;
+  loadingAiSettings = false;
+  savingAiSettings = false;
+  aiSettingsChanged = false;
+
   // Tab index for navigation
   selectedTabIndex = 0;
   // Tab map matches actual tab order in template:
-  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*
+  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*, 8: Teams*, 9: AI*
   // (*) = conditional tabs for non-master accounts
   private tabMap: { [key: string]: number } = {
     'sso': 0,
@@ -2396,7 +2720,8 @@ export class SettingsComponent implements OnInit {
     'access-requests': 5,
     'role-requests': 6,
     'slack': 7,
-    'teams': 8
+    'teams': 8,
+    'ai': 9
   };
 
   /**
@@ -2514,6 +2839,7 @@ export class SettingsComponent implements OnInit {
       this.loadSpaces();
       this.loadSlackSettings();
       this.loadTeamsSettings();
+      this.loadAiSettings();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -3317,25 +3643,70 @@ export class SettingsComponent implements OnInit {
   loadTeamsSettings(): void {
     this.loadingTeamsSettings = true;
     this.adminService.getTeamsSettings().subscribe({
-      next: (settings) => {
-        this.teamsSettings = settings;
+      next: (response: any) => {
+        // Map API response (connected, workspace, install_url) to TeamsSettings
+        const workspace = response.workspace || {};
+        this.teamsSettings = {
+          installed: response.connected === true,
+          install_url: response.install_url,
+          ms_tenant_id: workspace.ms_tenant_id,
+          ms_tenant_name: workspace.ms_tenant_name,
+          default_channel_id: workspace.default_channel_id,
+          default_channel_name: workspace.default_channel_name,
+          default_team_id: workspace.default_team_id,
+          default_team_name: workspace.default_team_name,
+          notifications_enabled: workspace.notifications_enabled,
+          notify_on_create: workspace.notify_on_create,
+          notify_on_status_change: workspace.notify_on_status_change,
+          installed_at: workspace.installed_at,
+          last_activity_at: workspace.last_activity_at
+        };
         // Load channels if connected
-        if (settings.installed) {
+        if (this.teamsSettings.installed) {
           this.teamsForm.patchValue({
-            default_channel_id: settings.default_channel_id || '',
-            notifications_enabled: settings.notifications_enabled !== false,
-            notify_on_create: settings.notify_on_create !== false,
-            notify_on_status_change: settings.notify_on_status_change !== false
+            default_channel_id: this.teamsSettings.default_channel_id || '',
+            notifications_enabled: this.teamsSettings.notifications_enabled !== false,
+            notify_on_create: this.teamsSettings.notify_on_create !== false,
+            notify_on_status_change: this.teamsSettings.notify_on_status_change !== false
           });
           this.loadTeamsChannels();
         }
         this.loadingTeamsSettings = false;
+
+        // Check for success/error query params from OAuth callback
+        this.checkTeamsCallbackParams();
       },
       error: () => {
         this.loadingTeamsSettings = false;
-        this.teamsSettings = { installed: false };
+        this.teamsSettings = { installed: false, install_url: null };
       }
     });
+  }
+
+  private checkTeamsCallbackParams(): void {
+    const urlParams = new URLSearchParams(window.location.search);
+    const teamsSuccess = urlParams.get('teams_success');
+    const teamsError = urlParams.get('teams_error');
+
+    if (teamsSuccess === 'connected') {
+      this.snackBar.open('Successfully connected to Microsoft Teams!', 'Close', { duration: 5000 });
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+      // Reload settings to get updated data
+      this.loadTeamsSettings();
+    } else if (teamsError) {
+      const errorMessages: { [key: string]: string } = {
+        'missing_tenant': 'Microsoft 365 tenant information was not provided',
+        'invalid_state': 'Invalid or expired OAuth state. Please try again.',
+        'tenant_not_found': 'Your organization could not be found',
+        'workspace_already_claimed': 'This Microsoft 365 tenant is already connected to another organization',
+        'connection_failed': 'Failed to connect. Please try again.',
+      };
+      const message = errorMessages[teamsError] || `Connection failed: ${teamsError}`;
+      this.snackBar.open(message, 'Close', { duration: 8000 });
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }
 
   loadTeamsChannels(): void {
@@ -3421,6 +3792,65 @@ export class SettingsComponent implements OnInit {
             this.snackBar.open(err.error?.error || 'Failed to disconnect Teams', 'Close', { duration: 5000 });
           }
         });
+      }
+    });
+  }
+
+  // AI Settings Methods
+  loadAiSettings(): void {
+    this.loadingAiSettings = true;
+    this.adminService.getAISettings().subscribe({
+      next: (settings) => {
+        this.aiSettings = settings;
+        this.aiSettingsChanged = false;
+        this.loadingAiSettings = false;
+      },
+      error: () => {
+        this.loadingAiSettings = false;
+        // Show default empty state if API fails
+        this.aiSettings = {
+          system_ai_enabled: false,
+          system_slack_bot_enabled: false,
+          system_mcp_enabled: false,
+          system_external_api_enabled: false,
+          ai_features_enabled: false,
+          ai_slack_queries_enabled: false,
+          ai_assisted_creation_enabled: false,
+          ai_external_access_enabled: false,
+          ai_require_anonymization: false,
+          ai_log_interactions: false
+        };
+      }
+    });
+  }
+
+  onAiSettingChange(): void {
+    this.aiSettingsChanged = true;
+  }
+
+  saveAiSettings(): void {
+    if (!this.aiSettings) return;
+
+    this.savingAiSettings = true;
+    const update: AISettingsUpdate = {
+      ai_features_enabled: this.aiSettings.ai_features_enabled,
+      ai_slack_queries_enabled: this.aiSettings.ai_slack_queries_enabled,
+      ai_assisted_creation_enabled: this.aiSettings.ai_assisted_creation_enabled,
+      ai_external_access_enabled: this.aiSettings.ai_external_access_enabled,
+      ai_require_anonymization: this.aiSettings.ai_require_anonymization,
+      ai_log_interactions: this.aiSettings.ai_log_interactions
+    };
+
+    this.adminService.updateAISettings(update).subscribe({
+      next: (response) => {
+        this.snackBar.open('AI settings saved successfully', 'Close', { duration: 3000 });
+        this.aiSettings = response.config;
+        this.aiSettingsChanged = false;
+        this.savingAiSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to save AI settings', 'Close', { duration: 5000 });
+        this.savingAiSettings = false;
       }
     });
   }

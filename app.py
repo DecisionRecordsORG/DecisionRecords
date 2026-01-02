@@ -821,6 +821,21 @@ def init_database():
                         else:
                             logger.info("No users to migrate from name to first_name/last_name")
 
+                        # Check if Teams tables exist (created by db.create_all())
+                        teams_tables = ['teams_workspaces', 'teams_user_mappings', 'teams_conversation_references']
+                        for table_name in teams_tables:
+                            result = conn.execute(db.text(f"""
+                                SELECT EXISTS (
+                                    SELECT FROM information_schema.tables
+                                    WHERE table_name = '{table_name}'
+                                )
+                            """))
+                            exists = result.scalar()
+                            if exists:
+                                logger.info(f"Teams table '{table_name}' exists")
+                            else:
+                                logger.info(f"Teams table '{table_name}' will be created by db.create_all()")
+
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
@@ -3273,6 +3288,61 @@ def api_save_support_settings():
             SystemConfig.KEY_SUPPORT_EMAIL,
             default=SystemConfig.DEFAULT_SUPPORT_EMAIL
         )
+    })
+
+
+@app.route('/api/admin/settings/ai', methods=['GET'])
+@master_required
+def api_get_ai_system_settings():
+    """Get system-level AI settings (super admin only)."""
+    return jsonify({
+        'ai_features_enabled': SystemConfig.get(SystemConfig.KEY_AI_FEATURES_ENABLED, 'false').lower() == 'true',
+        'external_api_enabled': SystemConfig.get(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'false').lower() == 'true',
+        'mcp_server_enabled': SystemConfig.get(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'false').lower() == 'true',
+        'slack_bot_enabled': SystemConfig.get(SystemConfig.KEY_AI_SLACK_BOT_ENABLED, 'false').lower() == 'true'
+    })
+
+
+@app.route('/api/admin/settings/ai', methods=['POST', 'PUT'])
+@master_required
+def api_save_ai_system_settings():
+    """Update system-level AI settings (super admin only)."""
+    data = request.get_json() or {}
+
+    if 'ai_features_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_AI_FEATURES_ENABLED,
+            'true' if data['ai_features_enabled'] else 'false',
+            description='Master switch for all AI features'
+        )
+
+    if 'external_api_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_AI_EXTERNAL_API_ENABLED,
+            'true' if data['external_api_enabled'] else 'false',
+            description='Enable external API access (MCP, REST API)'
+        )
+
+    if 'mcp_server_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_AI_MCP_SERVER_ENABLED,
+            'true' if data['mcp_server_enabled'] else 'false',
+            description='Enable MCP server for dev tools'
+        )
+
+    if 'slack_bot_enabled' in data:
+        SystemConfig.set(
+            SystemConfig.KEY_AI_SLACK_BOT_ENABLED,
+            'true' if data['slack_bot_enabled'] else 'false',
+            description='Enable Slack AI bot features'
+        )
+
+    return jsonify({
+        'message': 'AI settings updated successfully',
+        'ai_features_enabled': SystemConfig.get(SystemConfig.KEY_AI_FEATURES_ENABLED, 'false').lower() == 'true',
+        'external_api_enabled': SystemConfig.get(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'false').lower() == 'true',
+        'mcp_server_enabled': SystemConfig.get(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'false').lower() == 'true',
+        'slack_bot_enabled': SystemConfig.get(SystemConfig.KEY_AI_SLACK_BOT_ENABLED, 'false').lower() == 'true'
     })
 
 
@@ -9104,6 +9174,24 @@ def api_update_user_ai_preferences():
         'message': 'AI preferences updated',
         'ai_opt_out': membership.ai_opt_out,
     })
+
+
+# --- User AI Access Check ---
+
+@app.route('/api/user/ai/access', methods=['GET'])
+@login_required
+def api_check_ai_access():
+    """Check if AI external access is enabled for current user."""
+    user = get_current_user()
+    tenant = get_current_tenant()
+
+    if not tenant:
+        return jsonify({'available': False})
+
+    # Check if external AI is available for this user
+    available = AIConfig.is_external_ai_available(user, tenant)
+
+    return jsonify({'available': available})
 
 
 # --- User AI API Keys ---

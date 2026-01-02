@@ -73,6 +73,13 @@ interface SupportSettings {
   };
 }
 
+interface SystemAISettings {
+  ai_features_enabled: boolean;
+  external_api_enabled: boolean;
+  mcp_server_enabled: boolean;
+  slack_bot_enabled: boolean;
+}
+
 @Component({
   selector: 'app-superadmin-settings',
   standalone: true,
@@ -736,6 +743,73 @@ interface SupportSettings {
           }
         </mat-card-content>
       </mat-card>
+
+      <!-- AI & Integration Settings Card -->
+      <mat-card>
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>auto_awesome</mat-icon>
+            AI & Integration Features
+          </mat-card-title>
+          <mat-card-subtitle>
+            Enable or disable AI features at the system level
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (aiLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <div class="form-section">
+              <h3>AI Features</h3>
+              <p class="hint">These settings control AI features system-wide. Tenants can only enable features that are enabled here.</p>
+
+              <div class="toggle-group">
+                <mat-slide-toggle [(ngModel)]="aiSettings.ai_features_enabled" (change)="onAiSettingChange()">
+                  Enable AI Features (Master Switch)
+                </mat-slide-toggle>
+                <p class="toggle-hint">Master switch for all AI features across all tenants</p>
+              </div>
+
+              <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                <mat-slide-toggle [(ngModel)]="aiSettings.external_api_enabled"
+                                  [disabled]="!aiSettings.ai_features_enabled"
+                                  (change)="onAiSettingChange()">
+                  Enable External API Access
+                </mat-slide-toggle>
+                <p class="toggle-hint">Allow tenants to enable MCP server and REST API access</p>
+              </div>
+
+              <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                <mat-slide-toggle [(ngModel)]="aiSettings.mcp_server_enabled"
+                                  [disabled]="!aiSettings.ai_features_enabled"
+                                  (change)="onAiSettingChange()">
+                  Enable MCP Server
+                </mat-slide-toggle>
+                <p class="toggle-hint">Allow development tools (Claude Code, Cursor, VS Code) to connect</p>
+              </div>
+
+              <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">
+                <mat-slide-toggle [(ngModel)]="aiSettings.slack_bot_enabled"
+                                  [disabled]="!aiSettings.ai_features_enabled"
+                                  (change)="onAiSettingChange()">
+                  Enable Slack AI Bot
+                </mat-slide-toggle>
+                <p class="toggle-hint">Allow tenants to use AI-powered queries in Slack</p>
+              </div>
+            </div>
+
+            <div class="actions">
+              <button mat-raised-button color="primary" (click)="saveAiSettings()" [disabled]="aiSaving">
+                <mat-spinner diameter="20" *ngIf="aiSaving"></mat-spinner>
+                <mat-icon *ngIf="!aiSaving">save</mat-icon>
+                <span *ngIf="!aiSaving">Save AI Settings</span>
+              </button>
+            </div>
+          }
+        </mat-card-content>
+      </mat-card>
     </div>
   `,
   styles: [`
@@ -1056,6 +1130,20 @@ interface SupportSettings {
       font-family: monospace;
       font-size: 13px;
     }
+
+    .toggle-group {
+      padding: 12px 0;
+    }
+
+    .toggle-group.disabled {
+      opacity: 0.5;
+    }
+
+    .toggle-hint {
+      margin: 4px 0 0 48px;
+      font-size: 13px;
+      color: #666;
+    }
   `]
 })
 export class SuperadminSettingsComponent implements OnInit {
@@ -1134,6 +1222,17 @@ export class SuperadminSettingsComponent implements OnInit {
     support_email: 'admin@decisionrecords.org'
   };
 
+  // AI settings
+  aiLoading = true;
+  aiSaving = false;
+  aiSettings: SystemAISettings = {
+    ai_features_enabled: false,
+    external_api_enabled: false,
+    mcp_server_enabled: false,
+    slack_bot_enabled: false
+  };
+  aiSettingsChanged = false;
+
   constructor(
     private http: HttpClient,
     private fb: FormBuilder,
@@ -1158,6 +1257,7 @@ export class SuperadminSettingsComponent implements OnInit {
     this.loadCloudflareSettings();
     this.loadLogForwardingSettings();
     this.loadSupportSettings();
+    this.loadAiSettings();
   }
 
   loadSettings() {
@@ -1558,6 +1658,51 @@ export class SuperadminSettingsComponent implements OnInit {
   resetSupportToDefaults() {
     this.supportForm.patchValue({
       support_email: this.supportDefaults.support_email
+    });
+  }
+
+  // AI Settings Methods
+  loadAiSettings() {
+    this.aiLoading = true;
+    this.http.get<{
+      ai_features_enabled: boolean;
+      external_api_enabled: boolean;
+      mcp_server_enabled: boolean;
+      slack_bot_enabled: boolean;
+    }>('/api/admin/settings/ai').subscribe({
+      next: (settings) => {
+        this.aiSettings = settings;
+        this.aiLoading = false;
+      },
+      error: () => {
+        this.aiLoading = false;
+        // Default to all disabled if API fails
+        this.aiSettings = {
+          ai_features_enabled: false,
+          external_api_enabled: false,
+          mcp_server_enabled: false,
+          slack_bot_enabled: false
+        };
+      }
+    });
+  }
+
+  onAiSettingChange() {
+    this.aiSettingsChanged = true;
+  }
+
+  saveAiSettings() {
+    this.aiSaving = true;
+    this.http.post('/api/admin/settings/ai', this.aiSettings).subscribe({
+      next: () => {
+        this.snackBar.open('AI settings saved successfully', 'Close', { duration: 3000 });
+        this.aiSaving = false;
+        this.aiSettingsChanged = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save AI settings', 'Close', { duration: 3000 });
+        this.aiSaving = false;
+      }
     });
   }
 }
