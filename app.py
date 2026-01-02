@@ -9035,10 +9035,20 @@ def api_get_tenant_ai_config():
     system_config = AIConfig.get_system_ai_config()
     tenant_config = AIConfig.get_tenant_ai_config(tenant)
 
+    # Return flat structure for frontend compatibility
     return jsonify({
-        'system': system_config,
-        'tenant': tenant_config,
+        # System-level settings (read-only for tenant admins)
         'system_ai_enabled': system_config['ai_features_enabled'],
+        'system_slack_bot_enabled': system_config['ai_slack_bot_enabled'],
+        'system_mcp_enabled': system_config['ai_mcp_server_enabled'],
+        'system_external_api_enabled': system_config['ai_external_api_enabled'],
+        # Tenant-level settings (configurable by tenant admins)
+        'ai_features_enabled': tenant_config['ai_features_enabled'],
+        'ai_slack_queries_enabled': tenant_config['ai_slack_queries_enabled'],
+        'ai_assisted_creation_enabled': tenant_config['ai_assisted_creation_enabled'],
+        'ai_external_access_enabled': tenant_config['ai_external_access_enabled'],
+        'ai_require_anonymization': tenant_config['ai_require_anonymization'],
+        'ai_log_interactions': tenant_config['ai_log_interactions'],
     })
 
 
@@ -9085,9 +9095,26 @@ def api_update_tenant_ai_config():
         }
     )
 
+    # Get updated config with system settings for response
+    system_config = AIConfig.get_system_ai_config()
+    tenant_config = AIConfig.get_tenant_ai_config(tenant)
+
     return jsonify({
         'message': 'Tenant AI configuration updated',
-        **AIConfig.get_tenant_ai_config(tenant)
+        'config': {
+            # System-level settings (read-only for tenant admins)
+            'system_ai_enabled': system_config['ai_features_enabled'],
+            'system_slack_bot_enabled': system_config['ai_slack_bot_enabled'],
+            'system_mcp_enabled': system_config['ai_mcp_server_enabled'],
+            'system_external_api_enabled': system_config['ai_external_api_enabled'],
+            # Tenant-level settings
+            'ai_features_enabled': tenant_config['ai_features_enabled'],
+            'ai_slack_queries_enabled': tenant_config['ai_slack_queries_enabled'],
+            'ai_assisted_creation_enabled': tenant_config['ai_assisted_creation_enabled'],
+            'ai_external_access_enabled': tenant_config['ai_external_access_enabled'],
+            'ai_require_anonymization': tenant_config['ai_require_anonymization'],
+            'ai_log_interactions': tenant_config['ai_log_interactions'],
+        }
     })
 
 

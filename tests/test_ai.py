@@ -1550,9 +1550,13 @@ class TestTenantAdminAISettingsAPI:
         assert response.status_code == 200
 
         data = response.get_json()
-        assert 'system' in data
-        assert 'tenant' in data
+        # Check flat structure with system-level settings
         assert 'system_ai_enabled' in data
+        assert 'system_slack_bot_enabled' in data
+        assert 'system_external_api_enabled' in data
+        # Check tenant-level settings
+        assert 'ai_features_enabled' in data
+        assert 'ai_slack_queries_enabled' in data
 
     def test_update_tenant_ai_config_requires_auth(self, api_client):
         """POST /api/tenant/ai/config requires authentication."""
@@ -1599,9 +1603,9 @@ class TestTenantAdminAISettingsAPI:
         # Check the message is present (may vary slightly)
         assert 'message' in data
         assert 'updated' in data['message'].lower()
-        # Config values are returned at top level (not nested in 'config')
-        assert data['ai_features_enabled'] is True
-        assert data['ai_external_access_enabled'] is True
+        # Config values are in nested 'config' object
+        assert data['config']['ai_features_enabled'] is True
+        assert data['config']['ai_external_access_enabled'] is True
 
     def test_update_tenant_ai_config_partial_update(self, api_app, admin_client, master_client):
         """POST /api/tenant/ai/config can update individual settings."""
@@ -1623,7 +1627,7 @@ class TestTenantAdminAISettingsAPI:
         })
         assert response.status_code == 200
 
-        # Verify settings are returned in response (config at top level)
+        # Verify settings are in nested 'config' object
         data = response.get_json()
-        assert data['ai_features_enabled'] is True
-        assert data['ai_external_access_enabled'] is True
+        assert data['config']['ai_features_enabled'] is True
+        assert data['config']['ai_external_access_enabled'] is True
