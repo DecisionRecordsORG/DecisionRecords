@@ -97,3 +97,4 @@ e2e/test-results/
 screenshots/
 style-guide/
 backups/
+local_secrets.py

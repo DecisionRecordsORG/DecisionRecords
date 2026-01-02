@@ -19,6 +19,18 @@ os.environ['DEBUG'] = 'true'
 os.environ['SKIP_CLOUDFLARE_CHECK'] = 'true'  # Disable Cloudflare origin check for local dev
 os.environ['COMMERCIAL_FEATURES_ENABLED'] = 'true'  # Enable Slack/Teams integrations
 
+# Microsoft Teams Integration (for local testing with ngrok)
+# Credentials are stored in local_secrets.py (gitignored)
+# Run ./scripts/deploy-teams-bot.sh --local to create them
+try:
+    from local_secrets import TEAMS_BOT_APP_ID, TEAMS_BOT_APP_SECRET, TEAMS_BOT_TENANT_ID
+    os.environ['TEAMS_BOT_APP_ID'] = TEAMS_BOT_APP_ID
+    os.environ['TEAMS_BOT_APP_SECRET'] = TEAMS_BOT_APP_SECRET
+    os.environ['TEAMS_BOT_TENANT_ID'] = TEAMS_BOT_TENANT_ID
+    print("Teams credentials loaded from local_secrets.py")
+except ImportError:
+    print("Teams credentials not found (local_secrets.py missing) - Teams integration disabled")
+
 # Import and run the app
 from app import app
 

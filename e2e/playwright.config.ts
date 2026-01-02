@@ -1,4 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
+import * as fs from 'fs';
+
+// Check for ngrok URL (created by ./scripts/start-ngrok.sh)
+let ngrokUrl: string | undefined;
+try {
+  if (fs.existsSync('/tmp/ngrok_url.txt')) {
+    ngrokUrl = fs.readFileSync('/tmp/ngrok_url.txt', 'utf-8').trim();
+    console.log(`ngrok URL detected: ${ngrokUrl}`);
+  }
+} catch {
+  // ngrok not running, use localhost
+}
 
 export default defineConfig({
   testDir: './tests',
@@ -16,6 +28,8 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
+    // Make ngrok URL available to tests via extraHTTPHeaders or custom fixture
+    extraHTTPHeaders: ngrokUrl ? { 'X-Ngrok-URL': ngrokUrl } : {},
   },
 
   projects: [

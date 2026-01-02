@@ -74,6 +74,55 @@ Application Gateway template for production deployments:
 - Backend pool configuration
 - HTTP settings and health probes
 
+### `teams-bot-template.json`
+Microsoft Teams Bot integration template:
+- Azure Bot Service (Single-Tenant) for 2025+ compliance
+- Microsoft Teams channel configuration
+- Key Vault secrets for bot credentials
+- Messaging endpoint configuration
+
+**Prerequisites:**
+1. Create an Azure AD App Registration (Single-Tenant)
+2. Generate a client secret for the app
+3. Note the Application (client) ID and Directory (tenant) ID
+
+**Usage:**
+```bash
+# Deploy Teams Bot infrastructure
+./scripts/deploy-teams-bot.sh
+```
+
+Or manually:
+```bash
+# Variables (get from Azure AD App Registration)
+APP_ID="<your-app-registration-client-id>"
+APP_TENANT_ID="<your-azure-ad-tenant-id>"
+APP_SECRET="<your-app-registration-client-secret>"
+
+# Deploy
+az deployment group create \
+  --resource-group adr-resources-eu \
+  --template-file teams-bot-template.json \
+  --parameters \
+    appId="$APP_ID" \
+    appTenantId="$APP_TENANT_ID" \
+    botAppSecret="$APP_SECRET"
+```
+
+**Default Parameters:**
+| Parameter | Default Value |
+|-----------|---------------|
+| botName | adr-teams-bot |
+| botDisplayName | Decision Records |
+| messagingEndpoint | https://decisionrecords.org/api/teams/webhook |
+| keyVaultName | adr-keyvault-eu |
+
+**Teams App Manifest:**
+After deploying the bot, update `teams-app-manifest.json` in the project root:
+1. Replace `{{BOT_APP_ID}}` with the actual App ID
+2. Create a Teams app package (ZIP with manifest + icons)
+3. Upload to Teams Admin Center or sideload for testing
+
 ## Prerequisites
 
 Before deploying, ensure you have:
@@ -163,6 +212,9 @@ The container uses Azure Managed Identity to access secrets from Key Vault:
 | `smtp-username` | Email SMTP authentication |
 | `smtp-password` | Email SMTP authentication |
 | `posthog-api-key` | Analytics API key |
+| `teams-bot-app-id` | Teams Bot Azure AD Application (client) ID |
+| `teams-bot-app-secret` | Teams Bot Azure AD client secret |
+| `teams-bot-tenant-id` | Teams Bot Azure AD tenant ID (single-tenant) |
 
 The ARM template automatically:
 1. Creates a SystemAssigned managed identity for the container
