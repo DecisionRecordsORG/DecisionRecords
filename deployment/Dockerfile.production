@@ -29,6 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy Python application files
 COPY *.py ./
+COPY ai/ ./ai/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
