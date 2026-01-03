@@ -6637,7 +6637,13 @@ def api_list_tenants():
 
             # Calculate age (handle None created_at for legacy tenants)
             if tenant.created_at:
-                age_days = (datetime.now(timezone.utc) - tenant.created_at).days
+                # Handle both naive and aware datetimes
+                now = datetime.now(timezone.utc)
+                created = tenant.created_at
+                if created.tzinfo is None:
+                    # Naive datetime - assume UTC
+                    created = created.replace(tzinfo=timezone.utc)
+                age_days = (now - created).days
             else:
                 age_days = None
 
@@ -6689,7 +6695,12 @@ def api_get_tenant_maturity(domain):
 
     # Calculate age (handle None created_at)
     if tenant.created_at:
-        age_days = (datetime.now(timezone.utc) - tenant.created_at).days
+        # Handle both naive and aware datetimes
+        now = datetime.now(timezone.utc)
+        created = tenant.created_at
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        age_days = (now - created).days
     else:
         age_days = 0
 
