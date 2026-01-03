@@ -9374,84 +9374,128 @@ def api_get_tenant_ai_logs():
     })
 
 
-# --- MCP Server Endpoint ---
+# --- MCP Server Endpoint (Claude Code Compatible) ---
 
-@app.route('/api/mcp', methods=['POST'])
+# MCP Protocol Version supported
+MCP_PROTOCOL_VERSION = "2025-11-25"
+
+# Simple in-memory session store (in production, use Redis or similar)
+_mcp_sessions = {}
+
+@app.route('/api/mcp', methods=['GET', 'POST'])
 def api_mcp_handler():
     """
     MCP (Model Context Protocol) endpoint for developer tools.
 
-    Handles MCP JSON-RPC requests from tools like Claude Code, Cursor, and VS Code.
+    Implements the Streamable HTTP transport for Claude Code, Cursor, and VS Code.
+    Supports both POST (client→server) and GET (SSE stream for server→client).
+
     Authentication is via API key in the Authorization header.
 
     Supported methods:
+    - initialize: Initialize the MCP session
     - tools/list: List available tools
     - tools/call: Execute a tool
     """
-    from ai.mcp import handle_mcp_request
+    from ai.mcp import handle_mcp_request, get_tools
     from ai.config import AIConfig
+    import uuid
 
     # Check system-level MCP availability
     if not AIConfig.get_system_ai_enabled():
-        return jsonify({
-            'jsonrpc': '2.0',
-            'id': request.json.get('id') if request.is_json else None,
-            'error': {
-                'code': -32600,
-                'message': 'AI features are not enabled'
-            }
-        }), 400
+        return _mcp_error_response(None, -32600, 'AI features are not enabled'), 400
 
     if not AIConfig.get_system_mcp_server_enabled():
-        return jsonify({
-            'jsonrpc': '2.0',
-            'id': request.json.get('id') if request.is_json else None,
-            'error': {
-                'code': -32600,
-                'message': 'MCP server is not enabled'
-            }
-        }), 400
+        return _mcp_error_response(None, -32600, 'MCP server is not enabled'), 400
 
+    # Handle GET request (SSE stream for server-initiated messages)
+    if request.method == 'GET':
+        # For now, we don't support server-initiated messages
+        # Return 405 to indicate GET is not supported for this endpoint
+        return jsonify({
+            'error': 'GET method not supported. Use POST for MCP requests.'
+        }), 405
+
+    # POST request handling
     # Get API key from Authorization header
     auth_header = request.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
-        return jsonify({
-            'jsonrpc': '2.0',
-            'id': request.json.get('id') if request.is_json else None,
-            'error': {
-                'code': -32600,
-                'message': 'Missing or invalid Authorization header. Use: Bearer <api_key>'
-            }
-        }), 401
+        return _mcp_error_response(None, -32600,
+            'Missing or invalid Authorization header. Use: Bearer <api_key>'), 401
 
     api_key = auth_header[7:]  # Remove 'Bearer ' prefix
 
     if not request.is_json:
-        return jsonify({
-            'jsonrpc': '2.0',
-            'id': None,
-            'error': {
-                'code': -32700,
-                'message': 'Parse error: Request must be valid JSON'
-            }
-        }), 400
+        return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
 
     request_data = request.get_json()
+    request_id = request_data.get('id')
+    method = request_data.get('method', '')
+
+    # Handle initialize method specially
+    if method == 'initialize':
+        # Generate session ID
+        session_id = str(uuid.uuid4())
+        _mcp_sessions[session_id] = {
+            'api_key': api_key,
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+
+        response = jsonify({
+            'jsonrpc': '2.0',
+            'id': request_id,
+            'result': {
+                'protocolVersion': MCP_PROTOCOL_VERSION,
+                'capabilities': {
+                    'tools': {}
+                },
+                'serverInfo': {
+                    'name': 'decision-records',
+                    'version': '1.0.0'
+                }
+            }
+        })
+        response.headers['MCP-Session-Id'] = session_id
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    # Handle initialized notification (client confirms initialization)
+    if method == 'notifications/initialized':
+        return '', 202
 
     # Handle the MCP request
-    response = handle_mcp_request(request_data, api_key)
+    response_data = handle_mcp_request(request_data, api_key)
+
+    # Build response with proper headers
+    response = jsonify(response_data)
+    response.headers['Content-Type'] = 'application/json'
+
+    # Include session ID if present in request
+    session_id = request.headers.get('MCP-Session-Id')
+    if session_id:
+        response.headers['MCP-Session-Id'] = session_id
 
     # Determine status code based on response
-    if 'error' in response:
-        error_code = response['error'].get('code', -32000)
+    if 'error' in response_data:
+        error_code = response_data['error'].get('code', -32000)
         if error_code == -32600:  # Invalid Request
-            return jsonify(response), 400
+            return response, 400
         elif error_code == -32601:  # Method not found
-            return jsonify(response), 404
-        else:
-            return jsonify(response), 200  # Tool errors still return 200
+            return response, 404
 
-    return jsonify(response)
+    return response
+
+
+def _mcp_error_response(request_id, code, message):
+    """Helper to create MCP error response."""
+    return jsonify({
+        'jsonrpc': '2.0',
+        'id': request_id,
+        'error': {
+            'code': code,
+            'message': message
+        }
+    })
 
 
 # =============================================================================
