@@ -17,6 +17,72 @@ Architecture Decisions is a multi-tenant web application for managing Architectu
 - **Auth**: WebAuthn/Passkeys, OIDC SSO, local auth
 - **Deployment**: Docker → Azure Container Instances
 - **CDN/SSL**: Cloudflare (Free plan) with Origin Server certificates
+- **Decision Repository**: This project uses its own platform via MCP integration
+
+## Architecture Decision Records (ADRs)
+
+This project uses the Decision Records platform to document architecture decisions. Claude Code has access to the `decision-records` MCP server to search, read, and create decisions.
+
+### When to Create an Architecture Decision
+
+**CREATE a decision record when:**
+- Choosing between multiple valid technical approaches
+- Introducing new dependencies, frameworks, or external services
+- Changing API contracts or database schemas (especially breaking changes)
+- Establishing patterns that will be followed project-wide
+- Making security or authentication design choices
+- Defining integration approaches with external systems (Slack, Teams, MCP, etc.)
+- Making infrastructure or deployment architecture decisions
+- Deprecating or replacing existing architectural components
+
+**DO NOT create a decision record for:**
+- Bug fixes (unless they reveal a design flaw requiring architectural change)
+- Simple feature additions that follow established patterns
+- Code refactoring that doesn't change the architecture
+- Documentation updates
+- Configuration changes
+- Minor dependency version updates
+
+### How to Create Decisions
+
+Use the MCP tools to interact with the decision repository:
+
+```bash
+# Search existing decisions before creating new ones
+mcp__decision-records__search_decisions(query="authentication")
+
+# List recent decisions
+mcp__decision-records__list_decisions(limit=10)
+
+# Get full details of a decision
+mcp__decision-records__get_decision(id="ADR-003")
+
+# Create a new decision
+mcp__decision-records__create_decision(
+  title="Short descriptive title",
+  context="Why this decision is needed, what forces are at play",
+  decision="What we decided and why",
+  consequences="Positive, negative, and neutral impacts",
+  status="proposed"  # or "accepted" if already implemented
+)
+```
+
+### Decision Format (arc42)
+
+Decisions follow the arc42 ADR format:
+
+1. **Title**: Short, descriptive (e.g., "Use PostgreSQL for persistent storage")
+2. **Context**: Background, problem statement, decision drivers
+3. **Decision**: What was decided, implementation details, criteria
+4. **Consequences**: Positive, negative, and neutral impacts
+5. **Status**: `proposed`, `accepted`, `deprecated`, or `superseded`
+
+### Before Making Architectural Changes
+
+1. **Search existing decisions** to understand prior context
+2. **Check if a similar decision exists** that should be updated or superseded
+3. **Create a new decision** if making a significant architectural choice
+4. **Reference the decision** in commit messages when implementing (e.g., "Implements ADR-003")
 
 ## Critical Deployment Rules
 
