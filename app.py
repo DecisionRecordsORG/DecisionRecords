@@ -262,6 +262,80 @@ db.init_app(app)
 # Database initialization flag
 _db_initialized = False
 
+# Blog posts to auto-seed (source of truth for blog metadata)
+# Content is stored in Angular component; this is metadata only
+BLOG_POSTS_SEED = [
+    {
+        'slug': 'claude-code-integration-with-decision-records',
+        'title': 'Claude Code Integration With Decision Records',
+        'excerpt': "Two commands. That's all it takes to give Claude Code persistent access to your team's architecture decisions. Here's the complete setup guide.",
+        'author': 'Decision Records',
+        'category': 'Technical',
+        'read_time': '6 min read',
+        'image': '/assets/blog/claude-code-integration.svg',
+        'meta_description': 'Learn how to integrate Claude Code with Decision Records to give your AI assistant persistent access to architecture decisions. Complete setup guide with copy-paste commands.',
+        'featured': True,
+        'publish_date': datetime(2025, 1, 4, tzinfo=timezone.utc),
+    },
+    {
+        'slug': 'how-should-teams-document-important-decisions',
+        'title': 'How Should Teams Document Important Decisions?',
+        'excerpt': 'Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
+        'author': 'Decision Records',
+        'category': 'Documentation',
+        'read_time': '5 min read',
+        'image': '/assets/blog/documenting-decisions.svg',
+        'meta_description': 'Learn how teams can effectively document important decisions without creating overhead.',
+        'featured': False,
+        'publish_date': datetime(2024, 12, 1, tzinfo=timezone.utc),
+    },
+    {
+        'slug': 'how-to-track-decisions-at-a-startup',
+        'title': 'How to Track Decisions at a Startup',
+        'excerpt': "Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we'll remember. That assumption rarely holds.",
+        'author': 'Decision Records',
+        'category': 'Startups',
+        'read_time': '7 min read',
+        'image': '/assets/blog/startup-decisions.svg',
+        'meta_description': 'Practical guide to tracking decisions at fast-moving startups without slowing down.',
+        'featured': False,
+        'publish_date': datetime(2024, 12, 15, tzinfo=timezone.utc),
+    },
+    {
+        'slug': 'decision-habit-framework-fashion-brands',
+        'title': 'A Decision Habit Framework for Fast-Moving Fashion Brands',
+        'excerpt': 'Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
+        'author': 'Decision Records',
+        'category': 'Retail',
+        'read_time': '5 min read',
+        'image': '/assets/blog/fashion-decisions.svg',
+        'meta_description': 'A decision documentation framework designed for the fast pace of fashion retail.',
+        'featured': False,
+        'publish_date': datetime(2024, 12, 20, tzinfo=timezone.utc),
+    },
+]
+
+
+def seed_blog_posts():
+    """Seed blog posts that don't exist in the database yet."""
+    from models import BlogPost
+
+    created_count = 0
+    for post_data in BLOG_POSTS_SEED:
+        existing = BlogPost.query.filter_by(slug=post_data['slug']).first()
+        if not existing:
+            post = BlogPost(**post_data)
+            db.session.add(post)
+            logger.info(f"Seeding blog post: {post_data['slug']}")
+            created_count += 1
+
+    if created_count > 0:
+        db.session.commit()
+        logger.info(f"Seeded {created_count} new blog post(s)")
+    else:
+        logger.info("All blog posts already exist in database")
+
+
 def init_database():
     """Initialize database tables and master account on first request"""
     global _db_initialized, app_error_state
@@ -839,6 +913,14 @@ def init_database():
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                 logger.info("Schema migrations completed")
+
+                # Seed blog posts (auto-adds any missing posts from BLOG_POSTS_SEED)
+                logger.info("Checking blog posts...")
+                try:
+                    seed_blog_posts()
+                except Exception as blog_error:
+                    logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
+                    db.session.rollback()
 
                 # Create default master account
                 logger.info("Creating default master account...")
