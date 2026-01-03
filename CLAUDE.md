@@ -92,6 +92,80 @@ The version is displayed in:
 - Container logs on startup
 - Health check endpoint
 
+## Database Migration Guidelines
+
+### CRITICAL: When Adding New Database Columns or Tables
+
+**When modifying SQLAlchemy models that affect existing database tables, you MUST:**
+
+1. **Update the model** in `models.py` with the new column/table definition
+2. **Create a migration script** in `scripts/migrate_to_vXXX.py` to add the column/table to existing databases
+3. **Verify fresh initialization** works by testing with a new database (SQLAlchemy's `db.create_all()` handles this)
+4. **Run the migration** on production before deploying new code that uses the column
+
+### Why This Matters
+
+- **Fresh databases**: `db.create_all()` in `app.py` creates all tables/columns from model definitions - no migration needed
+- **Existing databases**: Production databases need explicit ALTER TABLE statements to add new columns
+- **Deployment order**: If you deploy code that queries a column that doesn't exist, you get 500 errors
+
+### Migration Script Pattern
+
+Migration scripts should be:
+- **Idempotent**: Can be run multiple times safely (check if column/table exists before adding)
+- **Named by version**: `migrate_to_v113.py` for version 1.13.0
+- **Support dry-run**: `--dry-run` flag to preview changes without making them
+
+Example structure:
+```python
+def column_exists(cur, table_name, column_name):
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.columns
+            WHERE table_schema = 'public'
+            AND table_name = %s AND column_name = %s
+        )
+    """, (table_name, column_name))
+    return cur.fetchone()[0]
+
+def add_new_column(cur, dry_run=False):
+    if column_exists(cur, 'tenants', 'new_column'):
+        print("  Column already exists")
+        return 0
+    if dry_run:
+        print("  [DRY-RUN] Would add column")
+        return 0
+    cur.execute("ALTER TABLE tenants ADD COLUMN new_column BOOLEAN DEFAULT FALSE")
+    return 1
+```
+
+### Running Migrations
+
+```bash
+# Preview changes (dry-run)
+DATABASE_URL="postgresql://..." python scripts/migrate_to_v113.py --dry-run --verbose
+
+# Apply changes
+DATABASE_URL="postgresql://..." python scripts/migrate_to_v113.py --verbose
+```
+
+### Existing Migration Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/migrate_to_v15.py` | v1.5 Governance model (tenants, memberships) |
+| `scripts/migrate_to_v113.py` | v1.13 AI, Slack, Teams, Blog features |
+
+### Common New Column Scenarios
+
+| Change Type | Model Update | Migration Needed |
+|-------------|--------------|------------------|
+| New column on existing table | Add to model class | Yes - ALTER TABLE |
+| New table | Add new model class | Yes - CREATE TABLE |
+| Column with default | Add with `default=` | Yes - with DEFAULT clause |
+| Nullable column | Add with `nullable=True` | Yes - no NOT NULL |
+| New enum type | Add enum to models | Yes - CREATE TYPE before table |
+
 ## Secrets Management
 
 All secrets are stored in Azure Key Vault (`adr-keyvault-eu`):
