@@ -3,6 +3,8 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTabsModule } from '@angular/material/tabs';
+import { Clipboard, ClipboardModule } from '@angular/cdk/clipboard';
 
 @Component({
   selector: 'app-mcp-integration',
@@ -11,7 +13,9 @@ import { MatIconModule } from '@angular/material/icon';
     CommonModule,
     RouterModule,
     MatButtonModule,
-    MatIconModule
+    MatIconModule,
+    MatTabsModule,
+    ClipboardModule
   ],
   template: `
     <div class="mcp-page">
@@ -26,10 +30,10 @@ import { MatIconModule } from '@angular/material/icon';
             </div>
             <h1>MCP Server Integration</h1>
             <p class="hero-tagline">
-              Access decision records directly from your development tools
+              Your architecture decisions, right where you code
             </p>
             <p class="hero-description">
-              Connect Claude Code, Cursor, VS Code, and other MCP-compatible tools to search, read, and create architecture decisions without leaving your IDE.
+              Connect Claude Code, Cursor, or any MCP-compatible tool and let your AI assistant access your team's architecture decisions. Ask questions in natural language—no context switching required.
             </p>
           </div>
         </div>
@@ -42,31 +46,31 @@ import { MatIconModule } from '@angular/material/icon';
 
           <div class="tools-grid">
             <div class="tool-card">
-              <div class="tool-icon claude">
-                <mat-icon>smart_toy</mat-icon>
+              <div class="tool-icon-wrapper claude">
+                <img src="/assets/claude-code-icon.svg" alt="Claude Code" class="tool-svg-icon" />
               </div>
               <h3>Claude Code</h3>
               <p>Anthropic's AI coding assistant with native MCP support</p>
             </div>
 
             <div class="tool-card">
-              <div class="tool-icon cursor">
-                <mat-icon>edit_note</mat-icon>
+              <div class="tool-icon-wrapper cursor">
+                <img src="/assets/cursor-icon.svg" alt="Cursor" class="tool-svg-icon" />
               </div>
               <h3>Cursor</h3>
               <p>AI-first code editor with MCP server configuration</p>
             </div>
 
             <div class="tool-card">
-              <div class="tool-icon vscode">
-                <mat-icon>code</mat-icon>
+              <div class="tool-icon-wrapper vscode">
+                <img src="/assets/vscode-svgrepo-com.svg" alt="VS Code" class="tool-svg-icon" />
               </div>
               <h3>VS Code</h3>
               <p>Via MCP extension for Visual Studio Code</p>
             </div>
 
             <div class="tool-card">
-              <div class="tool-icon other">
+              <div class="tool-icon-wrapper other">
                 <mat-icon>extension</mat-icon>
               </div>
               <h3>Other MCP Tools</h3>
@@ -76,50 +80,121 @@ import { MatIconModule } from '@angular/material/icon';
         </div>
       </section>
 
-      <!-- Features Section -->
-      <section class="features-section">
+      <!-- What You Can Say Section -->
+      <section class="conversation-section">
         <div class="container">
-          <h2>What You Can Do</h2>
+          <h2>Just Ask Your AI Assistant</h2>
+          <p class="section-intro">
+            Once connected, your AI assistant can search, read, and create decisions using natural language. Here are some things you can say:
+          </p>
 
-          <div class="features-grid">
-            <div class="feature-card">
-              <div class="feature-icon">
+          <div class="conversation-grid">
+            <div class="conversation-card">
+              <div class="conversation-icon search">
                 <mat-icon>search</mat-icon>
               </div>
-              <h3>Search Decisions</h3>
-              <p>
-                Find relevant decisions using natural language queries. Filter by status, search across all fields.
-              </p>
-            </div>
-
-            <div class="feature-card">
-              <div class="feature-icon">
-                <mat-icon>visibility</mat-icon>
+              <div class="conversation-content">
+                <h3>Search & Discover</h3>
+                <ul class="conversation-examples">
+                  <li>"Search for decisions about authentication"</li>
+                  <li>"Find all accepted decisions about our API"</li>
+                  <li>"What decisions have we made about caching?"</li>
+                  <li>"Show me recent architecture decisions"</li>
+                </ul>
               </div>
-              <h3>Read Full Context</h3>
-              <p>
-                Access complete decision records including context, rationale, and consequences.
-              </p>
             </div>
 
-            <div class="feature-card">
-              <div class="feature-icon">
+            <div class="conversation-card">
+              <div class="conversation-icon read">
+                <mat-icon>description</mat-icon>
+              </div>
+              <div class="conversation-content">
+                <h3>Get Full Context</h3>
+                <ul class="conversation-examples">
+                  <li>"Get the details of ADR-42"</li>
+                  <li>"What was the rationale for using PostgreSQL?"</li>
+                  <li>"Show me the consequences of our event-driven decision"</li>
+                  <li>"What's the history of changes to ADR-15?"</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="conversation-card">
+              <div class="conversation-icon create">
                 <mat-icon>add_circle</mat-icon>
               </div>
-              <h3>Create Decisions</h3>
-              <p>
-                Draft new decisions directly from your IDE when you make architectural choices in code.
-              </p>
+              <div class="conversation-content">
+                <h3>Create New Decisions</h3>
+                <ul class="conversation-examples">
+                  <li>"Create a decision about using Redis for session storage"</li>
+                  <li>"Document our choice to adopt GraphQL for the new API"</li>
+                  <li>"I just decided to use TypeScript—create an ADR for it"</li>
+                  <li>"Record our decision to migrate to microservices"</li>
+                </ul>
+              </div>
             </div>
 
-            <div class="feature-card">
-              <div class="feature-icon">
-                <mat-icon>history</mat-icon>
+            <div class="conversation-card">
+              <div class="conversation-icon context">
+                <mat-icon>psychology</mat-icon>
               </div>
-              <h3>View Change History</h3>
-              <p>
-                Track how decisions evolved over time with full audit history.
+              <div class="conversation-content">
+                <h3>Contextual Assistance</h3>
+                <ul class="conversation-examples">
+                  <li>"Before I implement this, are there any relevant decisions?"</li>
+                  <li>"Does this approach conflict with our architecture decisions?"</li>
+                  <li>"What patterns have we decided on for error handling?"</li>
+                  <li>"List all proposed decisions that need review"</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Features Section - Side by Side Layout -->
+      <section class="features-section">
+        <div class="container">
+          <div class="features-layout">
+            <div class="features-content">
+              <span class="features-badge">Seamless Integration</span>
+              <h2>Your decisions, right in your IDE</h2>
+              <p class="features-intro">
+                No more switching tabs or digging through docs. Your AI assistant fetches decisions instantly.
               </p>
+              <div class="features-list">
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Search with natural language</strong>
+                    <span>"What did we decide about caching?"</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Full context inline</strong>
+                    <span>See rationale, consequences, and status</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Create while you code</strong>
+                    <span>Capture decisions the moment you make them</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Track decision history</strong>
+                    <span>See how decisions evolved over time</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="features-visual">
+              <img src="/assets/mcp-ide-mockup.svg" alt="MCP integration in IDE showing AI assistant searching and creating decisions" />
             </div>
           </div>
         </div>
@@ -155,73 +230,196 @@ import { MatIconModule } from '@angular/material/icon';
         </div>
       </section>
 
-      <!-- Setup Section -->
+      <!-- Setup Section - ngrok inspired -->
       <section class="setup-section">
         <div class="container">
-          <h2>Quick Setup</h2>
-
-          <div class="setup-steps">
-            <div class="step">
-              <div class="step-number">1</div>
-              <div class="step-content">
-                <h3>Generate an API Key</h3>
-                <p>Go to your account settings in Decision Records and create a new API key with the scopes you need (read, search, write).</p>
+          <!-- Step 1: Generate API Key -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">1</span>
+              <div class="step-title">
+                <h2>Generate an API Key</h2>
+                <p>Create an API key with the permissions you need</p>
               </div>
             </div>
-
-            <div class="step">
-              <div class="step-number">2</div>
-              <div class="step-content">
-                <h3>Configure Your Tool</h3>
-                <p>Add the MCP server configuration to your development tool. The server URL and authentication details are provided below.</p>
-              </div>
-            </div>
-
-            <div class="step">
-              <div class="step-number">3</div>
-              <div class="step-content">
-                <h3>Start Using</h3>
-                <p>Your AI assistant can now search, read, and create decision records directly in your workflow.</p>
+            <div class="step-body">
+              <div class="key-generation-card">
+                <div class="key-info">
+                  <mat-icon>vpn_key</mat-icon>
+                  <div>
+                    <h3>API Key Scopes</h3>
+                    <p>Select the permissions for your key when creating it in your profile settings</p>
+                  </div>
+                </div>
+                <div class="scope-options">
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon read">visibility</mat-icon>
+                    <div>
+                      <strong>Read</strong>
+                      <span>View decision details</span>
+                    </div>
+                  </div>
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon search">search</mat-icon>
+                    <div>
+                      <strong>Search</strong>
+                      <span>Find decisions by keywords</span>
+                    </div>
+                  </div>
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon write">edit</mat-icon>
+                    <div>
+                      <strong>Write</strong>
+                      <span>Create new decisions</span>
+                    </div>
+                  </div>
+                </div>
+                <a routerLink="/dashboard" class="generate-key-btn">
+                  <mat-icon>add</mat-icon>
+                  Generate API Key
+                </a>
               </div>
             </div>
           </div>
 
-          <!-- Configuration Examples -->
-          <div class="config-examples">
-            <h3>Configuration Examples</h3>
-
-            <div class="config-card">
-              <div class="config-header">
-                <span class="config-title">Claude Code / Cursor</span>
+          <!-- Step 2: Connect -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">2</span>
+              <div class="step-title">
+                <h2>Connect</h2>
+                <p>Add the MCP server to your development tool</p>
               </div>
-              <div class="code-block">
-                <pre><code>{{ '{' }}
+            </div>
+            <div class="step-body">
+              <!-- Tool Tabs -->
+              <mat-tab-group class="tool-tabs" animationDuration="200ms">
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>terminal</mat-icon>
+                      <span>Claude Code</span>
+                      <span class="tab-badge">Recommended</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Run this command in your terminal:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ claudeCodeCommand }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(claudeCodeCommand)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                    <p class="tab-note">Then verify the connection:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ claudeListCommand }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(claudeListCommand)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>edit_note</mat-icon>
+                      <span>Cursor</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Add to <code>~/.cursor/mcp.json</code>:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ '{' }}
   "mcpServers": {{ '{' }}
     "decision-records": {{ '{' }}
       "url": "https://decisionrecords.org/api/mcp",
       "headers": {{ '{' }}
-        "Authorization": "Bearer adr_your_api_key_here"
+        "Authorization": "Bearer YOUR_API_KEY"
       {{ '}' }}
     {{ '}' }}
   {{ '}' }}
 {{ '}' }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(cursorConfig)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>extension</mat-icon>
+                      <span>Continue.dev</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Add to <code>~/.continue/config.json</code>:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ '{' }}
+  "mcpServers": [
+    {{ '{' }}
+      "name": "decision-records",
+      "transport": {{ '{' }}
+        "type": "http",
+        "url": "https://decisionrecords.org/api/mcp",
+        "headers": {{ '{' }}
+          "Authorization": "Bearer YOUR_API_KEY"
+        {{ '}' }}
+      {{ '}' }}
+    {{ '}' }}
+  ]
+{{ '}' }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(continueConfig)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>code</mat-icon>
+                      <span>cURL</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Test the connection:</p>
+                    <div class="code-block-modern">
+                      <pre><code>curl -X POST https://decisionrecords.org/api/mcp \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{{ '{' }}"jsonrpc": "2.0", "id": 1, "method": "tools/list"{{ '}' }}'</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(curlCommand)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+              </mat-tab-group>
+            </div>
+          </div>
+
+          <!-- Step 3: Start Using -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">3</span>
+              <div class="step-title">
+                <h2>Start Using</h2>
+                <p>Ask your AI assistant about your architecture decisions</p>
               </div>
             </div>
-
-            <div class="config-card">
-              <div class="config-header">
-                <span class="config-title">API Endpoint</span>
-              </div>
-              <div class="code-block">
-                <pre><code>POST https://decisionrecords.org/api/mcp
-Authorization: Bearer adr_your_api_key_here
-Content-Type: application/json
-
-{{ '{' }}
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/list"
-{{ '}' }}</code></pre>
+            <div class="step-body">
+              <div class="ready-card">
+                <mat-icon class="ready-icon">check_circle</mat-icon>
+                <div class="ready-content">
+                  <h3>You're all set!</h3>
+                  <p>Try asking your AI assistant:</p>
+                  <div class="example-prompts">
+                    <span class="prompt">"Search for decisions about authentication"</span>
+                    <span class="prompt">"What did we decide about caching?"</span>
+                    <span class="prompt">"Create a decision about using Redis"</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -374,33 +572,41 @@ Content-Type: application/json
       text-align: center;
     }
 
-    .tool-icon {
-      width: 56px;
-      height: 56px;
+    .tool-icon-wrapper {
+      width: 64px;
+      height: 64px;
       border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 16px;
+      overflow: hidden;
     }
 
-    .tool-icon.claude {
-      background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+    .tool-icon-wrapper.claude {
+      background: transparent;
     }
 
-    .tool-icon.cursor {
-      background: linear-gradient(135deg, #7c3aed 0%, #a78bfa 100%);
+    .tool-icon-wrapper.cursor {
+      background: #f8fafc;
+      padding: 10px;
     }
 
-    .tool-icon.vscode {
-      background: linear-gradient(135deg, #0078d4 0%, #00bcf2 100%);
+    .tool-icon-wrapper.vscode {
+      background: transparent;
     }
 
-    .tool-icon.other {
+    .tool-icon-wrapper.other {
       background: linear-gradient(135deg, #475569 0%, #64748b 100%);
     }
 
-    .tool-icon mat-icon {
+    .tool-svg-icon {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .tool-icon-wrapper mat-icon {
       color: white;
       font-size: 28px;
       width: 28px;
@@ -421,63 +627,196 @@ Content-Type: application/json
       margin: 0;
     }
 
-    /* Features */
-    .features-section {
+    /* Conversation Section */
+    .conversation-section {
       padding: 80px 0;
-      background: #f1f5f9;
+      background: linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%);
     }
 
-    .features-section h2 {
+    .conversation-section h2 {
       font-size: 1.75rem;
       font-weight: 600;
       color: #0f172a;
       text-align: center;
-      margin: 0 0 48px;
+      margin: 0 0 12px;
     }
 
-    .features-grid {
+    .section-intro {
+      font-size: 1.1rem;
+      color: #64748b;
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto 48px;
+      line-height: 1.6;
+    }
+
+    .conversation-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
       gap: 24px;
     }
 
-    .feature-card {
+    .conversation-card {
       background: white;
       padding: 28px;
       border-radius: 16px;
-      border: 1px solid #e2e8f0;
+      border: 1px solid #e9d5ff;
+      display: flex;
+      gap: 20px;
     }
 
-    .feature-icon {
+    .conversation-icon {
       width: 48px;
       height: 48px;
-      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
       border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 16px;
+      flex-shrink: 0;
     }
 
-    .feature-icon mat-icon {
+    .conversation-icon.search {
+      background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+    }
+
+    .conversation-icon.read {
+      background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    }
+
+    .conversation-icon.create {
+      background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    }
+
+    .conversation-icon.context {
+      background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    }
+
+    .conversation-icon mat-icon {
       color: white;
       font-size: 24px;
       width: 24px;
       height: 24px;
     }
 
-    .feature-card h3 {
-      font-size: 1.15rem;
+    .conversation-content h3 {
+      font-size: 1.1rem;
       font-weight: 600;
       color: #0f172a;
-      margin: 0 0 8px;
+      margin: 0 0 12px;
     }
 
-    .feature-card p {
-      font-size: 0.95rem;
+    .conversation-examples {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .conversation-examples li {
+      font-size: 0.9rem;
+      color: #475569;
+      padding: 8px 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      border-left: 3px solid #8b5cf6;
+      font-style: italic;
+    }
+
+    .conversation-examples li:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Features - Side by Side Layout */
+    .features-section {
+      padding: 80px 0;
+      background: #f1f5f9;
+    }
+
+    .features-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .features-badge {
+      display: inline-block;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+      color: white;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 100px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .features-content h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 16px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .features-intro {
+      font-size: 1.1rem;
       color: #64748b;
       line-height: 1.6;
-      margin: 0;
+      margin: 0 0 32px;
+    }
+
+    .features-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .feature-item {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .feature-check {
+      color: #22c55e;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .feature-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .feature-text strong {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .feature-text span {
+      font-size: 0.9rem;
+      color: #64748b;
+    }
+
+    .features-visual {
+      display: flex;
+      justify-content: center;
+    }
+
+    .features-visual img {
+      max-width: 100%;
+      height: auto;
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.15));
+      border-radius: 12px;
     }
 
     /* MCP Tools List */
@@ -523,109 +862,323 @@ Content-Type: application/json
       margin: 0;
     }
 
-    /* Setup */
+    /* Setup - ngrok inspired */
     .setup-section {
       padding: 80px 0;
-      background: #f1f5f9;
+      background: #0f172a;
     }
 
-    .setup-section h2 {
-      font-size: 1.75rem;
-      font-weight: 600;
-      color: #0f172a;
-      text-align: center;
-      margin: 0 0 48px;
-    }
-
-    .setup-steps {
-      max-width: 600px;
+    .setup-step {
+      max-width: 800px;
       margin: 0 auto 48px;
     }
 
-    .step {
-      display: flex;
-      gap: 24px;
-      margin-bottom: 32px;
-    }
-
-    .step:last-child {
+    .setup-step:last-child {
       margin-bottom: 0;
     }
 
-    .step-number {
-      width: 40px;
-      height: 40px;
+    .step-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .step-badge {
+      width: 48px;
+      height: 48px;
       background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
       color: white;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 600;
-      font-size: 1.1rem;
+      font-weight: 700;
+      font-size: 1.25rem;
       flex-shrink: 0;
     }
 
-    .step-content h3 {
-      font-size: 1.1rem;
+    .step-title h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
-      color: #0f172a;
-      margin: 0 0 8px;
+      color: white;
+      margin: 0 0 4px;
     }
 
-    .step-content p {
+    .step-title p {
       font-size: 0.95rem;
-      color: #64748b;
-      line-height: 1.6;
+      color: #94a3b8;
       margin: 0;
     }
 
-    .config-examples {
-      max-width: 700px;
-      margin: 0 auto;
+    .step-body {
+      margin-left: 68px;
     }
 
-    .config-examples h3 {
-      font-size: 1.25rem;
+    /* Key Generation Card */
+    .key-generation-card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 24px;
+      border: 1px solid #334155;
+    }
+
+    .key-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .key-info > mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: #60a5fa;
+    }
+
+    .key-info h3 {
+      font-size: 1.1rem;
       font-weight: 600;
-      color: #0f172a;
-      margin: 0 0 24px;
-      text-align: center;
+      color: white;
+      margin: 0 0 4px;
     }
 
-    .config-card {
+    .key-info p {
+      font-size: 0.9rem;
+      color: #94a3b8;
+      margin: 0;
+    }
+
+    .scope-options {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .scope-item {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
+    .scope-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+
+    .scope-icon.read { color: #60a5fa; }
+    .scope-icon.search { color: #a78bfa; }
+    .scope-icon.write { color: #34d399; }
+
+    .scope-item strong {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: white;
+      margin-bottom: 2px;
+    }
+
+    .scope-item span {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+
+    .generate-key-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+      color: white;
+      font-weight: 600;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .generate-key-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    /* Tool Tabs */
+    .tool-tabs {
       background: #1e293b;
       border-radius: 12px;
       overflow: hidden;
-      margin-bottom: 16px;
+      border: 1px solid #334155;
     }
 
-    .config-header {
-      padding: 12px 20px;
+    .tool-tabs ::ng-deep .mat-mdc-tab-header {
       background: #0f172a;
       border-bottom: 1px solid #334155;
     }
 
-    .config-title {
-      font-size: 0.9rem;
-      font-weight: 500;
+    .tool-tabs ::ng-deep .mat-mdc-tab {
+      min-width: 140px;
+    }
+
+    .tool-tabs ::ng-deep .mat-mdc-tab:not(.mat-mdc-tab-disabled) .mdc-tab__text-label {
       color: #94a3b8;
     }
 
-    .code-block {
-      padding: 20px;
+    .tool-tabs ::ng-deep .mat-mdc-tab.mat-mdc-tab-active .mdc-tab__text-label {
+      color: white;
+    }
+
+    .tool-tabs ::ng-deep .mdc-tab-indicator__content--underline {
+      border-color: #3b82f6;
+    }
+
+    .tab-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-label mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .tab-badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      background: #22c55e;
+      color: white;
+      border-radius: 100px;
+      text-transform: uppercase;
+    }
+
+    .tab-content {
+      padding: 24px;
+    }
+
+    .tab-description {
+      font-size: 0.95rem;
+      color: #94a3b8;
+      margin: 0 0 16px;
+    }
+
+    .tab-description code {
+      background: #0f172a;
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #60a5fa;
+      font-family: 'Fira Code', monospace;
+    }
+
+    .tab-note {
+      font-size: 0.9rem;
+      color: #64748b;
+      margin: 16px 0 12px;
+    }
+
+    .code-block-modern {
+      position: relative;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      overflow: hidden;
+    }
+
+    .code-block-modern pre {
+      margin: 0;
+      padding: 16px;
+      padding-right: 56px;
       overflow-x: auto;
     }
 
-    .code-block pre {
-      margin: 0;
-    }
-
-    .code-block code {
+    .code-block-modern code {
       font-family: 'Fira Code', 'Consolas', monospace;
       font-size: 0.85rem;
       color: #e2e8f0;
       line-height: 1.6;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 36px;
+      height: 36px;
+      background: #334155;
+      border: none;
+      border-radius: 6px;
+      color: #94a3b8;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: #475569;
+      color: white;
+    }
+
+    .copy-btn mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Ready Card */
+    .ready-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding: 24px;
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 12px;
+    }
+
+    .ready-icon {
+      font-size: 40px;
+      width: 40px;
+      height: 40px;
+      color: #22c55e;
+    }
+
+    .ready-content h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: white;
+      margin: 0 0 8px;
+    }
+
+    .ready-content > p {
+      font-size: 0.95rem;
+      color: #94a3b8;
+      margin: 0 0 16px;
+    }
+
+    .example-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .prompt {
+      padding: 8px 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: #e2e8f0;
+      font-style: italic;
     }
 
     /* Security */
@@ -745,6 +1298,7 @@ Content-Type: application/json
       }
 
       .tools-section,
+      .conversation-section,
       .features-section,
       .mcp-tools-section,
       .setup-section,
@@ -757,8 +1311,51 @@ Content-Type: application/json
         grid-template-columns: repeat(2, 1fr);
       }
 
-      .features-grid {
+      .conversation-grid {
         grid-template-columns: 1fr;
+      }
+
+      .conversation-card {
+        flex-direction: column;
+      }
+
+      .features-layout {
+        grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .features-visual {
+        order: -1;
+      }
+
+      .features-visual img {
+        max-width: 400px;
+      }
+
+      .features-content h2 {
+        font-size: 1.75rem;
+      }
+
+      .step-body {
+        margin-left: 0;
+        margin-top: 16px;
+      }
+
+      .scope-options {
+        flex-direction: column;
+      }
+
+      .tab-label span:not(.tab-badge) {
+        display: none;
+      }
+
+      .ready-card {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .example-prompts {
+        justify-content: center;
       }
 
       .security-content {
@@ -782,4 +1379,45 @@ Content-Type: application/json
     }
   `]
 })
-export class McpIntegrationComponent {}
+export class McpIntegrationComponent {
+  constructor(private clipboard: Clipboard) {}
+
+  // Config templates for copy functionality
+  claudeCodeCommand = 'claude mcp add decision-records https://decisionrecords.org/api/mcp -t http -H "Authorization: Bearer YOUR_API_KEY"';
+  claudeListCommand = 'claude mcp list';
+
+  cursorConfig = `{
+  "mcpServers": {
+    "decision-records": {
+      "url": "https://decisionrecords.org/api/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_KEY"
+      }
+    }
+  }
+}`;
+
+  continueConfig = `{
+  "mcpServers": [
+    {
+      "name": "decision-records",
+      "transport": {
+        "type": "http",
+        "url": "https://decisionrecords.org/api/mcp",
+        "headers": {
+          "Authorization": "Bearer YOUR_API_KEY"
+        }
+      }
+    }
+  ]
+}`;
+
+  curlCommand = `curl -X POST https://decisionrecords.org/api/mcp \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}'`;
+
+  copyToClipboard(text: string): void {
+    this.clipboard.copy(text);
+  }
+}

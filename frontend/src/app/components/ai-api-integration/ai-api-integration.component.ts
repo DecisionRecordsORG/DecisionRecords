@@ -3,6 +3,8 @@ import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTabsModule } from '@angular/material/tabs';
+import { Clipboard, ClipboardModule } from '@angular/cdk/clipboard';
 
 @Component({
   selector: 'app-ai-api-integration',
@@ -11,7 +13,9 @@ import { MatIconModule } from '@angular/material/icon';
     CommonModule,
     RouterModule,
     MatButtonModule,
-    MatIconModule
+    MatIconModule,
+    MatTabsModule,
+    ClipboardModule
   ],
   template: `
     <div class="ai-api-page">
@@ -24,53 +28,141 @@ import { MatIconModule } from '@angular/material/icon';
               <span>+</span>
               <img src="/assets/decision-records-logo-white.svg" alt="Decision Records" class="dr-icon" />
             </div>
-            <h1>AI API for Custom GPTs</h1>
+            <h1>AI API & Custom GPTs</h1>
             <p class="hero-tagline">
-              Build AI assistants that understand your architecture decisions
+              Give your AI assistants the context they need
             </p>
             <p class="hero-description">
-              Use our REST API to create Custom GPTs, AI agents, and integrations that can search, read, and create decision records.
+              Build Custom GPTs, AI agents, and automations that understand your team's decisions. Your AI can search, read, and even create decision records—all through a simple REST API.
             </p>
           </div>
         </div>
       </header>
 
-      <!-- Use Cases Section -->
-      <section class="use-cases-section">
+      <!-- Supported Platforms Section -->
+      <section class="platforms-section">
         <div class="container">
-          <h2>What You Can Build</h2>
+          <h2>Build For Any AI Platform</h2>
 
-          <div class="use-cases-grid">
-            <div class="use-case-card">
-              <div class="use-case-icon gpt">
-                <mat-icon>chat</mat-icon>
+          <div class="platforms-grid">
+            <div class="platform-card">
+              <div class="platform-icon-wrapper openai">
+                <img src="/assets/openai-svgrepo-com.svg" alt="OpenAI" class="platform-svg-icon" />
               </div>
               <h3>Custom GPTs</h3>
-              <p>Create ChatGPT assistants that can access your organization's decision records and help with architecture questions.</p>
+              <p>Create ChatGPT assistants with decision knowledge</p>
             </div>
 
-            <div class="use-case-card">
-              <div class="use-case-icon agent">
-                <mat-icon>smart_toy</mat-icon>
+            <div class="platform-card">
+              <div class="platform-icon-wrapper claude">
+                <img src="/assets/claude-code-icon.svg" alt="Claude" class="platform-svg-icon" />
               </div>
-              <h3>AI Agents</h3>
-              <p>Build autonomous agents that reference decisions when making recommendations or answering questions.</p>
+              <h3>Claude</h3>
+              <p>Power Anthropic Claude with your decisions</p>
             </div>
 
-            <div class="use-case-card">
-              <div class="use-case-icon workflow">
-                <mat-icon>account_tree</mat-icon>
+            <div class="platform-card">
+              <div class="platform-icon-wrapper langchain">
+                <mat-icon>link</mat-icon>
               </div>
-              <h3>Workflow Automation</h3>
-              <p>Integrate decision records into your CI/CD pipelines, PR reviews, or documentation workflows.</p>
+              <h3>LangChain</h3>
+              <p>Integrate with LangChain agents and tools</p>
             </div>
 
-            <div class="use-case-card">
-              <div class="use-case-icon custom">
-                <mat-icon>build</mat-icon>
+            <div class="platform-card">
+              <div class="platform-icon-wrapper other">
+                <mat-icon>api</mat-icon>
               </div>
-              <h3>Custom Integrations</h3>
-              <p>Connect Decision Records to any tool or platform using our comprehensive REST API.</p>
+              <h3>Any REST Client</h3>
+              <p>Standard REST API for any integration</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- What Your AI Can Do Section -->
+      <section class="ai-examples-section">
+        <div class="container">
+          <h2>Imagine Asking Your Custom GPT...</h2>
+          <p class="section-intro">
+            With Decision Records connected, your Custom GPT or AI agent can answer questions about your team's decisions:
+          </p>
+
+          <div class="ai-conversation">
+            <div class="ai-message user">
+              <div class="message-avatar">You</div>
+              <div class="message-content">"What authentication approach did we decide on for our API?"</div>
+            </div>
+            <div class="ai-message assistant">
+              <div class="message-avatar">AI</div>
+              <div class="message-content">
+                Based on ADR-42 "Use OAuth2 for API Authentication" (accepted on Dec 15, 2024), your team decided to use OAuth2 with JWT tokens. The key reasons were:
+                <ul>
+                  <li>Industry standard with broad library support</li>
+                  <li>Supports both user and service-to-service auth</li>
+                  <li>Stateless verification reduces database load</li>
+                </ul>
+              </div>
+            </div>
+            <div class="ai-message user">
+              <div class="message-avatar">You</div>
+              <div class="message-content">"Are there any decisions about caching that I should know about before implementing Redis?"</div>
+            </div>
+            <div class="ai-message assistant">
+              <div class="message-avatar">AI</div>
+              <div class="message-content">
+                Yes! I found 2 relevant decisions:<br><br>
+                <strong>ADR-38: Use Redis for Session Storage</strong> (accepted) - This aligns with your plan.<br>
+                <strong>ADR-51: Cache Invalidation Strategy</strong> (proposed) - Still under review. You may want to wait or provide input.
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Features Section - Side by Side Layout -->
+      <section class="features-section">
+        <div class="container">
+          <div class="features-layout">
+            <div class="features-content">
+              <span class="features-badge">REST API</span>
+              <h2>Power your AI with decision context</h2>
+              <p class="features-intro">
+                Simple REST endpoints that any AI platform can call. Your Custom GPT becomes a decision expert.
+              </p>
+              <div class="features-list">
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>OpenAPI 3.1 schema</strong>
+                    <span>Drop-in configuration for Custom GPTs</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Semantic search</strong>
+                    <span>Find relevant decisions by meaning, not just keywords</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Create decisions</strong>
+                    <span>Let your AI capture decisions on the fly</span>
+                  </div>
+                </div>
+                <div class="feature-item">
+                  <mat-icon class="feature-check">check_circle</mat-icon>
+                  <div class="feature-text">
+                    <strong>Full decision history</strong>
+                    <span>Trace how decisions evolved over time</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="features-visual">
+              <img src="/assets/ai-api-mockup.svg" alt="Custom GPT using Decision Records API to answer questions" />
             </div>
           </div>
         </div>
@@ -133,119 +225,165 @@ import { MatIconModule } from '@angular/material/icon';
         </div>
       </section>
 
-      <!-- Custom GPT Setup -->
-      <section class="gpt-setup-section">
+      <!-- Setup Section - ngrok inspired -->
+      <section class="setup-section">
         <div class="container">
-          <h2>Create a Custom GPT</h2>
-
-          <div class="setup-steps">
-            <div class="step">
-              <div class="step-number">1</div>
-              <div class="step-content">
-                <h3>Generate an API Key</h3>
-                <p>Create an API key in Decision Records with the scopes you need. For read-only access, select "read" and "search" scopes.</p>
+          <!-- Step 1: Generate API Key -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">1</span>
+              <div class="step-title">
+                <h2>Generate an API Key</h2>
+                <p>Create an API key with the permissions you need</p>
               </div>
             </div>
-
-            <div class="step">
-              <div class="step-number">2</div>
-              <div class="step-content">
-                <h3>Create Your GPT</h3>
-                <p>In ChatGPT, go to "Create a GPT" and configure it with a name, description, and instructions for how it should use decisions.</p>
-              </div>
-            </div>
-
-            <div class="step">
-              <div class="step-number">3</div>
-              <div class="step-content">
-                <h3>Add the Action</h3>
-                <p>In the GPT configuration, add an action using our OpenAPI schema URL. This tells the GPT what API calls it can make.</p>
-              </div>
-            </div>
-
-            <div class="step">
-              <div class="step-number">4</div>
-              <div class="step-content">
-                <h3>Configure Authentication</h3>
-                <p>Set authentication to "API Key" with type "Bearer", then paste your Decision Records API key.</p>
+            <div class="step-body">
+              <div class="key-generation-card">
+                <div class="key-info">
+                  <mat-icon>vpn_key</mat-icon>
+                  <div>
+                    <h3>API Key Scopes</h3>
+                    <p>Select permissions when creating your key</p>
+                  </div>
+                </div>
+                <div class="scope-options">
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon read">visibility</mat-icon>
+                    <div>
+                      <strong>Read</strong>
+                      <span>View decision details</span>
+                    </div>
+                  </div>
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon search">search</mat-icon>
+                    <div>
+                      <strong>Search</strong>
+                      <span>Find decisions</span>
+                    </div>
+                  </div>
+                  <div class="scope-item">
+                    <mat-icon class="scope-icon write">edit</mat-icon>
+                    <div>
+                      <strong>Write</strong>
+                      <span>Create decisions</span>
+                    </div>
+                  </div>
+                </div>
+                <a routerLink="/dashboard" class="generate-key-btn">
+                  <mat-icon>add</mat-icon>
+                  Generate API Key
+                </a>
               </div>
             </div>
           </div>
 
-          <!-- OpenAPI Schema -->
-          <div class="schema-card">
-            <div class="schema-header">
-              <mat-icon>description</mat-icon>
-              <div>
-                <h3>OpenAPI Schema URL</h3>
-                <p>Use this URL when configuring your Custom GPT action</p>
+          <!-- Step 2: Configure -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">2</span>
+              <div class="step-title">
+                <h2>Configure Your AI</h2>
+                <p>Set up your AI platform to use the Decision Records API</p>
               </div>
             </div>
-            <div class="schema-url">
-              <code>https://decisionrecords.org/api/ai/openapi.json</code>
+            <div class="step-body">
+              <!-- Platform Tabs -->
+              <mat-tab-group class="platform-tabs" animationDuration="200ms">
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <img src="/assets/openai-svgrepo-com.svg" alt="OpenAI" class="tab-icon-svg" />
+                      <span>Custom GPT</span>
+                      <span class="tab-badge">Recommended</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">In your GPT configuration, add an action with this schema URL:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ openapiUrl }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(openapiUrl)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                    <p class="tab-note">Then set authentication to "API Key" with type "Bearer" and paste your key.</p>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>link</mat-icon>
+                      <span>LangChain</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Create a custom tool in your LangChain agent:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ langchainCode }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(langchainCode)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>code</mat-icon>
+                      <span>Python</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Call the API directly from Python:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ pythonCode }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(pythonCode)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+                <mat-tab>
+                  <ng-template mat-tab-label>
+                    <div class="tab-label">
+                      <mat-icon>terminal</mat-icon>
+                      <span>cURL</span>
+                    </div>
+                  </ng-template>
+                  <div class="tab-content">
+                    <p class="tab-description">Test the API from your terminal:</p>
+                    <div class="code-block-modern">
+                      <pre><code>{{ curlCommand }}</code></pre>
+                      <button class="copy-btn" (click)="copyToClipboard(curlCommand)">
+                        <mat-icon>content_copy</mat-icon>
+                      </button>
+                    </div>
+                  </div>
+                </mat-tab>
+              </mat-tab-group>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- Example Request/Response -->
-      <section class="examples-section">
-        <div class="container">
-          <h2>Example Usage</h2>
-
-          <div class="example-grid">
-            <div class="example-card">
-              <h3>Search Decisions</h3>
-              <div class="code-block">
-                <div class="code-header">
-                  <span>Request</span>
-                </div>
-                <pre><code>curl -X POST https://decisionrecords.org/api/ai/search \\
-  -H "Authorization: Bearer adr_your_key" \\
-  -H "Content-Type: application/json" \\
-  -d '{{ '{' }}"query": "authentication"{{ '}' }}'</code></pre>
-              </div>
-              <div class="code-block">
-                <div class="code-header">
-                  <span>Response</span>
-                </div>
-                <pre><code>{{ '{' }}
-  "query": "authentication",
-  "count": 2,
-  "decisions": [
-    {{ '{' }}
-      "id": 42,
-      "display_id": "ADR-42",
-      "title": "Use OAuth2 for API auth",
-      "status": "accepted"
-    {{ '}' }}
-  ]
-{{ '}' }}</code></pre>
+          <!-- Step 3: Start Using -->
+          <div class="setup-step">
+            <div class="step-header">
+              <span class="step-badge">3</span>
+              <div class="step-title">
+                <h2>Start Asking Questions</h2>
+                <p>Your AI now has access to your team's decisions</p>
               </div>
             </div>
-
-            <div class="example-card">
-              <h3>Get Decision</h3>
-              <div class="code-block">
-                <div class="code-header">
-                  <span>Request</span>
+            <div class="step-body">
+              <div class="ready-card">
+                <mat-icon class="ready-icon">check_circle</mat-icon>
+                <div class="ready-content">
+                  <h3>You're all set!</h3>
+                  <p>Try asking your AI:</p>
+                  <div class="example-prompts">
+                    <span class="prompt">"What did we decide about authentication?"</span>
+                    <span class="prompt">"Find decisions about our API design"</span>
+                    <span class="prompt">"Create a decision about using GraphQL"</span>
+                  </div>
                 </div>
-                <pre><code>curl https://decisionrecords.org/api/ai/decisions/ADR-42 \\
-  -H "Authorization: Bearer adr_your_key"</code></pre>
-              </div>
-              <div class="code-block">
-                <div class="code-header">
-                  <span>Response</span>
-                </div>
-                <pre><code>{{ '{' }}
-  "id": 42,
-  "display_id": "ADR-42",
-  "title": "Use OAuth2 for API auth",
-  "status": "accepted",
-  "context": "We need secure...",
-  "decision": "We will use...",
-  "consequences": "Positive:..."
-{{ '}' }}</code></pre>
               </div>
             </div>
           </div>
@@ -377,12 +515,12 @@ import { MatIconModule } from '@angular/material/icon';
       line-height: 1.6;
     }
 
-    /* Use Cases */
-    .use-cases-section {
+    /* Platforms Section */
+    .platforms-section {
       padding: 80px 0;
     }
 
-    .use-cases-section h2 {
+    .platforms-section h2 {
       font-size: 1.75rem;
       font-weight: 600;
       color: #0f172a;
@@ -390,64 +528,262 @@ import { MatIconModule } from '@angular/material/icon';
       margin: 0 0 48px;
     }
 
-    .use-cases-grid {
+    .platforms-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 24px;
     }
 
-    .use-case-card {
+    .platform-card {
       background: white;
-      padding: 28px;
+      padding: 28px 20px;
       border-radius: 16px;
       border: 1px solid #e2e8f0;
+      text-align: center;
     }
 
-    .use-case-icon {
-      width: 56px;
-      height: 56px;
+    .platform-icon-wrapper {
+      width: 64px;
+      height: 64px;
       border-radius: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-bottom: 16px;
+      margin: 0 auto 16px;
+      overflow: hidden;
     }
 
-    .use-case-icon.gpt {
-      background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+    .platform-icon-wrapper.openai {
+      background: transparent;
     }
 
-    .use-case-icon.agent {
-      background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+    .platform-icon-wrapper.openai .platform-svg-icon {
+      width: 48px;
+      height: 48px;
     }
 
-    .use-case-icon.workflow {
-      background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+    .platform-icon-wrapper.claude {
+      background: transparent;
     }
 
-    .use-case-icon.custom {
-      background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+    .platform-icon-wrapper.langchain {
+      background: linear-gradient(135deg, #1a5f2c 0%, #2e7d32 100%);
     }
 
-    .use-case-icon mat-icon {
+    .platform-icon-wrapper.other {
+      background: linear-gradient(135deg, #475569 0%, #64748b 100%);
+    }
+
+    .platform-svg-icon {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .platform-icon-wrapper mat-icon {
       color: white;
       font-size: 28px;
       width: 28px;
       height: 28px;
     }
 
-    .use-case-card h3 {
-      font-size: 1.15rem;
+    .platform-card h3 {
+      font-size: 1.1rem;
       font-weight: 600;
       color: #0f172a;
       margin: 0 0 8px;
     }
 
-    .use-case-card p {
+    .platform-card p {
+      font-size: 0.9rem;
+      color: #64748b;
+      line-height: 1.5;
+      margin: 0;
+    }
+
+    /* AI Examples Section */
+    .ai-examples-section {
+      padding: 80px 0;
+      background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+    }
+
+    .ai-examples-section h2 {
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: #0f172a;
+      text-align: center;
+      margin: 0 0 12px;
+    }
+
+    .section-intro {
+      font-size: 1.1rem;
+      color: #64748b;
+      text-align: center;
+      max-width: 600px;
+      margin: 0 auto 48px;
+      line-height: 1.6;
+    }
+
+    .ai-conversation {
+      max-width: 700px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    .ai-message {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .ai-message:last-child {
+      margin-bottom: 0;
+    }
+
+    .message-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .ai-message.user .message-avatar {
+      background: #e0e7ff;
+      color: #4338ca;
+    }
+
+    .ai-message.assistant .message-avatar {
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      color: white;
+    }
+
+    .message-content {
+      flex: 1;
+      padding: 16px 20px;
+      border-radius: 12px;
       font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .ai-message.user .message-content {
+      background: #f1f5f9;
+      color: #334155;
+      font-style: italic;
+    }
+
+    .ai-message.assistant .message-content {
+      background: #f0fdf4;
+      color: #166534;
+      border: 1px solid #bbf7d0;
+    }
+
+    .ai-message.assistant .message-content ul {
+      margin: 12px 0 0 0;
+      padding-left: 20px;
+    }
+
+    .ai-message.assistant .message-content li {
+      margin-bottom: 4px;
+    }
+
+    /* Features - Side by Side Layout */
+    .features-section {
+      padding: 80px 0;
+    }
+
+    .features-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .features-badge {
+      display: inline-block;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      color: white;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 100px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .features-content h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 2rem;
+      font-weight: 700;
+      color: #0f172a;
+      margin: 0 0 16px;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+
+    .features-intro {
+      font-size: 1.1rem;
       color: #64748b;
       line-height: 1.6;
-      margin: 0;
+      margin: 0 0 32px;
+    }
+
+    .features-list {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .feature-item {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .feature-check {
+      color: #22c55e;
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .feature-text {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .feature-text strong {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #0f172a;
+    }
+
+    .feature-text span {
+      font-size: 0.9rem;
+      color: #64748b;
+    }
+
+    .features-visual {
+      display: flex;
+      justify-content: center;
+    }
+
+    .features-visual img {
+      max-width: 100%;
+      height: auto;
+      filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.15));
+      border-radius: 12px;
     }
 
     /* Endpoints */
@@ -522,174 +858,329 @@ import { MatIconModule } from '@angular/material/icon';
       margin: 0;
     }
 
-    /* GPT Setup */
-    .gpt-setup-section {
+    /* Setup - ngrok inspired */
+    .setup-section {
       padding: 80px 0;
+      background: #0f172a;
     }
 
-    .gpt-setup-section h2 {
-      font-size: 1.75rem;
-      font-weight: 600;
-      color: #0f172a;
-      text-align: center;
-      margin: 0 0 48px;
-    }
-
-    .setup-steps {
-      max-width: 600px;
+    .setup-step {
+      max-width: 800px;
       margin: 0 auto 48px;
     }
 
-    .step {
-      display: flex;
-      gap: 24px;
-      margin-bottom: 32px;
-    }
-
-    .step:last-child {
+    .setup-step:last-child {
       margin-bottom: 0;
     }
 
-    .step-number {
-      width: 40px;
-      height: 40px;
+    .step-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    .step-badge {
+      width: 48px;
+      height: 48px;
       background: linear-gradient(135deg, #059669 0%, #10b981 100%);
       color: white;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 600;
-      font-size: 1.1rem;
+      font-weight: 700;
+      font-size: 1.25rem;
       flex-shrink: 0;
     }
 
-    .step-content h3 {
-      font-size: 1.1rem;
+    .step-title h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 1.5rem;
       font-weight: 600;
-      color: #0f172a;
-      margin: 0 0 8px;
-    }
-
-    .step-content p {
-      font-size: 0.95rem;
-      color: #64748b;
-      line-height: 1.6;
-      margin: 0;
-    }
-
-    .schema-card {
-      max-width: 600px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
-      overflow: hidden;
-    }
-
-    .schema-header {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 20px 24px;
-      background: #f8fafc;
-      border-bottom: 1px solid #e2e8f0;
-    }
-
-    .schema-header mat-icon {
-      font-size: 32px;
-      width: 32px;
-      height: 32px;
-      color: #059669;
-    }
-
-    .schema-header h3 {
-      font-size: 1.1rem;
-      font-weight: 600;
-      color: #0f172a;
+      color: white;
       margin: 0 0 4px;
     }
 
-    .schema-header p {
-      font-size: 0.9rem;
-      color: #64748b;
+    .step-title p {
+      font-size: 0.95rem;
+      color: #94a3b8;
       margin: 0;
     }
 
-    .schema-url {
-      padding: 20px 24px;
+    .step-body {
+      margin-left: 68px;
+    }
+
+    /* Key Generation Card */
+    .key-generation-card {
       background: #1e293b;
+      border-radius: 12px;
+      padding: 24px;
+      border: 1px solid #334155;
     }
 
-    .schema-url code {
-      font-family: 'Fira Code', monospace;
-      font-size: 0.95rem;
-      color: #22d3ee;
+    .key-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
-    /* Examples */
-    .examples-section {
-      padding: 80px 0;
-      background: #f1f5f9;
+    .key-info > mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: #34d399;
     }
 
-    .examples-section h2 {
-      font-size: 1.75rem;
-      font-weight: 600;
-      color: #0f172a;
-      text-align: center;
-      margin: 0 0 48px;
-    }
-
-    .example-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 24px;
-    }
-
-    .example-card {
-      background: white;
-      border-radius: 16px;
-      border: 1px solid #e2e8f0;
-      overflow: hidden;
-    }
-
-    .example-card h3 {
+    .key-info h3 {
       font-size: 1.1rem;
       font-weight: 600;
-      color: #0f172a;
-      padding: 20px 24px;
+      color: white;
+      margin: 0 0 4px;
+    }
+
+    .key-info p {
+      font-size: 0.9rem;
+      color: #94a3b8;
       margin: 0;
-      border-bottom: 1px solid #e2e8f0;
     }
 
-    .code-block {
+    .scope-options {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .scope-item {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
+    .scope-icon {
+      font-size: 24px;
+      width: 24px;
+      height: 24px;
+    }
+
+    .scope-icon.read { color: #60a5fa; }
+    .scope-icon.search { color: #a78bfa; }
+    .scope-icon.write { color: #34d399; }
+
+    .scope-item strong {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: white;
+      margin-bottom: 2px;
+    }
+
+    .scope-item span {
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+
+    .generate-key-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+      color: white;
+      font-weight: 600;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: all 0.2s;
+    }
+
+    .generate-key-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Platform Tabs */
+    .platform-tabs {
       background: #1e293b;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #334155;
     }
 
-    .code-header {
-      padding: 8px 16px;
+    .platform-tabs ::ng-deep .mat-mdc-tab-header {
       background: #0f172a;
       border-bottom: 1px solid #334155;
     }
 
-    .code-header span {
-      font-size: 0.8rem;
-      font-weight: 500;
+    .platform-tabs ::ng-deep .mat-mdc-tab {
+      min-width: 140px;
+    }
+
+    .platform-tabs ::ng-deep .mat-mdc-tab:not(.mat-mdc-tab-disabled) .mdc-tab__text-label {
       color: #94a3b8;
     }
 
-    .code-block pre {
+    .platform-tabs ::ng-deep .mat-mdc-tab.mat-mdc-tab-active .mdc-tab__text-label {
+      color: white;
+    }
+
+    .platform-tabs ::ng-deep .mdc-tab-indicator__content--underline {
+      border-color: #10b981;
+    }
+
+    .tab-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tab-label mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .tab-icon-svg {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
+    .tab-badge {
+      font-size: 0.65rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      background: #22c55e;
+      color: white;
+      border-radius: 100px;
+      text-transform: uppercase;
+    }
+
+    .tab-content {
+      padding: 24px;
+    }
+
+    .tab-description {
+      font-size: 0.95rem;
+      color: #94a3b8;
+      margin: 0 0 16px;
+    }
+
+    .tab-description code {
+      background: #0f172a;
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #34d399;
+      font-family: 'Fira Code', monospace;
+    }
+
+    .tab-note {
+      font-size: 0.9rem;
+      color: #64748b;
+      margin: 16px 0 0;
+    }
+
+    .code-block-modern {
+      position: relative;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      overflow: hidden;
+    }
+
+    .code-block-modern pre {
       margin: 0;
       padding: 16px;
+      padding-right: 56px;
       overflow-x: auto;
     }
 
-    .code-block code {
-      font-family: 'Fira Code', monospace;
-      font-size: 0.8rem;
+    .code-block-modern code {
+      font-family: 'Fira Code', 'Consolas', monospace;
+      font-size: 0.85rem;
       color: #e2e8f0;
-      line-height: 1.5;
+      line-height: 1.6;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 36px;
+      height: 36px;
+      background: #334155;
+      border: none;
+      border-radius: 6px;
+      color: #94a3b8;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: #475569;
+      color: white;
+    }
+
+    .copy-btn mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+    }
+
+    /* Ready Card */
+    .ready-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 20px;
+      padding: 24px;
+      background: linear-gradient(135deg, rgba(34, 197, 94, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 12px;
+    }
+
+    .ready-icon {
+      font-size: 40px;
+      width: 40px;
+      height: 40px;
+      color: #22c55e;
+    }
+
+    .ready-content h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: white;
+      margin: 0 0 8px;
+    }
+
+    .ready-content > p {
+      font-size: 0.95rem;
+      color: #94a3b8;
+      margin: 0 0 16px;
+    }
+
+    .example-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .prompt {
+      padding: 8px 14px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 100px;
+      font-size: 0.85rem;
+      color: #e2e8f0;
+      font-style: italic;
     }
 
     /* Security */
@@ -827,18 +1318,72 @@ import { MatIconModule } from '@angular/material/icon';
         font-size: 1.1rem;
       }
 
-      .use-cases-section,
+      .platforms-section,
+      .ai-examples-section,
+      .features-section,
       .endpoints-section,
-      .gpt-setup-section,
-      .examples-section,
+      .setup-section,
       .security-section,
       .cta-section {
         padding: 60px 0;
       }
 
-      .use-cases-grid,
-      .example-grid {
+      .platforms-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .features-layout {
         grid-template-columns: 1fr;
+        gap: 48px;
+      }
+
+      .features-visual {
+        order: -1;
+      }
+
+      .features-visual img {
+        max-width: 400px;
+      }
+
+      .features-content h2 {
+        font-size: 1.75rem;
+      }
+
+      .ai-conversation {
+        padding: 20px;
+      }
+
+      .ai-message {
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .message-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 0.65rem;
+      }
+
+      .step-body {
+        margin-left: 0;
+        margin-top: 16px;
+      }
+
+      .scope-options {
+        flex-direction: column;
+      }
+
+      .tab-label span:not(.tab-badge) {
+        display: none;
+      }
+
+      .ready-card {
+        flex-direction: column;
+        text-align: center;
+      }
+
+      .example-prompts {
+        justify-content: center;
       }
 
       .security-content {
@@ -859,6 +1404,52 @@ import { MatIconModule } from '@angular/material/icon';
         align-items: center;
       }
     }
+
+    @media (max-width: 480px) {
+      .platforms-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   `]
 })
-export class AiApiIntegrationComponent {}
+export class AiApiIntegrationComponent {
+  constructor(private clipboard: Clipboard) {}
+
+  // Config templates for copy functionality
+  openapiUrl = 'https://decisionrecords.org/api/ai/openapi.json';
+
+  langchainCode = `from langchain.tools import tool
+import requests
+
+@tool
+def search_decisions(query: str) -> str:
+    """Search decisions by keyword."""
+    response = requests.post(
+        "https://decisionrecords.org/api/ai/search",
+        headers={"Authorization": "Bearer YOUR_API_KEY"},
+        json={"query": query}
+    )
+    return response.json()`;
+
+  pythonCode = `import requests
+
+API_KEY = "adr_your_key"
+BASE_URL = "https://decisionrecords.org/api/ai"
+
+# Search for decisions
+response = requests.post(
+    f"{BASE_URL}/search",
+    headers={"Authorization": f"Bearer {API_KEY}"},
+    json={"query": "authentication"}
+)
+decisions = response.json()["decisions"]`;
+
+  curlCommand = `curl -X POST https://decisionrecords.org/api/ai/search \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"query": "authentication"}'`;
+
+  copyToClipboard(text: string): void {
+    this.clipboard.copy(text);
+  }
+}

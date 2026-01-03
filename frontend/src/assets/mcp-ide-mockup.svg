@@ -1,0 +1,72 @@
+<svg width="480" height="360" viewBox="0 0 480 360" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- IDE Window Frame -->
+  <rect x="0" y="0" width="480" height="360" rx="12" fill="#1e293b"/>
+
+  <!-- Title Bar -->
+  <rect x="0" y="0" width="480" height="36" rx="12" fill="#0f172a"/>
+  <rect x="0" y="24" width="480" height="12" fill="#0f172a"/>
+
+  <!-- Window Controls -->
+  <circle cx="20" cy="18" r="6" fill="#ef4444"/>
+  <circle cx="40" cy="18" r="6" fill="#f59e0b"/>
+  <circle cx="60" cy="18" r="6" fill="#22c55e"/>
+
+  <!-- Title -->
+  <text x="240" y="22" fill="#94a3b8" font-family="Inter, sans-serif" font-size="12" text-anchor="middle">Claude Code - architecture-decisions</text>
+
+  <!-- Sidebar -->
+  <rect x="0" y="36" width="180" height="324" fill="#0f172a"/>
+
+  <!-- Sidebar Files -->
+  <text x="16" y="60" fill="#64748b" font-family="Inter, sans-serif" font-size="11" font-weight="600">EXPLORER</text>
+  <text x="16" y="84" fill="#e2e8f0" font-family="Consolas, monospace" font-size="12">src/</text>
+  <text x="28" y="104" fill="#94a3b8" font-family="Consolas, monospace" font-size="12">services/</text>
+  <text x="40" y="124" fill="#60a5fa" font-family="Consolas, monospace" font-size="12">auth.service.ts</text>
+  <text x="28" y="144" fill="#94a3b8" font-family="Consolas, monospace" font-size="12">components/</text>
+  <text x="16" y="164" fill="#e2e8f0" font-family="Consolas, monospace" font-size="12">docs/</text>
+  <text x="28" y="184" fill="#94a3b8" font-family="Consolas, monospace" font-size="12">decisions/</text>
+
+  <!-- Main Editor Area -->
+  <rect x="180" y="36" width="300" height="324" fill="#1e293b"/>
+
+  <!-- Chat/MCP Area -->
+  <rect x="188" y="44" width="284" height="308" rx="8" fill="#0f172a"/>
+
+  <!-- User Message -->
+  <rect x="200" y="56" width="260" height="44" rx="8" fill="#334155"/>
+  <text x="212" y="72" fill="#f1f5f9" font-family="Inter, sans-serif" font-size="11" font-weight="500">You</text>
+  <text x="212" y="90" fill="#e2e8f0" font-family="Inter, sans-serif" font-size="12">"What auth approach did we decide on?"</text>
+
+  <!-- AI Response with MCP -->
+  <rect x="200" y="108" width="260" height="120" rx="8" fill="#1e3a8a" fill-opacity="0.3"/>
+  <rect x="200" y="108" width="260" height="24" rx="8" fill="#1e3a8a" fill-opacity="0.5"/>
+  <rect x="200" y="124" width="260" height="4" fill="transparent"/>
+
+  <!-- MCP Tool Badge -->
+  <rect x="208" y="113" width="100" height="16" rx="4" fill="#8b5cf6"/>
+  <text x="214" y="124" fill="white" font-family="Inter, sans-serif" font-size="10" font-weight="600">search_decisions</text>
+
+  <!-- AI Message Content -->
+  <text x="212" y="148" fill="#e2e8f0" font-family="Inter, sans-serif" font-size="11">Based on ADR-42 "Use OAuth2 for API Auth"</text>
+  <text x="212" y="164" fill="#e2e8f0" font-family="Inter, sans-serif" font-size="11">(accepted Dec 2024), your team decided:</text>
+
+  <!-- Decision Points -->
+  <circle cx="220" cy="184" r="3" fill="#22c55e"/>
+  <text x="230" y="188" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10">OAuth2 with JWT tokens</text>
+  <circle cx="220" cy="200" r="3" fill="#22c55e"/>
+  <text x="230" y="204" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10">Stateless verification</text>
+  <circle cx="220" cy="216" r="3" fill="#22c55e"/>
+  <text x="230" y="220" fill="#94a3b8" font-family="Inter, sans-serif" font-size="10">Industry standard support</text>
+
+  <!-- Another User Message -->
+  <rect x="200" y="236" width="260" height="36" rx="8" fill="#334155"/>
+  <text x="212" y="252" fill="#f1f5f9" font-family="Inter, sans-serif" font-size="11" font-weight="500">You</text>
+  <text x="212" y="266" fill="#e2e8f0" font-family="Inter, sans-serif" font-size="12">"Create a decision about using Redis"</text>
+
+  <!-- AI Creating -->
+  <rect x="200" y="280" width="260" height="60" rx="8" fill="#059669" fill-opacity="0.2"/>
+  <rect x="208" y="288" width="90" height="16" rx="4" fill="#10b981"/>
+  <text x="214" y="299" fill="white" font-family="Inter, sans-serif" font-size="10" font-weight="600">create_decision</text>
+  <text x="212" y="320" fill="#34d399" font-family="Inter, sans-serif" font-size="11">Created ADR-58: Use Redis for caching</text>
+  <text x="212" y="334" fill="#6ee7b7" font-family="Inter, sans-serif" font-size="10">Status: proposed</text>
+</svg>

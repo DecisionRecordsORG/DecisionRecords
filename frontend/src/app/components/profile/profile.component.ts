@@ -16,6 +16,7 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
+import { MatCheckboxModule } from '@angular/material/checkbox';
 import { Clipboard, ClipboardModule } from '@angular/cdk/clipboard';
 import { AuthService } from '../../services/auth.service';
 import { WebAuthnService } from '../../services/webauthn.service';
@@ -63,6 +64,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
     MatTooltipModule,
     MatFormFieldModule,
     MatInputModule,
+    MatCheckboxModule,
     ClipboardModule,
     RoleRequestDialogComponent
   ],
@@ -451,6 +453,10 @@ const PASSWORD_REQUIRES_NUMBER = true;
                         </div>
                         <div matListItemLine>
                           <span class="key-prefix">{{ key.key_prefix }}...</span>
+                          &middot; Scopes:
+                          @for (scope of key.scopes; track scope) {
+                            <span class="scope-badge" [class.scope-read]="scope === 'read'" [class.scope-search]="scope === 'search'" [class.scope-write]="scope === 'write'">{{ scope }}</span>
+                          }
                           &middot; Created: {{ key.created_at | date:'mediumDate' }}
                           @if (key.last_used_at) {
                             &middot; Last used: {{ key.last_used_at | date:'mediumDate' }}
@@ -473,10 +479,26 @@ const PASSWORD_REQUIRES_NUMBER = true;
                 <!-- Create new key section -->
                 @if (!isCreatingKey) {
                   <div class="create-key-section">
-                    <mat-form-field appearance="outline" class="key-name-field">
-                      <mat-label>Key Name</mat-label>
-                      <input matInput [(ngModel)]="newKeyName" placeholder="e.g., My MCP Server">
-                    </mat-form-field>
+                    <div class="key-form">
+                      <mat-form-field appearance="outline" class="key-name-field">
+                        <mat-label>Key Name</mat-label>
+                        <input matInput [(ngModel)]="newKeyName" placeholder="e.g., My MCP Server">
+                      </mat-form-field>
+                      <div class="scope-selection">
+                        <span class="scope-label">Permissions:</span>
+                        <div class="scope-checkboxes">
+                          <mat-checkbox [(ngModel)]="newKeyScopes.read" [disabled]="true" matTooltip="Read is always enabled">
+                            Read
+                          </mat-checkbox>
+                          <mat-checkbox [(ngModel)]="newKeyScopes.search">
+                            Search
+                          </mat-checkbox>
+                          <mat-checkbox [(ngModel)]="newKeyScopes.write">
+                            Write (create decisions)
+                          </mat-checkbox>
+                        </div>
+                      </div>
+                    </div>
                     <button mat-raised-button color="primary" (click)="createApiKey()"
                             [disabled]="!newKeyName.trim() || apiKeys.length >= 5">
                       <mat-icon>add</mat-icon>
@@ -934,21 +956,6 @@ const PASSWORD_REQUIRES_NUMBER = true;
       margin-bottom: 16px;
     }
 
-    .create-key-section {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      margin-top: 16px;
-    }
-
-    .key-name-field {
-      flex: 1;
-    }
-
-    .create-key-section button {
-      margin-top: 4px;
-    }
-
     .max-keys-warning {
       display: flex;
       align-items: center;
@@ -965,6 +972,73 @@ const PASSWORD_REQUIRES_NUMBER = true;
       font-size: 18px;
       width: 18px;
       height: 18px;
+    }
+
+    /* Scope badges */
+    .scope-badge {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .scope-read {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .scope-search {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    .scope-write {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    /* Scope selection UI */
+    .key-form {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .scope-selection {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .scope-label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 500;
+    }
+
+    .scope-checkboxes {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .scope-checkboxes mat-checkbox {
+      font-size: 14px;
+    }
+
+    .create-key-section {
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+      margin-top: 16px;
+    }
+
+    .key-name-field {
+      flex: 1;
     }
   `]
 })
@@ -990,6 +1064,7 @@ export class ProfileComponent implements OnInit {
   isLoadingApiKeys = true;
   isCreatingKey = false;
   newKeyName = '';
+  newKeyScopes = { read: true, search: true, write: false };
   newlyCreatedKey: string | null = null;
   aiExternalAccessEnabled = false;
 
@@ -1371,13 +1446,22 @@ export class ProfileComponent implements OnInit {
   createApiKey(): void {
     if (!this.newKeyName.trim()) return;
 
+    // Build scopes array from selections
+    const scopes: string[] = [];
+    if (this.newKeyScopes.read) scopes.push('read');
+    if (this.newKeyScopes.search) scopes.push('search');
+    if (this.newKeyScopes.write) scopes.push('write');
+
     this.isCreatingKey = true;
     this.http.post<{ key: string } & AIApiKey>('/api/user/ai/keys', {
-      name: this.newKeyName.trim()
+      name: this.newKeyName.trim(),
+      scopes: scopes
     }).subscribe({
       next: (response) => {
         this.newlyCreatedKey = response.key;
         this.newKeyName = '';
+        // Reset scopes to defaults
+        this.newKeyScopes = { read: true, search: true, write: false };
         this.isCreatingKey = false;
         this.loadApiKeys();  // Reload the list
         this.snackBar.open('API key created successfully!', 'Close', { duration: 3000 });

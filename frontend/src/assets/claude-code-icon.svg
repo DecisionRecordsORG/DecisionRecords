@@ -1,0 +1,22 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Terminal window background -->
+  <rect x="4" y="8" width="56" height="48" rx="6" fill="#1e293b"/>
+
+  <!-- Title bar -->
+  <rect x="4" y="8" width="56" height="12" rx="6" fill="#0f172a"/>
+  <rect x="4" y="14" width="56" height="6" fill="#0f172a"/>
+
+  <!-- Window buttons -->
+  <circle cx="14" cy="14" r="3" fill="#ef4444"/>
+  <circle cx="24" cy="14" r="3" fill="#f59e0b"/>
+  <circle cx="34" cy="14" r="3" fill="#22c55e"/>
+
+  <!-- Prompt line 1 with Claude orange -->
+  <text x="12" y="33" fill="#d97706" font-family="monospace" font-size="10" font-weight="bold">></text>
+  <rect x="18" y="26" width="28" height="10" rx="2" fill="#d97706" fill-opacity="0.2"/>
+  <text x="22" y="34" fill="#fbbf24" font-family="monospace" font-size="8">claude</text>
+
+  <!-- Prompt line 2 -->
+  <text x="12" y="47" fill="#64748b" font-family="monospace" font-size="10" font-weight="bold">></text>
+  <rect x="18" y="40" width="6" height="10" fill="#f59e0b" fill-opacity="0.8"/>
+</svg>
