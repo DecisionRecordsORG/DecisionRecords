@@ -1,7 +1,7 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
@@ -66,7 +66,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
     MatInputModule,
     MatCheckboxModule,
     ClipboardModule,
-    RoleRequestDialogComponent
+    RoleRequestDialogComponent,
+    RouterLink
   ],
   template: `
     <div class="profile-container">
@@ -396,7 +397,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
         }
 
         <!-- API Keys Section (hidden during setup mode) -->
-        @if (!setupMode && aiExternalAccessEnabled) {
+        @if (!setupMode) {
           <mat-card class="api-keys-card">
             <mat-card-header>
               <mat-card-title>
@@ -405,6 +406,31 @@ const PASSWORD_REQUIRES_NUMBER = true;
               </mat-card-title>
             </mat-card-header>
             <mat-card-content>
+              @if (!aiExternalAccessEnabled) {
+                <!-- Show message when AI features are not enabled -->
+                <div class="ai-not-enabled-notice">
+                  <div class="notice-icon">
+                    <mat-icon>info</mat-icon>
+                  </div>
+                  <div class="notice-content">
+                    <h4>API Access Not Enabled</h4>
+                    <p>
+                      API keys allow you to integrate with AI tools like ChatGPT Custom GPTs, Claude MCP servers,
+                      and other external applications. To use this feature:
+                    </p>
+                    <ul>
+                      <li>A <strong>Tenant Administrator</strong> must enable "External AI Access" in the
+                          <a routerLink="/admin" class="admin-link">Admin Settings</a> → AI Features section</li>
+                      <li>If you're not an admin, ask your organization's administrator to enable this feature</li>
+                    </ul>
+                    <p class="notice-hint">
+                      <mat-icon>lightbulb</mat-icon>
+                      Once enabled, you'll be able to create API keys here to connect your decision records
+                      with AI-powered tools.
+                    </p>
+                  </div>
+                </div>
+              } @else {
               <p class="section-description">
                 API keys allow external applications to access decision records on your behalf.
                 Keep your keys secure and revoke any that are no longer needed.
@@ -517,6 +543,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
                     <span>Creating key...</span>
                   </div>
                 }
+              }
               }
             </mat-card-content>
           </mat-card>
@@ -1039,6 +1066,85 @@ const PASSWORD_REQUIRES_NUMBER = true;
 
     .key-name-field {
       flex: 1;
+    }
+
+    /* AI Not Enabled Notice */
+    .ai-not-enabled-notice {
+      display: flex;
+      gap: 16px;
+      padding: 20px;
+      background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      border-left: 4px solid #ff9800;
+    }
+
+    .ai-not-enabled-notice .notice-icon {
+      flex-shrink: 0;
+    }
+
+    .ai-not-enabled-notice .notice-icon mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: #f57c00;
+    }
+
+    .ai-not-enabled-notice .notice-content h4 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #e65100;
+    }
+
+    .ai-not-enabled-notice .notice-content p {
+      margin: 0 0 12px 0;
+      font-size: 14px;
+      color: #333;
+      line-height: 1.5;
+    }
+
+    .ai-not-enabled-notice .notice-content ul {
+      margin: 0 0 16px 0;
+      padding-left: 20px;
+    }
+
+    .ai-not-enabled-notice .notice-content ul li {
+      font-size: 14px;
+      color: #333;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    .ai-not-enabled-notice .admin-link {
+      color: #1565c0;
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .ai-not-enabled-notice .admin-link:hover {
+      text-decoration: underline;
+    }
+
+    .ai-not-enabled-notice .notice-hint {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.7);
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 8px;
+      font-size: 13px;
+      color: #666;
+    }
+
+    .ai-not-enabled-notice .notice-hint mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      color: #ff9800;
+      flex-shrink: 0;
+      margin-top: 2px;
     }
   `]
 })
