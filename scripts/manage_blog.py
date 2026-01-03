@@ -41,6 +41,18 @@ from models import db, BlogPost
 # Initial blog posts to seed (matching existing content)
 INITIAL_POSTS = [
     {
+        'slug': 'claude-code-integration-with-decision-records',
+        'title': 'Claude Code Integration With Decision Records',
+        'excerpt': 'Two commands. That\'s all it takes to give Claude Code persistent access to your team\'s architecture decisions. Here\'s the complete setup guide.',
+        'author': 'Decision Records',
+        'category': 'Technical',
+        'read_time': '6 min read',
+        'image': '/assets/blog/claude-code-integration.svg',
+        'meta_description': 'Learn how to integrate Claude Code with Decision Records to give your AI assistant persistent access to architecture decisions. Complete setup guide with copy-paste commands.',
+        'featured': True,
+        'publish_date': datetime(2025, 1, 4),
+    },
+    {
         'slug': 'how-should-teams-document-important-decisions',
         'title': 'How Should Teams Document Important Decisions?',
         'excerpt': 'Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',

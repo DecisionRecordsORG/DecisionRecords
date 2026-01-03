@@ -1,0 +1,82 @@
+<svg width="800" height="500" viewBox="0 0 800 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="500" fill="#F8FAFC"/>
+
+  <!-- Terminal window (left side) -->
+  <rect x="80" y="100" width="280" height="200" rx="8" fill="#1E293B"/>
+  <rect x="80" y="100" width="280" height="28" rx="8" fill="#334155"/>
+  <rect x="80" y="120" width="280" height="8" fill="#334155"/>
+  <!-- Window buttons -->
+  <circle cx="100" cy="114" r="6" fill="#F87171"/>
+  <circle cx="120" cy="114" r="6" fill="#FBBF24"/>
+  <circle cx="140" cy="114" r="6" fill="#4ADE80"/>
+  <!-- Terminal text -->
+  <rect x="100" y="145" width="60" height="8" rx="2" fill="#60A5FA"/>
+  <rect x="168" y="145" width="100" height="8" rx="2" fill="#94A3B8"/>
+  <rect x="100" y="165" width="40" height="8" rx="2" fill="#4ADE80"/>
+  <rect x="148" y="165" width="160" height="8" rx="2" fill="#E2E8F0"/>
+  <rect x="100" y="195" width="80" height="8" rx="2" fill="#60A5FA"/>
+  <rect x="188" y="195" width="120" height="8" rx="2" fill="#94A3B8"/>
+  <rect x="100" y="215" width="50" height="8" rx="2" fill="#4ADE80"/>
+  <rect x="158" y="215" width="80" height="8" rx="2" fill="#E2E8F0"/>
+  <!-- Cursor -->
+  <rect x="100" y="245" width="8" height="14" fill="#60A5FA">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Connection arrow -->
+  <path d="M380 200 L440 200" stroke="#2563EB" stroke-width="3" stroke-linecap="round"/>
+  <path d="M420 190 L445 200 L420 210" fill="#2563EB"/>
+
+  <!-- Sparkles around connection -->
+  <circle cx="410" cy="175" r="4" fill="#60A5FA"/>
+  <circle cx="425" cy="225" r="3" fill="#60A5FA"/>
+  <circle cx="395" cy="218" r="3" fill="#60A5FA"/>
+
+  <!-- AI/Claude circle -->
+  <circle cx="410" cy="200" r="30" fill="#2563EB" opacity="0.1"/>
+  <circle cx="410" cy="200" r="20" fill="#2563EB" opacity="0.2"/>
+
+  <!-- Decision Records (right side) -->
+  <rect x="460" y="80" width="260" height="160" rx="8" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <!-- Header -->
+  <rect x="480" y="100" width="80" height="10" rx="3" fill="#2563EB"/>
+  <rect x="480" y="120" width="180" height="8" rx="2" fill="#64748B"/>
+  <!-- Status badge -->
+  <rect x="580" y="98" width="60" height="16" rx="8" fill="#DCFCE7"/>
+  <rect x="592" y="103" width="36" height="6" rx="2" fill="#16A34A"/>
+  <!-- Content lines -->
+  <rect x="480" y="145" width="220" height="6" rx="2" fill="#CBD5E1"/>
+  <rect x="480" y="160" width="180" height="6" rx="2" fill="#CBD5E1"/>
+  <rect x="480" y="175" width="200" height="6" rx="2" fill="#CBD5E1"/>
+  <rect x="480" y="200" width="100" height="8" rx="2" fill="#94A3B8"/>
+  <rect x="480" y="218" width="160" height="6" rx="2" fill="#CBD5E1"/>
+
+  <!-- Second decision card (stacked) -->
+  <rect x="475" y="260" width="260" height="80" rx="8" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="495" y="280" width="70" height="8" rx="2" fill="#2563EB"/>
+  <rect x="495" y="298" width="160" height="6" rx="2" fill="#CBD5E1"/>
+  <rect x="495" y="313" width="120" height="6" rx="2" fill="#CBD5E1"/>
+  <!-- Status badge -->
+  <rect x="580" y="278" width="60" height="14" rx="7" fill="#FEF3C7"/>
+  <rect x="590" y="283" width="40" height="4" rx="2" fill="#D97706"/>
+
+  <!-- Third decision card (stacked) -->
+  <rect x="470" y="355" width="260" height="70" rx="8" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="490" y="375" width="60" height="8" rx="2" fill="#2563EB"/>
+  <rect x="490" y="393" width="140" height="6" rx="2" fill="#CBD5E1"/>
+  <rect x="490" y="408" width="100" height="6" rx="2" fill="#CBD5E1"/>
+
+  <!-- MCP label -->
+  <rect x="375" y="250" width="50" height="20" rx="4" fill="#1E40AF"/>
+  <text x="400" y="264" font-family="system-ui, sans-serif" font-size="10" fill="white" text-anchor="middle" font-weight="600">MCP</text>
+
+  <!-- Dashed connection lines from MCP to cards -->
+  <path d="M400 270 L500 280" stroke="#2563EB" stroke-width="2" stroke-dasharray="4 4" opacity="0.5"/>
+  <path d="M400 270 L495 360" stroke="#2563EB" stroke-width="2" stroke-dasharray="4 4" opacity="0.5"/>
+
+  <!-- Title text area -->
+  <rect x="80" y="340" width="280" height="100" rx="8" fill="white" stroke="#E2E8F0" stroke-width="2"/>
+  <text x="100" y="375" font-family="system-ui, sans-serif" font-size="14" fill="#1E293B" font-weight="600">claude mcp add</text>
+  <text x="100" y="400" font-family="system-ui, sans-serif" font-size="12" fill="#64748B">decision-records</text>
+  <text x="100" y="420" font-family="system-ui, sans-serif" font-size="11" fill="#94A3B8">decisionrecords.org/api/mcp</text>
+</svg>

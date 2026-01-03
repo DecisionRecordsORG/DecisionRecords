@@ -14,6 +14,7 @@
 /blog
 
 # Blog posts (auto-generated from blog-post.component.ts)
+/blog/claude-code-integration-with-decision-records
 /blog/how-should-teams-document-important-decisions
 /blog/how-to-track-decisions-at-a-startup
 /blog/decision-habit-framework-fashion-brands

@@ -345,6 +345,32 @@ interface RelatedPost {
       margin-bottom: 2em;
     }
 
+    .prose code {
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;
+      font-size: 0.9em;
+      background: #f1f5f9;
+      padding: 0.2em 0.4em;
+      border-radius: 4px;
+      color: #1e40af;
+    }
+
+    .prose pre {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1.25em 1.5em;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1.5em 0;
+      line-height: 1.5;
+    }
+
+    .prose pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+      font-size: 0.85em;
+    }
+
     /* Related Reading */
     .related-reading {
       background: #f8fafc;
@@ -560,6 +586,144 @@ export class BlogPostComponent implements OnInit {
   relatedPosts: RelatedPost[] = [];
 
   private posts: BlogPost[] = [
+    {
+      slug: 'claude-code-integration-with-decision-records',
+      title: 'Claude Code Integration With Decision Records',
+      excerpt: 'Two commands. That\'s all it takes to give Claude Code persistent access to your team\'s architecture decisions. Here\'s the complete setup guide.',
+      author: 'Decision Records',
+      date: 'January 2025',
+      readTime: '6 min read',
+      image: '/assets/blog/claude-code-integration.svg',
+      category: 'Technical',
+      metaDescription: 'Learn how to integrate Claude Code with Decision Records to give your AI assistant persistent access to architecture decisions. Complete setup guide with copy-paste commands.',
+      content: `
+        <p class="lead">Teams that document architecture decisions often struggle to <strong>make that knowledge accessible</strong> when it matters most—during development. Claude Code changes this by connecting directly to your decision repository.</p>
+
+        <p>The integration takes two commands. No configuration files, no complex setup. Your AI assistant gains <strong>persistent access to every architecture decision</strong> your team has documented.</p>
+
+        <h2>Why Connect Claude Code to Your Decisions?</h2>
+
+        <p>Claude Code is powerful, but it lacks context about <strong>your specific architectural choices</strong>. It doesn't know why you chose PostgreSQL over MongoDB, why you went with microservices, or what trade-offs shaped your authentication approach.</p>
+
+        <p>When connected to Decision Records, Claude Code can:</p>
+        <ul>
+          <li><strong>Search your decisions</strong> by keywords, status, or content</li>
+          <li><strong>Read full decision context</strong> including alternatives considered</li>
+          <li><strong>Create new decisions</strong> as you work (with write permissions)</li>
+          <li><strong>Reference past reasoning</strong> when suggesting implementations</li>
+        </ul>
+
+        <p>This means fewer repeated discussions and <strong>more context-aware assistance</strong>.</p>
+
+        <h2>Setup in Two Commands</h2>
+
+        <p>First, get your API key from your <a href="https://decisionrecords.org/profile">Profile Settings</a> page. Then run:</p>
+
+        <pre><code>claude mcp add decision-records https://decisionrecords.org/api/mcp \\
+  -t http -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
+
+        <p>Verify the connection:</p>
+
+        <pre><code>claude mcp list</code></pre>
+
+        <p>You should see <code>decision-records</code> listed with a <strong>green checkmark</strong>. That's it—Claude Code now has access to your team's architecture decisions.</p>
+
+        <h2>Add Guidelines to Your CLAUDE.md</h2>
+
+        <p>To make the most of this integration, add guidelines to your project's <code>CLAUDE.md</code> file. This tells Claude Code <strong>when and how to use</strong> your decision repository.</p>
+
+        <p>Copy this section into your CLAUDE.md:</p>
+
+        <pre><code>## Architecture Decision Records (ADRs)
+
+This project uses Decision Records (decisionrecords.org) to track
+architecture decisions. Use the MCP tools to search, read, and
+create decisions.
+
+### When to CREATE a Decision Record
+
+Create a new decision when:
+- Making a significant technical choice (new library, service, pattern)
+- Changing existing architecture (refactoring, migration)
+- Establishing team conventions (coding standards, processes)
+- Choosing between multiple valid approaches
+
+### When NOT to Create a Decision
+
+Skip decisions for:
+- Bug fixes and minor refactoring
+- Version updates without breaking changes
+- Routine maintenance tasks
+- Implementation details within existing decisions
+
+### Using MCP Tools
+
+Search for relevant decisions before implementing features:
+\`\`\`
+mcp__decision-records__search_decisions(query="authentication")
+\`\`\`
+
+Get full details of a specific decision:
+\`\`\`
+mcp__decision-records__get_decision(id="ADR-42")
+\`\`\`
+
+Create a new decision (requires write scope):
+\`\`\`
+mcp__decision-records__create_decision(
+  title="Use JWT for API authentication",
+  context="We need stateless auth for the API...",
+  decision="We will use JWT tokens with...",
+  consequences="+ Stateless, scalable\\n- Token revocation complexity"
+)
+\`\`\`
+
+### Decision Format (arc42)
+
+Follow this structure:
+- **Title**: Clear, action-oriented (e.g., "Use PostgreSQL for persistence")
+- **Context**: What problem are we solving? What constraints exist?
+- **Decision**: What did we decide? Be specific.
+- **Consequences**: Both positive (+) and negative (-) impacts</code></pre>
+
+        <h2>How It Works in Practice</h2>
+
+        <p>Once configured, the integration becomes seamless. When you ask Claude Code to implement a feature, it can <strong>automatically search</strong> for relevant decisions.</p>
+
+        <p>For example, if you say "implement user authentication", Claude Code might:</p>
+        <ol>
+          <li>Search decisions for "authentication"</li>
+          <li>Find ADR-15: "Use JWT for API authentication"</li>
+          <li>Read the full decision context</li>
+          <li>Implement authentication <strong>aligned with your documented approach</strong></li>
+        </ol>
+
+        <p>No more implementations that contradict your architecture. No more explaining the same decisions repeatedly.</p>
+
+        <h2>API Key Permissions</h2>
+
+        <p>Decision Records API keys support two scopes:</p>
+        <ul>
+          <li><strong>Read</strong>: Search, list, and view decisions (default)</li>
+          <li><strong>Write</strong>: Create new decisions and update existing ones</li>
+        </ul>
+
+        <p>For most development workflows, <strong>read + write</strong> works best. Claude Code can document decisions as they're made, keeping your repository current without manual effort.</p>
+
+        <h2>Getting Started</h2>
+
+        <p>Ready to connect Claude Code to your architecture decisions?</p>
+
+        <ol>
+          <li><a href="https://decisionrecords.org/register">Create a free account</a> if you don't have one</li>
+          <li>Generate an API key from your <a href="https://decisionrecords.org/profile">Profile Settings</a></li>
+          <li>Run the two commands above</li>
+          <li>Add the CLAUDE.md guidelines to your project</li>
+        </ol>
+
+        <p><strong>Your AI assistant will never forget your architecture decisions again.</strong></p>
+      `
+    },
     {
       slug: 'how-should-teams-document-important-decisions',
       title: 'How Should Teams Document Important Decisions?',
