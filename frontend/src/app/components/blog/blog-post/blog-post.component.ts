@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, AfterViewChecked, ViewEncapsulation, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
@@ -31,6 +31,7 @@ interface RelatedPost {
     RouterModule,
     MatIconModule
   ],
+  encapsulation: ViewEncapsulation.None,
   template: `
     <div class="blog-post-page">
       @if (post) {
@@ -442,6 +443,67 @@ interface RelatedPost {
       font-size: 0.85em;
     }
 
+    /* Copy button for code blocks */
+    .copy-button {
+      position: absolute;
+      top: 8px;
+      right: 80px;
+      background: transparent;
+      border: none;
+      padding: 6px;
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, opacity 0.2s;
+      opacity: 0.6;
+    }
+
+    .copy-button:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .code-block .copy-button {
+      color: #94a3b8;
+    }
+
+    .code-block .copy-button:hover {
+      color: #e2e8f0;
+    }
+
+    .markdown-block .copy-button {
+      color: #64748b;
+      right: 90px;
+    }
+
+    .markdown-block .copy-button:hover {
+      color: #334155;
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .copy-button .copy-icon {
+      display: block;
+    }
+
+    .copy-button .check-icon {
+      display: none;
+    }
+
+    .copy-button.copied .copy-icon {
+      display: none;
+    }
+
+    .copy-button.copied .check-icon {
+      display: block;
+      color: #4ade80;
+    }
+
+    .copy-button.copied {
+      opacity: 1;
+    }
+
     /* Related Reading */
     .related-reading {
       background: #f8fafc;
@@ -651,10 +713,11 @@ interface RelatedPost {
     }
   `]
 })
-export class BlogPostComponent implements OnInit {
+export class BlogPostComponent implements OnInit, AfterViewChecked {
   currentYear = new Date().getFullYear();
   post: BlogPost | null = null;
   relatedPosts: RelatedPost[] = [];
+  private copyButtonsAdded = false;
 
   private posts: BlogPost[] = [
     {
@@ -1097,7 +1160,8 @@ Follow this structure:
   constructor(
     private route: ActivatedRoute,
     private titleService: Title,
-    private metaService: Meta
+    private metaService: Meta,
+    private elementRef: ElementRef
   ) {}
 
   ngOnInit(): void {
@@ -1139,7 +1203,61 @@ Follow this structure:
             title: p.title,
             excerpt: p.excerpt
           }));
+
+        // Reset copy buttons flag when post changes
+        this.copyButtonsAdded = false;
       }
     });
+  }
+
+  ngAfterViewChecked(): void {
+    if (this.post && !this.copyButtonsAdded) {
+      this.addCopyButtons();
+    }
+  }
+
+  private addCopyButtons(): void {
+    const codeBlocks = this.elementRef.nativeElement.querySelectorAll('.code-block, .markdown-block');
+
+    if (codeBlocks.length === 0) {
+      return; // Content not rendered yet
+    }
+
+    codeBlocks.forEach((block: HTMLElement) => {
+      // Skip if button already added
+      if (block.querySelector('.copy-button')) {
+        return;
+      }
+
+      const button = document.createElement('button');
+      button.className = 'copy-button';
+      button.innerHTML = `
+        <svg class="copy-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+      button.title = 'Copy to clipboard';
+
+      button.addEventListener('click', async () => {
+        const code = block.querySelector('code');
+        if (code) {
+          try {
+            await navigator.clipboard.writeText(code.textContent || '');
+            button.classList.add('copied');
+            setTimeout(() => button.classList.remove('copied'), 2000);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+          }
+        }
+      });
+
+      block.appendChild(button);
+    });
+
+    this.copyButtonsAdded = true;
   }
 }

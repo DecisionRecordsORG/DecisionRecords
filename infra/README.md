@@ -67,6 +67,81 @@ Basic deployment template without VNet integration (for testing):
 - Simplified networking configuration
 - Basic environment variables
 
+### `azure-deploy-vm.json` (Cost Optimized - ADR-004)
+**VM-based deployment** as a cost-effective alternative to Container Instances:
+- Azure B1s VM (1 vCPU, 1 GB RAM) - **Free for 12 months** under Azure Free Tier
+- Ubuntu 22.04 LTS with Docker
+- Static private IP (10.0.1.100) - eliminates DNS update complexity
+- SystemAssigned Managed Identity for Key Vault access
+- Same container image as ACI deployment
+
+**Cost Comparison:**
+| Deployment | Monthly Cost |
+|------------|--------------|
+| ACI (current) | ~$40/month |
+| B1s VM | Free (12 months), then ~$8/month |
+
+**Prerequisites:**
+1. Generate SSH key pair:
+   ```bash
+   ssh-keygen -t rsa -b 4096 -f ~/.ssh/adr-vm-key -N ""
+   ```
+2. Azure CLI logged in (`az login`)
+
+**Usage:**
+```bash
+# Step 1: Deploy VM
+SSH_PUBLIC_KEY=$(cat ~/.ssh/adr-vm-key.pub)
+
+az deployment group create \
+  --resource-group adr-resources-eu \
+  --template-file infra/azure-deploy-vm.json \
+  --parameters sshPublicKey="$SSH_PUBLIC_KEY"
+
+# Step 2: Run one-time setup (configures Docker, systemd, pulls image)
+./scripts/setup-vm.sh 10.0.1.100
+
+# Step 3: Update Application Gateway to point to VM
+az network application-gateway address-pool update \
+  --gateway-name adr-appgateway \
+  --resource-group adr-resources-eu \
+  --name adr-backend-pool \
+  --servers 10.0.1.100
+```
+
+**Daily Deployments:**
+```bash
+./scripts/redeploy-vm.sh patch   # Bug fixes
+./scripts/redeploy-vm.sh minor   # New features
+./scripts/redeploy-vm.sh major   # Breaking changes
+```
+
+**Default Parameters:**
+| Parameter | Default Value |
+|-----------|---------------|
+| vmName | adr-vm-eu |
+| vmSize | Standard_B1s |
+| adminUsername | azureuser |
+| staticPrivateIP | 10.0.1.100 |
+| virtualNetworkName | adr-vnet |
+| subnetName | container-subnet |
+| keyVaultName | adr-keyvault-eu |
+
+**VM Management:**
+```bash
+# SSH to VM
+ssh -i ~/.ssh/adr-vm-key azureuser@10.0.1.100
+
+# View container logs
+ssh -i ~/.ssh/adr-vm-key azureuser@10.0.1.100 'sudo docker logs -f adr-app'
+
+# Restart container
+ssh -i ~/.ssh/adr-vm-key azureuser@10.0.1.100 'sudo systemctl restart adr-app'
+
+# Check service status
+ssh -i ~/.ssh/adr-vm-key azureuser@10.0.1.100 'sudo systemctl status adr-app'
+```
+
 ### `appgateway-template.json`
 Application Gateway template for production deployments:
 - Layer 7 load balancer

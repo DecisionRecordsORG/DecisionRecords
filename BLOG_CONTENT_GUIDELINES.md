@@ -1,4 +1,4 @@
-# Content Guidelines for Decision Records
+ how# Content Guidelines for Decision Records
 
 This document defines content creation standards for the Decision Records website. Follow these guidelines when creating blog posts, marketing pages, and educational content.
 
@@ -102,6 +102,18 @@ This project uses Decision Records to track architecture decisions.
 ```
 
 **Styling**: Light background (#f8fafc), blue left border, "CLAUDE.md" label in top-right corner.
+
+### Copy-to-Clipboard Button
+
+Both `code-block` and `markdown-block` elements automatically include a **copy button** that appears next to the label. This allows readers to copy code or markdown content with a single click.
+
+**Behavior**:
+- Button shows a copy icon (two overlapping rectangles)
+- On hover, button becomes fully visible
+- After clicking, icon changes to a green checkmark for 2 seconds
+- Copies the text content inside the `<code>` element
+
+**No additional markup required** - the copy button is automatically injected by the blog post component for all code blocks and markdown blocks.
 
 ### When to Use Each Type
 

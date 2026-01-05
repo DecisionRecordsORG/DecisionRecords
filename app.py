@@ -4,7 +4,13 @@ import secrets
 import logging
 import sys
 import traceback
-import psycopg2
+
+# psycopg2 is only needed for PostgreSQL - make import optional for SQLite local dev
+try:
+    import psycopg2
+except ImportError:
+    psycopg2 = None
+
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
@@ -349,16 +355,16 @@ def init_database():
                 
                 # Parse the DATABASE_URL to extract connection parameters
                 # Format: postgresql://user:password@host:port/dbname?sslmode=require
-                if database_url.startswith('postgresql://'):
+                if database_url.startswith('postgresql://') and psycopg2 is not None:
                     url_parts = database_url.replace('postgresql://', '').split('/')
                     auth_host = url_parts[0]
                     db_name = url_parts[1].split('?')[0] if '?' in url_parts[1] else url_parts[1]
-                    
+
                     user_pass, host_port = auth_host.split('@')
                     user, password = user_pass.split(':')
                     host = host_port.split(':')[0] if ':' in host_port else host_port
                     port = int(host_port.split(':')[1]) if ':' in host_port else 5432
-                    
+
                     # Use psycopg2 connection as per Azure documentation
                     conn = psycopg2.connect(
                         user=user,
@@ -374,7 +380,7 @@ def init_database():
                     conn.close()
                     logger.info("Database connection successful using psycopg2")
                 else:
-                    # Fallback to SQLAlchemy if URL format is different
+                    # Fallback to SQLAlchemy for SQLite or when psycopg2 not available
                     with db.engine.connect() as connection:
                         connection.execute(db.text("SELECT 1"))
                     logger.info("Database connection successful using SQLAlchemy")
