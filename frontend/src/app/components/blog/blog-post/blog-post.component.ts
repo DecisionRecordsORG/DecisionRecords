@@ -354,7 +354,78 @@ interface RelatedPost {
       color: #1e40af;
     }
 
-    .prose pre {
+    /* Terminal/command code blocks (dark theme) */
+    .prose pre.code-block,
+    .prose .code-block {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 1.25em 1.5em;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 1.5em 0;
+      line-height: 1.6;
+      position: relative;
+    }
+
+    .prose .code-block::before {
+      content: 'Terminal';
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: #334155;
+      color: #94a3b8;
+      font-size: 0.7em;
+      padding: 4px 10px;
+      border-radius: 0 8px 0 6px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .prose .code-block code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+      font-size: 0.85em;
+    }
+
+    /* Markdown content blocks (light theme with border) */
+    .prose .markdown-block {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #2563eb;
+      padding: 1.25em 1.5em;
+      border-radius: 0 8px 8px 0;
+      overflow-x: auto;
+      margin: 1.5em 0;
+      line-height: 1.6;
+      position: relative;
+    }
+
+    .prose .markdown-block::before {
+      content: 'CLAUDE.md';
+      position: absolute;
+      top: -1px;
+      right: -1px;
+      background: #2563eb;
+      color: white;
+      font-size: 0.7em;
+      padding: 4px 10px;
+      border-radius: 0 8px 0 6px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    .prose .markdown-block code {
+      background: transparent;
+      padding: 0;
+      color: #334155;
+      font-size: 0.85em;
+    }
+
+    /* Legacy pre blocks (fallback) */
+    .prose pre:not(.code-block):not(.markdown-block) {
       background: #1e293b;
       color: #e2e8f0;
       padding: 1.25em 1.5em;
@@ -364,7 +435,7 @@ interface RelatedPost {
       line-height: 1.5;
     }
 
-    .prose pre code {
+    .prose pre:not(.code-block):not(.markdown-block) code {
       background: transparent;
       padding: 0;
       color: inherit;
@@ -619,12 +690,12 @@ export class BlogPostComponent implements OnInit {
 
         <p>First, get your API key from your <a href="https://decisionrecords.org/profile">Profile Settings</a> page. Then run:</p>
 
-        <pre><code>claude mcp add decision-records https://decisionrecords.org/api/mcp \\
+        <pre class="code-block"><code>claude mcp add decision-records https://decisionrecords.org/api/mcp \\
   -t http -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
 
         <p>Verify the connection:</p>
 
-        <pre><code>claude mcp list</code></pre>
+        <pre class="code-block"><code>claude mcp list</code></pre>
 
         <p>You should see <code>decision-records</code> listed with a <strong>green checkmark</strong>. That's it—Claude Code now has access to your team's architecture decisions.</p>
 
@@ -634,7 +705,7 @@ export class BlogPostComponent implements OnInit {
 
         <p>Copy this section into your CLAUDE.md:</p>
 
-        <pre><code>## Architecture Decision Records (ADRs)
+        <pre class="markdown-block"><code>## Architecture Decision Records (ADRs)
 
 This project uses Decision Records (decisionrecords.org) to track
 architecture decisions. Use the MCP tools to search, read, and
@@ -659,24 +730,21 @@ Skip decisions for:
 ### Using MCP Tools
 
 Search for relevant decisions before implementing features:
-\`\`\`
+
 mcp__decision-records__search_decisions(query="authentication")
-\`\`\`
 
 Get full details of a specific decision:
-\`\`\`
+
 mcp__decision-records__get_decision(id="ADR-42")
-\`\`\`
 
 Create a new decision (requires write scope):
-\`\`\`
+
 mcp__decision-records__create_decision(
   title="Use JWT for API authentication",
   context="We need stateless auth for the API...",
   decision="We will use JWT tokens with...",
   consequences="+ Stateless, scalable\\n- Token revocation complexity"
 )
-\`\`\`
 
 ### Decision Format (arc42)
 

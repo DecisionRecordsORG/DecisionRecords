@@ -62,6 +62,63 @@ H1: Article Title (one per page)
 - Should make sense out of context
 - Style: left border, subtle background, italic
 
+## Code & Markdown Formatting
+
+Blog posts support three types of code formatting, each with distinct visual styling:
+
+### Inline Code
+Use for short references within text (file names, commands, variable names).
+
+```html
+<p>Run <code>claude mcp list</code> to verify the connection.</p>
+<p>Add this to your <code>CLAUDE.md</code> file.</p>
+```
+
+**Styling**: Light blue background (#f1f5f9), blue text (#1e40af), rounded corners.
+
+### Terminal/Command Blocks
+Use for shell commands, CLI instructions, or any code the user runs in a terminal.
+
+```html
+<pre class="code-block"><code>claude mcp add decision-records https://decisionrecords.org/api/mcp \
+  -t http -H "Authorization: Bearer YOUR_API_KEY"</code></pre>
+```
+
+**Styling**: Dark background (#1e293b), light text, "Terminal" label in top-right corner.
+
+### Markdown Content Blocks
+Use for copy-paste content intended for .md files (CLAUDE.md, README.md, etc.).
+
+```html
+<pre class="markdown-block"><code>## Architecture Decision Records (ADRs)
+
+This project uses Decision Records to track architecture decisions.
+
+### When to Create a Decision
+
+- Making a significant technical choice
+- Changing existing architecture
+- Establishing team conventions</code></pre>
+```
+
+**Styling**: Light background (#f8fafc), blue left border, "CLAUDE.md" label in top-right corner.
+
+### When to Use Each Type
+
+| Content Type | Class | Example |
+|-------------|-------|---------|
+| File names, short commands | `<code>` (inline) | `CLAUDE.md`, `npm install` |
+| Terminal commands to execute | `<pre class="code-block">` | Installation commands, CLI usage |
+| Markdown to copy into a file | `<pre class="markdown-block">` | CLAUDE.md templates, README sections |
+| Code snippets (JS, Python, etc.) | `<pre class="code-block">` | Function examples, API usage |
+
+### Escaping Special Characters
+
+In HTML content strings, escape:
+- Backslashes: `\\` → `\\\\`
+- Backticks inside markdown blocks: Use HTML entity or escape
+- Quotes: Use opposite quote type or escape
+
 ## Glanceability Checklist
 
 Before publishing any content, verify:
@@ -154,47 +211,58 @@ Error:      #F87171, #DC2626
 
 ## Adding a New Blog Post
 
-Blog posts are stored in the database and require both a database entry and an Angular component.
+Blog posts are automatically seeded to the database on app startup. Add posts to the source files and deploy—no manual scripts required.
 
-### Step 1: Create the Database Entry
+### Step 1: Add Post Content to Angular Component
 
-Use the blog management script to add the post metadata:
-
-```bash
-# Add a new blog post
-python scripts/manage_blog.py add \
-  --slug "your-post-slug" \
-  --title "Your Post Title" \
-  --excerpt "A 1-2 sentence description for the blog list" \
-  --category "Documentation" \
-  --image "/assets/blog/your-image.svg" \
-  --read-time "5 min read"
-
-# List all posts to verify
-python scripts/manage_blog.py list
-```
-
-### Step 2: Create the Angular Component
-
-Each blog post needs a dedicated Angular component in:
-`frontend/src/app/components/blog/posts/`
-
-1. Create a new file: `your-post-slug.component.ts`
-2. Follow the existing post component structure
-3. Import and use `SiteNavComponent` and `SiteFooterComponent`
-4. Set the correct meta tags for SEO
-
-### Step 3: Add the Route
-
-Add the route to `frontend/src/app/app.routes.ts`:
+Add the post to the `posts` array in `frontend/src/app/components/blog/blog-post/blog-post.component.ts`:
 
 ```typescript
 {
-  path: 'blog/your-post-slug',
-  loadComponent: () => import('./components/blog/posts/your-post-slug.component')
-    .then(m => m.YourPostSlugComponent),
+  slug: 'your-post-slug',
+  title: 'Your Post Title',
+  excerpt: 'A 1-2 sentence description for the blog list.',
+  author: 'Decision Records',
+  date: 'January 2025',
+  readTime: '5 min read',
+  image: '/assets/blog/your-image.svg',
+  category: 'Documentation',
+  metaDescription: 'SEO description (150-160 characters).',
+  content: `
+    <p class="lead">Lead paragraph with <strong>key insight</strong>.</p>
+
+    <h2>Section Heading</h2>
+    <p>Content with proper formatting...</p>
+
+    <pre class="code-block"><code>terminal commands here</code></pre>
+
+    <pre class="markdown-block"><code>markdown content here</code></pre>
+  `
+}
+```
+
+### Step 2: Add Post Metadata to BLOG_POSTS_SEED
+
+Add the post metadata to `BLOG_POSTS_SEED` in `app.py` for auto-seeding:
+
+```python
+{
+    'slug': 'your-post-slug',
+    'title': 'Your Post Title',
+    'excerpt': 'A 1-2 sentence description for the blog list.',
+    'author': 'Decision Records',
+    'category': 'Documentation',
+    'read_time': '5 min read',
+    'image': '/assets/blog/your-image.svg',
+    'meta_description': 'SEO description (150-160 characters).',
+    'featured': False,
+    'publish_date': datetime(2025, 1, 15, tzinfo=timezone.utc),
 },
 ```
+
+### Step 3: Create the Hero Image
+
+Create an SVG image at `frontend/src/assets/blog/your-image.svg` following the Visual Content Standards.
 
 ### Step 4: Update Prerender Routes
 
@@ -204,18 +272,23 @@ Add the new blog post to `frontend/prerender-routes.txt`:
 /blog/your-post-slug
 ```
 
-### Step 5: Create the Hero Image
+### Step 5: Deploy
 
-Create an SVG image at `/frontend/src/assets/blog/your-image.svg` following the Visual Content Standards below.
+Commit and deploy. The app automatically seeds any missing blog posts on startup.
 
-### Script Reference
+```bash
+git add .
+git commit -m "Add blog post: Your Post Title"
+./scripts/redeploy.sh patch
+```
+
+### Manual Script Reference (Optional)
+
+For manual operations (publish/unpublish, delete, update metadata):
 
 ```bash
 # List all blog posts
 python scripts/manage_blog.py list
-
-# Seed initial blog posts (run after migration)
-python scripts/manage_blog.py seed
 
 # Update a post
 python scripts/manage_blog.py update --slug "post-slug" --title "New Title"
@@ -258,5 +331,5 @@ Use consistent category labels:
 
 ---
 
-*Last updated: December 2024*
+*Last updated: January 2025*
 *Reference: Google Fonts readability research, NN/g glanceable typography guidelines*
