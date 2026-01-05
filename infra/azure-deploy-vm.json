@@ -11,9 +11,9 @@
     },
     "vmSize": {
       "type": "string",
-      "defaultValue": "Standard_B1s",
+      "defaultValue": "Standard_B2ts_v2",
       "metadata": {
-        "description": "Size of the virtual machine (B1s is free tier eligible)"
+        "description": "Size of the virtual machine (B2ts_v2: 2 vCPU, 1 GB RAM, ~$12/month)"
       }
     },
     "adminUsername": {
