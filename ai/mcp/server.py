@@ -373,8 +373,8 @@ def authenticate_mcp_request(api_key: str) -> Tuple[bool, Optional[MCPToolHandle
         return False, None, "Invalid or expired API key"
 
     # Get user and tenant
-    user = User.query.get(key_record.user_id)
-    tenant = Tenant.query.get(key_record.tenant_id)
+    user = db.session.get(User, key_record.user_id)
+    tenant = db.session.get(Tenant, key_record.tenant_id)
 
     if not user or not tenant:
         return False, None, "User or tenant not found"
