@@ -420,7 +420,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
                     </p>
                     <ul>
                       <li>A <strong>Tenant Administrator</strong> must enable "External AI Access" in the
-                          <a routerLink="/admin" class="admin-link">Admin Settings</a> → AI Features section</li>
+                          <a [routerLink]="'/' + user?.tenant_info?.domain + '/admin'" class="admin-link">Admin Settings</a> → AI Features section</li>
                       <li>If you're not an admin, ask your organization's administrator to enable this feature</li>
                     </ul>
                     <p class="notice-hint">
