@@ -12,6 +12,10 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatExpansionModule } from '@angular/material/expansion';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatChipsModule } from '@angular/material/chips';
+import { MatSelectModule } from '@angular/material/select';
+import { MatTabsModule } from '@angular/material/tabs';
+import { MatBadgeModule } from '@angular/material/badge';
 import { RouterModule } from '@angular/router';
 
 interface SessionSettings {
@@ -36,6 +40,13 @@ interface EndpointCategory {
   endpoints: string[];
 }
 
+interface DiscoveredEndpoint {
+  path: string;
+  methods: string[];
+  category: string;
+  suggested_event: string;
+}
+
 interface AnalyticsSettings {
   enabled: boolean;
   host: string;
@@ -43,7 +54,9 @@ interface AnalyticsSettings {
   exception_capture: boolean;
   api_key_configured: boolean;
   event_mappings: { [key: string]: string };
+  default_mappings: { [key: string]: string };
   categories: { [key: string]: EndpointCategory };
+  discovered_endpoints: { [key: string]: DiscoveredEndpoint };
 }
 
 interface CloudflareSettings {
@@ -97,7 +110,11 @@ interface SystemAISettings {
     MatSnackBarModule,
     MatSlideToggleModule,
     MatExpansionModule,
-    MatTooltipModule
+    MatTooltipModule,
+    MatChipsModule,
+    MatSelectModule,
+    MatTabsModule,
+    MatBadgeModule
   ],
   template: `
     <div class="settings-container">
@@ -386,43 +403,176 @@ interface SystemAISettings {
             @if (analyticsEnabled && analyticsCategories) {
               <div class="form-section">
                 <h3>Event Mappings</h3>
-                <p class="hint">Customize event names sent to PostHog by category</p>
+                <p class="hint">Customize event names sent to PostHog. Endpoints with mappings are automatically tracked.</p>
 
-                <mat-accordion multi>
-                  @for (categoryKey of getCategoryKeys(); track categoryKey) {
-                    <mat-expansion-panel>
-                      <mat-expansion-panel-header>
-                        <mat-panel-title>
-                          <mat-icon>{{ analyticsCategories[categoryKey].icon }}</mat-icon>
-                          {{ analyticsCategories[categoryKey].name }}
-                        </mat-panel-title>
-                        <mat-panel-description>
-                          {{ analyticsCategories[categoryKey].endpoints.length }} events
-                        </mat-panel-description>
-                      </mat-expansion-panel-header>
+                <div class="mapping-stats">
+                  <div class="stat">
+                    <mat-icon>api</mat-icon>
+                    <span class="stat-value">{{ getTotalEndpoints() }}</span>
+                    <span class="stat-label">API Endpoints</span>
+                  </div>
+                  <div class="stat mapped">
+                    <mat-icon>check_circle</mat-icon>
+                    <span class="stat-value">{{ getMappedCount() }}</span>
+                    <span class="stat-label">Mapped</span>
+                  </div>
+                  <div class="stat unmapped">
+                    <mat-icon>radio_button_unchecked</mat-icon>
+                    <span class="stat-value">{{ getUnmappedCount() }}</span>
+                    <span class="stat-label">Unmapped</span>
+                  </div>
+                </div>
 
-                      <div class="event-list">
-                        @for (endpoint of analyticsCategories[categoryKey].endpoints; track endpoint) {
-                          <div class="event-item">
-                            <span class="endpoint-name" matTooltip="{{ endpoint }}">{{ endpoint }}</span>
-                            <mat-form-field appearance="outline" class="event-name-field">
-                              <input matInput
-                                     [(ngModel)]="analyticsEventMappings[endpoint]"
-                                     placeholder="{{ endpoint }}">
-                            </mat-form-field>
+                <mat-tab-group animationDuration="200ms">
+                  <!-- By Category Tab -->
+                  <mat-tab>
+                    <ng-template mat-tab-label>
+                      <mat-icon class="tab-icon">category</mat-icon>
+                      By Category
+                    </ng-template>
+
+                    <div class="tab-content">
+                      <mat-accordion multi>
+                        @for (categoryKey of getCategoryKeys(); track categoryKey) {
+                          <mat-expansion-panel>
+                            <mat-expansion-panel-header>
+                              <mat-panel-title>
+                                <mat-icon>{{ analyticsCategories[categoryKey].icon }}</mat-icon>
+                                {{ analyticsCategories[categoryKey].name }}
+                              </mat-panel-title>
+                              <mat-panel-description>
+                                {{ analyticsCategories[categoryKey].endpoints.length }} events
+                              </mat-panel-description>
+                            </mat-expansion-panel-header>
+
+                            <div class="event-list">
+                              @for (endpoint of analyticsCategories[categoryKey].endpoints; track endpoint) {
+                                <div class="event-item">
+                                  <span class="endpoint-name" matTooltip="{{ endpoint }}">{{ endpoint }}</span>
+                                  <mat-form-field appearance="outline" class="event-name-field">
+                                    <input matInput
+                                           [(ngModel)]="analyticsEventMappings[endpoint]"
+                                           placeholder="{{ endpoint }}">
+                                  </mat-form-field>
+                                </div>
+                              }
+                            </div>
+
+                            <div class="panel-actions">
+                              <button mat-button (click)="resetCategoryMappings(categoryKey)">
+                                <mat-icon>restore</mat-icon>
+                                Reset Category to Defaults
+                              </button>
+                            </div>
+                          </mat-expansion-panel>
+                        }
+                      </mat-accordion>
+                    </div>
+                  </mat-tab>
+
+                  <!-- All Endpoints Tab -->
+                  <mat-tab>
+                    <ng-template mat-tab-label>
+                      <mat-icon class="tab-icon">list</mat-icon>
+                      All Endpoints
+                      @if (getUnmappedCount() > 0) {
+                        <span class="unmapped-badge">{{ getUnmappedCount() }}</span>
+                      }
+                    </ng-template>
+
+                    <div class="tab-content">
+                      <div class="filter-row">
+                        <mat-form-field appearance="outline" class="filter-field">
+                          <mat-label>Search endpoints</mat-label>
+                          <input matInput [(ngModel)]="endpointSearchFilter" placeholder="Filter by name or path...">
+                          <mat-icon matPrefix>search</mat-icon>
+                          @if (endpointSearchFilter) {
+                            <button mat-icon-button matSuffix (click)="endpointSearchFilter = ''">
+                              <mat-icon>close</mat-icon>
+                            </button>
+                          }
+                        </mat-form-field>
+
+                        <mat-form-field appearance="outline" class="filter-field">
+                          <mat-label>Category</mat-label>
+                          <mat-select [(ngModel)]="endpointCategoryFilter">
+                            <mat-option value="">All Categories</mat-option>
+                            @for (cat of getDiscoveredCategories(); track cat) {
+                              <mat-option [value]="cat">{{ cat | titlecase }}</mat-option>
+                            }
+                          </mat-select>
+                        </mat-form-field>
+
+                        <mat-form-field appearance="outline" class="filter-field status-filter">
+                          <mat-label>Status</mat-label>
+                          <mat-select [(ngModel)]="endpointStatusFilter">
+                            <mat-option value="">All</mat-option>
+                            <mat-option value="mapped">Mapped</mat-option>
+                            <mat-option value="unmapped">Unmapped</mat-option>
+                          </mat-select>
+                        </mat-form-field>
+                      </div>
+
+                      <div class="endpoints-list">
+                        @for (endpoint of getFilteredEndpoints(); track endpoint.name) {
+                          <div class="endpoint-row" [class.unmapped]="!analyticsEventMappings[endpoint.name]">
+                            <div class="endpoint-info">
+                              <div class="endpoint-header">
+                                <span class="endpoint-name-full" [matTooltip]="endpoint.name">{{ endpoint.name }}</span>
+                                @if (analyticsEventMappings[endpoint.name]) {
+                                  <mat-icon class="status-icon mapped" matTooltip="Tracked">check_circle</mat-icon>
+                                } @else {
+                                  <mat-icon class="status-icon unmapped" matTooltip="Not tracked">radio_button_unchecked</mat-icon>
+                                }
+                              </div>
+                              <div class="endpoint-details">
+                                <span class="endpoint-path">{{ endpoint.path }}</span>
+                                <div class="method-chips">
+                                  @for (method of endpoint.methods; track method) {
+                                    <span class="method-chip" [class]="method.toLowerCase()">{{ method }}</span>
+                                  }
+                                </div>
+                                <span class="endpoint-category">{{ endpoint.category }}</span>
+                              </div>
+                            </div>
+                            <div class="endpoint-mapping">
+                              <mat-form-field appearance="outline" class="mapping-field">
+                                <mat-label>Event name</mat-label>
+                                <input matInput
+                                       [(ngModel)]="analyticsEventMappings[endpoint.name]"
+                                       [placeholder]="endpoint.suggested_event">
+                                <mat-hint>{{ endpoint.suggested_event }}</mat-hint>
+                              </mat-form-field>
+                              @if (!analyticsEventMappings[endpoint.name]) {
+                                <button mat-stroked-button
+                                        color="primary"
+                                        (click)="enableEndpointTracking(endpoint.name, endpoint.suggested_event)"
+                                        matTooltip="Enable tracking with suggested name">
+                                  <mat-icon>add</mat-icon>
+                                  Enable
+                                </button>
+                              } @else {
+                                <button mat-icon-button
+                                        color="warn"
+                                        (click)="disableEndpointTracking(endpoint.name)"
+                                        matTooltip="Disable tracking">
+                                  <mat-icon>delete</mat-icon>
+                                </button>
+                              }
+                            </div>
+                          </div>
+                        }
+
+                        @if (getFilteredEndpoints().length === 0) {
+                          <div class="no-results">
+                            <mat-icon>search_off</mat-icon>
+                            <p>No endpoints match your filters</p>
                           </div>
                         }
                       </div>
-
-                      <div class="panel-actions">
-                        <button mat-button (click)="resetCategoryMappings(categoryKey)">
-                          <mat-icon>restore</mat-icon>
-                          Reset Category to Defaults
-                        </button>
-                      </div>
-                    </mat-expansion-panel>
-                  }
-                </mat-accordion>
+                    </div>
+                  </mat-tab>
+                </mat-tab-group>
 
                 <div class="actions">
                   <button mat-raised-button color="primary"
@@ -1144,6 +1294,247 @@ interface SystemAISettings {
       font-size: 13px;
       color: #666;
     }
+
+    /* Enhanced Analytics Styles */
+    .mapping-stats {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 20px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 8px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .mapping-stats .stat {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mapping-stats .stat mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+      color: #666;
+    }
+
+    .mapping-stats .stat.mapped mat-icon {
+      color: #2e7d32;
+    }
+
+    .mapping-stats .stat.unmapped mat-icon {
+      color: #f57c00;
+    }
+
+    .mapping-stats .stat-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .mapping-stats .stat-label {
+      font-size: 13px;
+      color: #666;
+    }
+
+    .tab-icon {
+      margin-right: 8px;
+    }
+
+    .unmapped-badge {
+      background: #f57c00;
+      color: white;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+
+    .tab-content {
+      padding: 16px 0;
+    }
+
+    .filter-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .filter-field {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .filter-field.status-filter {
+      max-width: 150px;
+      min-width: 120px;
+    }
+
+    .endpoints-list {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+    }
+
+    .endpoint-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid #f0f0f0;
+      background: #fff;
+    }
+
+    .endpoint-row:last-child {
+      border-bottom: none;
+    }
+
+    .endpoint-row.unmapped {
+      background: #fffde7;
+    }
+
+    .endpoint-row:hover {
+      background: #f5f5f5;
+    }
+
+    .endpoint-row.unmapped:hover {
+      background: #fff9c4;
+    }
+
+    .endpoint-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .endpoint-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .endpoint-name-full {
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: 500;
+      color: #333;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-icon {
+      font-size: 16px;
+      width: 16px;
+      height: 16px;
+    }
+
+    .status-icon.mapped {
+      color: #2e7d32;
+    }
+
+    .status-icon.unmapped {
+      color: #bdbdbd;
+    }
+
+    .endpoint-details {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .endpoint-path {
+      font-size: 12px;
+      color: #666;
+      font-family: monospace;
+    }
+
+    .method-chips {
+      display: flex;
+      gap: 4px;
+    }
+
+    .method-chip {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+
+    .method-chip.get {
+      background: #e3f2fd;
+      color: #1565c0;
+    }
+
+    .method-chip.post {
+      background: #e8f5e9;
+      color: #2e7d32;
+    }
+
+    .method-chip.put {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .method-chip.delete {
+      background: #ffebee;
+      color: #c62828;
+    }
+
+    .method-chip.patch {
+      background: #f3e5f5;
+      color: #7b1fa2;
+    }
+
+    .endpoint-category {
+      font-size: 11px;
+      color: #9e9e9e;
+      background: #f5f5f5;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    .endpoint-mapping {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .mapping-field {
+      width: 250px;
+    }
+
+    .mapping-field input {
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    .no-results {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+      color: #9e9e9e;
+    }
+
+    .no-results mat-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      margin-bottom: 16px;
+    }
+
+    .no-results p {
+      margin: 0;
+      font-size: 14px;
+    }
   `]
 })
 export class SuperadminSettingsComponent implements OnInit {
@@ -1179,6 +1570,12 @@ export class SuperadminSettingsComponent implements OnInit {
   analyticsEventMappings: { [key: string]: string } = {};
   analyticsCategories: { [key: string]: EndpointCategory } | null = null;
   analyticsDefaultMappings: { [key: string]: string } = {};
+  analyticsDiscoveredEndpoints: { [key: string]: DiscoveredEndpoint } = {};
+
+  // Endpoint filters
+  endpointSearchFilter = '';
+  endpointCategoryFilter = '';
+  endpointStatusFilter = '';
 
   // Cloudflare settings
   cloudflareLoading = true;
@@ -1351,8 +1748,9 @@ export class SuperadminSettingsComponent implements OnInit {
         this.analyticsExceptionCapture = settings.exception_capture;
         this.analyticsApiKeyConfigured = settings.api_key_configured;
         this.analyticsEventMappings = { ...settings.event_mappings };
-        this.analyticsDefaultMappings = { ...settings.event_mappings };
+        this.analyticsDefaultMappings = { ...settings.default_mappings };
         this.analyticsCategories = settings.categories;
+        this.analyticsDiscoveredEndpoints = settings.discovered_endpoints || {};
         this.analyticsLoading = false;
       },
       error: (error) => {
@@ -1459,6 +1857,76 @@ export class SuperadminSettingsComponent implements OnInit {
         this.snackBar.open(error.error?.error || 'Failed to reset mappings', 'Close', { duration: 3000 });
       }
     });
+  }
+
+  // Discovered endpoints methods
+  getTotalEndpoints(): number {
+    return Object.keys(this.analyticsDiscoveredEndpoints).length;
+  }
+
+  getMappedCount(): number {
+    const discoveredKeys = Object.keys(this.analyticsDiscoveredEndpoints);
+    return discoveredKeys.filter(key => this.analyticsEventMappings[key]).length;
+  }
+
+  getUnmappedCount(): number {
+    return this.getTotalEndpoints() - this.getMappedCount();
+  }
+
+  getDiscoveredCategories(): string[] {
+    const categories = new Set<string>();
+    Object.values(this.analyticsDiscoveredEndpoints).forEach(endpoint => {
+      if (endpoint.category) {
+        categories.add(endpoint.category);
+      }
+    });
+    return Array.from(categories).sort();
+  }
+
+  getFilteredEndpoints(): Array<DiscoveredEndpoint & { name: string }> {
+    let endpoints = Object.entries(this.analyticsDiscoveredEndpoints).map(([name, endpoint]) => ({
+      name,
+      ...endpoint
+    }));
+
+    // Filter by search term
+    if (this.endpointSearchFilter) {
+      const search = this.endpointSearchFilter.toLowerCase();
+      endpoints = endpoints.filter(ep =>
+        ep.name.toLowerCase().includes(search) ||
+        ep.path.toLowerCase().includes(search)
+      );
+    }
+
+    // Filter by category
+    if (this.endpointCategoryFilter) {
+      endpoints = endpoints.filter(ep => ep.category === this.endpointCategoryFilter);
+    }
+
+    // Filter by status
+    if (this.endpointStatusFilter === 'mapped') {
+      endpoints = endpoints.filter(ep => this.analyticsEventMappings[ep.name]);
+    } else if (this.endpointStatusFilter === 'unmapped') {
+      endpoints = endpoints.filter(ep => !this.analyticsEventMappings[ep.name]);
+    }
+
+    // Sort: unmapped first, then alphabetically
+    return endpoints.sort((a, b) => {
+      const aMapped = this.analyticsEventMappings[a.name] ? 1 : 0;
+      const bMapped = this.analyticsEventMappings[b.name] ? 1 : 0;
+      if (aMapped !== bMapped) return aMapped - bMapped;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  enableEndpointTracking(endpointName: string, suggestedEvent: string) {
+    this.analyticsEventMappings[endpointName] = suggestedEvent;
+    this.snackBar.open(`Tracking enabled for ${endpointName}`, 'Close', { duration: 2000 });
+  }
+
+  disableEndpointTracking(endpointName: string) {
+    delete this.analyticsEventMappings[endpointName];
+    this.snackBar.open(`Tracking disabled for ${endpointName}`, 'Close', { duration: 2000 });
   }
 
   // Cloudflare methods

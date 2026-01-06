@@ -79,7 +79,7 @@ DEFAULT_EVENT_MAPPINGS = {
     'api_webauthn_auth_verify': 'webauthn_auth_completed',
 
     # User Profile & Credentials (7)
-    'api_user_me': 'user_profile_viewed',
+    'api_user_me': 'auth_status_checked',
     'api_user_subscription_get': 'subscription_viewed',
     'api_user_subscription_update': 'subscription_updated',
     'api_user_dismiss_admin_onboarding': 'admin_onboarding_dismissed',
@@ -135,11 +135,34 @@ DEFAULT_EVENT_MAPPINGS = {
     'api_admin_settings_licensing_get': 'licensing_settings_viewed',
     'api_admin_settings_licensing_save': 'licensing_settings_saved',
 
-    # Admin - Analytics Settings (4)
+    # Admin - Analytics Settings (7)
     'api_admin_settings_analytics_get': 'analytics_settings_viewed',
     'api_admin_settings_analytics_save': 'analytics_settings_saved',
     'api_admin_settings_analytics_api_key': 'analytics_api_key_updated',
     'api_admin_settings_analytics_test': 'analytics_test_event_sent',
+    'api_admin_settings_analytics_reset': 'analytics_mappings_reset',
+    'api_admin_settings_analytics_mapping_update': 'analytics_mapping_updated',
+    'api_admin_settings_analytics_mapping_delete': 'analytics_mapping_deleted',
+
+    # Admin - Support Settings (2)
+    'api_admin_settings_support_get': 'support_settings_viewed',
+    'api_admin_settings_support_save': 'support_settings_saved',
+
+    # Admin - AI System Settings (2)
+    'api_admin_settings_ai_get': 'ai_system_settings_viewed',
+    'api_admin_settings_ai_save': 'ai_system_settings_saved',
+
+    # Admin - Cloudflare Settings (4)
+    'api_admin_settings_cloudflare_get': 'cloudflare_settings_viewed',
+    'api_admin_settings_cloudflare_save': 'cloudflare_settings_saved',
+    'api_admin_settings_cloudflare_aud': 'cloudflare_access_aud_updated',
+    'api_admin_settings_cloudflare_test': 'cloudflare_settings_tested',
+
+    # Admin - Log Forwarding Settings (4)
+    'api_admin_settings_logforwarding_get': 'log_forwarding_settings_viewed',
+    'api_admin_settings_logforwarding_save': 'log_forwarding_settings_saved',
+    'api_admin_settings_logforwarding_api_key': 'log_forwarding_api_key_updated',
+    'api_admin_settings_logforwarding_test': 'log_forwarding_tested',
 
     # Admin - User Management (4)
     'api_admin_users_list': 'admin_users_listed',
@@ -314,8 +337,15 @@ ENDPOINT_CATEGORIES = {
             'api_admin_settings_session_save', 'api_admin_settings_licensing_get',
             'api_admin_settings_licensing_save', 'api_admin_settings_analytics_get',
             'api_admin_settings_analytics_save', 'api_admin_settings_analytics_api_key',
-            'api_admin_settings_analytics_test', 'api_system_config_get',
-            'api_system_config_key_get', 'api_system_config_set',
+            'api_admin_settings_analytics_test', 'api_admin_settings_analytics_reset',
+            'api_admin_settings_analytics_mapping_update', 'api_admin_settings_analytics_mapping_delete',
+            'api_admin_settings_support_get', 'api_admin_settings_support_save',
+            'api_admin_settings_ai_get', 'api_admin_settings_ai_save',
+            'api_admin_settings_cloudflare_get', 'api_admin_settings_cloudflare_save',
+            'api_admin_settings_cloudflare_aud', 'api_admin_settings_cloudflare_test',
+            'api_admin_settings_logforwarding_get', 'api_admin_settings_logforwarding_save',
+            'api_admin_settings_logforwarding_api_key', 'api_admin_settings_logforwarding_test',
+            'api_system_config_get', 'api_system_config_key_get', 'api_system_config_set',
             'api_system_email_verification_get', 'api_system_email_verification_set',
             'api_system_super_admin_email_get', 'api_system_super_admin_email_set',
             'api_tenants_list', 'api_tenants_maturity_get', 'api_tenants_maturity_update',
@@ -535,6 +565,10 @@ def track_endpoint(endpoint_name, extra_properties=None):
     """
     Decorator to track API endpoint calls.
 
+    NOTE: This decorator is now optional. The tracking middleware (init_tracking_middleware)
+    will automatically track any endpoint that has a mapping configured, even without
+    this decorator. Use this decorator only if you need to pass extra_properties.
+
     Usage:
         @app.route('/api/decisions', methods=['GET'])
         @login_required
@@ -545,6 +579,8 @@ def track_endpoint(endpoint_name, extra_properties=None):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            from flask import g
+
             # Execute the endpoint first
             result = f(*args, **kwargs)
 
@@ -558,6 +594,9 @@ def track_endpoint(endpoint_name, extra_properties=None):
                         properties['response_status'] = result[1]
 
                 track_event(endpoint_name, properties)
+
+                # Set flag to prevent middleware from double-tracking
+                g._analytics_tracked = True
             except Exception as e:
                 logger.debug(f"Analytics tracking failed: {e}")
 
@@ -673,16 +712,241 @@ def capture_exception(exception, endpoint_name=None, extra_properties=None):
         logger.warning(f"Failed to capture exception: {e}")
 
 
-def get_config_for_api():
+def discover_endpoints(app):
+    """
+    Discover all API endpoints from Flask's url_map.
+
+    Returns a dict of endpoint_name -> endpoint_info with:
+    - path: URL path
+    - methods: HTTP methods
+    - category: Auto-detected category based on path
+    - suggested_event: Auto-generated event name suggestion
+    """
+    endpoints = {}
+
+    # Category detection based on URL path patterns
+    category_patterns = [
+        (r'^/api/admin/settings/', 'super_admin'),
+        (r'^/api/admin/', 'admin'),
+        (r'^/api/auth/', 'authentication'),
+        (r'^/api/webauthn/', 'webauthn'),
+        (r'^/api/user/', 'user_profile'),
+        (r'^/api/decisions/', 'decisions'),
+        (r'^/api/infrastructure/', 'infrastructure'),
+        (r'^/api/spaces/', 'spaces'),
+        (r'^/api/slack/', 'slack'),
+        (r'^/api/teams/', 'teams'),
+        (r'^/api/ai/', 'ai'),
+        (r'^/api/tenants/', 'super_admin'),
+        (r'^/api/domains/', 'super_admin'),
+        (r'^/api/system/', 'super_admin'),
+        (r'^/api/master/', 'super_admin'),
+        (r'^/api/blog/', 'public'),
+        (r'^/api/features', 'system'),
+        (r'^/api/health', 'system'),
+        (r'^/api/version', 'system'),
+        (r'^/api/', 'other'),
+    ]
+
+    import re
+
+    for rule in app.url_map.iter_rules():
+        endpoint_name = rule.endpoint
+
+        # Skip static files and non-API endpoints
+        if endpoint_name == 'static' or not rule.rule.startswith('/api'):
+            continue
+
+        # Skip internal Flask endpoints
+        if endpoint_name.startswith('_'):
+            continue
+
+        # Detect category
+        category = 'other'
+        for pattern, cat in category_patterns:
+            if re.match(pattern, rule.rule):
+                category = cat
+                break
+
+        # Generate suggested event name from endpoint name
+        # Convert endpoint_name like 'api_decisions_list' to 'decisions_listed'
+        suggested_event = _generate_event_name(endpoint_name, rule.methods)
+
+        endpoints[endpoint_name] = {
+            'path': rule.rule,
+            'methods': sorted([m for m in rule.methods if m not in ('HEAD', 'OPTIONS')]),
+            'category': category,
+            'suggested_event': suggested_event
+        }
+
+    return endpoints
+
+
+def _generate_event_name(endpoint_name, methods):
+    """Generate a suggested event name from an endpoint name."""
+    # Remove common prefixes
+    name = endpoint_name
+    for prefix in ['api_', 'auth_', 'admin_']:
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+
+    # Convert to past tense for common action words
+    action_mappings = {
+        '_list': '_listed',
+        '_get': '_viewed',
+        '_create': '_created',
+        '_update': '_updated',
+        '_delete': '_deleted',
+        '_save': '_saved',
+        '_test': '_tested',
+        '_send': '_sent',
+        '_verify': '_verified',
+        '_approve': '_approved',
+        '_reject': '_rejected',
+        '_toggle': '_toggled',
+        '_reset': '_reset',
+        '_check': '_checked',
+    }
+
+    for suffix, replacement in action_mappings.items():
+        if name.endswith(suffix):
+            name = name[:-len(suffix)] + replacement
+            break
+
+    return name
+
+
+def init_tracking_middleware(app):
+    """
+    Initialize automatic endpoint tracking via after_request middleware.
+
+    This enables tracking for ALL endpoints without requiring decorators.
+    The mapping is looked up dynamically from the database/config.
+
+    Call this once during app initialization:
+        from analytics import init_tracking_middleware
+        init_tracking_middleware(app)
+    """
+    @app.after_request
+    def track_request(response):
+        """Track API requests automatically based on configured mappings."""
+        from flask import request, g, session
+
+        try:
+            # Only track API endpoints
+            if not request.path.startswith('/api'):
+                return response
+
+            # Skip if already tracked by decorator (check flag)
+            if getattr(g, '_analytics_tracked', False):
+                return response
+
+            # Get the endpoint name
+            endpoint_name = request.endpoint
+            if not endpoint_name:
+                return response
+
+            # Get config and check if tracking is enabled
+            config = _get_analytics_config()
+            if not config['enabled'] or not config['posthog_client']:
+                return response
+
+            # Look up event mapping
+            event_name = config['event_mappings'].get(endpoint_name)
+            if not event_name:
+                # No mapping configured - skip tracking
+                return response
+
+            # Track the event
+            properties = {
+                'response_status': response.status_code
+            }
+
+            # Use internal tracking (bypasses the mapping lookup since we have event_name)
+            _track_event_internal(event_name, endpoint_name, properties)
+
+        except Exception as e:
+            # Never let tracking errors affect the response
+            logger.debug(f"Middleware tracking failed: {e}")
+
+        return response
+
+    logger.info("Analytics tracking middleware initialized")
+
+
+def _track_event_internal(event_name, endpoint_name, properties=None):
+    """
+    Internal event tracking - used by middleware when event_name is already known.
+    """
+    from flask import g, request, session
+
+    config = _get_analytics_config()
+
+    if not config['enabled'] or not config['posthog_client']:
+        return
+
+    # Generate distinct_id
+    distinct_id = 'anonymous'
+    user_type = 'anonymous'
+    tenant_domain = None
+
+    if session.get('is_master'):
+        distinct_id = 'master_admin'
+        user_type = 'master_admin'
+    elif hasattr(g, 'current_user') and g.current_user:
+        tenant_domain = getattr(g.current_user, 'sso_domain', None)
+        distinct_id = generate_distinct_id(g.current_user.id, tenant_domain)
+        user_type = 'authenticated'
+
+    # Build properties
+    event_properties = {
+        'user_type': user_type,
+        'endpoint': endpoint_name,
+        'path': request.path if request else None,
+        'method': request.method if request else None,
+    }
+
+    if tenant_domain:
+        event_properties['tenant_hash'] = hashlib.sha256(
+            tenant_domain.encode()
+        ).hexdigest()[:16]
+
+    if properties:
+        event_properties.update(properties)
+
+    # Optionally disable person profile creation
+    if not config['person_profiling']:
+        event_properties['$process_person_profile'] = False
+
+    try:
+        config['posthog_client'].capture(
+            distinct_id=distinct_id,
+            event=event_name,
+            properties=event_properties
+        )
+        logger.debug(f"Tracked event: {event_name} for {distinct_id}")
+    except Exception as e:
+        logger.warning(f"Failed to track event {event_name}: {e}")
+
+
+def get_config_for_api(app=None):
     """Get analytics configuration for API response (without sensitive data)."""
     config = _get_analytics_config()
 
-    return {
+    result = {
         'enabled': config['enabled'],
         'host': config['host'],
         'person_profiling': config['person_profiling'],
         'exception_capture': config['exception_capture'],
         'api_key_configured': bool(config['api_key']),
         'event_mappings': config['event_mappings'],
+        'default_mappings': DEFAULT_EVENT_MAPPINGS,
         'categories': ENDPOINT_CATEGORIES
     }
+
+    # Include discovered endpoints if app is provided
+    if app:
+        result['discovered_endpoints'] = discover_endpoints(app)
+
+    return result

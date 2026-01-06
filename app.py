@@ -197,6 +197,15 @@ from ai.api import ai_api
 app.register_blueprint(ai_api)
 logger.info("AI API Blueprint registered at /api/ai")
 
+# ==================== Analytics Tracking Middleware ====================
+# Automatic event tracking for all API endpoints based on configured mappings
+
+try:
+    from analytics import init_tracking_middleware
+    init_tracking_middleware(app)
+except Exception as e:
+    logger.warning(f"Failed to initialize analytics tracking middleware: {e}")
+
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
@@ -3221,6 +3230,7 @@ def api_test_system_email():
 
 @app.route('/api/admin/settings/session', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_session_get')
 def api_get_session_settings():
     """Get session timeout settings (super admin only)."""
     return jsonify({
@@ -3241,6 +3251,7 @@ def api_get_session_settings():
 
 @app.route('/api/admin/settings/session', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_session_save')
 def api_save_session_settings():
     """Update session timeout settings (super admin only)."""
     data = request.get_json() or {}
@@ -3290,6 +3301,7 @@ def api_save_session_settings():
 
 @app.route('/api/admin/settings/licensing', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_licensing_get')
 def api_get_licensing_settings():
     """Get licensing settings (super admin only)."""
     return jsonify({
@@ -3305,6 +3317,7 @@ def api_get_licensing_settings():
 
 @app.route('/api/admin/settings/licensing', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_licensing_save')
 def api_save_licensing_settings():
     """Update licensing settings (super admin only)."""
     data = request.get_json() or {}
@@ -3335,6 +3348,7 @@ def api_save_licensing_settings():
 
 @app.route('/api/admin/settings/support', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_support_get')
 def api_get_support_settings():
     """Get support/contact email settings (super admin only)."""
     return jsonify({
@@ -3350,6 +3364,7 @@ def api_get_support_settings():
 
 @app.route('/api/admin/settings/support', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_support_save')
 def api_save_support_settings():
     """Update support/contact email settings (super admin only)."""
     from security import sanitize_email
@@ -3381,6 +3396,7 @@ def api_save_support_settings():
 
 @app.route('/api/admin/settings/ai', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_ai_get')
 def api_get_ai_system_settings():
     """Get system-level AI settings (super admin only)."""
     return jsonify({
@@ -3393,6 +3409,7 @@ def api_get_ai_system_settings():
 
 @app.route('/api/admin/settings/ai', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_ai_save')
 def api_save_ai_system_settings():
     """Update system-level AI settings (super admin only)."""
     data = request.get_json() or {}
@@ -3436,14 +3453,29 @@ def api_save_ai_system_settings():
 
 @app.route('/api/admin/settings/analytics', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_analytics_get')
 def api_get_analytics_settings():
-    """Get analytics settings (super admin only)."""
+    """Get analytics settings (super admin only).
+
+    Returns:
+        - enabled: Whether analytics is enabled
+        - host: PostHog host URL
+        - person_profiling: Whether person profiles are enabled
+        - exception_capture: Whether exception capture is enabled
+        - api_key_configured: Whether an API key is set
+        - event_mappings: Current endpoint -> event name mappings
+        - default_mappings: Default mappings for reference
+        - categories: Static category definitions (deprecated)
+        - discovered_endpoints: Dynamically discovered API endpoints
+    """
     from analytics import get_config_for_api
-    return jsonify(get_config_for_api())
+    from flask import current_app
+    return jsonify(get_config_for_api(app=current_app))
 
 
 @app.route('/api/admin/settings/analytics', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_analytics_save')
 def api_save_analytics_settings():
     """Update analytics settings (super admin only)."""
     import json as json_lib
@@ -3492,11 +3524,14 @@ def api_save_analytics_settings():
     if 'event_mappings' in data:
         mappings = data['event_mappings']
         if isinstance(mappings, dict):
-            # Validate all keys exist in defaults
+            # Allow any endpoint name - supports custom mappings for new endpoints
             valid_mappings = {}
             for key, value in mappings.items():
-                if key in DEFAULT_EVENT_MAPPINGS:
-                    valid_mappings[key] = sanitize_text_field(value, max_length=100) if value else DEFAULT_EVENT_MAPPINGS[key]
+                # Sanitize key and value
+                sanitized_key = sanitize_text_field(key, max_length=100)
+                sanitized_value = sanitize_text_field(value, max_length=100) if value else None
+                if sanitized_key and sanitized_value:
+                    valid_mappings[sanitized_key] = sanitized_value
             SystemConfig.set(
                 SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
                 json_lib.dumps(valid_mappings),
@@ -3513,6 +3548,7 @@ def api_save_analytics_settings():
 
 @app.route('/api/admin/settings/analytics/api-key', methods=['PUT'])
 @master_required
+@track_endpoint('api_admin_settings_analytics_api_key')
 def api_save_analytics_api_key():
     """Save analytics API key (super admin only).
 
@@ -3548,6 +3584,7 @@ def api_save_analytics_api_key():
 
 @app.route('/api/admin/settings/analytics/test', methods=['POST'])
 @master_required
+@track_endpoint('api_admin_settings_analytics_test')
 def api_test_analytics():
     """Send a test event to PostHog (super admin only)."""
     from analytics import _get_analytics_config, invalidate_cache
@@ -3589,6 +3626,7 @@ def api_test_analytics():
 
 @app.route('/api/admin/settings/analytics/reset-mappings', methods=['POST'])
 @master_required
+@track_endpoint('api_admin_settings_analytics_reset')
 def api_reset_analytics_mappings():
     """Reset event mappings to defaults (super admin only)."""
     from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
@@ -3610,10 +3648,113 @@ def api_reset_analytics_mappings():
     })
 
 
+@app.route('/api/admin/settings/analytics/mapping', methods=['PUT'])
+@master_required
+@track_endpoint('api_admin_settings_analytics_mapping_update')
+def api_update_analytics_mapping():
+    """Add or update a single event mapping (super admin only).
+
+    Request body:
+        {
+            "endpoint": "api_my_endpoint",
+            "event_name": "my_action_completed"
+        }
+
+    Set event_name to null/empty to remove a mapping.
+    """
+    import json as json_lib
+    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+
+    data = request.get_json() or {}
+
+    endpoint = sanitize_text_field(data.get('endpoint', ''), max_length=100)
+    event_name = sanitize_text_field(data.get('event_name', ''), max_length=100)
+
+    if not endpoint:
+        return jsonify({'error': 'Endpoint name is required'}), 400
+
+    # Get current mappings
+    current_mappings_json = SystemConfig.get(SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS)
+    if current_mappings_json:
+        try:
+            current_mappings = json.loads(current_mappings_json)
+        except json.JSONDecodeError:
+            current_mappings = DEFAULT_EVENT_MAPPINGS.copy()
+    else:
+        current_mappings = DEFAULT_EVENT_MAPPINGS.copy()
+
+    # Update or remove the mapping
+    if event_name:
+        current_mappings[endpoint] = event_name
+        action = 'updated'
+    else:
+        current_mappings.pop(endpoint, None)
+        action = 'removed'
+
+    # Save updated mappings
+    SystemConfig.set(
+        SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
+        json_lib.dumps(current_mappings),
+        description='Custom event name mappings for PostHog'
+    )
+
+    # Invalidate cache
+    invalidate_cache()
+
+    return jsonify({
+        'message': f'Event mapping {action} successfully',
+        'endpoint': endpoint,
+        'event_name': event_name if event_name else None
+    })
+
+
+@app.route('/api/admin/settings/analytics/mapping/<endpoint_name>', methods=['DELETE'])
+@master_required
+@track_endpoint('api_admin_settings_analytics_mapping_delete')
+def api_delete_analytics_mapping(endpoint_name):
+    """Remove an event mapping (super admin only)."""
+    import json as json_lib
+    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+
+    endpoint = sanitize_text_field(endpoint_name, max_length=100)
+
+    # Get current mappings
+    current_mappings_json = SystemConfig.get(SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS)
+    if current_mappings_json:
+        try:
+            current_mappings = json.loads(current_mappings_json)
+        except json.JSONDecodeError:
+            current_mappings = DEFAULT_EVENT_MAPPINGS.copy()
+    else:
+        current_mappings = DEFAULT_EVENT_MAPPINGS.copy()
+
+    # Remove the mapping
+    if endpoint in current_mappings:
+        del current_mappings[endpoint]
+
+        # Save updated mappings
+        SystemConfig.set(
+            SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,
+            json_lib.dumps(current_mappings),
+            description='Custom event name mappings for PostHog'
+        )
+
+        # Invalidate cache
+        invalidate_cache()
+
+        return jsonify({
+            'message': 'Event mapping removed successfully',
+            'endpoint': endpoint
+        })
+    else:
+        return jsonify({'error': 'Mapping not found'}), 404
+
+
 # ==================== API Routes - Cloudflare Security Settings ====================
 
 @app.route('/api/admin/settings/cloudflare', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_cloudflare_get')
 def api_get_cloudflare_settings():
     """Get Cloudflare security settings (super admin only)."""
     from cloudflare_security import get_cloudflare_config_for_api
@@ -3622,6 +3763,7 @@ def api_get_cloudflare_settings():
 
 @app.route('/api/admin/settings/cloudflare', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_cloudflare_save')
 def api_save_cloudflare_settings():
     """Update Cloudflare security settings (super admin only)."""
     from cloudflare_security import invalidate_cloudflare_cache
@@ -3677,6 +3819,7 @@ def api_save_cloudflare_settings():
 
 @app.route('/api/admin/settings/cloudflare/access-aud', methods=['PUT'])
 @master_required
+@track_endpoint('api_admin_settings_cloudflare_aud')
 def api_save_cloudflare_access_aud():
     """Save Cloudflare Access AUD (super admin only).
 
@@ -3708,6 +3851,7 @@ def api_save_cloudflare_access_aud():
 
 @app.route('/api/admin/settings/cloudflare/test', methods=['POST'])
 @master_required
+@track_endpoint('api_admin_settings_cloudflare_test')
 def api_test_cloudflare_settings():
     """Test Cloudflare Access configuration (super admin only).
 
@@ -3777,6 +3921,7 @@ def api_test_cloudflare_settings():
 
 @app.route('/api/admin/settings/log-forwarding', methods=['GET'])
 @master_required
+@track_endpoint('api_admin_settings_logforwarding_get')
 def api_get_log_forwarding_settings():
     """Get log forwarding settings (super admin only)."""
     from log_forwarding import get_config_for_api
@@ -3785,6 +3930,7 @@ def api_get_log_forwarding_settings():
 
 @app.route('/api/admin/settings/log-forwarding', methods=['POST', 'PUT'])
 @master_required
+@track_endpoint('api_admin_settings_logforwarding_save')
 def api_save_log_forwarding_settings():
     """Update log forwarding settings (super admin only)."""
     from log_forwarding import validate_settings, invalidate_cache, reconfigure
@@ -3885,6 +4031,7 @@ def api_save_log_forwarding_settings():
 
 @app.route('/api/admin/settings/log-forwarding/api-key', methods=['PUT'])
 @master_required
+@track_endpoint('api_admin_settings_logforwarding_api_key')
 def api_save_log_forwarding_api_key():
     """Save log forwarding API key (super admin only).
 
@@ -3914,6 +4061,7 @@ def api_save_log_forwarding_api_key():
 
 @app.route('/api/admin/settings/log-forwarding/test', methods=['POST'])
 @master_required
+@track_endpoint('api_admin_settings_logforwarding_test')
 def api_test_log_forwarding():
     """Test log forwarding connection (super admin only)."""
     from log_forwarding import test_connection
