@@ -17,6 +17,7 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
 import { AdminService } from '../../services/admin.service';
 import { User, MasterAccount } from '../../models/decision.model';
+import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/decision-modal.component';
 
 @Component({
   selector: 'app-navbar',
@@ -35,7 +36,8 @@ import { User, MasterAccount } from '../../models/decision.model';
     MatFormFieldModule,
     MatInputModule,
     MatCheckboxModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    DecisionModalComponent
   ],
   template: `
     <mat-toolbar class="navbar">
@@ -65,10 +67,10 @@ import { User, MasterAccount } from '../../models/decision.model';
             Decisions
           </a>
           @if (!authService.isMasterAccount) {
-            <a mat-button [routerLink]="newDecisionLink" routerLinkActive="active">
+            <button mat-button (click)="openCreateModal()">
               <mat-icon>add</mat-icon>
               New
-            </a>
+            </button>
           }
         </nav>
 
@@ -564,6 +566,27 @@ export class NavbarComponent {
 
   get newDecisionLink(): string {
     return `/${this.userDomain}/decision/new`;
+  }
+
+  openCreateModal(): void {
+    const dialogRef = this.dialog.open(DecisionModalComponent, {
+      width: '1200px',
+      maxWidth: '90vw',
+      height: '85vh',
+      maxHeight: '90vh',
+      panelClass: 'decision-modal-panel',
+      data: {
+        mode: 'create',
+        tenant: this.userDomain
+      }
+    });
+
+    dialogRef.afterClosed().subscribe((result: DecisionModalResult) => {
+      if (result?.action === 'saved') {
+        // Navigate to decisions list to show the new decision
+        this.router.navigate([`/${this.userDomain}`]);
+      }
+    });
   }
 
   get profileLink(): string {
