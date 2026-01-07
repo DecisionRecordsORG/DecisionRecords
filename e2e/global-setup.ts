@@ -1,6 +1,7 @@
 import { request } from '@playwright/test';
 
-const API_URL = 'http://localhost:5001';
+// E2E tests use port 5002 to avoid conflicts with development backend on 5001
+const API_URL = 'http://localhost:5002';
 
 async function globalSetup() {
   console.log('Global setup: Resetting test database...');

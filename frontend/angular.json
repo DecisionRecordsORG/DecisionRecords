@@ -88,6 +88,10 @@
             },
             "development": {
               "buildTarget": "frontend:build:development"
+            },
+            "e2e": {
+              "buildTarget": "frontend:build:development",
+              "proxyConfig": "proxy.conf.e2e.json"
             }
           },
           "defaultConfiguration": "development"

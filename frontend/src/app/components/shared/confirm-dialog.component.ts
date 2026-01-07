@@ -37,12 +37,10 @@ export interface ConfirmDialogResult {
     MatInputModule
   ],
   template: `
-    <h2 mat-dialog-title>
-      <mat-icon [color]="data.isDanger ? 'warn' : 'primary'">
-        {{ data.isDanger ? 'warning' : 'help_outline' }}
-      </mat-icon>
-      {{ data.title }}
-    </h2>
+    <div class="dialog-header" [class.danger]="data.isDanger">
+      <mat-icon>{{ data.isDanger ? 'warning' : 'help_outline' }}</mat-icon>
+      <h2 mat-dialog-title>{{ data.title }}</h2>
+    </div>
     <mat-dialog-content>
       <p>{{ data.message }}</p>
       @if (data.showInput) {
@@ -56,10 +54,10 @@ export interface ConfirmDialogResult {
       }
     </mat-dialog-content>
     <mat-dialog-actions align="end">
-      <button mat-button (click)="cancel()">
+      <button mat-stroked-button (click)="cancel()">
         {{ data.cancelText || 'Cancel' }}
       </button>
-      <button mat-raised-button
+      <button mat-flat-button
               [color]="data.isDanger ? 'warn' : 'primary'"
               (click)="confirm()"
               [disabled]="data.showInput && data.inputRequired && !inputValue.trim()">
@@ -68,20 +66,53 @@ export interface ConfirmDialogResult {
     </mat-dialog-actions>
   `,
   styles: [`
-    h2 {
+    .dialog-header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 12px;
+      padding: 20px 24px 0;
+    }
+
+    .dialog-header mat-icon {
+      font-size: 28px;
+      width: 28px;
+      height: 28px;
+      color: #3b82f6;
+    }
+
+    .dialog-header.danger mat-icon {
+      color: #ef4444;
+    }
+
+    .dialog-header h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      color: #1a1a1a;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    mat-dialog-content {
+      padding: 16px 24px 24px !important;
     }
 
     mat-dialog-content p {
-      font-size: 16px;
-      line-height: 1.5;
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.6;
+      color: #374151;
     }
 
     .full-width {
       width: 100%;
       margin-top: 16px;
+    }
+
+    mat-dialog-actions {
+      padding: 16px 24px !important;
+      gap: 12px;
+      border-top: 1px solid #e5e7eb;
+      background: #f9fafb;
     }
   `]
 })

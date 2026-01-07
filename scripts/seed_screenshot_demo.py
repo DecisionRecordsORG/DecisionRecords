@@ -20,7 +20,7 @@ Credentials (all use password: demo123):
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 
 # Add parent directory to path
@@ -978,7 +978,7 @@ def create_tenant_with_user(domain, company_name, email, user_name, password):
             name=company_name,
             status='active',
             maturity_state=MaturityState.MATURE,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.session.add(tenant)
         db.session.flush()  # Get the tenant ID
@@ -1000,7 +1000,7 @@ def create_tenant_with_user(domain, company_name, email, user_name, password):
             auth_type='local',
             is_admin=True,
             email_verified=True,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.session.add(user)
         db.session.flush()  # Get the user ID
@@ -1016,7 +1016,7 @@ def create_tenant_with_user(domain, company_name, email, user_name, password):
             user_id=user.id,
             tenant_id=tenant.id,
             global_role=GlobalRole.ADMIN,
-            joined_at=datetime.utcnow()
+            joined_at=datetime.now(timezone.utc)
         )
         db.session.add(membership)
         print(f"  Created membership: {email} -> {domain} (ADMIN)")
@@ -1030,7 +1030,7 @@ def create_tenant_with_user(domain, company_name, email, user_name, password):
             description='Default space for all decisions',
             is_default=True,
             created_by_id=user.id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.session.add(default_space)
         print(f"  Created default space: General")
@@ -1052,7 +1052,7 @@ def seed_decisions_for_domain(domain, decisions, user):
     for i, decision_data in enumerate(decisions):
         # Create varied dates
         days_ago = random.randint(7, 180)
-        created_at = datetime.utcnow() - timedelta(days=days_ago)
+        created_at = datetime.now(timezone.utc) - timedelta(days=days_ago)
         updated_at = created_at + timedelta(days=random.randint(0, min(30, days_ago)))
 
         decision = ArchitectureDecision(

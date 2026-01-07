@@ -18,6 +18,7 @@ import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { Decision, User, Space } from '../../models/decision.model';
+import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/decision-modal.component';
 
 @Component({
   selector: 'app-decision-list',
@@ -36,7 +37,8 @@ import { Decision, User, Space } from '../../models/decision.model';
     MatInputModule,
     MatFormFieldModule,
     MatSelectModule,
-    MatDialogModule
+    MatDialogModule,
+    DecisionModalComponent
   ],
   template: `
     <div class="decision-list-container">
@@ -46,7 +48,7 @@ import { Decision, User, Space } from '../../models/decision.model';
           <p class="subtitle">Track and manage your decision records</p>
         </div>
         @if (!authService.isMasterAccount && userDomain) {
-          <button mat-flat-button color="primary" class="new-decision-btn" [routerLink]="['/' + userDomain + '/decision/new']">
+          <button mat-flat-button color="primary" class="new-decision-btn" (click)="openCreateModal()">
             <mat-icon>add</mat-icon>
             New Decision
           </button>
@@ -167,7 +169,7 @@ import { Decision, User, Space } from '../../models/decision.model';
             <h2>{{ searchTerm || statusFilter ? 'No matching decisions' : 'No decisions yet' }}</h2>
             <p>{{ searchTerm || statusFilter ? 'Try adjusting your search or filters' : 'Create your first decision record to start documenting choices that matter' }}</p>
             @if (!searchTerm && !statusFilter && !authService.isMasterAccount && userDomain) {
-              <button mat-flat-button color="primary" class="create-btn" [routerLink]="['/' + userDomain + '/decision/new']">
+              <button mat-flat-button color="primary" class="create-btn" (click)="openCreateModal()">
                 <mat-icon>add</mat-icon>
                 Create Your First Decision
               </button>
@@ -183,7 +185,7 @@ import { Decision, User, Space } from '../../models/decision.model';
       } @else {
         <div class="decisions-grid">
           @for (decision of filteredDecisions; track decision.id) {
-            <mat-card class="decision-card" appearance="outlined" [routerLink]="['/' + userDomain + '/decision', decision.id]">
+            <mat-card class="decision-card" appearance="outlined" (click)="openDecisionModal(decision)">
               <mat-card-header>
                 <div class="card-header-content">
                   <div class="decision-id-badge" [ngClass]="'status-badge-' + decision.status">
@@ -1198,5 +1200,47 @@ export class DecisionListComponent implements OnInit {
 
   hasActiveFilters(): boolean {
     return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null || this.showMyDecisionsOnly;
+  }
+
+  // Decision Modal Methods
+  openCreateModal(): void {
+    const dialogRef = this.dialog.open(DecisionModalComponent, {
+      width: '1200px',
+      maxWidth: '90vw',
+      height: '85vh',
+      maxHeight: '90vh',
+      panelClass: 'decision-modal-panel',
+      data: {
+        mode: 'create',
+        tenant: this.userDomain
+      }
+    });
+
+    dialogRef.afterClosed().subscribe((result: DecisionModalResult) => {
+      if (result?.action === 'saved') {
+        this.loadDecisions();
+      }
+    });
+  }
+
+  openDecisionModal(decision: Decision): void {
+    const dialogRef = this.dialog.open(DecisionModalComponent, {
+      width: '1200px',
+      maxWidth: '90vw',
+      height: '85vh',
+      maxHeight: '90vh',
+      panelClass: 'decision-modal-panel',
+      data: {
+        mode: 'view',
+        decisionId: decision.id,
+        tenant: this.userDomain
+      }
+    });
+
+    dialogRef.afterClosed().subscribe((result: DecisionModalResult) => {
+      if (result?.action === 'saved' || result?.action === 'deleted') {
+        this.loadDecisions();
+      }
+    });
   }
 }

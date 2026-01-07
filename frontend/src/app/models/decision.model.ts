@@ -107,6 +107,10 @@ export interface Decision {
   // v1.5 additions
   tenant_id?: number;
   spaces?: Space[];
+  // Decision owner (person who made the decision, may differ from who logged it)
+  owner_id?: number;
+  owner_email?: string;
+  owner?: User;
 }
 
 export interface DecisionHistory {

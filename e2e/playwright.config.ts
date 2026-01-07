@@ -40,15 +40,16 @@ export default defineConfig({
   ],
 
   // Run backend and frontend before tests
+  // IMPORTANT: Uses port 5002 to avoid conflicts with development backend on 5001
   webServer: [
     {
-      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing FLASK_RUN_PORT=5001 python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5001, debug=False)"',
-      url: 'http://localhost:5001/api/version',
+      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5002, debug=False)"',
+      url: 'http://localhost:5002/api/version',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
     },
     {
-      command: 'cd ../frontend && npm run start',
+      command: 'cd ../frontend && npm run start -- --configuration=e2e',
       url: 'http://localhost:4200',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
