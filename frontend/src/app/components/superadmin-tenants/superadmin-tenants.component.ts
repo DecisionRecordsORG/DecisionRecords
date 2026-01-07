@@ -13,6 +13,8 @@ import { MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatTooltipModule } from '@angular/material/tooltip';
+import { MatPaginatorModule, PageEvent } from '@angular/material/paginator';
+import { MatSelectModule } from '@angular/material/select';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { Clipboard } from '@angular/cdk/clipboard';
@@ -77,6 +79,44 @@ interface SlackWorkspace {
   linked_users: SlackLinkedUser[];
 }
 
+interface PendingVerification {
+  id: number;
+  email: string;
+  name: string | null;
+  purpose: string;
+  domain: string;
+  created_at: string;
+  expires_at: string;
+  is_expired: boolean;
+}
+
+interface LoginHistoryEntry {
+  id: number;
+  user_id: number | null;
+  email: string;
+  tenant_domain: string | null;
+  login_method: string;
+  ip_address: string | null;
+  success: boolean;
+  failure_reason: string | null;
+  created_at: string;
+}
+
+interface LoginStats {
+  total: number;
+  successful: number;
+  failed: number;
+  by_method: { [key: string]: number };
+  by_tenant: { [key: string]: number };
+}
+
+interface LoginHistoryResponse {
+  total: number;
+  limit: number;
+  offset: number;
+  items: LoginHistoryEntry[];
+}
+
 @Component({
   selector: 'app-superadmin-tenants',
   standalone: true,
@@ -96,6 +136,8 @@ interface SlackWorkspace {
     MatFormFieldModule,
     MatInputModule,
     MatTooltipModule,
+    MatPaginatorModule,
+    MatSelectModule,
     ConfirmDialogComponent
   ],
   template: `
@@ -312,76 +354,274 @@ interface SlackWorkspace {
           </div>
         </mat-tab>
 
-        <!-- Domain History Tab -->
+        <!-- History Tab with Sub-tabs -->
         <mat-tab>
           <ng-template mat-tab-label>
             <mat-icon class="tab-icon">history</mat-icon>
             History
           </ng-template>
           <div class="tab-content">
-            <mat-card>
-              <mat-card-header>
-                <mat-card-title>Domain Approval History</mat-card-title>
-                <mat-card-subtitle>
-                  All domain approval requests and their outcomes
-                </mat-card-subtitle>
-              </mat-card-header>
-              <mat-card-content>
-                @if (isLoadingHistory) {
-                  <div class="loading">
-                    <mat-spinner diameter="40"></mat-spinner>
-                    <span>Loading history...</span>
-                  </div>
-                } @else if (allApprovals.length === 0) {
-                  <div class="empty-state">
-                    <mat-icon>history</mat-icon>
-                    <p>No domain approval history</p>
-                  </div>
-                } @else {
-                  <table mat-table [dataSource]="allApprovals" class="full-width">
-                    <ng-container matColumnDef="domain">
-                      <th mat-header-cell *matHeaderCellDef>Domain</th>
-                      <td mat-cell *matCellDef="let approval">
-                        <strong>{{ approval.domain }}</strong>
-                      </td>
-                    </ng-container>
+            <mat-tab-group class="history-subtabs">
+              <!-- Domain Approvals Sub-tab -->
+              <mat-tab label="Domain Approvals">
+                <mat-card class="subtab-card">
+                  <mat-card-header>
+                    <mat-card-title>Domain Approval History</mat-card-title>
+                    <mat-card-subtitle>
+                      All domain approval requests and their outcomes
+                    </mat-card-subtitle>
+                  </mat-card-header>
+                  <mat-card-content>
+                    @if (isLoadingHistory) {
+                      <div class="loading">
+                        <mat-spinner diameter="40"></mat-spinner>
+                        <span>Loading history...</span>
+                      </div>
+                    } @else if (allApprovals.length === 0) {
+                      <div class="empty-state">
+                        <mat-icon>history</mat-icon>
+                        <p>No domain approval history</p>
+                      </div>
+                    } @else {
+                      <table mat-table [dataSource]="allApprovals" class="full-width">
+                        <ng-container matColumnDef="domain">
+                          <th mat-header-cell *matHeaderCellDef>Domain</th>
+                          <td mat-cell *matCellDef="let approval">
+                            <strong>{{ approval.domain }}</strong>
+                          </td>
+                        </ng-container>
 
-                    <ng-container matColumnDef="status">
-                      <th mat-header-cell *matHeaderCellDef>Status</th>
-                      <td mat-cell *matCellDef="let approval">
-                        <mat-chip [class]="approval.status">
-                          {{ approval.status | titlecase }}
-                        </mat-chip>
-                      </td>
-                    </ng-container>
+                        <ng-container matColumnDef="status">
+                          <th mat-header-cell *matHeaderCellDef>Status</th>
+                          <td mat-cell *matCellDef="let approval">
+                            <mat-chip [class]="approval.status">
+                              {{ approval.status | titlecase }}
+                            </mat-chip>
+                          </td>
+                        </ng-container>
 
-                    <ng-container matColumnDef="requested_by">
-                      <th mat-header-cell *matHeaderCellDef>Requested By</th>
-                      <td mat-cell *matCellDef="let approval">
-                        {{ approval.requested_by_email }}
-                      </td>
-                    </ng-container>
+                        <ng-container matColumnDef="requested_by">
+                          <th mat-header-cell *matHeaderCellDef>Requested By</th>
+                          <td mat-cell *matCellDef="let approval">
+                            {{ approval.requested_by_email }}
+                          </td>
+                        </ng-container>
 
-                    <ng-container matColumnDef="created_at">
-                      <th mat-header-cell *matHeaderCellDef>Requested</th>
-                      <td mat-cell *matCellDef="let approval">
-                        {{ approval.created_at | date:'medium' }}
-                      </td>
-                    </ng-container>
+                        <ng-container matColumnDef="created_at">
+                          <th mat-header-cell *matHeaderCellDef>Requested</th>
+                          <td mat-cell *matCellDef="let approval">
+                            {{ approval.created_at | date:'medium' }}
+                          </td>
+                        </ng-container>
 
-                    <ng-container matColumnDef="reviewed_at">
-                      <th mat-header-cell *matHeaderCellDef>Reviewed</th>
-                      <td mat-cell *matCellDef="let approval">
-                        {{ approval.reviewed_at ? (approval.reviewed_at | date:'medium') : '-' }}
-                      </td>
-                    </ng-container>
+                        <ng-container matColumnDef="reviewed_at">
+                          <th mat-header-cell *matHeaderCellDef>Reviewed</th>
+                          <td mat-cell *matCellDef="let approval">
+                            {{ approval.reviewed_at ? (approval.reviewed_at | date:'medium') : '-' }}
+                          </td>
+                        </ng-container>
 
-                    <tr mat-header-row *matHeaderRowDef="historyColumns"></tr>
-                    <tr mat-row *matRowDef="let row; columns: historyColumns;"></tr>
-                  </table>
-                }
-              </mat-card-content>
-            </mat-card>
+                        <tr mat-header-row *matHeaderRowDef="historyColumns"></tr>
+                        <tr mat-row *matRowDef="let row; columns: historyColumns;"></tr>
+                      </table>
+                    }
+                  </mat-card-content>
+                </mat-card>
+              </mat-tab>
+
+              <!-- Pending Verifications Sub-tab -->
+              <mat-tab>
+                <ng-template mat-tab-label>
+                  Pending Verifications
+                  @if (pendingVerifications.length > 0) {
+                    <span class="badge">{{ pendingVerifications.length }}</span>
+                  }
+                </ng-template>
+                <mat-card class="subtab-card">
+                  <mat-card-header>
+                    <mat-card-title>Pending Email Verifications</mat-card-title>
+                    <mat-card-subtitle>
+                      Users who started signup but haven't verified their email
+                    </mat-card-subtitle>
+                  </mat-card-header>
+                  <mat-card-content>
+                    @if (isLoadingVerifications) {
+                      <div class="loading">
+                        <mat-spinner diameter="40"></mat-spinner>
+                        <span>Loading pending verifications...</span>
+                      </div>
+                    } @else if (pendingVerifications.length === 0) {
+                      <div class="empty-state">
+                        <mat-icon>check_circle</mat-icon>
+                        <p>No pending email verifications</p>
+                      </div>
+                    } @else {
+                      <table mat-table [dataSource]="pendingVerifications" class="full-width">
+                        <ng-container matColumnDef="email">
+                          <th mat-header-cell *matHeaderCellDef>Email</th>
+                          <td mat-cell *matCellDef="let v">
+                            <strong>{{ v.email }}</strong>
+                          </td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="name">
+                          <th mat-header-cell *matHeaderCellDef>Name</th>
+                          <td mat-cell *matCellDef="let v">{{ v.name || '-' }}</td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="domain">
+                          <th mat-header-cell *matHeaderCellDef>Domain</th>
+                          <td mat-cell *matCellDef="let v">{{ v.domain }}</td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="purpose">
+                          <th mat-header-cell *matHeaderCellDef>Purpose</th>
+                          <td mat-cell *matCellDef="let v">
+                            <mat-chip>{{ v.purpose | titlecase }}</mat-chip>
+                          </td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="created_at">
+                          <th mat-header-cell *matHeaderCellDef>Requested</th>
+                          <td mat-cell *matCellDef="let v">{{ v.created_at | date:'medium' }}</td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="status">
+                          <th mat-header-cell *matHeaderCellDef>Status</th>
+                          <td mat-cell *matCellDef="let v">
+                            <mat-chip [class]="v.is_expired ? 'expired' : 'pending'">
+                              {{ v.is_expired ? 'Expired' : 'Pending' }}
+                            </mat-chip>
+                          </td>
+                        </ng-container>
+
+                        <tr mat-header-row *matHeaderRowDef="verificationColumns"></tr>
+                        <tr mat-row *matRowDef="let row; columns: verificationColumns;"></tr>
+                      </table>
+                    }
+                  </mat-card-content>
+                </mat-card>
+              </mat-tab>
+
+              <!-- Login History Sub-tab -->
+              <mat-tab label="Login History">
+                <mat-card class="subtab-card">
+                  <mat-card-header>
+                    <mat-card-title>Login Activity</mat-card-title>
+                    <mat-card-subtitle>
+                      All login attempts across the system
+                    </mat-card-subtitle>
+                  </mat-card-header>
+                  <mat-card-content>
+                    <!-- Stats Summary -->
+                    @if (loginStats) {
+                      <div class="login-stats">
+                        <div class="stat-card">
+                          <span class="stat-value">{{ loginStats.total }}</span>
+                          <span class="stat-label">Total Logins</span>
+                        </div>
+                        <div class="stat-card success">
+                          <span class="stat-value">{{ loginStats.successful }}</span>
+                          <span class="stat-label">Successful</span>
+                        </div>
+                        <div class="stat-card failed">
+                          <span class="stat-value">{{ loginStats.failed }}</span>
+                          <span class="stat-label">Failed</span>
+                        </div>
+                      </div>
+                    }
+
+                    <!-- Filters -->
+                    <div class="login-filters">
+                      <mat-form-field appearance="outline">
+                        <mat-label>Filter by Method</mat-label>
+                        <mat-select [(ngModel)]="loginHistoryFilter.method" (selectionChange)="applyLoginHistoryFilters()">
+                          <mat-option value="">All Methods</mat-option>
+                          <mat-option value="password">Password</mat-option>
+                          <mat-option value="webauthn">Passkey</mat-option>
+                          <mat-option value="sso">SSO</mat-option>
+                          <mat-option value="slack_oidc">Slack</mat-option>
+                          <mat-option value="google_oauth">Google</mat-option>
+                          <mat-option value="teams_oidc">Teams</mat-option>
+                          <mat-option value="master">Master</mat-option>
+                        </mat-select>
+                      </mat-form-field>
+
+                      <mat-form-field appearance="outline">
+                        <mat-label>Filter by Status</mat-label>
+                        <mat-select [(ngModel)]="loginHistoryFilter.success" (selectionChange)="applyLoginHistoryFilters()">
+                          <mat-option value="">All</mat-option>
+                          <mat-option value="true">Successful</mat-option>
+                          <mat-option value="false">Failed</mat-option>
+                        </mat-select>
+                      </mat-form-field>
+                    </div>
+
+                    @if (isLoadingLoginHistory) {
+                      <div class="loading">
+                        <mat-spinner diameter="40"></mat-spinner>
+                        <span>Loading login history...</span>
+                      </div>
+                    } @else if (loginHistory.length === 0) {
+                      <div class="empty-state">
+                        <mat-icon>login</mat-icon>
+                        <p>No login history recorded yet</p>
+                      </div>
+                    } @else {
+                      <table mat-table [dataSource]="loginHistory" class="full-width">
+                        <ng-container matColumnDef="email">
+                          <th mat-header-cell *matHeaderCellDef>Email</th>
+                          <td mat-cell *matCellDef="let entry">
+                            <strong>{{ entry.email }}</strong>
+                          </td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="tenant_domain">
+                          <th mat-header-cell *matHeaderCellDef>Tenant</th>
+                          <td mat-cell *matCellDef="let entry">{{ entry.tenant_domain || '-' }}</td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="login_method">
+                          <th mat-header-cell *matHeaderCellDef>Method</th>
+                          <td mat-cell *matCellDef="let entry">
+                            <mat-chip>{{ formatLoginMethod(entry.login_method) }}</mat-chip>
+                          </td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="success">
+                          <th mat-header-cell *matHeaderCellDef>Status</th>
+                          <td mat-cell *matCellDef="let entry">
+                            <mat-chip [class]="entry.success ? 'approved' : 'rejected'">
+                              {{ entry.success ? 'Success' : 'Failed' }}
+                            </mat-chip>
+                          </td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="ip_address">
+                          <th mat-header-cell *matHeaderCellDef>IP Address</th>
+                          <td mat-cell *matCellDef="let entry">{{ entry.ip_address || '-' }}</td>
+                        </ng-container>
+
+                        <ng-container matColumnDef="created_at">
+                          <th mat-header-cell *matHeaderCellDef>Time</th>
+                          <td mat-cell *matCellDef="let entry">{{ entry.created_at | date:'medium' }}</td>
+                        </ng-container>
+
+                        <tr mat-header-row *matHeaderRowDef="loginHistoryColumns"></tr>
+                        <tr mat-row *matRowDef="let row; columns: loginHistoryColumns;"></tr>
+                      </table>
+
+                      <mat-paginator
+                        [length]="loginHistoryTotal"
+                        [pageSize]="50"
+                        [pageSizeOptions]="[25, 50, 100]"
+                        (page)="onLoginHistoryPageChange($event)">
+                      </mat-paginator>
+                    }
+                  </mat-card-content>
+                </mat-card>
+              </mat-tab>
+            </mat-tab-group>
           </div>
         </mat-tab>
 
@@ -663,6 +903,81 @@ interface SlackWorkspace {
       color: #1976d2;
       text-decoration: underline;
     }
+
+    /* History sub-tabs styles */
+    .history-subtabs {
+      margin-top: 16px;
+    }
+
+    .subtab-card {
+      margin-top: 16px;
+    }
+
+    mat-chip.expired {
+      background: #ffebee !important;
+      color: #c62828 !important;
+    }
+
+    /* Login history styles */
+    .login-stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .stat-card {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 16px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 120px;
+    }
+
+    .stat-card.success {
+      background: #e8f5e9;
+    }
+
+    .stat-card.failed {
+      background: #ffebee;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .stat-card.success .stat-value {
+      color: #2e7d32;
+    }
+
+    .stat-card.failed .stat-value {
+      color: #c62828;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .login-filters {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .login-filters mat-form-field {
+      min-width: 180px;
+    }
+
+    mat-paginator {
+      margin-top: 16px;
+    }
   `]
 })
 export class SuperadminTenantsComponent implements OnInit {
@@ -671,10 +986,17 @@ export class SuperadminTenantsComponent implements OnInit {
   tenants: Tenant[] = [];
   slackWorkspaces: SlackWorkspace[] = [];
 
+  // New history data
+  pendingVerifications: PendingVerification[] = [];
+  loginHistory: LoginHistoryEntry[] = [];
+  loginStats: LoginStats | null = null;
+
   isLoading = true;
   isLoadingTenants = true;
   isLoadingHistory = true;
   isLoadingSlack = true;
+  isLoadingVerifications = true;
+  isLoadingLoginHistory = true;
 
   processingId: number | null = null;
   processingAction: 'approve' | 'reject' | null = null;
@@ -682,10 +1004,18 @@ export class SuperadminTenantsComponent implements OnInit {
 
   rejectionReason = '';
 
+  // Login history pagination and filters
+  loginHistoryTotal = 0;
+  loginHistoryPage = 0;
+  loginHistoryPageSize = 50;
+  loginHistoryFilter = { method: '', success: '' };
+
   pendingColumns = ['domain', 'requested_by', 'created_at', 'actions'];
   tenantColumns = ['domain', 'login_url', 'maturity_state', 'user_count', 'admin_count', 'steward_count', 'age_days', 'has_sso', 'created_at', 'actions'];
   historyColumns = ['domain', 'status', 'requested_by', 'created_at', 'reviewed_at'];
   slackColumns = ['workspace_name', 'tenant_domain', 'status', 'claimed_by', 'claimed_at', 'linked_users_count', 'actions'];
+  verificationColumns = ['email', 'name', 'domain', 'purpose', 'created_at', 'status'];
+  loginHistoryColumns = ['email', 'tenant_domain', 'login_method', 'success', 'ip_address', 'created_at'];
 
   constructor(
     private http: HttpClient,
@@ -709,6 +1039,9 @@ export class SuperadminTenantsComponent implements OnInit {
     this.loadTenants();
     this.loadAllApprovals();
     this.loadSlackWorkspaces();
+    this.loadPendingVerifications();
+    this.loadLoginHistory();
+    this.loadLoginStats();
   }
 
   loadPendingApprovals(): void {
@@ -858,6 +1191,80 @@ export class SuperadminTenantsComponent implements OnInit {
         this.isLoadingSlack = false;
       }
     });
+  }
+
+  loadPendingVerifications(): void {
+    this.isLoadingVerifications = true;
+    this.http.get<PendingVerification[]>('/api/superadmin/email-verifications/pending').subscribe({
+      next: (verifications) => {
+        this.pendingVerifications = verifications;
+        this.isLoadingVerifications = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load pending verifications', 'Close', { duration: 3000 });
+        this.isLoadingVerifications = false;
+      }
+    });
+  }
+
+  loadLoginHistory(): void {
+    this.isLoadingLoginHistory = true;
+    const offset = this.loginHistoryPage * this.loginHistoryPageSize;
+    let url = `/api/superadmin/login-history?limit=${this.loginHistoryPageSize}&offset=${offset}`;
+
+    if (this.loginHistoryFilter.method) {
+      url += `&method=${this.loginHistoryFilter.method}`;
+    }
+    if (this.loginHistoryFilter.success) {
+      url += `&success=${this.loginHistoryFilter.success}`;
+    }
+
+    this.http.get<LoginHistoryResponse>(url).subscribe({
+      next: (response) => {
+        this.loginHistory = response.items;
+        this.loginHistoryTotal = response.total;
+        this.isLoadingLoginHistory = false;
+      },
+      error: () => {
+        this.snackBar.open('Failed to load login history', 'Close', { duration: 3000 });
+        this.isLoadingLoginHistory = false;
+      }
+    });
+  }
+
+  loadLoginStats(): void {
+    this.http.get<LoginStats>('/api/superadmin/login-history/stats').subscribe({
+      next: (stats) => {
+        this.loginStats = stats;
+      },
+      error: () => {
+        // Silent fail for stats
+      }
+    });
+  }
+
+  applyLoginHistoryFilters(): void {
+    this.loginHistoryPage = 0;
+    this.loadLoginHistory();
+  }
+
+  onLoginHistoryPageChange(event: PageEvent): void {
+    this.loginHistoryPage = event.pageIndex;
+    this.loginHistoryPageSize = event.pageSize;
+    this.loadLoginHistory();
+  }
+
+  formatLoginMethod(method: string): string {
+    const methodMap: { [key: string]: string } = {
+      'password': 'Password',
+      'webauthn': 'Passkey',
+      'sso': 'SSO',
+      'slack_oidc': 'Slack',
+      'google_oauth': 'Google',
+      'teams_oidc': 'Teams',
+      'master': 'Master'
+    };
+    return methodMap[method] || method;
   }
 
   disconnectSlackWorkspace(workspace: SlackWorkspace): void {

@@ -651,6 +651,83 @@ class AuditLog(db.Model):
         }
 
 
+class LoginHistory(db.Model):
+    """
+    Tracks all login attempts across the system for security monitoring.
+
+    Records both successful and failed login attempts with metadata
+    for audit trail and security analysis.
+    """
+    __tablename__ = 'login_history'
+
+    # Login method constants
+    METHOD_PASSWORD = 'password'
+    METHOD_WEBAUTHN = 'webauthn'
+    METHOD_SSO = 'sso'
+    METHOD_SLACK_OIDC = 'slack_oidc'
+    METHOD_GOOGLE_OAUTH = 'google_oauth'
+    METHOD_TEAMS_OIDC = 'teams_oidc'
+    METHOD_MASTER = 'master'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)
+    email = db.Column(db.String(255), nullable=False, index=True)
+    tenant_domain = db.Column(db.String(255), nullable=True, index=True)
+    login_method = db.Column(db.String(20), nullable=False)
+    ip_address = db.Column(db.String(45), nullable=True)  # IPv6 can be up to 45 chars
+    user_agent = db.Column(db.String(500), nullable=True)
+    success = db.Column(db.Boolean, nullable=False, default=False)
+    failure_reason = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'email': self.email,
+            'tenant_domain': self.tenant_domain,
+            'login_method': self.login_method,
+            'ip_address': self.ip_address,
+            'user_agent': self.user_agent,
+            'success': self.success,
+            'failure_reason': self.failure_reason,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+def log_login_attempt(email, login_method, success, user_id=None, tenant_domain=None,
+                      ip_address=None, user_agent=None, failure_reason=None):
+    """
+    Log a login attempt to the LoginHistory table.
+
+    Args:
+        email: Email address used for login attempt
+        login_method: One of LoginHistory.METHOD_* constants
+        success: Whether the login was successful
+        user_id: User ID if known (may be None for failed attempts)
+        tenant_domain: Domain of the tenant (None for master account logins)
+        ip_address: Client IP address
+        user_agent: Client user agent string (truncated to 500 chars)
+        failure_reason: Reason for failure if success=False
+
+    Returns:
+        The created LoginHistory entry
+    """
+    entry = LoginHistory(
+        user_id=user_id,
+        email=email,
+        tenant_domain=tenant_domain,
+        login_method=login_method,
+        ip_address=ip_address,
+        user_agent=user_agent[:500] if user_agent else None,
+        success=success,
+        failure_reason=failure_reason
+    )
+    db.session.add(entry)
+    db.session.commit()
+    return entry
+
+
 class User(db.Model):
     """User model for authenticated users via SSO, WebAuthn, or local password."""
 

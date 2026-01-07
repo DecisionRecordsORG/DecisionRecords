@@ -9,7 +9,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import db, User, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, \
-    AuditLog, ArchitectureDecision, MaturityState, GlobalRole, VisibilityPolicy
+    AuditLog, ArchitectureDecision, MaturityState, GlobalRole, VisibilityPolicy, \
+    LoginHistory, log_login_attempt, EmailVerification, MasterAccount
 from flask import Flask
 
 
@@ -199,4 +200,24 @@ def admin_client(app, admin_user):
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['user_id'] = admin_user.id
+    return client
+
+
+@pytest.fixture
+def sample_master(session):
+    """Create a sample master account for testing."""
+    master = MasterAccount(username='testadmin')
+    master.set_password('testpassword')
+    session.add(master)
+    session.commit()
+    return master
+
+
+@pytest.fixture
+def master_session(app, sample_master):
+    """Create a logged-in master session for testing superadmin endpoints."""
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess['master_id'] = sample_master.id
+        sess['is_master'] = True
     return client

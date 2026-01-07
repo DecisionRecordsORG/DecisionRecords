@@ -13,7 +13,7 @@ except ImportError:
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SlackWorkspace, SlackUserMapping, SetupToken, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction, LoginHistory, log_login_attempt
 from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
@@ -1387,6 +1387,10 @@ def local_login():
     # Log login attempt for security auditing
     log_security_event('auth', f"Master login attempt for user", severity='INFO')
 
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
     # Support both form data and JSON
     if request.is_json:
         data = request.get_json()
@@ -1405,6 +1409,14 @@ def local_login():
 
     master = authenticate_master(username, password)
     if master:
+        # Log successful master login
+        log_login_attempt(
+            email=username,
+            login_method=LoginHistory.METHOD_MASTER,
+            success=True,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
         session['master_id'] = master.id
         session['is_master'] = True
         set_session_expiry(is_admin=True)  # 1 hour default for super admin
@@ -1412,6 +1424,15 @@ def local_login():
             return jsonify({'message': 'Login successful'}), 200
         return redirect(url_for('index'))
     else:
+        # Log failed master login
+        log_login_attempt(
+            email=username,
+            login_method=LoginHistory.METHOD_MASTER,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='Invalid username or password'
+        )
         if request.is_json:
             return jsonify({'error': 'Invalid username or password'}), 401
         return render_template('login.html',
@@ -1437,6 +1458,10 @@ def api_tenant_login():
     """Handle tenant user password login."""
     log_security_event('auth', f"Tenant login attempt", severity='INFO')
 
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
     data = request.get_json() or {}
     # Sanitize email input to prevent injection attacks
     email = sanitize_email(data.get('email', ''))
@@ -1445,20 +1470,62 @@ def api_tenant_login():
     if not email or not password:
         return jsonify({'error': 'Email and password are required'}), 400
 
+    # Extract domain for logging
+    tenant_domain = extract_domain_from_email(email) if email else None
+
     user = User.query.filter_by(email=email).first()
     if not user:
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_PASSWORD,
+            success=False,
+            tenant_domain=tenant_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='User not found'
+        )
         return jsonify({'error': 'Invalid email or password'}), 401
 
     if not user.has_password():
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_PASSWORD,
+            success=False,
+            user_id=user.id,
+            tenant_domain=user.sso_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='No password set'
+        )
         return jsonify({
             'error': 'No password set for this account',
             'has_passkey': len(user.webauthn_credentials) > 0
         }), 401
 
     if not user.check_password(password):
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_PASSWORD,
+            success=False,
+            user_id=user.id,
+            tenant_domain=user.sso_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='Invalid password'
+        )
         return jsonify({'error': 'Invalid email or password'}), 401
 
-    # Login successful
+    # Login successful - log it
+    log_login_attempt(
+        email=email,
+        login_method=LoginHistory.METHOD_PASSWORD,
+        success=True,
+        user_id=user.id,
+        tenant_domain=user.sso_domain,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+
     session['user_id'] = user.id
     set_session_expiry(is_admin=False)  # 8 hours default for regular users
     user.last_login = datetime.now(timezone.utc)
@@ -1544,6 +1611,10 @@ def sso_login(config_id):
 @app.route('/auth/callback')
 def sso_callback():
     """Handle SSO callback."""
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
     config_id = session.pop('sso_config_id', None)
     stored_state = session.pop('oauth_state', None)
 
@@ -1582,15 +1653,44 @@ def sso_callback():
         subject = userinfo.get('sub')
 
         if not email:
+            log_login_attempt(
+                email='unknown',
+                login_method=LoginHistory.METHOD_SSO,
+                success=False,
+                tenant_domain=sso_config.domain,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason='Email not provided by SSO provider'
+            )
             return render_template('error.html', message='Email not provided by SSO provider'), 400
 
         # Verify email domain matches SSO config domain
         email_domain = extract_domain_from_email(email)
         if email_domain != sso_config.domain.lower():
+            log_login_attempt(
+                email=email,
+                login_method=LoginHistory.METHOD_SSO,
+                success=False,
+                tenant_domain=sso_config.domain,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason='Email domain mismatch'
+            )
             return render_template('error.html', message='Email domain does not match SSO configuration'), 403
 
         # Get or create user
         user = get_or_create_user(email, name, subject, sso_config.domain)
+
+        # Log successful SSO login
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_SSO,
+            success=True,
+            user_id=user.id,
+            tenant_domain=sso_config.domain,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
 
         # Set session
         session['user_id'] = user.id
@@ -1600,6 +1700,15 @@ def sso_callback():
 
     except Exception as e:
         app.logger.error(f"SSO callback error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_SSO,
+            success=False,
+            tenant_domain=sso_config.domain if sso_config else None,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'SSO error: {str(e)[:200]}'
+        )
         return render_template('error.html', message='Authentication failed'), 500
 
 
@@ -1735,6 +1844,10 @@ def slack_oidc_callback():
         SLACK_OIDC_TOKEN_URL,
         SLACK_OIDC_USERINFO_URL
     )
+
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
 
     # Get callback parameters
     code = request.args.get('code')
@@ -1914,6 +2027,17 @@ def slack_oidc_callback():
             user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
             db.session.commit()
 
+        # Log successful Slack OIDC login
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_SLACK_OIDC,
+            success=True,
+            user_id=user.id,
+            tenant_domain=domain,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
         # Set session
         session['user_id'] = user.id
         set_session_expiry(is_admin=user.is_admin)
@@ -1932,9 +2056,25 @@ def slack_oidc_callback():
 
     except requests.RequestException as e:
         logger.error(f"Slack OIDC request error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_SLACK_OIDC,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Network error: {str(e)[:200]}'
+        )
         return redirect('/?error=network_error')
     except Exception as e:
         logger.error(f"Slack OIDC callback error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_SLACK_OIDC,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Callback error: {str(e)[:200]}'
+        )
         return redirect('/?error=internal_error')
 
 
@@ -2042,6 +2182,10 @@ def google_oauth_callback():
         GOOGLE_OAUTH_TOKEN_URL,
         GOOGLE_OAUTH_USERINFO_URL
     )
+
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
 
     # Get callback parameters
     code = request.args.get('code')
@@ -2220,6 +2364,17 @@ def google_oauth_callback():
             user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
             db.session.commit()
 
+        # Log successful Google OAuth login
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_GOOGLE_OAUTH,
+            success=True,
+            user_id=user.id,
+            tenant_domain=domain,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
         # Set session
         session['user_id'] = user.id
         set_session_expiry(is_admin=user.is_admin)
@@ -2235,9 +2390,25 @@ def google_oauth_callback():
 
     except http_requests.RequestException as e:
         logger.error(f"Google OAuth request error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_GOOGLE_OAUTH,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Network error: {str(e)[:200]}'
+        )
         return redirect('/?error=network_error')
     except Exception as e:
         logger.error(f"Google OAuth callback error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_GOOGLE_OAUTH,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Callback error: {str(e)[:200]}'
+        )
         return redirect('/?error=internal_error')
 
 
@@ -6453,6 +6624,10 @@ def api_webauthn_auth_options():
 @app.route('/api/webauthn/authenticate/verify', methods=['POST'])
 def api_webauthn_auth_verify():
     """Verify WebAuthn authentication and log in user."""
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
     data = request.get_json() or {}
 
     credential = data.get('credential')
@@ -6463,7 +6638,28 @@ def api_webauthn_auth_verify():
     user, error = verify_authentication(credential)
 
     if error:
+        # Try to extract email from session for logging
+        email = session.get('webauthn_email', 'unknown')
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_WEBAUTHN,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=error[:255] if error else 'WebAuthn verification failed'
+        )
         return jsonify({'error': error}), 400
+
+    # Log successful WebAuthn login
+    log_login_attempt(
+        email=user.email,
+        login_method=LoginHistory.METHOD_WEBAUTHN,
+        success=True,
+        user_id=user.id,
+        tenant_domain=user.sso_domain,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
 
     # Log the user in
     session['user_id'] = user.id
@@ -6797,6 +6993,112 @@ def api_check_domain_status(domain):
         'domain': domain,
         'status': approval.status,
         'message': 'Domain is approved' if approval.status == 'approved' else f'Domain is {approval.status}'
+    })
+
+
+# ============================================================================
+# Superadmin History Endpoints
+# ============================================================================
+
+@app.route('/api/superadmin/email-verifications/pending', methods=['GET'])
+@master_required
+def api_list_pending_verifications():
+    """List all pending email verifications (super admin only).
+
+    Returns email verification records where verified_at is NULL,
+    representing users who started signup but never completed verification.
+    """
+    pending = EmailVerification.query.filter(
+        EmailVerification.verified_at.is_(None)
+    ).order_by(EmailVerification.created_at.desc()).all()
+
+    # Add is_expired flag to each result
+    result = []
+    for v in pending:
+        data = v.to_dict()
+        data['is_expired'] = v.is_expired()
+        result.append(data)
+
+    return jsonify(result)
+
+
+@app.route('/api/superadmin/login-history', methods=['GET'])
+@master_required
+def api_list_login_history():
+    """List all login history records (super admin only).
+
+    Query params:
+    - limit: Number of records to return (default 50, max 500)
+    - offset: Number of records to skip (default 0)
+    - tenant_domain: Filter by tenant domain
+    - success: Filter by success status ('true' or 'false')
+    - method: Filter by login method
+    """
+    limit = min(int(request.args.get('limit', 50)), 500)
+    offset = int(request.args.get('offset', 0))
+    tenant_domain = request.args.get('tenant_domain')
+    success = request.args.get('success')
+    method = request.args.get('method')
+
+    query = LoginHistory.query
+
+    if tenant_domain:
+        query = query.filter(LoginHistory.tenant_domain == tenant_domain)
+    if success is not None and success != '':
+        query = query.filter(LoginHistory.success == (success.lower() == 'true'))
+    if method:
+        query = query.filter(LoginHistory.login_method == method)
+
+    total = query.count()
+    items = query.order_by(LoginHistory.created_at.desc()).offset(offset).limit(limit).all()
+
+    return jsonify({
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'items': [item.to_dict() for item in items]
+    })
+
+
+@app.route('/api/superadmin/login-history/stats', methods=['GET'])
+@master_required
+def api_login_history_stats():
+    """Get login history statistics (super admin only).
+
+    Returns aggregate statistics about login attempts.
+    """
+    total = LoginHistory.query.count()
+    successful = LoginHistory.query.filter_by(success=True).count()
+    failed = LoginHistory.query.filter_by(success=False).count()
+
+    # Count by method
+    by_method = {}
+    method_counts = db.session.query(
+        LoginHistory.login_method,
+        db.func.count(LoginHistory.id)
+    ).group_by(LoginHistory.login_method).all()
+    for method, count in method_counts:
+        by_method[method] = count
+
+    # Count by tenant (top 10)
+    by_tenant = {}
+    tenant_counts = db.session.query(
+        LoginHistory.tenant_domain,
+        db.func.count(LoginHistory.id)
+    ).filter(
+        LoginHistory.tenant_domain.isnot(None)
+    ).group_by(LoginHistory.tenant_domain).order_by(
+        db.func.count(LoginHistory.id).desc()
+    ).limit(10).all()
+    for domain, count in tenant_counts:
+        by_tenant[domain] = count
+
+    return jsonify({
+        'total': total,
+        'successful': successful,
+        'failed': failed,
+        'by_method': by_method,
+        'by_tenant': by_tenant
     })
 
 
@@ -10327,10 +10629,22 @@ def teams_oidc_callback():
         get_teams_user_info
     )
 
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
     error = request.args.get('error')
     if error:
         error_description = request.args.get('error_description', error)
         logger.error(f"Teams OIDC error: {error_description}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_TEAMS_OIDC,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Teams error: {error_description[:200]}'
+        )
         return redirect(f'/login?error={error}')
 
     code = request.args.get('code')
@@ -10438,6 +10752,17 @@ def teams_oidc_callback():
         )
         db.session.add(membership)
         db.session.commit()
+
+    # Log successful Teams OIDC login
+    log_login_attempt(
+        email=email,
+        login_method=LoginHistory.METHOD_TEAMS_OIDC,
+        success=True,
+        user_id=user.id,
+        tenant_domain=domain,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
 
     # Set session
     session['user_id'] = user.id
