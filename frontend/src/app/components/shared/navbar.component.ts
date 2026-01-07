@@ -258,13 +258,15 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
       margin-right: 16px;
     }
 
-    .nav-links a {
+    .nav-links a,
+    .nav-links button {
       color: rgba(255, 255, 255, 0.8);
       border-radius: 8px;
       transition: all 0.2s ease;
     }
 
-    .nav-links a:hover {
+    .nav-links a:hover,
+    .nav-links button:hover {
       color: white;
       background: rgba(255, 255, 255, 0.1);
     }
@@ -583,8 +585,17 @@ export class NavbarComponent {
 
     dialogRef.afterClosed().subscribe((result: DecisionModalResult) => {
       if (result?.action === 'saved') {
-        // Navigate to decisions list to show the new decision
-        this.router.navigate([`/${this.userDomain}`]);
+        const targetUrl = `/${this.userDomain}`;
+        // Check if we're already on the decisions list page
+        if (this.router.url === targetUrl || this.router.url.startsWith(targetUrl + '?')) {
+          // Force reload by navigating away and back, or use a query param
+          this.router.navigateByUrl('/', { skipLocationChange: true }).then(() => {
+            this.router.navigate([targetUrl]);
+          });
+        } else {
+          // Navigate to decisions list
+          this.router.navigate([targetUrl]);
+        }
       }
     });
   }
