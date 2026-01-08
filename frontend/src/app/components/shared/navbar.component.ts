@@ -16,6 +16,7 @@ import { MatCheckboxModule } from '@angular/material/checkbox';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
 import { AdminService } from '../../services/admin.service';
+import { DecisionService } from '../../services/decision.service';
 import { User, MasterAccount } from '../../models/decision.model';
 import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/decision-modal.component';
 
@@ -507,6 +508,7 @@ export class NavbarComponent {
   constructor(
     public authService: AuthService,
     private adminService: AdminService,
+    private decisionService: DecisionService,
     private router: Router,
     private fb: FormBuilder,
     private http: HttpClient,
@@ -588,10 +590,8 @@ export class NavbarComponent {
         const targetUrl = `/${this.userDomain}`;
         // Check if we're already on the decisions list page
         if (this.router.url === targetUrl || this.router.url.startsWith(targetUrl + '?')) {
-          // Force reload by navigating away and back, or use a query param
-          this.router.navigateByUrl('/', { skipLocationChange: true }).then(() => {
-            this.router.navigate([targetUrl]);
-          });
+          // Notify decision-list component to refresh via service
+          this.decisionService.notifyRefreshNeeded();
         } else {
           // Navigate to decisions list
           this.router.navigate([targetUrl]);

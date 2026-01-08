@@ -271,6 +271,50 @@ def handle_400(e):
         return jsonify({'error': 'Bad request'}), 400
     return "Bad request", 400
 
+
+# Common attack path patterns to silently block (WordPress, PHP, etc.)
+ATTACK_PATH_PATTERNS = (
+    '.php',           # PHP files (xmlrpc.php, wp-login.php, etc.)
+    '.env',           # Environment files
+    '.git',           # Git directory
+    '.config',        # Config files
+    'phpinfo',        # PHP info pages
+    'phpunit',        # PHPUnit exploits
+    'wp-',            # WordPress paths
+    'wordpress',      # WordPress paths
+    'admin/.env',     # Admin env files
+    'vendor/',        # PHP vendor directories
+    'eval-stdin',     # PHP eval exploits
+    '/cgi-bin/',      # CGI exploits
+    'shell',          # Shell access attempts
+    '.asp',           # ASP files
+    '.jsp',           # JSP files
+    'phpmyadmin',     # phpMyAdmin
+    'mysql',          # MySQL admin attempts
+    'adminer',        # Adminer DB tool
+    'debug',          # Debug endpoints
+    '/.well-known/security.txt',  # Not an attack but unnecessary
+)
+
+
+@app.before_request
+def block_attack_paths():
+    """Silently return 404 for common attack/scanner paths.
+
+    This prevents unnecessary error logging and PostHog exception tracking
+    for automated vulnerability scanners probing for WordPress, PHP, etc.
+    """
+    path_lower = request.path.lower()
+
+    # Check if path matches any attack pattern
+    for pattern in ATTACK_PATH_PATTERNS:
+        if pattern in path_lower:
+            # Return 404 silently - don't log, don't track
+            return '', 404
+
+    return None  # Continue to normal request handling
+
+
 # Initialize database
 db.init_app(app)
 

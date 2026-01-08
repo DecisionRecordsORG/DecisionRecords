@@ -1,4 +1,5 @@
-import { Component, OnInit, TemplateRef, ViewChild } from '@angular/core';
+import { Component, OnInit, OnDestroy, TemplateRef, ViewChild } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule, TitleCasePipe } from '@angular/common';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -995,7 +996,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
     }
   `]
 })
-export class DecisionListComponent implements OnInit {
+export class DecisionListComponent implements OnInit, OnDestroy {
   @ViewChild('adminOnboardingDialog') adminOnboardingDialog!: TemplateRef<any>;
   @ViewChild('slackWelcomeDialog') slackWelcomeDialog!: TemplateRef<any>;
 
@@ -1010,6 +1011,7 @@ export class DecisionListComponent implements OnInit {
   userDomain = '';
   onboardingDialogRef: MatDialogRef<any> | null = null;
   slackWelcomeDialogRef: MatDialogRef<any> | null = null;
+  private refreshSubscription: Subscription | null = null;
 
   constructor(
     private decisionService: DecisionService,
@@ -1028,6 +1030,11 @@ export class DecisionListComponent implements OnInit {
     this.userDomain = this.route.snapshot.paramMap.get('tenant') || '';
     console.log('[DecisionList] userDomain from route:', this.userDomain);
 
+    // Subscribe to refresh notifications from other components (e.g., navbar)
+    this.refreshSubscription = this.decisionService.onRefreshNeeded$.subscribe(() => {
+      this.loadDecisions();
+    });
+
     // Check for slack_welcome query param (from Slack OIDC login)
     this.route.queryParams.subscribe(params => {
       if (params['slack_welcome'] === '1') {
@@ -1045,6 +1052,12 @@ export class DecisionListComponent implements OnInit {
 
     // Check if admin needs to see onboarding modal
     this.checkAdminOnboarding();
+  }
+
+  ngOnDestroy(): void {
+    if (this.refreshSubscription) {
+      this.refreshSubscription.unsubscribe();
+    }
   }
 
   loadSpaces(): void {
