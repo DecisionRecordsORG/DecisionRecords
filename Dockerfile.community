@@ -1,7 +1,13 @@
 # Decision Records - Community Edition Dockerfile
 #
 # Build: docker build -f Dockerfile.community -t decision-records:community .
-# Run:   docker run -p 3000:5000 -e SECRET_KEY=your-secret decision-records:community
+# Run:   docker run -p 3000:8000 -e SECRET_KEY=your-secret decision-records:community
+#
+# For production with PostgreSQL:
+#   docker run -p 3000:8000 \
+#     -e SECRET_KEY=your-secret \
+#     -e DATABASE_URL=postgresql://user:pass@host:5432/db \
+#     decision-records:community
 
 # Stage 1: Build Angular frontend
 FROM node:22-slim AS frontend-builder
@@ -14,7 +20,7 @@ COPY frontend/package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy frontend source (excluding enterprise components)
+# Copy frontend source
 COPY frontend/ ./
 
 # Build Angular app for production
@@ -27,6 +33,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -35,16 +42,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy application code (core only, exclude /ee)
-COPY *.py ./
+COPY app.py models.py version.py feature_flags.py ./
 COPY auth.py governance.py notifications.py security.py webauthn_auth.py ./
-COPY feature_flags.py ./
+COPY teams_cards.py teams_security.py ./
 COPY templates/ ./templates/
 COPY static/ ./static/
 
 # Copy Angular build from frontend-builder
 COPY --from=frontend-builder /app/frontend/dist/frontend/browser ./frontend/dist/frontend/browser
 
-# Create directory for database
+# Create directory for SQLite database (when not using PostgreSQL)
 RUN mkdir -p /data
 
 # Set environment variables for Community Edition
@@ -54,15 +61,15 @@ ENV DECISION_RECORDS_EDITION=community
 ENV PYTHONUNBUFFERED=1
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
 
 # Expose port
-EXPOSE 5000
+EXPOSE 8000
 
 # Create non-root user for security
 RUN useradd -m -r appuser && chown -R appuser:appuser /app /data
 USER appuser
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", "--timeout", "120", "app:app"]

@@ -1234,8 +1234,11 @@ def health_check():
         }), 503
 
 @app.route('/ping')
+@app.route('/api/health')
 def ping():
-    """Simple ping endpoint for load balancer health checks - always returns 200"""
+    """Simple ping endpoint for load balancer health checks - always returns 200.
+    Also available at /api/health for consistency with documentation.
+    """
     return jsonify({
         'status': 'ok',
         'server': 'running',
@@ -1248,6 +1251,17 @@ def get_version():
     """Get application version information."""
     from version import get_build_info
     return jsonify(get_build_info()), 200
+
+
+@app.route('/api/version/check')
+def check_version():
+    """
+    Check for available updates.
+    Compares current version with latest GitHub release.
+    Returns update status and release information.
+    """
+    from version import check_for_updates
+    return jsonify(check_for_updates()), 200
 
 
 @app.route('/api/features')

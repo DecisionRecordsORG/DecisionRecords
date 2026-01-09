@@ -2,17 +2,23 @@
 #
 # Quick Start (SQLite):
 #   docker-compose up -d
+#   Open http://localhost:3000
 #
 # With PostgreSQL:
 #   docker-compose --profile postgres up -d
+#
+# Configuration:
+#   Copy .env.example to .env and customize values
 
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile.community
+    image: ghcr.io/decisionrecordsorg/decisionrecords:latest
+    # Or build locally:
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.community
     ports:
-      - "3000:5000"
+      - "3000:8000"
     volumes:
       - adr-data:/data
     environment:
@@ -26,10 +32,11 @@ services:
         required: false
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # Optional PostgreSQL database (use --profile postgres)
   db:
@@ -48,6 +55,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Optional: Watchtower for automatic updates
+  watchtower:
+    image: containrrr/watchtower
+    profiles:
+      - auto-update
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=86400  # Check daily
+      - WATCHTOWER_INCLUDE_STOPPED=false
+    restart: unless-stopped
 
 volumes:
   adr-data:
