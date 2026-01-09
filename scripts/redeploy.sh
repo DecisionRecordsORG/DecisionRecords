@@ -1,5 +1,5 @@
 #!/bin/bash
-# Quick redeploy script for Architecture Decisions application
+# Quick redeploy script for Architecture Decisions application (Enterprise Edition)
 # This script builds, pushes, and redeploys the container with the new image
 #
 # Usage: ./scripts/redeploy.sh <patch|minor|major|--no-bump>
@@ -15,6 +15,9 @@
 # - Docker running
 # - Git changes committed (enforced by this script)
 # - CLOUDFLARE_API_TOKEN environment variable set (optional, for cache purge)
+#
+# Note: This deploys the Enterprise Edition. For Community Edition builds,
+# use Dockerfile.community instead.
 
 set -e
 
@@ -143,9 +146,10 @@ check_cloudflare_security() {
         error "SECURITY: Production code imports run_local.py which has dev-only settings!"
     fi
 
-    # Check cloudflare_security.py doesn't have hardcoded bypasses
-    if grep -q "return True.*# BYPASS\|# DISABLE" cloudflare_security.py 2>/dev/null; then
-        error "SECURITY: cloudflare_security.py contains hardcoded bypass!"
+    # Check cloudflare_security.py doesn't have hardcoded bypasses (now in ee/backend/cloudflare/)
+    local cf_security="ee/backend/cloudflare/cloudflare_security.py"
+    if [ -f "$cf_security" ] && grep -q "return True.*# BYPASS\|# DISABLE" "$cf_security" 2>/dev/null; then
+        error "SECURITY: $cf_security contains hardcoded bypass!"
     fi
 
     success "Cloudflare security settings OK"
@@ -294,7 +298,7 @@ purge_cloudflare_cache() {
 # Main
 main() {
     echo ""
-    log "=== Architecture Decisions Redeploy Script ==="
+    log "=== Architecture Decisions Redeploy Script (Enterprise Edition) ==="
     echo ""
 
     validate_version_argument

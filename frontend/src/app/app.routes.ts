@@ -2,58 +2,13 @@ import { Routes } from '@angular/router';
 import { authGuard, adminGuard, masterGuard, guestGuard, tenantGuard } from './guards/auth.guard';
 
 export const routes: Routes = [
-  // Public homepage with integrated signup form
+  // Public landing page (Community Edition)
+  // For Enterprise Edition with marketing pages, this would be replaced
   {
     path: '',
-    loadComponent: () => import('./components/homepage/homepage.component').then(m => m.HomepageComponent)
+    loadComponent: () => import('./components/landing/landing.component').then(m => m.LandingComponent)
   },
-  // About page
-  {
-    path: 'about',
-    loadComponent: () => import('./components/about/about.component').then(m => m.AboutComponent)
-  },
-  // Licensing page
-  {
-    path: 'licensing',
-    loadComponent: () => import('./components/licensing/licensing.component').then(m => m.LicensingComponent)
-  },
-  // FAQ page
-  {
-    path: 'faq',
-    loadComponent: () => import('./components/faq/faq.component').then(m => m.FaqComponent)
-  },
-  // Solutions page
-  {
-    path: 'solutions',
-    loadComponent: () => import('./components/solutions/solutions.component').then(m => m.SolutionsComponent)
-  },
-  // Security features page (product page, not legal)
-  {
-    path: 'security-features',
-    loadComponent: () => import('./components/security/security.component').then(m => m.SecurityComponent)
-  },
-  // Integrations pages
-  {
-    path: 'integrations',
-    loadComponent: () => import('./components/integrations/integrations.component').then(m => m.IntegrationsComponent)
-  },
-  {
-    path: 'integrations/slack',
-    loadComponent: () => import('./components/slack-integration/slack-integration.component').then(m => m.SlackIntegrationComponent)
-  },
-  {
-    path: 'integrations/mcp',
-    loadComponent: () => import('./components/mcp-integration/mcp-integration.component').then(m => m.McpIntegrationComponent)
-  },
-  {
-    path: 'integrations/ai-api',
-    loadComponent: () => import('./components/ai-api-integration/ai-api-integration.component').then(m => m.AiApiIntegrationComponent)
-  },
-  {
-    path: 'integrations/teams',
-    loadComponent: () => import('./components/teams-integration/teams-integration.component').then(m => m.TeamsIntegrationComponent)
-  },
-  // Blog pages
+  // Blog pages (available in both editions)
   {
     path: 'blog',
     loadComponent: () => import('./components/blog/blog-list/blog-list.component').then(m => m.BlogListComponent)
@@ -109,26 +64,9 @@ export const routes: Routes = [
     loadComponent: () => import('./components/superadmin-settings/superadmin-settings.component').then(m => m.SuperadminSettingsComponent),
     canActivate: [masterGuard]
   },
-  // Slack installation landing page (for unclaimed workspace installs)
-  {
-    path: 'slack/installed',
-    loadComponent: () => import('./components/slack-installed/slack-installed.component').then(m => m.SlackInstalledComponent)
-  },
-  // Slack account linking page (when user clicks "Link Account" from Slack)
-  {
-    path: 'slack/link',
-    loadComponent: () => import('./components/slack-link-account/slack-link-account.component').then(m => m.SlackLinkAccountComponent)
-  },
-  // Teams installation landing page (for unclaimed workspace installs)
-  {
-    path: 'teams/installed',
-    loadComponent: () => import('./components/teams-installed/teams-installed.component').then(m => m.TeamsInstalledComponent)
-  },
-  // Teams account linking page (when user clicks "Link Account" from Teams)
-  {
-    path: 'teams/link',
-    loadComponent: () => import('./components/teams-link-account/teams-link-account.component').then(m => m.TeamsLinkAccountComponent)
-  },
+  // NOTE: Slack and Teams routes are Enterprise Edition features
+  // They are available when running with DECISION_RECORDS_EDITION=enterprise
+  // For Community Edition, these routes are disabled
   // Tenant-specific routes
   // NOTE: Order matters! More specific routes must come BEFORE less specific ones.
   // The ':tenant' route must be LAST among tenant routes because it matches any single segment.

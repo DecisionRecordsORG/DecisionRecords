@@ -1,13 +1,12 @@
 """
 Feature Flags Module
 
-Controls which features are enabled based on deployment type.
-Commercial features (like Slack integration) can be disabled for
-open-source deployments.
+Controls which features are enabled based on edition (Community vs Enterprise).
+Commercial features are disabled in the Community Edition.
 
 Configuration:
-- Environment variable: COMMERCIAL_FEATURES_ENABLED (default: false)
-- Azure Key Vault: commercial-features-enabled
+- Environment variable: DECISION_RECORDS_EDITION (default: 'community')
+- Values: 'community' or 'enterprise'
 """
 import os
 import logging
@@ -16,114 +15,172 @@ from flask import jsonify
 
 logger = logging.getLogger(__name__)
 
-# Cache for feature flags
-_commercial_enabled = None
+
+class Edition:
+    """Product editions."""
+    COMMUNITY = 'community'
+    ENTERPRISE = 'enterprise'
 
 
-def is_commercial_enabled():
-    """
-    Check if commercial features are enabled.
+# Get current edition from environment
+EDITION = os.environ.get('DECISION_RECORDS_EDITION', Edition.COMMUNITY).lower()
 
-    Commercial features include:
-    - Slack integration
-    - (Future: other integrations, advanced analytics, etc.)
+# Validate edition value
+if EDITION not in (Edition.COMMUNITY, Edition.ENTERPRISE):
+    logger.warning(f"Invalid DECISION_RECORDS_EDITION '{EDITION}', defaulting to community")
+    EDITION = Edition.COMMUNITY
 
-    Returns True if commercial features are enabled, False otherwise.
-    """
-    global _commercial_enabled
-
-    if _commercial_enabled is None:
-        # Check environment variable first
-        env_value = os.environ.get('COMMERCIAL_FEATURES_ENABLED', '').lower()
-
-        if env_value in ('true', '1', 'yes'):
-            _commercial_enabled = True
-        elif env_value in ('false', '0', 'no', ''):
-            # Default to checking Key Vault if not in env
-            try:
-                from keyvault_client import keyvault_client
-                kv_value = keyvault_client.get_secret(
-                    'commercial-features-enabled',
-                    fallback_env_var='COMMERCIAL_FEATURES_ENABLED'
-                )
-                _commercial_enabled = kv_value and kv_value.lower() in ('true', '1', 'yes')
-            except Exception as e:
-                logger.debug(f"Could not check Key Vault for commercial features flag: {e}")
-                _commercial_enabled = False
-        else:
-            _commercial_enabled = False
-
-        logger.info(f"Commercial features enabled: {_commercial_enabled}")
-
-    return _commercial_enabled
+logger.info(f"Decision Records Edition: {EDITION}")
 
 
-def is_slack_enabled():
+# Feature definitions
+FEATURES = {
+    # Core features (always available in both editions)
+    'decisions': True,
+    'multi_tenancy': True,
+    'webauthn': True,
+    'generic_oidc': True,
+    'local_auth': True,
+    'governance': True,
+    'audit_logs': True,
+    'email_notifications': True,
+    'spaces': True,
+    'infrastructure': True,
+
+    # Enterprise features (only available in Enterprise Edition)
+    'slack_integration': EDITION == Edition.ENTERPRISE,
+    'teams_integration': EDITION == Edition.ENTERPRISE,
+    'google_oauth': EDITION == Edition.ENTERPRISE,
+    'slack_oidc': EDITION == Edition.ENTERPRISE,
+    'ai_features': EDITION == Edition.ENTERPRISE,
+    'posthog_analytics': EDITION == Edition.ENTERPRISE,
+    'azure_keyvault': EDITION == Edition.ENTERPRISE,
+    'cloudflare_security': EDITION == Edition.ENTERPRISE,
+    'marketing_pages': EDITION == Edition.ENTERPRISE,
+}
+
+
+def is_feature_enabled(feature: str) -> bool:
+    """Check if a specific feature is enabled."""
+    return FEATURES.get(feature, False)
+
+
+def is_enterprise() -> bool:
+    """Check if running Enterprise Edition."""
+    return EDITION == Edition.ENTERPRISE
+
+
+def is_community() -> bool:
+    """Check if running Community Edition."""
+    return EDITION == Edition.COMMUNITY
+
+
+# Legacy compatibility functions
+def is_commercial_enabled() -> bool:
+    """Legacy: Check if commercial features are enabled."""
+    return is_enterprise()
+
+
+def is_slack_enabled() -> bool:
     """Check if Slack integration is enabled."""
-    return is_commercial_enabled()
+    return is_feature_enabled('slack_integration')
 
 
-def is_teams_enabled():
+def is_teams_enabled() -> bool:
     """Check if Microsoft Teams integration is enabled."""
-    return is_commercial_enabled()
+    return is_feature_enabled('teams_integration')
 
 
-def require_commercial(f):
+def is_ai_enabled() -> bool:
+    """Check if AI features are enabled."""
+    return is_feature_enabled('ai_features')
+
+
+def is_google_oauth_enabled() -> bool:
+    """Check if Google OAuth is enabled."""
+    return is_feature_enabled('google_oauth')
+
+
+def is_slack_oidc_enabled() -> bool:
+    """Check if Slack OIDC is enabled."""
+    return is_feature_enabled('slack_oidc')
+
+
+def is_analytics_enabled() -> bool:
+    """Check if PostHog analytics is enabled."""
+    return is_feature_enabled('posthog_analytics')
+
+
+def require_enterprise(f):
     """
-    Decorator to require commercial features for an endpoint.
-
-    Returns 404 if commercial features are disabled (hides endpoint existence).
+    Decorator to require Enterprise Edition for an endpoint.
+    Returns 404 if not Enterprise (hides endpoint existence).
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not is_commercial_enabled():
+        if not is_enterprise():
             return jsonify({'error': 'Not found'}), 404
         return f(*args, **kwargs)
     return decorated_function
+
+
+def require_feature(feature: str):
+    """
+    Decorator factory to require a specific feature for an endpoint.
+    Returns 404 if feature is disabled (hides endpoint existence).
+
+    Usage:
+        @require_feature('slack_integration')
+        def slack_endpoint():
+            ...
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not is_feature_enabled(feature):
+                return jsonify({'error': 'Not found'}), 404
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+
+# Legacy decorators for backwards compatibility
+def require_commercial(f):
+    """Legacy: Decorator to require commercial/enterprise features."""
+    return require_enterprise(f)
 
 
 def require_slack(f):
-    """
-    Decorator to require Slack integration for an endpoint.
-
-    Returns 404 if Slack is disabled (hides endpoint existence).
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not is_slack_enabled():
-            return jsonify({'error': 'Not found'}), 404
-        return f(*args, **kwargs)
-    return decorated_function
+    """Decorator to require Slack integration."""
+    return require_feature('slack_integration')(f)
 
 
 def require_teams(f):
+    """Decorator to require Teams integration."""
+    return require_feature('teams_integration')(f)
+
+
+def require_ai(f):
+    """Decorator to require AI features."""
+    return require_feature('ai_features')(f)
+
+
+def get_enabled_features() -> dict:
     """
-    Decorator to require Teams integration for an endpoint.
-
-    Returns 404 if Teams is disabled (hides endpoint existence).
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not is_teams_enabled():
-            return jsonify({'error': 'Not found'}), 404
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def invalidate_cache():
-    """Clear cached feature flag values."""
-    global _commercial_enabled
-    _commercial_enabled = None
-
-
-def get_enabled_features():
-    """
-    Get a dictionary of enabled commercial features.
-
+    Get a dictionary of enabled features.
     Used by the frontend to conditionally show/hide UI elements.
     """
     return {
-        'commercial': is_commercial_enabled(),
+        'edition': EDITION,
+        'is_enterprise': is_enterprise(),
+        **{feature: enabled for feature, enabled in FEATURES.items()},
+        # Legacy fields for backwards compatibility
+        'commercial': is_enterprise(),
         'slack': is_slack_enabled(),
         'teams': is_teams_enabled(),
     }
+
+
+def invalidate_cache():
+    """Clear cached feature flag values (no-op in new system, kept for compatibility)."""
+    pass

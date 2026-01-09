@@ -27,7 +27,13 @@
       "Bash(lsof:*)",
       "Bash(gh issue view:*)",
       "Bash(npx --package=typescript tsc:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "WebFetch(domain:handbook.gitlab.com)",
+      "WebFetch(domain:posthog.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:supabase.com)",
+      "Bash(DECISION_RECORDS_EDITION=community .venv/bin/python -m pytest:*)"
     ],
     "deny": [],
     "ask": []

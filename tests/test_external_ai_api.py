@@ -1,5 +1,5 @@
 """
-Tests for External AI API routes.
+Tests for External AI API routes (Enterprise Edition).
 
 Tests cover:
 1. require_ai_api_key decorator - authentication and authorization
@@ -9,6 +9,8 @@ Tests cover:
 5. Create decision endpoint /api/ai/decisions (POST)
 6. Get history endpoint /api/ai/decisions/<id>/history (GET)
 7. OpenAPI schema endpoint /api/ai/openapi.json (GET)
+
+Note: These tests require Enterprise Edition modules from ee/backend/ai/
 """
 import pytest
 import json
@@ -23,7 +25,17 @@ from models import (
     db, User, Tenant, TenantMembership, SystemConfig, GlobalRole, MaturityState,
     AIApiKey, ArchitectureDecision, DecisionHistory
 )
-from ai import AIConfig, AIApiKeyService
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.ai import AIConfig, AIApiKeyService
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    AIConfig = None
+    AIApiKeyService = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 def _ensure_testing_env():

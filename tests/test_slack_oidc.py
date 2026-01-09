@@ -1,5 +1,5 @@
 """
-Backend Unit Tests for Slack OIDC Authentication
+Backend Unit Tests for Slack OIDC Authentication (Enterprise Edition)
 
 Tests for the "Sign in with Slack" feature using OpenID Connect.
 Tests cover:
@@ -11,6 +11,8 @@ Tests cover:
 - Existing user login
 - Blocked domain rejection
 - First user becomes provisional admin
+
+Note: These tests require Enterprise Edition modules from ee/backend/slack/
 """
 import pytest
 import json
@@ -24,11 +26,26 @@ from models import (
     db, User, Tenant, TenantMembership, TenantSettings, AuthConfig,
     GlobalRole, MaturityState
 )
-from slack_security import (
-    generate_slack_oidc_state, verify_slack_oidc_state,
-    _get_encryption_key, SLACK_OIDC_AUTHORIZE_URL, SLACK_OIDC_TOKEN_URL,
-    SLACK_OIDC_USERINFO_URL, SLACK_OIDC_SCOPES
-)
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.slack.slack_security import (
+        generate_slack_oidc_state, verify_slack_oidc_state,
+        _get_encryption_key, SLACK_OIDC_AUTHORIZE_URL, SLACK_OIDC_TOKEN_URL,
+        SLACK_OIDC_USERINFO_URL, SLACK_OIDC_SCOPES
+    )
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    generate_slack_oidc_state = None
+    verify_slack_oidc_state = None
+    _get_encryption_key = None
+    SLACK_OIDC_AUTHORIZE_URL = None
+    SLACK_OIDC_TOKEN_URL = None
+    SLACK_OIDC_USERINFO_URL = None
+    SLACK_OIDC_SCOPES = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ==================== Fixtures ====================

@@ -1,5 +1,5 @@
 """
-Backend Unit Tests for Google OAuth Authentication
+Backend Unit Tests for Google OAuth Authentication (Enterprise Edition)
 
 Tests for the "Sign in with Google" feature using OAuth 2.0.
 Tests cover:
@@ -11,6 +11,8 @@ Tests cover:
 - Existing user login
 - Blocked domain rejection (gmail.com)
 - First user becomes provisional admin
+
+Note: These tests require Enterprise Edition modules from ee/backend/oauth_providers/
 """
 import pytest
 import json
@@ -23,13 +25,32 @@ from models import (
     db, User, Tenant, TenantMembership, TenantSettings, AuthConfig,
     GlobalRole, MaturityState, DomainApproval
 )
-from google_oauth import (
-    generate_google_oauth_state, verify_google_oauth_state,
-    is_google_oauth_configured, get_google_client_id, get_google_client_secret,
-    clear_credential_cache, _get_encryption_key,
-    GOOGLE_OAUTH_AUTHORIZE_URL, GOOGLE_OAUTH_TOKEN_URL,
-    GOOGLE_OAUTH_USERINFO_URL, GOOGLE_OAUTH_SCOPES
-)
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.oauth_providers.google_oauth import (
+        generate_google_oauth_state, verify_google_oauth_state,
+        is_google_oauth_configured, get_google_client_id, get_google_client_secret,
+        clear_credential_cache, _get_encryption_key,
+        GOOGLE_OAUTH_AUTHORIZE_URL, GOOGLE_OAUTH_TOKEN_URL,
+        GOOGLE_OAUTH_USERINFO_URL, GOOGLE_OAUTH_SCOPES
+    )
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    generate_google_oauth_state = None
+    verify_google_oauth_state = None
+    is_google_oauth_configured = None
+    get_google_client_id = None
+    get_google_client_secret = None
+    clear_credential_cache = None
+    _get_encryption_key = None
+    GOOGLE_OAUTH_AUTHORIZE_URL = None
+    GOOGLE_OAUTH_TOKEN_URL = None
+    GOOGLE_OAUTH_USERINFO_URL = None
+    GOOGLE_OAUTH_SCOPES = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ==================== Fixtures ====================

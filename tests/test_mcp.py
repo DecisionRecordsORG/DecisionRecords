@@ -1,10 +1,12 @@
 """
-Tests for MCP (Model Context Protocol) server implementation.
+Tests for MCP (Model Context Protocol) server implementation (Enterprise Edition).
 
 Tests cover:
-1. Tool definitions in ai/mcp/tools.py
-2. MCP server handler in ai/mcp/server.py
+1. Tool definitions in ee/backend/ai/mcp/tools.py
+2. MCP server handler in ee/backend/ai/mcp/server.py
 3. MCP API endpoint in app.py
+
+Note: These tests require Enterprise Edition modules from ee/backend/ai/
 """
 import pytest
 import json
@@ -19,9 +21,26 @@ from models import (
     db, User, Tenant, TenantMembership, SystemConfig, GlobalRole, MaturityState,
     AIApiKey, ArchitectureDecision, DecisionHistory
 )
-from ai import AIConfig, AIApiKeyService
-from ai.mcp.tools import get_tools, get_tool_by_name, validate_tool_input, TOOLS
-from ai.mcp.server import MCPToolHandler, authenticate_mcp_request, handle_mcp_request
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.ai import AIConfig, AIApiKeyService
+    from ee.backend.ai.mcp.tools import get_tools, get_tool_by_name, validate_tool_input, TOOLS
+    from ee.backend.ai.mcp.server import MCPToolHandler, authenticate_mcp_request, handle_mcp_request
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    AIConfig = None
+    AIApiKeyService = None
+    get_tools = None
+    get_tool_by_name = None
+    validate_tool_input = None
+    TOOLS = None
+    MCPToolHandler = None
+    authenticate_mcp_request = None
+    handle_mcp_request = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ============================================================================

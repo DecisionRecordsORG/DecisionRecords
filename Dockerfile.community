@@ -1,0 +1,68 @@
+# Decision Records - Community Edition Dockerfile
+#
+# Build: docker build -f Dockerfile.community -t decision-records:community .
+# Run:   docker run -p 3000:5000 -e SECRET_KEY=your-secret decision-records:community
+
+# Stage 1: Build Angular frontend
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copy frontend package files
+COPY frontend/package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy frontend source (excluding enterprise components)
+COPY frontend/ ./
+
+# Build Angular app for production
+RUN npm run build -- --configuration=production
+
+# Stage 2: Python backend with Angular frontend
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies (core only)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+
+# Copy application code (core only, exclude /ee)
+COPY *.py ./
+COPY auth.py governance.py notifications.py security.py webauthn_auth.py ./
+COPY feature_flags.py ./
+COPY templates/ ./templates/
+COPY static/ ./static/
+
+# Copy Angular build from frontend-builder
+COPY --from=frontend-builder /app/frontend/dist/frontend/browser ./frontend/dist/frontend/browser
+
+# Create directory for database
+RUN mkdir -p /data
+
+# Set environment variables for Community Edition
+ENV FLASK_APP=app.py
+ENV DATABASE_URL=sqlite:////data/architecture_decisions.db
+ENV DECISION_RECORDS_EDITION=community
+ENV PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')" || exit 1
+
+# Expose port
+EXPOSE 5000
+
+# Create non-root user for security
+RUN useradd -m -r appuser && chown -R appuser:appuser /app /data
+USER appuser
+
+# Run with gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]

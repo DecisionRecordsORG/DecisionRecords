@@ -1,11 +1,13 @@
 """
-Tests for AI/LLM integration foundation.
+Tests for AI/LLM integration foundation (Enterprise Edition).
 
 Tests cover:
 1. AI Config - Hierarchical configuration system
 2. API Key Service - Key generation, validation, and management
 3. Interaction Logger - Logging and querying AI interactions
 4. API Endpoints - Super admin, tenant admin, and user endpoints
+
+Note: These tests require Enterprise Edition modules from ee/backend/ai/
 """
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -19,7 +21,18 @@ from models import (
     db, User, Tenant, TenantMembership, SystemConfig, GlobalRole, MaturityState,
     AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 )
-from ai import AIConfig, AIApiKeyService, AIInteractionLogger
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.ai import AIConfig, AIApiKeyService, AIInteractionLogger
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    AIConfig = None
+    AIApiKeyService = None
+    AIInteractionLogger = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ============================================================================

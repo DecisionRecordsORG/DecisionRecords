@@ -19,6 +19,98 @@ Architecture Decisions is a multi-tenant web application for managing Architectu
 - **CDN/SSL**: Cloudflare (Free plan) with Origin Server certificates
 - **Decision Repository**: This project uses its own platform via MCP integration
 
+## Open Core Architecture
+
+This project follows an **Open Core** model with a monorepo structure:
+- **Community Edition** (BSL 1.1 License): Core ADR functionality, open source
+- **Enterprise Edition** (Proprietary): Commercial features in `ee/` directory
+
+### Edition Selection
+
+The edition is controlled by the `DECISION_RECORDS_EDITION` environment variable:
+
+```bash
+# Community Edition (default for self-hosting)
+DECISION_RECORDS_EDITION=community
+
+# Enterprise Edition (production decisionrecords.org)
+DECISION_RECORDS_EDITION=enterprise
+```
+
+### Feature Availability by Edition
+
+| Feature | Community | Enterprise |
+|---------|-----------|------------|
+| Architecture Decisions (CRUD) | ✅ | ✅ |
+| Multi-Tenancy | ✅ | ✅ |
+| WebAuthn/Passkeys | ✅ | ✅ |
+| Generic OIDC SSO | ✅ | ✅ |
+| Spaces (Visibility Control) | ✅ | ✅ |
+| Governance Model | ✅ | ✅ |
+| Audit Logging | ✅ | ✅ |
+| Slack Integration | ❌ | ✅ |
+| Microsoft Teams | ❌ | ✅ |
+| AI Features (MCP Server) | ❌ | ✅ |
+| Google OAuth | ❌ | ✅ |
+| PostHog Analytics | ❌ | ✅ |
+| Azure Key Vault | ❌ | ✅ |
+
+### Directory Structure
+
+```
+architecture-decisions/
+├── app.py                    # Main Flask app (core routes)
+├── models.py                 # SQLAlchemy models (shared)
+├── feature_flags.py          # Edition-based feature detection
+├── security.py               # Core security (CSRF, sanitization)
+├── requirements.txt          # Core dependencies only
+├── frontend/                 # Angular frontend (shared)
+│   └── src/app/
+│       ├── components/       # Core UI components
+│       └── services/         # Core services
+├── tests/                    # All tests (EE tests skip if unavailable)
+├── ee/                       # Enterprise Edition (proprietary)
+│   ├── LICENSE               # Proprietary license
+│   ├── requirements.txt      # Additional EE dependencies
+│   ├── backend/              # Python EE modules
+│   │   ├── ai/               # AI/LLM integration
+│   │   ├── slack/            # Slack integration
+│   │   ├── teams/            # Teams integration
+│   │   ├── analytics/        # PostHog integration
+│   │   ├── azure/            # Azure Key Vault
+│   │   ├── cloudflare/       # Cloudflare security
+│   │   └── oauth_providers/  # Google OAuth
+│   ├── frontend/             # Angular EE components
+│   │   ├── components/       # EE-specific components
+│   │   └── pages/            # EE-specific pages
+│   └── infra/                # Azure ARM templates
+├── deployment/
+│   └── Dockerfile.production # Enterprise Edition build
+├── Dockerfile.community      # Community Edition build
+├── docker-compose.yml        # Self-hosting compose file
+└── docs/
+    └── self-hosting.md       # Self-hosting guide
+```
+
+### How Code is Loaded
+
+**Backend (app.py)**:
+```python
+from feature_flags import is_enterprise
+
+# EE modules are conditionally imported
+if is_enterprise():
+    from ee.backend.slack.slack_service import SlackService
+    from ee.backend.teams.teams_service import TeamsService
+    from ee.backend.ai import AIConfig
+    # Register EE routes...
+```
+
+**Frontend**:
+- Core components are in `frontend/src/app/components/`
+- EE components are in `ee/frontend/components/` (loaded conditionally)
+- Feature flags service fetches `/api/features` to determine edition
+
 ## Architecture Decision Records (ADRs)
 
 This project uses the Decision Records platform to document architecture decisions. Claude Code has access to the `decision-records` MCP server to search, read, and create decisions.
@@ -312,10 +404,15 @@ In production, the app runs behind Cloudflare which provides security controls. 
 
 ```bash
 source .venv/bin/activate
+
+# Run Enterprise Edition (all features - default)
 python run_local.py
+
+# Run Community Edition (core features only)
+python run_local.py --community
 ```
 
-This script automatically sets all required environment variables.
+This script automatically sets all required environment variables including `DECISION_RECORDS_EDITION`.
 
 #### Option 2: Manual with Environment Variables
 
@@ -379,18 +476,35 @@ The Angular dev server proxies `/api` and `/auth` calls to the Flask backend via
 
 ## File Structure
 
-Key files to understand:
+### Core Files (Community Edition)
 
 | File | Purpose |
 |------|---------|
 | `app.py` | Main Flask application with all API routes |
 | `models.py` | SQLAlchemy database models |
 | `version.py` | Version information |
-| `keyvault_client.py` | Azure Key Vault integration |
+| `feature_flags.py` | Edition detection and feature flags |
 | `security.py` | Security helpers (CSRF, sanitization) |
+| `requirements.txt` | Core Python dependencies |
 | `frontend/src/app/` | Angular components and services |
-| `deployment/Dockerfile.production` | Production Docker build |
-| `infra/azure-deploy-vnet.json` | Azure ARM template |
+| `Dockerfile.community` | Community Edition Docker build |
+| `docker-compose.yml` | Self-hosting compose file |
+
+### Enterprise Edition Files (`ee/`)
+
+| File | Purpose |
+|------|---------|
+| `ee/backend/ai/` | AI/LLM integration (MCP server) |
+| `ee/backend/slack/` | Slack integration (OAuth, commands) |
+| `ee/backend/teams/` | Microsoft Teams integration |
+| `ee/backend/analytics/` | PostHog analytics |
+| `ee/backend/azure/keyvault_client.py` | Azure Key Vault integration |
+| `ee/backend/cloudflare/` | Cloudflare security middleware |
+| `ee/backend/oauth_providers/` | Google OAuth provider |
+| `ee/frontend/components/` | EE Angular components |
+| `ee/infra/` | Azure ARM templates |
+| `ee/requirements.txt` | EE Python dependencies |
+| `deployment/Dockerfile.production` | Enterprise Edition Docker build |
 
 ## Testing Requirements
 
@@ -438,8 +552,11 @@ Key files to understand:
 ### Running Tests
 
 ```bash
-# Run all backend tests
-.venv/bin/python -m pytest tests/ -v
+# Run all backend tests (Enterprise Edition - includes EE tests)
+DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/ -v
+
+# Run only Community Edition tests (skips EE tests)
+DECISION_RECORDS_EDITION=community .venv/bin/python -m pytest tests/ -v
 
 # Run specific test file
 .venv/bin/python -m pytest tests/test_auth.py -v
@@ -451,6 +568,22 @@ npx playwright test
 # Run specific E2E test
 npx playwright test e2e/tests/decisions.spec.ts
 ```
+
+### Test Organization
+
+Tests are organized by feature area. Enterprise Edition tests automatically skip when EE modules are not available:
+
+| Test File | Edition | Purpose |
+|-----------|---------|---------|
+| `tests/test_auth.py` | Core | Authentication tests |
+| `tests/test_decisions.py` | Core | Decision CRUD tests |
+| `tests/test_tenants.py` | Core | Multi-tenancy tests |
+| `tests/test_slack.py` | **EE** | Slack integration tests |
+| `tests/test_teams.py` | **EE** | Teams integration tests |
+| `tests/test_ai.py` | **EE** | AI/MCP tests |
+| `tests/test_google_oauth.py` | **EE** | Google OAuth tests |
+
+**EE tests use `pytest.mark.skipif`** to automatically skip when `ee/` modules are unavailable.
 
 ### Test Patterns to Follow
 
@@ -547,20 +680,23 @@ This project uses these response patterns:
 3. **Don't guess endpoint names** - Always verify against `app.py`
 4. **Don't skip error response handling** - Backend errors use `{ error: '...' }` format
 
-## Analytics & Error Capture Guidelines
+## Analytics & Error Capture Guidelines (Enterprise Edition)
 
-When writing code for this project, follow these guidelines for analytics and error tracking.
+Analytics and error tracking are **Enterprise Edition features**. These are only available when running with `DECISION_RECORDS_EDITION=enterprise`.
 
 ### Adding Analytics to New Endpoints
 
 All API endpoints should be instrumented with analytics tracking:
 
 ```python
-from analytics import track_endpoint
+# Only in Enterprise Edition
+from feature_flags import is_enterprise
+if is_enterprise():
+    from ee.backend.analytics.analytics import track_endpoint
 
 @app.route('/api/my-endpoint', methods=['GET'])
 @login_required
-@track_endpoint('api_my_endpoint')  # Add after auth decorators
+@track_endpoint('api_my_endpoint')  # Add after auth decorators (EE only)
 def my_endpoint():
     ...
 ```
@@ -568,20 +704,23 @@ def my_endpoint():
 When adding new endpoints:
 1. Add the `@track_endpoint('endpoint_name')` decorator after authentication decorators
 2. Use a descriptive endpoint name following the pattern: `api_<resource>_<action>`
-3. Register the endpoint in `analytics.py` in the appropriate category
+3. Register the endpoint in `ee/backend/analytics/analytics.py` in the appropriate category
 
 ### Handling Errors with Exception Capture
 
 For operations that might fail unexpectedly, capture exceptions:
 
 ```python
-from analytics import capture_exception
+from feature_flags import is_enterprise
+if is_enterprise():
+    from ee.backend.analytics.analytics import capture_exception
 
 try:
     risky_external_call()
 except Exception as e:
     logger.error(f"External call failed: {e}")
-    capture_exception(e, endpoint_name='external_integration')
+    if is_enterprise():
+        capture_exception(e, endpoint_name='external_integration')
     return jsonify({'error': 'Service temporarily unavailable'}), 503
 ```
 
@@ -709,3 +848,226 @@ az network application-gateway show-backend-health \
 ```
 
 The container IP can change on restart because Azure Container Instances in VNets don't support static private IPs.
+
+## Developing New Features
+
+### Where to Put Code
+
+**Community Edition (Core) Features** - Goes in main directories:
+- Backend: `app.py`, `models.py`, `security.py`
+- Frontend: `frontend/src/app/components/`
+- Tests: `tests/test_*.py`
+
+**Enterprise Edition Features** - Goes in `ee/` directory:
+- Backend: `ee/backend/<feature>/`
+- Frontend: `ee/frontend/components/<feature>/`
+- Tests: `tests/test_<feature>.py` (with EE skip marker)
+
+### Decision Criteria: Core vs Enterprise
+
+| Put in Core if... | Put in EE if... |
+|-------------------|-----------------|
+| Essential for ADR management | Adds integration with external service |
+| Basic multi-tenancy | Requires paid external APIs |
+| Standard auth (WebAuthn, OIDC) | Provider-specific OAuth (Google) |
+| Security fundamentals | Advanced analytics/monitoring |
+| Self-hosting requirements | Cloud-specific (Azure, AWS) |
+
+### Adding an Enterprise Feature
+
+1. **Create module directory**:
+   ```bash
+   mkdir -p ee/backend/my_feature
+   touch ee/backend/my_feature/__init__.py
+   ```
+
+2. **Add conditional import in app.py**:
+   ```python
+   from feature_flags import is_enterprise
+
+   if is_enterprise():
+       from ee.backend.my_feature import MyFeatureService
+       # Register routes...
+   ```
+
+3. **Add dependencies to ee/requirements.txt**:
+   ```
+   my-feature-sdk>=1.0.0
+   ```
+
+4. **Create tests with skip marker**:
+   ```python
+   # tests/test_my_feature.py
+   import pytest
+
+   try:
+       from ee.backend.my_feature import MyFeatureService
+       EE_AVAILABLE = True
+   except ImportError:
+       EE_AVAILABLE = False
+
+   pytestmark = pytest.mark.skipif(
+       not EE_AVAILABLE,
+       reason="Enterprise Edition modules not available"
+   )
+   ```
+
+5. **Add feature flag**:
+   ```python
+   # feature_flags.py
+   def get_features():
+       return {
+           ...
+           'my_feature': is_enterprise(),
+       }
+   ```
+
+### Adding a Core Feature
+
+1. **Add to appropriate core file** (`app.py`, `models.py`, etc.)
+2. **Add tests in `tests/`** (no skip marker needed)
+3. **Verify it works in Community Edition**:
+   ```bash
+   python run_local.py --community
+   # Test the feature
+   ```
+
+## GitHub Repository Configuration
+
+### Repository Strategy for Open Core
+
+This project uses a **single repository** with the `ee/` directory containing proprietary code. There are two approaches to manage this:
+
+#### Option A: Public Repo with Private Submodule (Recommended)
+
+```
+public-repo/              # decisionrecords/architecture-decisions (public)
+├── app.py
+├── models.py
+├── ee/ → submodule       # Points to private ee repo
+└── ...
+
+private-repo/             # decisionrecords/ee (private)
+├── backend/
+├── frontend/
+└── requirements.txt
+```
+
+**Setup:**
+```bash
+# In the public repo, add ee as a submodule
+git submodule add git@github.com:decisionrecords/ee.git ee
+git commit -m "Add ee submodule"
+
+# Clone with submodule
+git clone --recurse-submodules git@github.com:decisionrecords/architecture-decisions.git
+
+# Update submodule
+git submodule update --remote ee
+```
+
+**Advantages:**
+- Public repo is truly open source
+- Enterprise code is completely separate
+- CI/CD can work with or without the submodule
+
+#### Option B: Single Private Repo with Public Mirror
+
+```
+private-repo/             # Internal development (private)
+├── app.py
+├── ee/                   # Enterprise code
+└── ...
+
+public-mirror/            # Public release (public)
+├── app.py
+├── ee/ → empty or stub
+└── ...
+```
+
+**Setup:**
+```bash
+# Create release script that excludes ee/
+./scripts/create-public-release.sh
+
+# Or use GitHub Actions to sync non-ee files
+```
+
+### Current Repository Setup
+
+The current repository contains both editions in a monorepo. For open-source release:
+
+1. **Create private `ee` repository**:
+   ```bash
+   # On GitHub: Create decisionrecords/ee (private)
+   ```
+
+2. **Move ee/ to submodule**:
+   ```bash
+   # Save ee contents
+   mv ee ../ee-backup
+
+   # Add as submodule
+   git submodule add git@github.com:decisionrecords/ee.git ee
+
+   # Copy contents to submodule
+   cp -r ../ee-backup/* ee/
+   cd ee && git add . && git commit -m "Initial EE code"
+   git push origin main
+   cd ..
+
+   # Update parent repo
+   git add ee .gitmodules
+   git commit -m "Convert ee to submodule"
+   ```
+
+3. **Update CI/CD**:
+   - GitHub Actions needs access to both repos
+   - Use deploy keys or GitHub App for private submodule access
+
+### GitHub Actions for Dual Repos
+
+```yaml
+# .github/workflows/build.yml
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  build-community:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No submodule checkout = Community Edition
+
+      - name: Build Community Edition
+        run: |
+          docker build -f Dockerfile.community -t app:community .
+
+  build-enterprise:
+    runs-on: ubuntu-latest
+    # Only on private repo or with access
+    if: github.repository == 'decisionrecords/architecture-decisions-private'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.EE_REPO_TOKEN }}
+
+      - name: Build Enterprise Edition
+        run: |
+          docker build -f deployment/Dockerfile.production -t app:enterprise .
+```
+
+### Access Control Summary
+
+| Repository | Visibility | Contains |
+|------------|------------|----------|
+| `decisionrecords/architecture-decisions` | Public | Core code, docs, tests |
+| `decisionrecords/ee` | Private | EE backend, frontend, infra |
+
+| User Type | Core Repo | EE Repo |
+|-----------|-----------|---------|
+| Community contributor | Read/Write (via PR) | No access |
+| Maintainer | Write | Read |
+| Core team | Admin | Admin |

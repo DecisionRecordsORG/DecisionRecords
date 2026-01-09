@@ -1,26 +1,29 @@
+# Decision Records - Core Requirements (Community Edition)
+# These packages are required for the Community Edition
+
+# Flask web framework
 Flask==3.0.0
 Flask-SQLAlchemy==3.1.1
 Flask-Limiter==3.5.0
 Flask-Talisman==1.1.0
 Werkzeug==3.0.1
+
+# Authentication
 Authlib==1.3.0
-requests==2.31.0
 webauthn==2.0.0
+cryptography>=41.0.0
+
+# HTTP client
+requests==2.31.0
+
+# Database
 psycopg2-binary==2.9.9
-azure-keyvault-secrets==4.8.0
-azure-identity==1.15.0
+
+# Security
 bleach==6.1.0
+
+# Email domain validation
 free-email-domains==1.0.1
 disposable-email-domains==0.0.92
-posthog>=3.0.0
-# Slack SDK for Slack integration
-slack-sdk>=3.21.0
-cryptography>=41.0.0
-# Microsoft Teams integration dependencies
-httpx>=0.25.0
-PyJWT>=2.8.0
-msal>=1.25.0
-# OpenTelemetry for log forwarding
-opentelemetry-sdk>=1.20.0
-opentelemetry-exporter-otlp>=1.20.0
-opentelemetry-instrumentation-logging>=0.41b0
+
+# For Enterprise Edition features, see ee/requirements.txt

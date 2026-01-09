@@ -1,11 +1,13 @@
 """
-Backend Unit Tests for Microsoft Teams Security Module
+Backend Unit Tests for Microsoft Teams Security Module (Enterprise Edition)
 
 Tests for Teams security functions including:
 - JWT validation (valid tokens, expired tokens, wrong audience)
 - OAuth state encryption/decryption
 - Link token generation/verification
 - OIDC state handling
+
+Note: These tests require Enterprise Edition modules from ee/backend/teams/
 """
 import pytest
 import json
@@ -17,6 +19,15 @@ from unittest.mock import Mock, patch, MagicMock
 from flask import Flask
 
 from models import db
+
+# Check if Enterprise Edition is available
+try:
+    from ee.backend.teams import teams_security as _ts_check
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ==================== Fixtures ====================
@@ -59,7 +70,7 @@ class TestTeamsTokenEncryption:
     def test_token_encryption_roundtrip(self, app):
         """Token can be encrypted and decrypted."""
         with app.app_context():
-            from teams_security import encrypt_token, decrypt_token
+            from ee.backend.teams.teams_security import encrypt_token, decrypt_token
 
             original_token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.test-token-12345'
 
@@ -73,7 +84,7 @@ class TestTeamsTokenEncryption:
     def test_encrypt_none_returns_none(self, app):
         """Encrypting None should return None."""
         with app.app_context():
-            from teams_security import encrypt_token
+            from ee.backend.teams.teams_security import encrypt_token
 
             result = encrypt_token(None)
             assert result is None
@@ -81,7 +92,7 @@ class TestTeamsTokenEncryption:
     def test_decrypt_none_returns_none(self, app):
         """Decrypting None should return None."""
         with app.app_context():
-            from teams_security import decrypt_token
+            from ee.backend.teams.teams_security import decrypt_token
 
             result = decrypt_token(None)
             assert result is None
@@ -89,7 +100,7 @@ class TestTeamsTokenEncryption:
     def test_encrypt_empty_string_returns_none(self, app):
         """Encrypting empty string returns None (falsy value treated as None)."""
         with app.app_context():
-            from teams_security import encrypt_token
+            from ee.backend.teams.teams_security import encrypt_token
 
             # Empty string is treated as falsy, returns None
             encrypted = encrypt_token('')
@@ -98,7 +109,7 @@ class TestTeamsTokenEncryption:
     def test_different_tokens_produce_different_encrypted_values(self, app):
         """Different tokens produce different encrypted values."""
         with app.app_context():
-            from teams_security import encrypt_token
+            from ee.backend.teams.teams_security import encrypt_token
 
             encrypted1 = encrypt_token('token-one-12345')
             encrypted2 = encrypt_token('token-two-67890')
@@ -114,7 +125,7 @@ class TestTeamsOAuthState:
     def test_oauth_state_roundtrip(self, app):
         """OAuth state can be generated and verified."""
         with app.app_context():
-            from teams_security import generate_teams_oauth_state, verify_teams_oauth_state
+            from ee.backend.teams.teams_security import generate_teams_oauth_state, verify_teams_oauth_state
 
             state = generate_teams_oauth_state(
                 tenant_id=123,
@@ -138,7 +149,7 @@ class TestTeamsOAuthState:
     def test_oauth_state_expires(self, app):
         """Expired OAuth state should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_oauth_state
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_oauth_state
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)
@@ -161,7 +172,7 @@ class TestTeamsOAuthState:
     def test_oauth_state_invalid_returns_none(self, app):
         """Invalid OAuth state should return None."""
         with app.app_context():
-            from teams_security import verify_teams_oauth_state
+            from ee.backend.teams.teams_security import verify_teams_oauth_state
 
             invalid_state = 'totally-invalid-state-string'
             result = verify_teams_oauth_state(invalid_state)
@@ -170,7 +181,7 @@ class TestTeamsOAuthState:
     def test_oauth_state_wrong_type_returns_none(self, app):
         """OAuth state with wrong type should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_oauth_state
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_oauth_state
             from cryptography.fernet import Fernet
 
             # Create state with wrong type
@@ -192,7 +203,7 @@ class TestTeamsOAuthState:
     def test_oauth_state_empty_returns_none(self, app):
         """Empty state should return None."""
         with app.app_context():
-            from teams_security import verify_teams_oauth_state
+            from ee.backend.teams.teams_security import verify_teams_oauth_state
 
             assert verify_teams_oauth_state('') is None
             assert verify_teams_oauth_state(None) is None
@@ -206,7 +217,7 @@ class TestTeamsLinkToken:
     def test_link_token_roundtrip(self, app):
         """Link token can be generated and verified."""
         with app.app_context():
-            from teams_security import generate_teams_link_token, verify_teams_link_token
+            from ee.backend.teams.teams_security import generate_teams_link_token, verify_teams_link_token
 
             token = generate_teams_link_token(
                 teams_workspace_id=1,
@@ -230,7 +241,7 @@ class TestTeamsLinkToken:
     def test_link_token_expires(self, app):
         """Expired link token should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_link_token
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_link_token
             from cryptography.fernet import Fernet
 
             # Create expired token (expired 1 hour ago)
@@ -253,7 +264,7 @@ class TestTeamsLinkToken:
     def test_link_token_invalid_returns_none(self, app):
         """Invalid link token should return None."""
         with app.app_context():
-            from teams_security import verify_teams_link_token
+            from ee.backend.teams.teams_security import verify_teams_link_token
 
             invalid_token = 'invalid-token-string'
             result = verify_teams_link_token(invalid_token)
@@ -262,7 +273,7 @@ class TestTeamsLinkToken:
     def test_link_token_wrong_type_returns_none(self, app):
         """Link token with wrong type should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_link_token
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_link_token
             from cryptography.fernet import Fernet
 
             expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
@@ -283,7 +294,7 @@ class TestTeamsLinkToken:
     def test_link_token_empty_returns_none(self, app):
         """Empty link token should return None."""
         with app.app_context():
-            from teams_security import verify_teams_link_token
+            from ee.backend.teams.teams_security import verify_teams_link_token
 
             assert verify_teams_link_token('') is None
             assert verify_teams_link_token(None) is None
@@ -297,7 +308,7 @@ class TestTeamsOIDCState:
     def test_oidc_state_roundtrip(self, app):
         """OIDC state can be generated and verified."""
         with app.app_context():
-            from teams_security import generate_teams_oidc_state, verify_teams_oidc_state
+            from ee.backend.teams.teams_security import generate_teams_oidc_state, verify_teams_oidc_state
 
             state = generate_teams_oidc_state(
                 return_url='/dashboard',
@@ -319,7 +330,7 @@ class TestTeamsOIDCState:
     def test_oidc_state_expires(self, app):
         """Expired OIDC state should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_oidc_state
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_oidc_state
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)
@@ -341,7 +352,7 @@ class TestTeamsOIDCState:
     def test_oidc_state_invalid_returns_none(self, app):
         """Invalid OIDC state should return None."""
         with app.app_context():
-            from teams_security import verify_teams_oidc_state
+            from ee.backend.teams.teams_security import verify_teams_oidc_state
 
             invalid_state = 'invalid-oidc-state'
             result = verify_teams_oidc_state(invalid_state)
@@ -350,7 +361,7 @@ class TestTeamsOIDCState:
     def test_oidc_state_wrong_type_returns_none(self, app):
         """OIDC state with wrong type should be rejected."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_oidc_state
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_oidc_state
             from cryptography.fernet import Fernet
 
             expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
@@ -371,7 +382,7 @@ class TestTeamsOIDCState:
     def test_oidc_state_empty_returns_none(self, app):
         """Empty OIDC state should return None."""
         with app.app_context():
-            from teams_security import verify_teams_oidc_state
+            from ee.backend.teams.teams_security import verify_teams_oidc_state
 
             assert verify_teams_oidc_state('') is None
             assert verify_teams_oidc_state(None) is None
@@ -385,7 +396,7 @@ class TestTeamsJWTValidation:
     def test_validate_jwt_missing_header_returns_none(self, app):
         """Missing Authorization header should return None."""
         with app.app_context():
-            from teams_security import validate_teams_jwt
+            from ee.backend.teams.teams_security import validate_teams_jwt
 
             result = validate_teams_jwt(None)
             assert result is None
@@ -396,7 +407,7 @@ class TestTeamsJWTValidation:
     def test_validate_jwt_invalid_format_returns_none(self, app):
         """Invalid header format should return None."""
         with app.app_context():
-            from teams_security import validate_teams_jwt
+            from ee.backend.teams.teams_security import validate_teams_jwt
 
             result = validate_teams_jwt('InvalidFormat token123')
             assert result is None
@@ -407,7 +418,7 @@ class TestTeamsJWTValidation:
     def test_validate_jwt_no_app_id_returns_none(self, app):
         """Missing app ID should return None."""
         with app.app_context():
-            from teams_security import validate_teams_jwt
+            from ee.backend.teams.teams_security import validate_teams_jwt
 
             # Clear the app ID
             original = os.environ.get('TEAMS_BOT_APP_ID')
@@ -429,7 +440,7 @@ class TestTeamsJWTValidation:
     def test_validate_jwt_invalid_token_returns_none(self, app):
         """Invalid JWT token should return None."""
         with app.app_context():
-            from teams_security import validate_teams_jwt
+            from ee.backend.teams.teams_security import validate_teams_jwt
 
             # This is a malformed JWT
             result = validate_teams_jwt('Bearer not.a.valid.jwt.token')
@@ -439,7 +450,7 @@ class TestTeamsJWTValidation:
     def test_validate_jwt_expired_returns_none(self, mock_jwks, app):
         """Expired JWT should return None."""
         with app.app_context():
-            from teams_security import validate_teams_jwt
+            from ee.backend.teams.teams_security import validate_teams_jwt
 
             # Create an expired JWT manually
             expired_time = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -469,7 +480,7 @@ class TestVerifyTeamsRequestDecorator:
     def test_decorator_rejects_missing_auth(self, app):
         """Decorator rejects requests without auth header."""
         with app.app_context():
-            from teams_security import verify_teams_request
+            from ee.backend.teams.teams_security import verify_teams_request
 
             @app.route('/test-teams', methods=['POST'])
             @verify_teams_request
@@ -484,7 +495,7 @@ class TestVerifyTeamsRequestDecorator:
     def test_decorator_rejects_invalid_token(self, app):
         """Decorator rejects requests with invalid token."""
         with app.app_context():
-            from teams_security import verify_teams_request
+            from ee.backend.teams.teams_security import verify_teams_request
 
             @app.route('/test-teams-invalid', methods=['POST'])
             @verify_teams_request
@@ -507,7 +518,7 @@ class TestTeamsOIDCURLHelpers:
     def test_get_authorize_url_with_tenant(self, app):
         """Authorize URL includes tenant ID."""
         with app.app_context():
-            from teams_security import get_teams_oidc_authorize_url
+            from ee.backend.teams.teams_security import get_teams_oidc_authorize_url
 
             url = get_teams_oidc_authorize_url(tenant_id='specific-tenant-id')
             assert 'specific-tenant-id' in url
@@ -516,7 +527,7 @@ class TestTeamsOIDCURLHelpers:
     def test_get_authorize_url_common(self, app):
         """Authorize URL uses 'common' by default."""
         with app.app_context():
-            from teams_security import get_teams_oidc_authorize_url
+            from ee.backend.teams.teams_security import get_teams_oidc_authorize_url
 
             url = get_teams_oidc_authorize_url()
             assert '/common/' in url
@@ -525,7 +536,7 @@ class TestTeamsOIDCURLHelpers:
     def test_get_token_url_with_tenant(self, app):
         """Token URL includes tenant ID."""
         with app.app_context():
-            from teams_security import get_teams_oidc_token_url
+            from ee.backend.teams.teams_security import get_teams_oidc_token_url
 
             url = get_teams_oidc_token_url(tenant_id='specific-tenant-id')
             assert 'specific-tenant-id' in url
@@ -534,7 +545,7 @@ class TestTeamsOIDCURLHelpers:
     def test_get_token_url_common(self, app):
         """Token URL uses 'common' by default."""
         with app.app_context():
-            from teams_security import get_teams_oidc_token_url
+            from ee.backend.teams.teams_security import get_teams_oidc_token_url
 
             url = get_teams_oidc_token_url()
             assert '/common/' in url
@@ -554,7 +565,7 @@ class TestTeamsCredentialGetters:
             teams_security._teams_bot_app_id = None
 
             os.environ['TEAMS_BOT_APP_ID'] = 'env-bot-app-id'
-            from teams_security import get_teams_bot_app_id
+            from ee.backend.teams.teams_security import get_teams_bot_app_id
 
             result = get_teams_bot_app_id()
             assert result == 'env-bot-app-id'
@@ -567,7 +578,7 @@ class TestTeamsCredentialGetters:
             teams_security._teams_bot_app_secret = None
 
             os.environ['TEAMS_BOT_APP_SECRET'] = 'env-bot-secret'
-            from teams_security import get_teams_bot_app_secret
+            from ee.backend.teams.teams_security import get_teams_bot_app_secret
 
             result = get_teams_bot_app_secret()
             assert result == 'env-bot-secret'
@@ -580,7 +591,7 @@ class TestTeamsCredentialGetters:
             teams_security._teams_bot_tenant_id = None
 
             os.environ['TEAMS_BOT_TENANT_ID'] = 'env-tenant-id'
-            from teams_security import get_teams_bot_tenant_id
+            from ee.backend.teams.teams_security import get_teams_bot_tenant_id
 
             result = get_teams_bot_tenant_id()
             assert result == 'env-tenant-id'
@@ -595,7 +606,7 @@ class TestTeamsOIDCTokenExchange:
     def test_exchange_code_success(self, mock_client_class, app):
         """Successfully exchanges authorization code for tokens."""
         with app.app_context():
-            from teams_security import exchange_teams_oidc_code
+            from ee.backend.teams.teams_security import exchange_teams_oidc_code
 
             # Mock token response
             mock_response = Mock()
@@ -626,7 +637,7 @@ class TestTeamsOIDCTokenExchange:
     def test_exchange_code_failure(self, mock_client_class, app):
         """Returns None on token exchange failure."""
         with app.app_context():
-            from teams_security import exchange_teams_oidc_code
+            from ee.backend.teams.teams_security import exchange_teams_oidc_code
 
             # Mock error response
             mock_response = Mock()
@@ -657,7 +668,7 @@ class TestTeamsGetUserInfo:
     def test_get_user_info_success(self, mock_client_class, app):
         """Successfully retrieves user info from Graph API."""
         with app.app_context():
-            from teams_security import get_teams_user_info
+            from ee.backend.teams.teams_security import get_teams_user_info
 
             # Mock Graph API response
             mock_response = Mock()
@@ -685,7 +696,7 @@ class TestTeamsGetUserInfo:
     def test_get_user_info_failure(self, mock_client_class, app):
         """Returns None on Graph API failure."""
         with app.app_context():
-            from teams_security import get_teams_user_info
+            from ee.backend.teams.teams_security import get_teams_user_info
 
             # Mock error response
             mock_response = Mock()
@@ -711,7 +722,7 @@ class TestTeamsStateSecurityProperties:
     def test_csrf_token_is_unique_per_state(self, app):
         """Each OAuth state has a unique CSRF token."""
         with app.app_context():
-            from teams_security import generate_teams_oauth_state, verify_teams_oauth_state
+            from ee.backend.teams.teams_security import generate_teams_oauth_state, verify_teams_oauth_state
 
             state1 = generate_teams_oauth_state(tenant_id=1)
             state2 = generate_teams_oauth_state(tenant_id=1)
@@ -724,7 +735,7 @@ class TestTeamsStateSecurityProperties:
     def test_nonce_is_unique_per_link_token(self, app):
         """Each link token has a unique nonce."""
         with app.app_context():
-            from teams_security import generate_teams_link_token, verify_teams_link_token
+            from ee.backend.teams.teams_security import generate_teams_link_token, verify_teams_link_token
 
             token1 = generate_teams_link_token(1, 'aad-id-1')
             token2 = generate_teams_link_token(1, 'aad-id-1')
@@ -737,7 +748,7 @@ class TestTeamsStateSecurityProperties:
     def test_state_cannot_be_reused_after_expiry(self, app):
         """State parameters expire and cannot be reused."""
         with app.app_context():
-            from teams_security import _get_encryption_key, verify_teams_oidc_state
+            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_oidc_state
             from cryptography.fernet import Fernet
 
             # Create a state that expires in 1 second

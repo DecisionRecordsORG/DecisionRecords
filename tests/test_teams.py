@@ -1,5 +1,5 @@
 """
-Backend Unit Tests for Microsoft Teams Integration
+Backend Unit Tests for Microsoft Teams Integration (Enterprise Edition)
 
 Tests for Teams service, models, and API endpoints.
 Tests cover:
@@ -9,6 +9,8 @@ Tests cover:
 - Notifications
 - Settings management
 - Conversation reference management
+
+Note: These tests require Enterprise Edition modules from ee/backend/teams/
 """
 import pytest
 import json
@@ -22,11 +24,27 @@ from models import (
     TeamsWorkspace, TeamsUserMapping, TeamsConversationReference,
     GlobalRole, MaturityState, Space, VisibilityPolicy
 )
-from teams_security import (
-    encrypt_token, decrypt_token, generate_teams_oauth_state, verify_teams_oauth_state,
-    generate_teams_link_token, verify_teams_link_token
-)
-from teams_service import TeamsService, get_teams_service_for_tenant
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.teams.teams_security import (
+        encrypt_token, decrypt_token, generate_teams_oauth_state, verify_teams_oauth_state,
+        generate_teams_link_token, verify_teams_link_token
+    )
+    from ee.backend.teams.teams_service import TeamsService, get_teams_service_for_tenant
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    encrypt_token = None
+    decrypt_token = None
+    generate_teams_oauth_state = None
+    verify_teams_oauth_state = None
+    generate_teams_link_token = None
+    verify_teams_link_token = None
+    TeamsService = None
+    get_teams_service_for_tenant = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ==================== Fixtures ====================

@@ -1,5 +1,5 @@
 """
-Backend Unit Tests for Slack Integration
+Backend Unit Tests for Slack Integration (Enterprise Edition)
 
 Tests for Slack service, security, and API endpoints.
 Tests cover:
@@ -9,6 +9,8 @@ Tests cover:
 - User linking (auto-link by email and browser flow)
 - Notifications
 - Settings management
+
+Note: These tests require Enterprise Edition modules from ee/backend/slack/
 """
 import pytest
 import hmac
@@ -24,11 +26,28 @@ from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
     SlackWorkspace, SlackUserMapping, GlobalRole, MaturityState
 )
-from slack_security import (
-    verify_slack_signature, generate_oauth_state, verify_oauth_state,
-    encrypt_token, decrypt_token, generate_link_token, verify_link_token
-)
-from slack_service import SlackService
+
+# Enterprise Edition imports - skip tests if not available
+try:
+    from ee.backend.slack.slack_security import (
+        verify_slack_signature, generate_oauth_state, verify_oauth_state,
+        encrypt_token, decrypt_token, generate_link_token, verify_link_token
+    )
+    from ee.backend.slack.slack_service import SlackService
+    EE_AVAILABLE = True
+except ImportError:
+    EE_AVAILABLE = False
+    # Define stubs to prevent import errors
+    verify_slack_signature = None
+    generate_oauth_state = None
+    verify_oauth_state = None
+    encrypt_token = None
+    decrypt_token = None
+    generate_link_token = None
+    verify_link_token = None
+    SlackService = None
+
+pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
 
 
 # ==================== Fixtures ====================
@@ -281,7 +300,7 @@ class TestSlackOAuth:
             state = generate_oauth_state(tenant_id=123)
 
             # Manually create an expired state by patching the expiry
-            from slack_security import _get_encryption_key
+            from ee.backend.slack.slack_security import _get_encryption_key
             from cryptography.fernet import Fernet
 
             # Create expired state (expired 1 hour ago)

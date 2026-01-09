@@ -1,14 +1,54 @@
+# Decision Records - Docker Compose for Self-Hosting
+#
+# Quick Start (SQLite):
+#   docker-compose up -d
+#
+# With PostgreSQL:
+#   docker-compose --profile postgres up -d
+
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.community
     ports:
-      - "5001:5000"
+      - "3000:5000"
     volumes:
       - adr-data:/data
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
-      - DATABASE_URL=sqlite:////data/architecture_decisions.db
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////data/architecture_decisions.db}
+      - DECISION_RECORDS_EDITION=community
+      - SKIP_CLOUDFLARE_CHECK=true
+    depends_on:
+      db:
+        condition: service_started
+        required: false
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional PostgreSQL database (use --profile postgres)
+  db:
+    image: postgres:15-alpine
+    profiles:
+      - postgres
+    environment:
+      - POSTGRES_USER=decisions
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-changeme}
+      - POSTGRES_DB=decisions
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U decisions"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
   adr-data:
+  postgres-data:

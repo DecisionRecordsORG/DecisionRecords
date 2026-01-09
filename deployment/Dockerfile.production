@@ -1,4 +1,8 @@
-# Production Dockerfile optimized for Azure Container Instances
+# Production Dockerfile for Enterprise Edition
+# Optimized for Azure Container Instances
+#
+# This builds the Enterprise Edition with all features enabled.
+# For Community Edition, use Dockerfile.community instead.
 
 # Stage 1: Build Angular frontend
 FROM node:22-slim AS frontend-builder
@@ -23,15 +27,21 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Install Python dependencies (core + enterprise)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+COPY ee/requirements.txt ./ee/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -r ee/requirements.txt gunicorn
 
-# Copy Python application files
+# Copy Python application files (core)
 COPY *.py ./
-COPY ai/ ./ai/
 COPY templates/ ./templates/
 COPY static/ ./static/
+
+# Copy Enterprise Edition modules
+COPY ee/ ./ee/
+
+# Set Enterprise Edition
+ENV DECISION_RECORDS_EDITION=enterprise
 
 # Copy startup script
 COPY deployment/startup.sh ./startup.sh

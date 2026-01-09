@@ -1138,7 +1138,10 @@ class TestAnalyticsSettingsAPI:
 
     def test_save_custom_event_mappings(self, master_client):
         """Custom event mappings can be saved."""
-        from analytics import DEFAULT_EVENT_MAPPINGS
+        try:
+            from ee.backend.analytics.analytics import DEFAULT_EVENT_MAPPINGS
+        except ImportError:
+            pytest.skip("Enterprise Edition analytics module not available")
 
         # Get a valid mapping key
         valid_key = list(DEFAULT_EVENT_MAPPINGS.keys())[0]

@@ -29,10 +29,42 @@ from security import (
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data, sanitize_string
 )
-from keyvault_client import keyvault_client
-from analytics import track_endpoint
-from cloudflare_security import setup_cloudflare_security, require_cloudflare_access, get_cloudflare_config_for_api, invalidate_cloudflare_cache
-from feature_flags import require_slack, require_teams, get_enabled_features, is_slack_enabled, is_teams_enabled
+from feature_flags import (
+    require_slack, require_teams, require_enterprise, require_feature,
+    get_enabled_features, is_slack_enabled, is_teams_enabled, is_enterprise,
+    is_feature_enabled, is_analytics_enabled, EDITION, Edition
+)
+
+# Enterprise Edition imports - loaded conditionally based on edition
+if is_enterprise():
+    from ee.backend.azure.keyvault_client import keyvault_client
+    from ee.backend.analytics.analytics import track_endpoint, capture_exception
+    from ee.backend.cloudflare.cloudflare_security import (
+        setup_cloudflare_security, require_cloudflare_access,
+        get_cloudflare_config_for_api, invalidate_cloudflare_cache
+    )
+else:
+    # Community Edition - use stubs for keyvault_client
+    class KeyVaultClientStub:
+        """Stub for keyvault_client that uses environment variables only."""
+        def get_database_url(self):
+            return os.environ.get('DATABASE_URL', 'sqlite:///instance/decisions.db')
+
+        def get_flask_secret_key(self):
+            return os.environ.get('SECRET_KEY')
+
+        def get_secret(self, name, fallback_env_var=None, default=None):
+            if fallback_env_var:
+                return os.environ.get(fallback_env_var, default)
+            return os.environ.get(name.upper().replace('-', '_'), default)
+
+    keyvault_client = KeyVaultClientStub()
+    def track_endpoint(name): return lambda f: f  # No-op decorator
+    def capture_exception(e, **kwargs): pass  # No-op
+    def setup_cloudflare_security(app): pass
+    def require_cloudflare_access(f): return f
+    def get_cloudflare_config_for_api(): return {}
+    def invalidate_cloudflare_cache(): pass
 
 # Configure logging
 logging.basicConfig(
@@ -180,31 +212,37 @@ else:
     logger.info("TESTING MODE: Cloudflare security checks disabled")
 
 # ==================== Log Forwarding (OpenTelemetry) ====================
-# Forwards logs to configured OTLP endpoint (Grafana, Datadog, etc.)
+# Forwards logs to configured OTLP endpoint (Grafana, Datadog, etc.) - Enterprise only
 
-try:
-    from log_forwarding import setup_log_forwarding
-    setup_log_forwarding(app)
-except ImportError as e:
-    logger.warning(f"Log forwarding module not available: {e}")
-except Exception as e:
-    logger.error(f"Failed to initialize log forwarding: {e}")
+if is_enterprise():
+    try:
+        from ee.backend.analytics.log_forwarding import setup_log_forwarding
+        setup_log_forwarding(app)
+    except ImportError as e:
+        logger.warning(f"Log forwarding module not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to initialize log forwarding: {e}")
 
 # ==================== External AI API Blueprint ====================
-# Register the external AI API Blueprint for Custom GPTs and AI agents
+# Register the external AI API Blueprint for Custom GPTs and AI agents (Enterprise only)
 
-from ai.api import ai_api
-app.register_blueprint(ai_api)
-logger.info("AI API Blueprint registered at /api/ai")
+if is_enterprise():
+    try:
+        from ee.backend.ai.api import ai_api
+        app.register_blueprint(ai_api)
+        logger.info("AI API Blueprint registered at /api/ai")
+    except ImportError as e:
+        logger.warning(f"AI API module not available: {e}")
 
 # ==================== Analytics Tracking Middleware ====================
-# Automatic event tracking for all API endpoints based on configured mappings
+# Automatic event tracking for all API endpoints based on configured mappings (Enterprise only)
 
-try:
-    from analytics import init_tracking_middleware
-    init_tracking_middleware(app)
-except Exception as e:
-    logger.warning(f"Failed to initialize analytics tracking middleware: {e}")
+if is_enterprise():
+    try:
+        from ee.backend.analytics.analytics import init_tracking_middleware
+        init_tracking_middleware(app)
+    except Exception as e:
+        logger.warning(f"Failed to initialize analytics tracking middleware: {e}")
 
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
@@ -217,8 +255,7 @@ def handle_exception(e):
     logger.error(f"Unhandled exception: {str(e)} | Path: {request.path} | Method: {request.method}")
     logger.error(traceback.format_exc())
 
-    # Capture to PostHog if enabled
-    from analytics import capture_exception
+    # Capture to PostHog if enabled (Enterprise only)
     capture_exception(e, endpoint_name='unhandled_exception')
 
     # Return generic error to client - NEVER expose internal details
@@ -232,8 +269,7 @@ def handle_500(e):
     """Handle 500 Internal Server Error."""
     logger.error(f"500 Error: {str(e)}")
 
-    # Capture to PostHog if enabled
-    from analytics import capture_exception
+    # Capture to PostHog if enabled (Enterprise only)
     capture_exception(e, endpoint_name='http_500_error')
 
     if request.path.startswith('/api/'):
@@ -1799,7 +1835,7 @@ def slack_oidc_status():
 
     # Check if Slack credentials are configured
     try:
-        from slack_security import get_slack_client_id
+        from ee.backend.slack.slack_security import get_slack_client_id
         client_id = get_slack_client_id()
         if not client_id:
             return jsonify({'enabled': False, 'reason': 'not_configured'})
@@ -1819,7 +1855,7 @@ def slack_oidc_initiate():
     After authentication, Slack redirects back to /auth/slack/oidc/callback
     with the authorization code.
     """
-    from slack_security import (
+    from ee.backend.slack.slack_security import (
         get_slack_client_id,
         generate_slack_oidc_state,
         SLACK_OIDC_AUTHORIZE_URL,
@@ -1881,7 +1917,7 @@ def slack_oidc_callback():
     First user of a domain becomes provisional admin (existing logic).
     """
     import requests
-    from slack_security import (
+    from ee.backend.slack.slack_security import (
         get_slack_client_id,
         get_slack_client_secret,
         verify_slack_oidc_state,
@@ -2135,7 +2171,7 @@ def google_oauth_status():
     This is a public endpoint (no login required) since users need to see it before login.
     """
     try:
-        from google_oauth import is_google_oauth_configured
+        from ee.backend.oauth_providers.google_oauth import is_google_oauth_configured
         if not is_google_oauth_configured():
             return jsonify({'enabled': False, 'reason': 'not_configured'})
     except Exception as e:
@@ -2154,7 +2190,7 @@ def google_oauth_initiate():
     After authentication, Google redirects back to /auth/google/callback
     with the authorization code.
     """
-    from google_oauth import (
+    from ee.backend.oauth_providers.google_oauth import (
         get_google_client_id,
         generate_google_oauth_state,
         is_google_oauth_configured,
@@ -2219,7 +2255,7 @@ def google_oauth_callback():
     First user of a domain becomes provisional admin (existing logic).
     """
     import requests as http_requests
-    from google_oauth import (
+    from ee.backend.oauth_providers.google_oauth import (
         get_google_client_id,
         get_google_client_secret,
         verify_google_oauth_state,
@@ -2649,12 +2685,13 @@ def api_create_decision():
         except Exception as e:
             logger.warning(f"Failed to notify decision owner: {e}")
 
-    # Send Slack notification if configured
-    try:
-        from slack_service import notify_decision_created
-        notify_decision_created(decision)
-    except Exception as e:
-        logger.warning(f"Failed to send Slack notification for new decision: {e}")
+    # Send Slack notification if configured (Enterprise only)
+    if is_slack_enabled():
+        try:
+            from ee.backend.slack.slack_service import notify_decision_created
+            notify_decision_created(decision)
+        except Exception as e:
+            logger.warning(f"Failed to send Slack notification for new decision: {e}")
 
     return jsonify(decision.to_dict()), 201
 
@@ -2819,10 +2856,10 @@ def api_update_decision(decision_id):
             except Exception as e:
                 logger.warning(f"Failed to notify decision owner on update: {e}")
 
-    # Send Slack notification if status changed
-    if status_changed:
+    # Send Slack notification if status changed (Enterprise only)
+    if status_changed and is_slack_enabled():
         try:
-            from slack_service import notify_decision_status_changed
+            from ee.backend.slack.slack_service import notify_decision_status_changed
             notify_decision_status_changed(decision)
         except Exception as e:
             logger.warning(f"Failed to send Slack notification for status change: {e}")
@@ -3683,7 +3720,7 @@ def api_get_analytics_settings():
         - categories: Static category definitions (deprecated)
         - discovered_endpoints: Dynamically discovered API endpoints
     """
-    from analytics import get_config_for_api
+    from ee.backend.analytics.analytics import get_config_for_api
     from flask import current_app
     return jsonify(get_config_for_api(app=current_app))
 
@@ -3694,7 +3731,7 @@ def api_get_analytics_settings():
 def api_save_analytics_settings():
     """Update analytics settings (super admin only)."""
     import json as json_lib
-    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+    from ee.backend.analytics.analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
 
     data = request.get_json() or {}
 
@@ -3770,7 +3807,7 @@ def api_save_analytics_api_key():
     For self-hosted deployments that don't use Key Vault.
     In cloud deployments, the key should be in Key Vault.
     """
-    from analytics import invalidate_cache
+    from ee.backend.analytics.analytics import invalidate_cache
 
     data = request.get_json() or {}
     api_key = data.get('api_key')
@@ -3802,7 +3839,7 @@ def api_save_analytics_api_key():
 @track_endpoint('api_admin_settings_analytics_test')
 def api_test_analytics():
     """Send a test event to PostHog (super admin only)."""
-    from analytics import _get_analytics_config, invalidate_cache
+    from ee.backend.analytics.analytics import _get_analytics_config, invalidate_cache
 
     # Force config refresh
     invalidate_cache()
@@ -3844,7 +3881,7 @@ def api_test_analytics():
 @track_endpoint('api_admin_settings_analytics_reset')
 def api_reset_analytics_mappings():
     """Reset event mappings to defaults (super admin only)."""
-    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+    from ee.backend.analytics.analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
     import json as json_lib
 
     # Clear the custom mappings
@@ -3878,7 +3915,7 @@ def api_update_analytics_mapping():
     Set event_name to null/empty to remove a mapping.
     """
     import json as json_lib
-    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+    from ee.backend.analytics.analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
 
     data = request.get_json() or {}
 
@@ -3929,7 +3966,7 @@ def api_update_analytics_mapping():
 def api_delete_analytics_mapping(endpoint_name):
     """Remove an event mapping (super admin only)."""
     import json as json_lib
-    from analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
+    from ee.backend.analytics.analytics import invalidate_cache, DEFAULT_EVENT_MAPPINGS
 
     endpoint = sanitize_text_field(endpoint_name, max_length=100)
 
@@ -4139,7 +4176,7 @@ def api_test_cloudflare_settings():
 @track_endpoint('api_admin_settings_logforwarding_get')
 def api_get_log_forwarding_settings():
     """Get log forwarding settings (super admin only)."""
-    from log_forwarding import get_config_for_api
+    from ee.backend.analytics.log_forwarding import get_config_for_api
     return jsonify(get_config_for_api())
 
 
@@ -4148,7 +4185,7 @@ def api_get_log_forwarding_settings():
 @track_endpoint('api_admin_settings_logforwarding_save')
 def api_save_log_forwarding_settings():
     """Update log forwarding settings (super admin only)."""
-    from log_forwarding import validate_settings, invalidate_cache, reconfigure
+    from ee.backend.analytics.log_forwarding import validate_settings, invalidate_cache, reconfigure
 
     data = request.get_json() or {}
 
@@ -4253,7 +4290,7 @@ def api_save_log_forwarding_api_key():
     For cloud deployments, API keys should be stored in Key Vault.
     This endpoint stores in SystemConfig as fallback for self-hosted.
     """
-    from log_forwarding import invalidate_cache
+    from ee.backend.analytics.log_forwarding import invalidate_cache
 
     data = request.get_json() or {}
     api_key = data.get('api_key', '').strip()
@@ -4279,7 +4316,7 @@ def api_save_log_forwarding_api_key():
 @track_endpoint('api_admin_settings_logforwarding_test')
 def api_test_log_forwarding():
     """Test log forwarding connection (super admin only)."""
-    from log_forwarding import test_connection
+    from ee.backend.analytics.log_forwarding import test_connection
 
     success, message = test_connection()
 
@@ -8484,8 +8521,7 @@ def create_incomplete_test_user():
 @track_endpoint('api_slack_install')
 def slack_install():
     """Start Slack OAuth installation flow."""
-    from keyvault_client import keyvault_client
-    from slack_security import generate_oauth_state
+    from ee.backend.slack.slack_security import generate_oauth_state
 
     try:
         client_id = keyvault_client.get_slack_client_id()
@@ -8534,8 +8570,7 @@ def slack_oauth_callback():
     1. Installation initiated from Decision Records settings (has state with tenant_id)
     2. Installation from Slack App Directory (no state, workspace stored as pending_claim)
     """
-    from keyvault_client import keyvault_client
-    from slack_security import verify_oauth_state, encrypt_token
+    from ee.backend.slack.slack_security import verify_oauth_state, encrypt_token
     from slack_sdk import WebClient
 
     code = request.args.get('code')
@@ -8597,7 +8632,7 @@ def slack_oauth_callback():
         logger.info(f"Slack OAuth granted scopes: {granted_scopes}")
 
         # Get current app version for tracking
-        from slack_upgrade import CURRENT_APP_VERSION
+        from ee.backend.slack.slack_upgrade import CURRENT_APP_VERSION
 
         # Encrypt and store
         encrypted_token = encrypt_token(bot_token)
@@ -8815,8 +8850,8 @@ def slack_oauth_callback():
 @track_endpoint('api_slack_command')
 def slack_commands():
     """Handle Slack slash commands."""
-    from slack_security import verify_slack_signature
-    from slack_service import SlackService
+    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_service import SlackService
 
     # Verify request signature
     if not verify_slack_signature(request):
@@ -8864,8 +8899,8 @@ def slack_commands():
 @track_endpoint('api_slack_interaction')
 def slack_interactions():
     """Handle Slack interactive components (modals, buttons)."""
-    from slack_security import verify_slack_signature
-    from slack_service import SlackService
+    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_service import SlackService
     import json
 
     # Verify request signature
@@ -8910,8 +8945,8 @@ def slack_interactions():
 @track_endpoint('api_slack_events')
 def slack_events():
     """Handle Slack Events API (app_home_opened, etc.)."""
-    from slack_security import verify_slack_signature
-    from slack_service import SlackService
+    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_service import SlackService
     import json
 
     # Verify request signature
@@ -9317,7 +9352,7 @@ def slack_workspace_info(workspace_id):
 @track_endpoint('api_slack_test')
 def slack_test():
     """Send a test notification to Slack."""
-    from slack_service import SlackService
+    from ee.backend.slack.slack_service import SlackService
 
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
@@ -9347,7 +9382,7 @@ def slack_test():
 @track_endpoint('api_slack_channels')
 def slack_channels():
     """Get list of Slack channels for channel selection."""
-    from slack_service import SlackService
+    from ee.backend.slack.slack_service import SlackService
 
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
@@ -9388,7 +9423,7 @@ def slack_link_initiate():
 @track_endpoint('api_slack_link_validate')
 def slack_link_validate():
     """Validate a Slack link token and return info for the link page."""
-    from slack_security import verify_link_token
+    from ee.backend.slack.slack_security import verify_link_token
 
     data = request.get_json() or {}
     token = data.get('token')
@@ -9438,7 +9473,7 @@ def slack_link_complete():
 
     Accepts token in request body (for new flow) or from session (legacy).
     """
-    from slack_security import verify_link_token
+    from ee.backend.slack.slack_security import verify_link_token
 
     data = request.get_json() or {}
     token = data.get('token')
@@ -9495,14 +9530,34 @@ def slack_link_complete():
 
 # ==================== API Routes - AI/LLM Integration ====================
 
-# Import AI services
-from ai import AIConfig, AIApiKeyService, AIInteractionLogger
+# Import AI services (Enterprise only)
+if is_enterprise():
+    from ee.backend.ai import AIConfig, AIApiKeyService, AIInteractionLogger
+else:
+    # Community Edition stubs
+    class AIConfig:
+        @staticmethod
+        def get_system_ai_config():
+            return {'enabled': False, 'edition': 'community'}
+        @staticmethod
+        def get_system_ai_enabled():
+            return False
+        @staticmethod
+        def get_system_mcp_server_enabled():
+            return False
+
+    class AIApiKeyService:
+        pass
+
+    class AIInteractionLogger:
+        pass
 
 
 # --- Super Admin AI Configuration ---
 
 @app.route('/api/admin/ai/config', methods=['GET'])
 @master_required
+@require_enterprise
 def api_get_ai_system_config():
     """Get system-level AI configuration (super admin only)."""
     return jsonify(AIConfig.get_system_ai_config())
@@ -9979,8 +10034,8 @@ def api_mcp_handler():
     - tools/list: List available tools
     - tools/call: Execute a tool
     """
-    from ai.mcp import handle_mcp_request, get_tools
-    from ai.config import AIConfig
+    from ee.backend.ai.mcp import handle_mcp_request, get_tools
+    from ee.backend.ai.config import AIConfig
     import uuid
 
     # Check system-level MCP availability
@@ -10094,8 +10149,8 @@ def teams_webhook():
     All messages, invokes, and events come through here.
     """
     import asyncio
-    from teams_security import validate_teams_jwt
-    from teams_service import TeamsService
+    from ee.backend.teams.teams_security import validate_teams_jwt
+    from ee.backend.teams.teams_service import TeamsService
 
     # Validate JWT Bearer token from Bot Framework
     auth_header = request.headers.get('Authorization', '')
@@ -10196,7 +10251,7 @@ def _teams_card_response(card):
 @track_endpoint('api_teams_oauth_start')
 def teams_oauth_start():
     """Start Azure AD OAuth consent flow for Teams integration."""
-    from teams_security import (
+    from ee.backend.teams.teams_security import (
         get_teams_bot_app_id, generate_teams_oauth_state
     )
 
@@ -10241,7 +10296,7 @@ def teams_oauth_start():
 @track_endpoint('api_teams_oauth_callback')
 def teams_oauth_callback():
     """Handle Azure AD admin consent callback."""
-    from teams_security import verify_teams_oauth_state
+    from ee.backend.teams.teams_security import verify_teams_oauth_state
 
     # Check for error
     error = request.args.get('error')
@@ -10311,7 +10366,7 @@ def teams_oauth_callback():
 @track_endpoint('api_teams_settings_get')
 def teams_settings_get():
     """Get Teams integration settings for tenant."""
-    from teams_security import get_teams_bot_app_id
+    from ee.backend.teams.teams_security import get_teams_bot_app_id
 
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
@@ -10443,8 +10498,8 @@ def teams_channels():
 def teams_test():
     """Send a test notification to the configured Teams channel."""
     import asyncio
-    from teams_service import TeamsService
-    from teams_cards import build_success_card
+    from ee.backend.teams.teams_service import TeamsService
+    from ee.backend.teams.teams_cards import build_success_card
 
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
@@ -10509,7 +10564,7 @@ def teams_link_initiate():
 @track_endpoint('api_teams_link_validate')
 def teams_link_validate():
     """Validate a Teams link token and return workspace info."""
-    from teams_security import verify_teams_link_token
+    from ee.backend.teams.teams_security import verify_teams_link_token
 
     data = request.get_json() or {}
     token = data.get('token')
@@ -10554,7 +10609,7 @@ def teams_link_validate():
 @track_endpoint('api_teams_link_complete')
 def teams_link_complete():
     """Complete user linking after login."""
-    from teams_security import verify_teams_link_token
+    from ee.backend.teams.teams_security import verify_teams_link_token
 
     data = request.get_json() or {}
     token = data.get('token')
@@ -10613,7 +10668,7 @@ def teams_link_complete():
 @track_endpoint('api_auth_teams_oidc_status')
 def teams_oidc_status():
     """Check if Teams OIDC is enabled."""
-    from teams_security import get_teams_bot_app_id
+    from ee.backend.teams.teams_security import get_teams_bot_app_id
 
     app_id = get_teams_bot_app_id()
     commercial_enabled = os.environ.get('COMMERCIAL_FEATURES_ENABLED', '').lower() == 'true'
@@ -10628,7 +10683,7 @@ def teams_oidc_status():
 @track_endpoint('auth_teams_oidc')
 def teams_oidc_start():
     """Start Microsoft OIDC authentication flow."""
-    from teams_security import (
+    from ee.backend.teams.teams_security import (
         get_teams_bot_app_id, generate_teams_oidc_state,
         TEAMS_OIDC_SCOPES
     )
@@ -10668,7 +10723,7 @@ def teams_oidc_start():
 @track_endpoint('auth_teams_oidc_callback')
 def teams_oidc_callback():
     """Handle Microsoft OIDC callback."""
-    from teams_security import (
+    from ee.backend.teams.teams_security import (
         verify_teams_oidc_state, exchange_teams_oidc_code,
         get_teams_user_info
     )
