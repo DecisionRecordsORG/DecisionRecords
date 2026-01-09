@@ -934,96 +934,85 @@ The container IP can change on restart because Azure Container Instances in VNet
 
 ## GitHub Repository Configuration
 
-### Repository Strategy for Open Core
+### Repository Structure
 
-This project uses a **single repository** with the `ee/` directory containing proprietary code. There are two approaches to manage this:
+This project uses **Option A: Public Repo with Private Submodule** for open core:
 
-#### Option A: Public Repo with Private Submodule (Recommended)
+| Rep<br/>ository | URL | Visibility | Contains |
+|------------|-----|------------|----------|
+| **DecisionRecords** | `github.com/DecisionRecordsORG/DecisionRecords` | Public | Core code, docs, tests |
+| **ee** | `github.com/DecisionRecordsORG/ee` | Private | EE backend, frontend, infra |
 
 ```
-public-repo/              # decisionrecords/architecture-decisions (public)
-├── app.py
-├── models.py
-├── ee/ → submodule       # Points to private ee repo
-└── ...
-
-private-repo/             # decisionrecords/ee (private)
-├── backend/
-├── frontend/
-└── requirements.txt
+DecisionRecordsORG/
+├── DecisionRecords (PUBLIC)     # Core open source code
+│   ├── app.py
+│   ├── models.py
+│   ├── frontend/
+│   ├── ee/ → submodule         # Points to private repo
+│   └── ...
+│
+└── ee (PRIVATE)                 # Enterprise code
+    ├── backend/
+    │   ├── ai/
+    │   ├── slack/
+    │   ├── teams/
+    │   └── ...
+    ├── frontend/
+    └── requirements.txt
 ```
 
-**Setup:**
+### Cloning the Repository
+
+**Community Edition** (public users, no access to ee/):
 ```bash
-# In the public repo, add ee as a submodule
-git submodule add git@github.com:decisionrecords/ee.git ee
-git commit -m "Add ee submodule"
+git clone https://github.com/DecisionRecordsORG/DecisionRecords.git
+cd DecisionRecords
+# ee/ directory is empty - Community Edition only
+```
 
-# Clone with submodule
-git clone --recurse-submodules git@github.com:decisionrecords/architecture-decisions.git
+**Enterprise Edition** (team members with ee/ access):
+```bash
+git clone --recurse-submodules https://github.com/DecisionRecordsORG/DecisionRecords.git
+cd DecisionRecords
+# ee/ contains enterprise code - Full Enterprise Edition
+```
 
-# Update submodule
+**If you already cloned without submodule:**
+```bash
+git submodule update --init --recursive
+```
+
+### Updating the Submodule
+
+When the ee/ repository has new commits:
+```bash
+# Update to latest ee/ commit
 git submodule update --remote ee
+
+# Commit the submodule reference update
+git add ee
+git commit -m "Update ee submodule to latest"
+git push
 ```
 
-**Advantages:**
-- Public repo is truly open source
-- Enterprise code is completely separate
-- CI/CD can work with or without the submodule
+### Making Changes to Enterprise Code
 
-#### Option B: Single Private Repo with Public Mirror
-
-```
-private-repo/             # Internal development (private)
-├── app.py
-├── ee/                   # Enterprise code
-└── ...
-
-public-mirror/            # Public release (public)
-├── app.py
-├── ee/ → empty or stub
-└── ...
-```
-
-**Setup:**
 ```bash
-# Create release script that excludes ee/
-./scripts/create-public-release.sh
+# Navigate into the submodule
+cd ee
 
-# Or use GitHub Actions to sync non-ee files
+# Make changes, commit, and push to ee repo
+git add .
+git commit -m "Your change description"
+git push origin main
+
+# Go back to main repo and update submodule reference
+cd ..
+git add ee
+git commit -m "Update ee submodule"
+git push
 ```
-
-### Current Repository Setup
-
-The current repository contains both editions in a monorepo. For open-source release:
-
-1. **Create private `ee` repository**:
-   ```bash
-   # On GitHub: Create decisionrecords/ee (private)
-   ```
-
-2. **Move ee/ to submodule**:
-   ```bash
-   # Save ee contents
-   mv ee ../ee-backup
-
-   # Add as submodule
-   git submodule add git@github.com:decisionrecords/ee.git ee
-
-   # Copy contents to submodule
-   cp -r ../ee-backup/* ee/
-   cd ee && git add . && git commit -m "Initial EE code"
-   git push origin main
-   cd ..
-
-   # Update parent repo
-   git add ee .gitmodules
-   git commit -m "Convert ee to submodule"
-   ```
-
-3. **Update CI/CD**:
-   - GitHub Actions needs access to both repos
-   - Use deploy keys or GitHub App for private submodule access
 
 ### GitHub Actions for Dual Repos
 
@@ -1046,8 +1035,8 @@ jobs:
 
   build-enterprise:
     runs-on: ubuntu-latest
-    # Only on private repo or with access
-    if: github.repository == 'decisionrecords/architecture-decisions-private'
+    # Only run if we have access to the private submodule
+    if: github.repository == 'DecisionRecordsORG/DecisionRecords'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1059,15 +1048,20 @@ jobs:
           docker build -f deployment/Dockerfile.production -t app:enterprise .
 ```
 
-### Access Control Summary
+### Access Control
 
-| Repository | Visibility | Contains |
-|------------|------------|----------|
-| `decisionrecords/architecture-decisions` | Public | Core code, docs, tests |
-| `decisionrecords/ee` | Private | EE backend, frontend, infra |
-
-| User Type | Core Repo | EE Repo |
-|-----------|-----------|---------|
+| User Type | DecisionRecords (Public) | ee (Private) |
+|-----------|--------------------------|--------------|
 | Community contributor | Read/Write (via PR) | No access |
 | Maintainer | Write | Read |
 | Core team | Admin | Admin |
+
+### Setting Up CI/CD Access to Private Submodule
+
+For GitHub Actions to access the private `ee` repo:
+
+1. **Create a Personal Access Token (PAT)** with `repo` scope
+2. **Add as repository secret**: Settings → Secrets → `EE_REPO_TOKEN`
+3. **Use in checkout action**: `token: ${{ secrets.EE_REPO_TOKEN }}`
+
+Alternatively, use a **GitHub App** or **Deploy Key** for more granular permissions.
