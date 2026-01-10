@@ -27,10 +27,6 @@ services:
       - DATABASE_URL=${DATABASE_URL:-sqlite:////data/architecture_decisions.db}
       - DECISION_RECORDS_EDITION=community
       - SKIP_CLOUDFLARE_CHECK=true
-    depends_on:
-      db:
-        condition: service_started
-        required: false
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
