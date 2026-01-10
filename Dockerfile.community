@@ -1,15 +1,32 @@
 # Decision Records - Community Edition Dockerfile
 #
-# Build: docker build -f Dockerfile.community -t decision-records:community .
-# Run:   docker run -p 3000:8000 -e SECRET_KEY=your-secret decision-records:community
+# This Dockerfile builds a standalone Community Edition image that does NOT
+# include any Enterprise Edition code. The ee/ directory is explicitly excluded.
 #
-# For production with PostgreSQL:
-#   docker run -p 3000:8000 \
-#     -e SECRET_KEY=your-secret \
+# Build:
+#   docker build -f Dockerfile.community -t decision-records:community .
+#
+# Run with persistent storage (RECOMMENDED):
+#   docker run -d -p 3000:8000 \
+#     -v decision-records-data:/data \
+#     -e SECRET_KEY=your-secret-key-min-32-chars \
+#     decision-records:community
+#
+# Or use docker-compose (recommended for production):
+#   docker-compose up -d
+#
+# With external PostgreSQL:
+#   docker run -d -p 3000:8000 \
+#     -e SECRET_KEY=your-secret-key-min-32-chars \
 #     -e DATABASE_URL=postgresql://user:pass@host:5432/db \
 #     decision-records:community
+#
+# IMPORTANT: Always use a volume (-v) to persist data across container restarts.
+# Without a volume, all data will be lost when the container is removed.
 
-# Stage 1: Build Angular frontend
+# ==============================================================================
+# Stage 1: Build Angular frontend (Community Edition)
+# ==============================================================================
 FROM node:22-slim AS frontend-builder
 
 WORKDIR /app/frontend
@@ -20,13 +37,16 @@ COPY frontend/package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy frontend source
+# Copy frontend source (excluding ee/ components)
 COPY frontend/ ./
 
-# Build Angular app for production
+# Build Angular app for Community Edition
+# NOTE: Community builds do not include ee/frontend components
 RUN npm run build -- --configuration=production
 
+# ==============================================================================
 # Stage 2: Python backend with Angular frontend
+# ==============================================================================
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -37,14 +57,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (core only)
+# Install Python dependencies (core only - no ee/requirements.txt)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-# Copy application code (core only, exclude /ee)
+# ==============================================================================
+# Copy ONLY core application files
+# IMPORTANT: Do NOT copy ee/ directory or any files that import from ee/
+# ==============================================================================
+
+# Core application
 COPY app.py models.py version.py feature_flags.py ./
-COPY auth.py governance.py notifications.py security.py webauthn_auth.py ./
-COPY teams_cards.py teams_security.py ./
+
+# Core modules (these do NOT import from ee/)
+COPY auth.py governance.py notifications.py security.py webauthn_auth.py crypto.py ./
+
+# Templates and static assets
 COPY templates/ ./templates/
 COPY static/ ./static/
 
@@ -54,11 +82,20 @@ COPY --from=frontend-builder /app/frontend/dist/frontend/browser ./frontend/dist
 # Create directory for SQLite database (when not using PostgreSQL)
 RUN mkdir -p /data
 
-# Set environment variables for Community Edition
+# ==============================================================================
+# Environment Configuration for Community Edition
+# ==============================================================================
 ENV FLASK_APP=app.py
 ENV DATABASE_URL=sqlite:////data/architecture_decisions.db
 ENV DECISION_RECORDS_EDITION=community
 ENV PYTHONUNBUFFERED=1
+
+# Skip Cloudflare check (required for self-hosted deployments)
+ENV SKIP_CLOUDFLARE_CHECK=true
+
+# ==============================================================================
+# Security & Health
+# ==============================================================================
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

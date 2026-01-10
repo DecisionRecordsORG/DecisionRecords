@@ -7,6 +7,7 @@ import { SiteFooterComponent } from './components/shared/site-footer/site-footer
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
+import { FeatureFlagsService } from './services/feature-flags.service';
 import { filter } from 'rxjs/operators';
 
 @Component({
@@ -14,7 +15,7 @@ import { filter } from 'rxjs/operators';
   standalone: true,
   imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent, SiteNavComponent, SiteFooterComponent],
   template: `
-    @if (showSiteNav) {
+    @if (showSiteNav && featureFlags.marketingPagesEnabled) {
       <app-site-nav [darkBackground]="siteNavDarkBg" [lightTopBackground]="siteNavLightTopBg"></app-site-nav>
     }
     @if (authService.isAuthenticated && showAppNavbar) {
@@ -23,21 +24,20 @@ import { filter } from 'rxjs/operators';
     <main>
       <router-outlet></router-outlet>
     </main>
-    @if (showSiteFooter) {
+    @if (showSiteFooter && featureFlags.marketingPagesEnabled) {
       <app-site-footer></app-site-footer>
     }
-    <footer class="app-footer">
-      <div class="footer-content">
-        <small>
-          Decision Records
-          <span class="separator">|</span>
-          <a routerLink="/about">About</a>
-          <span class="separator">|</span>
-          <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
-        </small>
-        <img src="/assets/made-sweden-label.jpg.png" alt="Made in Sweden" class="sweden-badge" />
-      </div>
-    </footer>
+    @if (!isLandingPage) {
+      <footer class="app-footer">
+        <div class="footer-content">
+          <small>
+            Decision Records
+            <span class="separator">|</span>
+            <span class="version" [title]="versionTooltip">{{ versionService.versionString }}</span>
+          </small>
+        </div>
+      </footer>
+    }
   `,
   styles: [`
     :host {
@@ -93,8 +93,9 @@ export class AppComponent implements OnInit {
   showSiteFooter = false;
   siteNavDarkBg = false;
   siteNavLightTopBg = false;
+  isLandingPage = false;
 
-  // Marketing/public pages that should show the site nav
+  // Marketing/public pages that should show the site nav (EE only)
   private publicRoutes = [
     '/',
     '/about',
@@ -119,11 +120,16 @@ export class AppComponent implements OnInit {
   constructor(
     public authService: AuthService,
     public versionService: VersionService,
+    public featureFlags: FeatureFlagsService,
     private router: Router,
     private postHogService: PostHogService
   ) {
-    // Initialize PostHog analytics
-    this.postHogService.init();
+    // Initialize PostHog analytics (only if enabled)
+    if (this.featureFlags.analyticsEnabled) {
+      this.postHogService.init();
+    }
+    // Load feature flags on startup
+    this.featureFlags.loadFlags().subscribe();
   }
 
   ngOnInit(): void {
@@ -142,6 +148,9 @@ export class AppComponent implements OnInit {
     // Remove query params for comparison
     const path = url.split('?')[0];
 
+    // Check if this is the landing page
+    this.isLandingPage = path === '/';
+
     // Check if current path is a public/marketing route
     const isPublicRoute = this.publicRoutes.some(route => {
       if (route === '/') {
@@ -150,7 +159,7 @@ export class AppComponent implements OnInit {
       return path === route || path.startsWith(route + '/');
     });
 
-    // Show site nav and footer on public pages
+    // Show site nav and footer on public pages (EE only - controlled in template)
     this.showSiteNav = isPublicRoute;
     this.showSiteFooter = isPublicRoute;
 

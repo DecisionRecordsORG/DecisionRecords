@@ -223,16 +223,27 @@ if is_enterprise():
     except Exception as e:
         logger.error(f"Failed to initialize log forwarding: {e}")
 
-# ==================== External AI API Blueprint ====================
-# Register the external AI API Blueprint for Custom GPTs and AI agents (Enterprise only)
+# ==================== Enterprise Edition Module Registration ====================
+# EE modules are packaged as Flask Blueprints for clean separation.
+# Each module (Slack, Teams, AI, Analytics, etc.) is self-contained in ee/backend/
+# Community Edition builds exclude the ee/ directory entirely.
 
 if is_enterprise():
     try:
-        from ee.backend.ai.api import ai_api
-        app.register_blueprint(ai_api)
-        logger.info("AI API Blueprint registered at /api/ai")
+        from ee.backend import register_all_blueprints, init_ee_services
+        registered_modules = register_all_blueprints(app)
+        if registered_modules:
+            logger.info(f"Enterprise Edition modules registered: {', '.join(registered_modules)}")
+        init_ee_services(app)
     except ImportError as e:
-        logger.warning(f"AI API module not available: {e}")
+        logger.warning(f"EE module registration not available: {e}")
+        # Fallback: try individual module registration
+        try:
+            from ee.backend.ai.api import ai_api
+            app.register_blueprint(ai_api)
+            logger.info("AI API Blueprint registered at /api/ai (fallback)")
+        except ImportError:
+            pass
 
 # ==================== Analytics Tracking Middleware ====================
 # Automatic event tracking for all API endpoints based on configured mappings (Enterprise only)
@@ -1028,9 +1039,12 @@ def init_database():
                     if not SystemConfig.query.filter_by(key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED).first():
                         logger.info("Creating default system config...")
                         # Use a manual approach to avoid transaction issues
+                        # Default to OFF for Community Edition (self-hosters may not have SMTP)
+                        # Default to ON for Enterprise Edition
+                        default_value = 'true' if is_enterprise() else 'false'
                         config = SystemConfig(
                             key=SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED,
-                            value='true',
+                            value=default_value,
                             description='Require email verification for new user signups'
                         )
                         db.session.add(config)
@@ -6970,6 +6984,111 @@ def api_set_email_verification():
         'required': is_required,
         'message': f'Email verification is now {"enabled" if is_required else "disabled"}'
     })
+
+
+@app.route('/api/system/license', methods=['GET'])
+def api_get_license_status():
+    """Get license acceptance status (public endpoint for setup flow)."""
+    accepted = SystemConfig.get_bool(SystemConfig.KEY_LICENSE_ACCEPTED, default=False)
+    accepted_by = SystemConfig.get(SystemConfig.KEY_LICENSE_ACCEPTED_BY, default='')
+    accepted_at = SystemConfig.get(SystemConfig.KEY_LICENSE_ACCEPTED_AT, default='')
+
+    return jsonify({
+        'accepted': accepted,
+        'accepted_by': accepted_by if accepted else None,
+        'accepted_at': accepted_at if accepted else None,
+        'license_type': 'BSL-1.1',
+        'license_url': 'https://github.com/DecisionRecordsORG/DecisionRecords/blob/main/LICENSE'
+    })
+
+
+@app.route('/api/system/license/accept', methods=['POST'])
+def api_accept_license():
+    """Accept the BSL 1.1 license (for first-time setup, no auth required)."""
+    # Check if license is already accepted
+    if SystemConfig.get_bool(SystemConfig.KEY_LICENSE_ACCEPTED, default=False):
+        return jsonify({'error': 'License has already been accepted'}), 400
+
+    data = request.get_json() or {}
+
+    # Require acknowledgement
+    if not data.get('accept'):
+        return jsonify({'error': 'You must accept the license terms'}), 400
+
+    accepted_by = data.get('accepted_by', 'anonymous')
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Store acceptance
+    SystemConfig.set(SystemConfig.KEY_LICENSE_ACCEPTED, 'true', 'BSL 1.1 license acceptance')
+    SystemConfig.set(SystemConfig.KEY_LICENSE_ACCEPTED_BY, accepted_by, 'Email of license acceptor')
+    SystemConfig.set(SystemConfig.KEY_LICENSE_ACCEPTED_AT, now, 'License acceptance timestamp')
+
+    logger.info(f"License accepted by: {accepted_by} at {now}")
+
+    return jsonify({
+        'message': 'License accepted successfully',
+        'accepted': True,
+        'accepted_by': accepted_by,
+        'accepted_at': now
+    })
+
+
+@app.route('/api/system/status', methods=['GET'])
+def api_get_system_status():
+    """
+    Get system installation status (public endpoint for setup flow).
+
+    Used by Community Edition landing page to determine:
+    - Fresh install: Show setup wizard
+    - Configured: Show sign-in flow
+
+    Returns:
+        has_tenants: Whether any tenants exist in the system
+        has_super_admin: Whether the super admin has been configured
+        license_accepted: Whether the BSL 1.1 license has been accepted
+        edition: Current edition (community/enterprise)
+    """
+    from feature_flags import EDITION, is_community
+
+    # Count tenants (excluding any system/default tenants if they exist)
+    tenant_count = Tenant.query.count()
+
+    # Check if super admin is configured (MasterAccount exists with password)
+    super_admin = MasterAccount.query.first()
+    has_super_admin = super_admin is not None and super_admin.password_hash is not None
+
+    # Check license acceptance
+    license_accepted = SystemConfig.get_bool(SystemConfig.KEY_LICENSE_ACCEPTED, default=False)
+
+    return jsonify({
+        'has_tenants': tenant_count > 0,
+        'tenant_count': tenant_count,
+        'has_super_admin': has_super_admin,
+        'license_accepted': license_accepted,
+        'edition': EDITION,
+        'is_community': is_community()
+    })
+
+
+@app.route('/api/tenants/public', methods=['GET'])
+def api_list_tenants_public():
+    """
+    List public tenant information (no auth required).
+
+    Used by Community Edition landing page to determine
+    which tenant to redirect to for sign-in.
+
+    Only returns basic public info: domain and name.
+    Does not include sensitive information or stats.
+    """
+    # Filter out soft-deleted tenants (deleted_at is not null for deleted ones)
+    tenants = Tenant.query.filter(Tenant.deleted_at.is_(None)).order_by(Tenant.created_at.asc()).all()
+
+    return jsonify([{
+        'id': t.id,
+        'sso_domain': t.domain,  # Using domain as sso_domain for consistency with frontend
+        'company_name': t.name or t.domain  # Using name as company_name for consistency
+    } for t in tenants])
 
 
 @app.route('/api/system/super-admin-email', methods=['GET'])

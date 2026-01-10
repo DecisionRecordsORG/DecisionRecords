@@ -7,6 +7,12 @@ Commercial features are disabled in the Community Edition.
 Configuration:
 - Environment variable: DECISION_RECORDS_EDITION (default: 'community')
 - Values: 'community' or 'enterprise'
+
+Security Note:
+- Features are strictly tied to edition - no environment variable overrides
+- For development/testing with EE features, run with DECISION_RECORDS_EDITION=enterprise
+- Physical code separation (ee/ directory excluded in Community builds) provides
+  additional protection - EE code doesn't exist in Community Edition Docker images
 """
 import os
 import logging
@@ -33,7 +39,8 @@ if EDITION not in (Edition.COMMUNITY, Edition.ENTERPRISE):
 logger.info(f"Decision Records Edition: {EDITION}")
 
 
-# Feature definitions
+# Feature definitions - strictly tied to edition
+# Enterprise features require DECISION_RECORDS_EDITION=enterprise
 FEATURES = {
     # Core features (always available in both editions)
     'decisions': True,
@@ -47,7 +54,7 @@ FEATURES = {
     'spaces': True,
     'infrastructure': True,
 
-    # Enterprise features (only available in Enterprise Edition)
+    # Enterprise features (require Enterprise Edition)
     'slack_integration': EDITION == Edition.ENTERPRISE,
     'teams_integration': EDITION == Edition.ENTERPRISE,
     'google_oauth': EDITION == Edition.ENTERPRISE,

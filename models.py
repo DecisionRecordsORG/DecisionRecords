@@ -95,6 +95,9 @@ class SystemConfig(db.Model):
 
     # Licensing configuration keys
     KEY_MAX_USERS_PER_TENANT = 'max_users_per_tenant'
+    KEY_LICENSE_ACCEPTED = 'license_accepted'  # Whether BSL 1.1 license has been accepted
+    KEY_LICENSE_ACCEPTED_BY = 'license_accepted_by'  # Email of who accepted
+    KEY_LICENSE_ACCEPTED_AT = 'license_accepted_at'  # When license was accepted
 
     # Analytics configuration keys
     KEY_ANALYTICS_ENABLED = 'analytics_enabled'

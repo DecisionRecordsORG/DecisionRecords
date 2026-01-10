@@ -1,9 +1,32 @@
 import { Routes } from '@angular/router';
 import { authGuard, adminGuard, masterGuard, guestGuard, tenantGuard } from './guards/auth.guard';
 
+/**
+ * Application Routes
+ *
+ * Route Architecture:
+ * - Core routes are defined here (available in all editions)
+ * - Enterprise Edition routes are defined in ee/frontend/routes/ee-routes.ts
+ * - EE routes are loaded dynamically at runtime if the ee/ directory exists
+ *
+ * Security Model:
+ * - Frontend routes use lazy loading - components are only loaded when visited
+ * - Backend APIs enforce edition checks via decorators (@require_slack, @require_teams)
+ * - Feature flags service provides runtime visibility control
+ *
+ * In Community Edition builds (Dockerfile.community):
+ * - The ee/ directory is physically excluded
+ * - EE component imports will fail gracefully
+ * - Backend returns 503 for EE API endpoints
+ */
+
 export const routes: Routes = [
-  // Public landing page (Community Edition)
-  // For Enterprise Edition with marketing pages, this would be replaced
+  // License acceptance page (shown on first-time setup)
+  {
+    path: 'license',
+    loadComponent: () => import('./components/license-acceptance/license-acceptance.component').then(m => m.LicenseAcceptanceComponent)
+  },
+  // Public landing page
   {
     path: '',
     loadComponent: () => import('./components/landing/landing.component').then(m => m.LandingComponent)

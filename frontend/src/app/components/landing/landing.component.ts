@@ -2,12 +2,30 @@ import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { HttpClient } from '@angular/common/http';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
+import { FeatureFlagsService } from '../../services/feature-flags.service';
+
+interface SystemStatus {
+  has_tenants: boolean;
+  tenant_count: number;
+  has_super_admin: boolean;
+  license_accepted: boolean;
+  edition: string;
+  is_community: boolean;
+}
+
+interface TenantInfo {
+  id: number;
+  sso_domain: string;
+  company_name: string;
+}
 
 @Component({
   selector: 'app-landing',
@@ -20,7 +38,8 @@ import { AuthService } from '../../services/auth.service';
     MatCardModule,
     MatFormFieldModule,
     MatInputModule,
-    MatIconModule
+    MatIconModule,
+    MatProgressSpinnerModule
   ],
   template: `
     <div class="landing-container">
@@ -33,22 +52,57 @@ import { AuthService } from '../../services/auth.service';
             important architecture decisions using the ADR format.
           </p>
 
-          <div class="cta-section">
-            <div class="domain-input" *ngIf="!isLoggedIn">
+          <!-- Loading State -->
+          <div class="cta-section" *ngIf="loading">
+            <mat-spinner diameter="40"></mat-spinner>
+          </div>
+
+          <!-- Community Edition: Fresh Install (No Tenants) -->
+          <div class="cta-section" *ngIf="!loading && isCommunity && !hasTenants && !isLoggedIn">
+            <div class="setup-cta">
+              <button mat-raised-button class="primary-button large-button" (click)="goToSetup()">
+                <mat-icon>rocket_launch</mat-icon>
+                Set Up Your Instance
+              </button>
+              <p class="cta-hint">First time? Configure your organization in just a few steps.</p>
+            </div>
+          </div>
+
+          <!-- Community Edition: Configured (Has Tenant) -->
+          <div class="cta-section" *ngIf="!loading && isCommunity && hasTenants && !isLoggedIn">
+            <div class="signin-cta">
+              <button mat-raised-button class="primary-button large-button" (click)="goToSignIn()">
+                <mat-icon>login</mat-icon>
+                Sign In
+              </button>
+              <p class="cta-hint" *ngIf="tenantName">Sign in to {{ tenantName }}</p>
+            </div>
+          </div>
+
+          <!-- Enterprise Edition: Domain Input -->
+          <div class="cta-section" *ngIf="!loading && !isCommunity && !isLoggedIn">
+            <div class="domain-input">
               <mat-form-field appearance="outline">
                 <mat-label>Your company domain</mat-label>
                 <input matInput [(ngModel)]="domain" placeholder="example.com"
                        (keyup.enter)="goToTenant()">
+                <mat-hint>Enter your company domain to get started</mat-hint>
               </mat-form-field>
-              <button mat-raised-button color="primary" (click)="goToTenant()">
+              <button mat-raised-button class="primary-button" (click)="goToTenant()" [disabled]="!domain">
                 Get Started
               </button>
             </div>
-            <div *ngIf="isLoggedIn">
-              <button mat-raised-button color="primary" (click)="goToDashboard()">
-                Go to Dashboard
-              </button>
-            </div>
+            <p class="sign-in-link">
+              Already have an account? Enter your domain above and click Get Started.
+            </p>
+          </div>
+
+          <!-- Logged In State -->
+          <div class="cta-section" *ngIf="!loading && isLoggedIn">
+            <button mat-raised-button class="primary-button large-button" (click)="goToDashboard()">
+              <mat-icon>dashboard</mat-icon>
+              Go to Dashboard
+            </button>
           </div>
         </div>
       </div>
@@ -58,8 +112,8 @@ import { AuthService } from '../../services/auth.service';
         <div class="features-grid">
           <mat-card class="feature-card">
             <mat-icon>description</mat-icon>
-            <h3>Architecture Decision Records</h3>
-            <p>Capture decisions using the proven ADR format with context, decision, and consequences.</p>
+            <h3>Decision Records</h3>
+            <p>Capture decisions using a structured format with context, decision, and consequences.</p>
           </mat-card>
 
           <mat-card class="feature-card">
@@ -103,7 +157,7 @@ import { AuthService } from '../../services/auth.service';
 
       <footer class="landing-footer">
         <p>
-          <a href="https://github.com/decisionrecords/decision-records" target="_blank">
+          <a href="https://github.com/DecisionRecordsORG/DecisionRecords" target="_blank">
             <mat-icon>code</mat-icon> View on GitHub
           </a>
           &nbsp;|&nbsp;
@@ -115,7 +169,7 @@ import { AuthService } from '../../services/auth.service';
   styles: [`
     .landing-container {
       min-height: 100vh;
-      background: linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%);
+      background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 50%, #1e40af 100%);
     }
 
     .hero-section {
@@ -130,18 +184,21 @@ import { AuthService } from '../../services/auth.service';
     }
 
     h1 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       font-size: 3.5rem;
       margin-bottom: 16px;
       font-weight: 700;
     }
 
     .tagline {
+      font-family: 'Inter', sans-serif;
       font-size: 1.5rem;
       opacity: 0.9;
       margin-bottom: 24px;
     }
 
     .description {
+      font-family: 'Inter', sans-serif;
       font-size: 1.1rem;
       opacity: 0.8;
       max-width: 600px;
@@ -151,9 +208,51 @@ import { AuthService } from '../../services/auth.service';
 
     .cta-section {
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: center;
       gap: 16px;
-      flex-wrap: wrap;
+    }
+
+    .setup-cta,
+    .signin-cta {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .cta-hint {
+      font-size: 0.95rem;
+      opacity: 0.85;
+      margin: 0;
+    }
+
+    .primary-button {
+      background: #3b82f6 !important;
+      color: white !important;
+      border-radius: 8px !important;
+      font-weight: 500 !important;
+      text-transform: none !important;
+      letter-spacing: 0 !important;
+    }
+
+    .primary-button:hover {
+      background: #2563eb !important;
+    }
+
+    .primary-button:disabled {
+      background: rgba(255, 255, 255, 0.3) !important;
+      color: rgba(255, 255, 255, 0.6) !important;
+    }
+
+    .large-button {
+      padding: 12px 32px !important;
+      font-size: 1.1rem !important;
+      height: auto !important;
+    }
+
+    .large-button mat-icon {
+      margin-right: 8px;
     }
 
     .domain-input {
@@ -167,19 +266,24 @@ import { AuthService } from '../../services/auth.service';
     }
 
     .domain-input ::ng-deep .mat-mdc-text-field-wrapper {
-      background: white;
-      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 8px;
+    }
+
+    .domain-input ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+      color: rgba(255, 255, 255, 0.8);
     }
 
     .features-section {
       padding: 60px 20px;
-      background: #f5f5f5;
+      background: #f8fafc;
     }
 
     .features-section h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       text-align: center;
       margin-bottom: 40px;
-      color: #333;
+      color: #1e293b;
       font-size: 2rem;
     }
 
@@ -194,43 +298,56 @@ import { AuthService } from '../../services/auth.service';
     .feature-card {
       padding: 24px;
       text-align: center;
+      border-radius: 12px !important;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+      transition: box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .feature-card:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+      transform: translateY(-2px);
     }
 
     .feature-card mat-icon {
       font-size: 48px;
       width: 48px;
       height: 48px;
-      color: #1e3a5f;
+      color: #3b82f6;
       margin-bottom: 16px;
     }
 
     .feature-card h3 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
       margin-bottom: 12px;
-      color: #333;
+      color: #1e293b;
+      font-weight: 600;
     }
 
     .feature-card p {
-      color: #666;
+      font-family: 'Inter', sans-serif;
+      color: #64748b;
       line-height: 1.5;
     }
 
     .admin-section {
       padding: 40px 20px;
       text-align: center;
-      background: #e8e8e8;
+      background: #e2e8f0;
     }
 
     .admin-link {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      color: #666;
+      color: #64748b;
       text-decoration: none;
       font-size: 0.9rem;
+      font-family: 'Inter', sans-serif;
+      transition: color 0.2s ease;
     }
 
     .admin-link:hover {
-      color: #1e3a5f;
+      color: #3b82f6;
     }
 
     .admin-link mat-icon {
@@ -242,7 +359,7 @@ import { AuthService } from '../../services/auth.service';
     .landing-footer {
       padding: 24px 20px;
       text-align: center;
-      background: #1e3a5f;
+      background: #1e3a8a;
       color: white;
     }
 
@@ -252,6 +369,7 @@ import { AuthService } from '../../services/auth.service';
       display: inline-flex;
       align-items: center;
       gap: 4px;
+      font-family: 'Inter', sans-serif;
     }
 
     .landing-footer a:hover {
@@ -262,6 +380,20 @@ import { AuthService } from '../../services/auth.service';
       font-size: 18px;
       width: 18px;
       height: 18px;
+    }
+
+    .sign-in-link {
+      margin-top: 16px;
+      font-size: 0.9rem;
+      opacity: 0.8;
+    }
+
+    mat-spinner {
+      margin: 20px auto;
+    }
+
+    ::ng-deep mat-spinner circle {
+      stroke: white !important;
     }
 
     @media (max-width: 600px) {
@@ -281,23 +413,107 @@ import { AuthService } from '../../services/auth.service';
       .domain-input mat-form-field {
         width: 100%;
       }
+
+      .large-button {
+        width: 100%;
+        max-width: 300px;
+      }
     }
   `]
 })
 export class LandingComponent implements OnInit {
   private authService = inject(AuthService);
   private router = inject(Router);
+  private http = inject(HttpClient);
+  private featureFlags = inject(FeatureFlagsService);
 
   domain = '';
   isLoggedIn = false;
+  loading = true;
+  isCommunity = false;
+  hasTenants = false;
+  tenantDomain = '';
+  tenantName = '';
 
   ngOnInit() {
+    // Check system status to determine what to show
+    this.http.get<SystemStatus>('/api/system/status').subscribe({
+      next: (status) => {
+        this.isCommunity = status.is_community;
+        this.hasTenants = status.has_tenants;
+
+        // For Community Edition, check license first
+        if (status.is_community && !status.license_accepted) {
+          this.router.navigate(['/license']);
+          return;
+        }
+
+        // If Community Edition has a single tenant, get its info for the Sign In button
+        if (status.is_community && status.has_tenants) {
+          this.loadTenantInfo();
+        }
+
+        this.loading = false;
+      },
+      error: () => {
+        // Fallback to feature flags service if status endpoint fails
+        this.isCommunity = this.featureFlags.isCommunity;
+        this.loading = false;
+
+        // Check license for Community Edition
+        if (this.isCommunity) {
+          this.http.get<{ accepted: boolean }>('/api/system/license').subscribe({
+            next: (response) => {
+              if (!response.accepted) {
+                this.router.navigate(['/license']);
+              }
+            },
+            error: () => {
+              this.router.navigate(['/license']);
+            }
+          });
+        }
+      }
+    });
+
+    // Check auth state
     this.authService.currentUser$.subscribe(currentUser => {
       this.isLoggedIn = !!currentUser?.user;
       if (currentUser?.user && 'sso_domain' in currentUser.user) {
         this.domain = (currentUser.user as any).sso_domain || '';
       }
     });
+  }
+
+  private loadTenantInfo() {
+    // Get tenant info for Community Edition (typically single tenant)
+    this.http.get<TenantInfo[]>('/api/tenants/public').subscribe({
+      next: (tenants) => {
+        if (tenants && tenants.length > 0) {
+          // Use the first (or only) tenant
+          this.tenantDomain = tenants[0].sso_domain;
+          this.tenantName = tenants[0].company_name || tenants[0].sso_domain;
+        }
+      },
+      error: () => {
+        // Silent fail - will just not show tenant name
+      }
+    });
+  }
+
+  goToSetup() {
+    // Navigate to super admin to set up the first tenant
+    this.router.navigate(['/superadmin']);
+  }
+
+  goToSignIn() {
+    if (this.tenantDomain) {
+      // Navigate directly to the tenant's login page
+      this.router.navigate(['/', this.tenantDomain, 'login']);
+    } else {
+      // Fallback to super admin if no tenant domain found
+      this.router.navigate(['/superadmin']);
+    }
   }
 
   goToTenant() {
@@ -308,13 +524,17 @@ export class LandingComponent implements OnInit {
       cleanDomain = cleanDomain.replace(/\/.*$/, '');
       cleanDomain = cleanDomain.replace(/^www\./, '');
 
-      this.router.navigate(['/', cleanDomain]);
+      // Navigate to tenant login page (/:tenant/login)
+      // The login page allows unauthenticated users (guestGuard)
+      this.router.navigate(['/', cleanDomain, 'login']);
     }
   }
 
   goToDashboard() {
     if (this.domain) {
       this.router.navigate(['/', this.domain]);
+    } else if (this.tenantDomain) {
+      this.router.navigate(['/', this.tenantDomain]);
     }
   }
 }
