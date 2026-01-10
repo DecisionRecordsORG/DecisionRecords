@@ -67,7 +67,7 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 # ==============================================================================
 
 # Core application
-COPY app.py models.py version.py feature_flags.py ./
+COPY app.py models.py version.py feature_flags.py migrations.py ./
 
 # Core modules (these do NOT import from ee/)
 COPY auth.py governance.py notifications.py security.py webauthn_auth.py crypto.py ./
