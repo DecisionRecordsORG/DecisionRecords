@@ -1,6 +1,6 @@
 # Decision Records
 
-> Open source platform for capturing and preserving architecture decisions
+> Open source platform for capturing and preserving Decision Records
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](docker-compose.yml)
@@ -11,8 +11,8 @@ Decision Records helps teams remember why decisions were made. Based on the [Arc
 
 ```bash
 # Clone and run with Docker
-git clone https://github.com/decisionrecords/decision-records.git
-cd decision-records
+git clone https://github.com/DecisionRecordsORG/DecisionRecords.git
+cd DecisionRecords
 docker-compose up -d
 
 # Open http://localhost:3000

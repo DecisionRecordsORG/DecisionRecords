@@ -12,11 +12,12 @@
 
 services:
   app:
-    image: ghcr.io/decisionrecordsorg/decisionrecords:latest
-    # Or build locally:
-    # build:
-    #   context: .
-    #   dockerfile: Dockerfile.community
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile.community
+    # Or use pre-built image (when available):
+    # image: ghcr.io/decisionrecordsorg/decisionrecords:latest
     ports:
       - "3000:8000"
     volumes:
