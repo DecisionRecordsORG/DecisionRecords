@@ -502,8 +502,8 @@ export class LandingComponent implements OnInit {
   }
 
   goToSetup() {
-    // Navigate to super admin to set up the first tenant
-    this.router.navigate(['/superadmin']);
+    // Navigate to setup wizard for first-time Community Edition setup
+    this.router.navigate(['/setup']);
   }
 
   goToSignIn() {

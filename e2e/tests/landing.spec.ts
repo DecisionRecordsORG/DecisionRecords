@@ -92,7 +92,7 @@ test.describe('Landing Page - Community Edition', () => {
     }
   });
 
-  test('setup-button-navigates-to-superadmin: Set Up button navigates to superadmin', async ({ page }) => {
+  test('setup-button-navigates-to-setup-wizard: Set Up button navigates to setup wizard', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
@@ -117,9 +117,9 @@ test.describe('Landing Page - Community Edition', () => {
     await expect(setupButton).toBeVisible({ timeout: 5000 });
     await setupButton.click();
 
-    // Should navigate to superadmin
-    await page.waitForURL('**/superadmin', { timeout: 10000 });
-    expect(page.url()).toContain('/superadmin');
+    // Should navigate to setup wizard
+    await page.waitForURL('**/setup', { timeout: 10000 });
+    expect(page.url()).toContain('/setup');
   });
 
   test('signin-button-navigates-to-tenant-login: Sign In button navigates to tenant login', async ({ page }) => {

@@ -7091,6 +7091,154 @@ def api_list_tenants_public():
     } for t in tenants])
 
 
+@app.route('/api/setup/initialize', methods=['POST'])
+def api_setup_initialize():
+    """
+    Initialize a fresh Community Edition installation.
+
+    This endpoint is only available when:
+    - Running Community Edition (DECISION_RECORDS_EDITION=community)
+    - No tenants exist yet (fresh install)
+    - License has been accepted
+
+    Creates:
+    - First tenant with provided organization name
+    - First admin user with provided email/password
+    - Default space for the tenant
+    - Auth configuration for the tenant
+
+    Request body:
+        organization_name: Name of the organization (becomes tenant name)
+        domain: Domain for the tenant (e.g., "mycompany.com")
+        admin_email: Email for the first admin user
+        admin_password: Password for the first admin user
+        admin_name: Optional full name for the admin user
+    """
+    from feature_flags import is_community
+
+    # Only allow in Community Edition
+    if not is_community():
+        return jsonify({'error': 'Setup wizard is only available in Community Edition'}), 403
+
+    # Only allow if no tenants exist (fresh install)
+    tenant_count = Tenant.query.count()
+    if tenant_count > 0:
+        return jsonify({'error': 'Setup already completed. A tenant already exists.'}), 400
+
+    # Check if license was accepted
+    license_accepted = SystemConfig.get_bool(SystemConfig.KEY_LICENSE_ACCEPTED, default=False)
+    if not license_accepted:
+        return jsonify({'error': 'Please accept the license agreement first'}), 400
+
+    data = request.get_json() or {}
+
+    # Validate required fields
+    organization_name = data.get('organization_name', '').strip()
+    domain = data.get('domain', '').strip().lower()
+    admin_email = data.get('admin_email', '').strip().lower()
+    admin_password = data.get('admin_password', '')
+    admin_name = data.get('admin_name', '').strip()
+
+    if not organization_name:
+        return jsonify({'error': 'Organization name is required'}), 400
+    if not domain:
+        return jsonify({'error': 'Domain is required'}), 400
+    if not admin_email:
+        return jsonify({'error': 'Admin email is required'}), 400
+    if not admin_password:
+        return jsonify({'error': 'Admin password is required'}), 400
+    if len(admin_password) < 8:
+        return jsonify({'error': 'Password must be at least 8 characters'}), 400
+
+    # Validate email format
+    if '@' not in admin_email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    # Clean up domain (remove protocol, paths, www)
+    domain = domain.replace('https://', '').replace('http://', '')
+    domain = domain.split('/')[0]
+    if domain.startswith('www.'):
+        domain = domain[4:]
+
+    try:
+        # Create the tenant
+        tenant = Tenant(
+            domain=domain,
+            name=organization_name,
+            status='active',
+            maturity_state=MaturityState.BOOTSTRAP
+        )
+        db.session.add(tenant)
+        db.session.flush()
+        app.logger.info(f"Created tenant via setup wizard: {domain}")
+
+        # Create default auth config for the tenant
+        auth_config = AuthConfig(
+            domain=domain,
+            auth_method='local',
+            allow_password=True,
+            allow_passkey=True,
+            allow_registration=True,
+            require_approval=False  # Auto-approve new users for CE single-tenant
+        )
+        db.session.add(auth_config)
+
+        # Create default space for the tenant
+        default_space = Space(
+            tenant_id=tenant.id,
+            name='General',
+            description='Default space for all architecture decisions',
+            is_default=True
+        )
+        db.session.add(default_space)
+
+        # Create the first admin user
+        user = User(
+            email=admin_email,
+            sso_domain=domain,
+            auth_type='local',  # Password-based auth
+            is_admin=True,
+            email_verified=True  # Skip verification for setup
+        )
+        user.set_password(admin_password)
+
+        # Set name if provided
+        if admin_name:
+            user.set_name(full_name=admin_name)
+
+        db.session.add(user)
+        db.session.flush()
+
+        # Create tenant membership for the admin
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            global_role=GlobalRole.ADMIN
+        )
+        db.session.add(membership)
+
+        db.session.commit()
+
+        app.logger.info(f"Setup wizard completed. Tenant: {domain}, Admin: {admin_email}")
+
+        return jsonify({
+            'message': 'Setup completed successfully',
+            'tenant': {
+                'domain': domain,
+                'name': organization_name
+            },
+            'admin': {
+                'email': admin_email
+            },
+            'next_step': f'/{domain}/login'
+        })
+
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Setup wizard failed: {str(e)}")
+        return jsonify({'error': 'Setup failed. Please try again.'}), 500
+
+
 @app.route('/api/system/super-admin-email', methods=['GET'])
 @master_required
 def api_get_super_admin_email():

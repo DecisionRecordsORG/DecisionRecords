@@ -26,6 +26,11 @@ export const routes: Routes = [
     path: 'license',
     loadComponent: () => import('./components/license-acceptance/license-acceptance.component').then(m => m.LicenseAcceptanceComponent)
   },
+  // Setup wizard for Community Edition first-time setup
+  {
+    path: 'setup',
+    loadComponent: () => import('./components/setup-wizard/setup-wizard.component').then(m => m.SetupWizardComponent)
+  },
   // Public landing page
   {
     path: '',
