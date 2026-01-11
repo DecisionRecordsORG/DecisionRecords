@@ -18,7 +18,11 @@ docker-compose up -d
 # Open http://localhost:3000
 ```
 
-Default admin: `admin` / `changeme` (change immediately!)
+On first run, the **Setup Wizard** will guide you through:
+1. Creating your organization
+2. Setting up your admin account
+
+Super Admin access (for managing multiple tenants): `admin` / `changeme`
 
 ## Features
 
@@ -134,6 +138,46 @@ decision-records/
 │   ├── backend/           # EE backend modules
 │   └── frontend/          # EE frontend components
 └── docs/                  # Documentation
+```
+
+## Troubleshooting
+
+### Reset Database (Fresh Start)
+
+To completely reset the application to a fresh state:
+
+```bash
+# Stop container and remove data volume
+docker-compose down -v
+
+# Remove cached images (optional, for clean rebuild)
+docker system prune -f
+
+# Rebuild and start fresh
+docker-compose build --no-cache app
+docker-compose up -d
+```
+
+### Clear Browser Cache
+
+If you see stale UI after an update:
+1. Hard refresh: `Cmd+Shift+R` (Mac) or `Ctrl+Shift+R` (Windows/Linux)
+2. Or clear browser cache and reload
+
+### Port Already in Use
+
+```bash
+# Find and kill process using port 3000
+lsof -i :3000 | grep LISTEN | awk '{print $2}' | xargs kill -9
+
+# Then restart
+docker-compose up -d
+```
+
+### Check Container Logs
+
+```bash
+docker-compose logs -f app
 ```
 
 ## Contributing

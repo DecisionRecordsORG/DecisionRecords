@@ -1,7 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
-import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
@@ -466,6 +466,7 @@ export class SetupWizardComponent {
   adminEmail = '';
 
   constructor() {
+    // Main form with all fields and cross-field password validator
     this.setupForm = this.fb.group({
       organizationName: ['', Validators.required],
       domain: ['', Validators.required],
@@ -473,10 +474,11 @@ export class SetupWizardComponent {
       adminEmail: ['', [Validators.required, Validators.email]],
       adminPassword: ['', [Validators.required, Validators.minLength(8)]],
       confirmPassword: ['', Validators.required]
+    }, {
+      validators: SetupWizardComponent.passwordMatchValidator
     });
 
-    // Create step form groups for stepper validation
-    // These reference the same controls as setupForm
+    // Create step form groups for stepper navigation validation
     this.orgFormGroup = this.fb.group({
       organizationName: this.setupForm.get('organizationName'),
       domain: this.setupForm.get('domain')
@@ -487,52 +489,57 @@ export class SetupWizardComponent {
       adminEmail: this.setupForm.get('adminEmail'),
       adminPassword: this.setupForm.get('adminPassword'),
       confirmPassword: this.setupForm.get('confirmPassword')
-    });
-
-    // Subscribe to password changes to validate match
-    this.setupForm.get('adminPassword')?.valueChanges.subscribe(() => {
-      this.updatePasswordMatchValidity();
-    });
-    this.setupForm.get('confirmPassword')?.valueChanges.subscribe(() => {
-      this.updatePasswordMatchValidity();
+    }, {
+      validators: SetupWizardComponent.passwordMatchValidator
     });
   }
 
-  // Update confirmPassword validity based on password match
-  private updatePasswordMatchValidity(): void {
-    const password = this.setupForm.get('adminPassword')?.value;
-    const confirmPassword = this.setupForm.get('confirmPassword')?.value;
-    const confirmControl = this.setupForm.get('confirmPassword');
+  // Static validator for password matching - works with Angular's form validation
+  static passwordMatchValidator(control: AbstractControl): ValidationErrors | null {
+    const password = control.get('adminPassword')?.value;
+    const confirmPassword = control.get('confirmPassword')?.value;
 
-    if (!confirmControl) return;
-
-    // Get current errors excluding passwordMismatch
-    const currentErrors = confirmControl.errors;
-    const { passwordMismatch, ...otherErrors } = currentErrors || {};
-
-    if (confirmPassword && password !== confirmPassword) {
-      // Passwords don't match - add error
-      confirmControl.setErrors({ ...otherErrors, passwordMismatch: true });
-    } else {
-      // Passwords match - remove passwordMismatch error only
-      confirmControl.setErrors(Object.keys(otherErrors).length > 0 ? otherErrors : null);
+    if (password && confirmPassword && password !== confirmPassword) {
+      // Mark confirmPassword as having an error for display purposes
+      control.get('confirmPassword')?.setErrors({ passwordMismatch: true });
+      return { passwordMismatch: true };
     }
+
+    // Clear passwordMismatch error if passwords match
+    const confirmControl = control.get('confirmPassword');
+    if (confirmControl?.errors?.['passwordMismatch']) {
+      // Remove only passwordMismatch, keep other errors like 'required'
+      const errors = { ...confirmControl.errors };
+      delete errors['passwordMismatch'];
+      confirmControl.setErrors(Object.keys(errors).length ? errors : null);
+    }
+
+    return null;
   }
 
-  // Check if form is ready for submission (all fields valid + passwords match)
+  // Check if all form data is valid for submission
   get isFormValid(): boolean {
-    const password = this.setupForm.get('adminPassword')?.value;
-    const confirmPassword = this.setupForm.get('confirmPassword')?.value;
-    const passwordsMatch = password === confirmPassword;
+    // Check each field explicitly to avoid any stepper state issues
+    const orgName = this.setupForm.get('organizationName');
+    const domain = this.setupForm.get('domain');
+    const email = this.setupForm.get('adminEmail');
+    const password = this.setupForm.get('adminPassword');
+    const confirmPassword = this.setupForm.get('confirmPassword');
 
-    // Check all required fields
-    const orgNameValid = this.setupForm.get('organizationName')?.valid;
-    const domainValid = this.setupForm.get('domain')?.valid;
-    const emailValid = this.setupForm.get('adminEmail')?.valid;
-    const passwordValid = this.setupForm.get('adminPassword')?.valid;
-    const confirmValid = confirmPassword && confirmPassword.length > 0;
+    // All required fields must have values and be valid
+    const orgValid = orgName?.value && orgName.valid;
+    const domainValid = domain?.value && domain.valid;
+    const emailValid = email?.value && email.valid;
+    const passwordValid = password?.value && password.valid;
+    const confirmValid = confirmPassword?.value && !confirmPassword.errors;
 
-    return !!(orgNameValid && domainValid && emailValid && passwordValid && confirmValid && passwordsMatch);
+    // Passwords must match
+    const passwordsMatch = password?.value === confirmPassword?.value;
+
+    // Debug: log what's failing (remove in production)
+    // console.log('Form validity:', { orgValid, domainValid, emailValid, passwordValid, confirmValid, passwordsMatch });
+
+    return !!(orgValid && domainValid && emailValid && passwordValid && confirmValid && passwordsMatch);
   }
 
   onSubmit() {
