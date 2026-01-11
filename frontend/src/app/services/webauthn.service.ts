@@ -135,6 +135,44 @@ export class WebAuthnService {
   }
 
   /**
+   * Check if email verification is required for new signups
+   * This is a system-wide setting controlled by the super admin
+   */
+  isEmailVerificationRequired(): Observable<{ required: boolean }> {
+    return this.http.get<{ required: boolean }>(`${this.apiUrl}/system/email-verification`);
+  }
+
+  /**
+   * Direct signup without email verification
+   * Used when email verification is disabled in system settings
+   */
+  directSignup(
+    email: string,
+    firstName: string,
+    lastName: string,
+    authPreference: 'passkey' | 'password' = 'passkey',
+    password?: string
+  ): Observable<{
+    message: string;
+    user: User;
+    redirect_url?: string;
+    setup_passkey?: boolean;
+  }> {
+    return this.http.post<{
+      message: string;
+      user: User;
+      redirect_url?: string;
+      setup_passkey?: boolean;
+    }>(`${this.apiUrl}/auth/direct-signup`, {
+      email,
+      first_name: firstName,
+      last_name: lastName,
+      auth_preference: authPreference,
+      password
+    });
+  }
+
+  /**
    * Register a new user with WebAuthn (or add a new credential for existing user)
    */
   register(email: string, firstName?: string, lastName?: string): Observable<{ message: string; user: User }> {

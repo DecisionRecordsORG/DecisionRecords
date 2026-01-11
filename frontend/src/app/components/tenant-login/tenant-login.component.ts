@@ -1059,7 +1059,7 @@ export class TenantLoginComponent implements OnInit {
 
     const { email, first_name, last_name, reason } = this.requestForm.value;
 
-    this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string}>('/api/auth/access-request', {
+    this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string; setup_url?: string}>('/api/auth/access-request', {
       email,
       first_name,
       last_name,
@@ -1070,7 +1070,12 @@ export class TenantLoginComponent implements OnInit {
         this.isLoading = false;
         // Check if auto-approved (account created immediately)
         if (response.auto_approved) {
-          this.currentView = 'auto-approved';
+          // If setup_url is provided (email not configured), redirect directly
+          if (response.setup_url) {
+            window.location.href = response.setup_url;
+          } else {
+            this.currentView = 'auto-approved';
+          }
         } else {
           this.currentView = 'request-sent';
         }

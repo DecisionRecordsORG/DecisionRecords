@@ -675,13 +675,52 @@ export class LoginComponent implements OnInit {
 
     const { email, firstName, lastName } = this.registerForm.value;
 
-    this.webAuthnService.register(email, firstName, lastName).subscribe({
-      next: () => {
-        this.router.navigate(['/']);
+    // First check if email verification is required
+    this.webAuthnService.isEmailVerificationRequired().subscribe({
+      next: (config) => {
+        if (config.required) {
+          // Email verification is enabled - use WebAuthn registration flow
+          // which will send a verification email
+          this.webAuthnService.register(email, firstName, lastName).subscribe({
+            next: () => {
+              this.router.navigate(['/']);
+            },
+            error: (err) => {
+              this.isLoading = false;
+              this.error = err.error?.error || 'Registration failed. Please try again.';
+            }
+          });
+        } else {
+          // Email verification is disabled - use direct signup
+          this.webAuthnService.directSignup(email, firstName, lastName, 'passkey').subscribe({
+            next: (result: any) => {
+              if (result.setup_passkey && result.redirect) {
+                // Redirect to passkey setup page
+                window.location.href = result.redirect;
+              } else {
+                // User is logged in, go to their tenant
+                const domain = email.split('@')[1];
+                this.router.navigate(['/' + domain + '/decisions']);
+              }
+            },
+            error: (err) => {
+              this.isLoading = false;
+              this.error = err.error?.error || 'Registration failed. Please try again.';
+            }
+          });
+        }
       },
-      error: (err) => {
-        this.isLoading = false;
-        this.error = err.error?.error || 'Registration failed. Please try again.';
+      error: () => {
+        // If can't determine email verification status, default to standard flow
+        this.webAuthnService.register(email, firstName, lastName).subscribe({
+          next: () => {
+            this.router.navigate(['/']);
+          },
+          error: (err) => {
+            this.isLoading = false;
+            this.error = err.error?.error || 'Registration failed. Please try again.';
+          }
+        });
       }
     });
   }

@@ -4608,20 +4608,17 @@ def api_direct_signup():
 
     # Determine redirect and auth handling based on auth preference
     if auth_preference == 'passkey':
-        # SECURITY: For passkey signups, use a setup token instead of full session
+        # SECURITY: For passkey signups, use a database-backed setup token
         # This prevents account hijacking if user doesn't complete passkey setup
         # The token only allows access to credential setup endpoints
-        import secrets
-        setup_token = secrets.token_urlsafe(32)
+        from models import SetupToken
 
-        # Store setup token in session with limited scope
-        session['setup_token'] = setup_token
-        session['setup_user_id'] = user.id
-        session['setup_expires'] = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
-        session.permanent = False  # Session-only cookie
+        # Create a proper database-backed setup token
+        setup_token = SetupToken.create_for_user(user)
+        setup_token_str = setup_token._token_string
 
         # Do NOT set user_id - user is NOT fully logged in yet
-        redirect_url = f'/{domain}/setup?token={setup_token}'
+        redirect_url = f'/{domain}/setup?token={setup_token_str}'
         setup_passkey = True
 
         app.logger.info(f"Created setup token for user {email} - credential setup required")
@@ -4935,27 +4932,42 @@ def api_submit_access_request():
 
         db.session.commit()
 
-        # Send setup email to user
+        # Send setup email to user (if email is configured)
         email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
+        email_sent = False
         if email_config:
-            send_account_setup_email(
-                email_config,
-                name,
-                email,
-                setup_url,
-                SetupToken.TOKEN_VALIDITY_HOURS,
-                tenant_name=domain
-            )
-            app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
+            try:
+                send_account_setup_email(
+                    email_config,
+                    name,
+                    email,
+                    setup_url,
+                    SetupToken.TOKEN_VALIDITY_HOURS,
+                    tenant_name=domain
+                )
+                email_sent = True
+                app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
+            except Exception as e:
+                app.logger.warning(f"Failed to send setup email to {email}: {e}")
         else:
-            app.logger.warning(f"Auto-approved user {email} for tenant {domain}, but no email config to send setup link")
+            app.logger.warning(f"Auto-approved user {email} for tenant {domain}, but no email config")
 
-        return jsonify({
-            'message': 'Your account has been created! Check your email for a link to set up your login credentials.',
+        # Build response based on whether email was sent
+        response_data = {
             'auto_approved': True,
             'email': email,
             'domain': domain
-        })
+        }
+
+        if email_sent:
+            response_data['message'] = 'Your account has been created! Check your email for a link to set up your login credentials.'
+        else:
+            # Email not configured/sent - provide setup URL directly for Community Edition
+            # This allows users to complete setup without requiring email
+            response_data['message'] = 'Your account has been created! Click the button below to set up your login credentials.'
+            response_data['setup_url'] = setup_url  # Include setup URL when email fails
+
+        return jsonify(response_data)
 
     # require_approval=True: Create access request for admin review
     access_request = AccessRequest(
