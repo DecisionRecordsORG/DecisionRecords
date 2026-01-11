@@ -225,24 +225,39 @@ Clear browser cookies and cache, or try incognito mode.
 
 ## Community vs Enterprise
 
-The Community Edition includes:
-- Architecture Decision Records (ADR) management
-- Multi-tenant support
-- WebAuthn/Passkey authentication
-- Generic OIDC SSO
-- Role-based access control
-- Audit logging
-- IT Infrastructure mapping
-- Email notifications
-- Spaces/Tags organization
+### Community Edition (Included)
 
-Enterprise Edition adds:
-- Slack integration
-- Microsoft Teams integration
-- Google OAuth
-- AI-powered features
-- PostHog analytics
-- Priority support
+| Feature | Description |
+|---------|-------------|
+| Architecture Decision Records | Create, manage, and track ADRs |
+| Multi-tenant support | Isolated workspaces per organization |
+| WebAuthn/Passkeys | Passwordless authentication |
+| Generic OIDC SSO | Connect Okta, Azure AD, Auth0, etc. |
+| Role-based access control | Admins, Stewards, and Users |
+| Audit logging | Complete history of all changes |
+| IT Infrastructure mapping | Link decisions to systems |
+| Email notifications | Subscribe to decision updates |
+| Spaces/Tags organization | Organize decisions by project/team |
+
+### Enterprise Edition (Additional)
+
+| Feature | Description |
+|---------|-------------|
+| Slack integration | Slash commands, notifications, bot |
+| Microsoft Teams | Bot, notifications, adaptive cards |
+| Google OAuth | Sign in with Google |
+| AI-powered features | MCP server, API access, AI-assisted creation |
+| PostHog analytics | Usage tracking and insights |
+| Priority support | Dedicated support channel |
+
+### Technical Note: Physical Code Separation
+
+The Community Edition Docker image (`Dockerfile.community`) does not contain Enterprise code. Setting `DECISION_RECORDS_EDITION=enterprise` has no effect - the code physically doesn't exist in the image.
+
+This means:
+- You cannot "unlock" Enterprise features by changing environment variables
+- API endpoints for Enterprise features will return 404 (not implemented)
+- The application is smaller and has less attack surface
 
 For Enterprise licensing, contact enterprise@decisionrecords.org.
 
