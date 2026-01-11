@@ -1,3 +1,25 @@
+/**
+ * Super Admin Tenants Component
+ *
+ * Security Model for Enterprise Edition Features:
+ * ------------------------------------------------
+ * This component uses @if (featureFlags.isEnterprise) to show/hide EE-only UI sections
+ * (e.g., Login History analytics). This is intentional and secure because:
+ *
+ * 1. Backend APIs enforce edition checks via decorators
+ *    - EE API endpoints return 503 in Community Edition
+ *    - Users cannot access EE features by modifying frontend code
+ *
+ * 2. Feature flags are fetched from backend at runtime
+ *    - Backend determines edition based on DECISION_RECORDS_EDITION env var
+ *    - Frontend cannot override what backend reports
+ *
+ * 3. Physical separation on backend
+ *    - In CE builds, ee/ directory is excluded at Docker build time
+ *    - EE Python modules don't exist in CE Docker images
+ *
+ * The @if pattern is for UX, not security. See: docs/architecture/open-core-model.md
+ */
 import { Component, OnInit, Inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -19,6 +41,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { Clipboard } from '@angular/cdk/clipboard';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { FeatureFlagsService } from '../../services/feature-flags.service';
 
 interface DomainApproval {
   id: number;
@@ -503,7 +526,8 @@ interface LoginHistoryResponse {
                 </mat-card>
               </mat-tab>
 
-              <!-- Login History Sub-tab -->
+              <!-- Login History Sub-tab (Enterprise only) -->
+              @if (featureFlags.isEnterprise) {
               <mat-tab label="Login History">
                 <mat-card class="subtab-card">
                   <mat-card-header>
@@ -621,11 +645,13 @@ interface LoginHistoryResponse {
                   </mat-card-content>
                 </mat-card>
               </mat-tab>
+              }
             </mat-tab-group>
           </div>
         </mat-tab>
 
-        <!-- Slack Integrations Tab -->
+        <!-- Slack Integrations Tab (Enterprise only) -->
+        @if (featureFlags.isEnterprise) {
         <mat-tab>
           <ng-template mat-tab-label>
             <mat-icon class="tab-icon">tag</mat-icon>
@@ -736,6 +762,7 @@ interface LoginHistoryResponse {
             </mat-card>
           </div>
         </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -1021,7 +1048,8 @@ export class SuperadminTenantsComponent implements OnInit {
     private http: HttpClient,
     private snackBar: MatSnackBar,
     private dialog: MatDialog,
-    private clipboard: Clipboard
+    private clipboard: Clipboard,
+    public featureFlags: FeatureFlagsService
   ) {}
 
   getLoginUrl(domain: string): string {

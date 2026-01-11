@@ -1,3 +1,28 @@
+/**
+ * Super Admin Settings Component
+ *
+ * Security Model for Enterprise Edition Features:
+ * ------------------------------------------------
+ * This component uses @if (featureFlags.isEnterprise) to show/hide EE-only UI sections.
+ * This is intentional and secure because:
+ *
+ * 1. Backend APIs enforce edition checks via decorators (@require_enterprise, etc.)
+ *    - EE API endpoints return 503 in Community Edition
+ *    - Users cannot access EE features by modifying frontend code
+ *
+ * 2. Feature flags are fetched from backend at runtime
+ *    - The backend determines the edition based on DECISION_RECORDS_EDITION env var
+ *    - Frontend cannot override what the backend reports
+ *
+ * 3. Physical separation on backend
+ *    - In CE builds, ee/ directory is excluded at Docker build time
+ *    - EE Python modules don't exist in CE Docker images
+ *
+ * The @if pattern here is for UX (don't show UI for unavailable features),
+ * not for security (which is enforced on the backend).
+ *
+ * See: docs/architecture/open-core-model.md
+ */
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
@@ -17,6 +42,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatTabsModule } from '@angular/material/tabs';
 import { MatBadgeModule } from '@angular/material/badge';
 import { RouterModule } from '@angular/router';
+import { FeatureFlagsService } from '../../services/feature-flags.service';
 
 interface SessionSettings {
   admin_session_timeout_hours: number;
@@ -123,7 +149,8 @@ interface SystemAISettings {
         System Settings
       </h1>
 
-      <!-- Licensing Settings Card -->
+      <!-- Licensing Settings Card (Enterprise only) -->
+      @if (featureFlags.isEnterprise) {
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -173,6 +200,7 @@ interface SystemAISettings {
           }
         </mat-card-content>
       </mat-card>
+      }
 
       <!-- Session Settings Card -->
       <mat-card>
@@ -228,7 +256,8 @@ interface SystemAISettings {
         </mat-card-content>
       </mat-card>
 
-      <!-- Support Email Settings Card -->
+      <!-- Support Email Settings Card (Enterprise only) -->
+      @if (featureFlags.isEnterprise) {
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -272,8 +301,10 @@ interface SystemAISettings {
           }
         </mat-card-content>
       </mat-card>
+      }
 
-      <!-- Analytics Settings Card -->
+      <!-- Analytics Settings Card (Enterprise only) -->
+      @if (featureFlags.isEnterprise) {
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -592,8 +623,10 @@ interface SystemAISettings {
           }
         </mat-card-content>
       </mat-card>
+      }
 
-      <!-- Cloudflare Security Settings Card -->
+      <!-- Cloudflare Security Settings Card (Enterprise only) -->
+      @if (featureFlags.isEnterprise) {
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -732,6 +765,7 @@ interface SystemAISettings {
           }
         </mat-card-content>
       </mat-card>
+      }
 
       <!-- Log Forwarding Settings Card -->
       <mat-card>
@@ -894,7 +928,8 @@ interface SystemAISettings {
         </mat-card-content>
       </mat-card>
 
-      <!-- AI & Integration Settings Card -->
+      <!-- AI & Integration Settings Card (Enterprise only) -->
+      @if (featureFlags.isEnterprise) {
       <mat-card>
         <mat-card-header>
           <mat-card-title>
@@ -960,6 +995,7 @@ interface SystemAISettings {
           }
         </mat-card-content>
       </mat-card>
+      }
     </div>
   `,
   styles: [`
@@ -1633,7 +1669,8 @@ export class SuperadminSettingsComponent implements OnInit {
   constructor(
     private http: HttpClient,
     private fb: FormBuilder,
-    private snackBar: MatSnackBar
+    private snackBar: MatSnackBar,
+    public featureFlags: FeatureFlagsService
   ) {
     this.sessionForm = this.fb.group({
       admin_session_timeout_hours: [1, [Validators.required, Validators.min(1), Validators.max(24)]],

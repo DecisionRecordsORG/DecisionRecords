@@ -1258,8 +1258,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
         </mat-tab>
         }
 
-        <!-- AI & Integrations Tab -->
-        @if (!authService.isMasterAccount) {
+        <!-- AI & Integrations Tab (Enterprise Edition only) -->
+        @if (!authService.isMasterAccount && aiFeatureEnabled) {
         <mat-tab label="AI & API">
           <div class="tab-content">
             <mat-card class="info-card">
@@ -2697,6 +2697,7 @@ export class SettingsComponent implements OnInit {
   // Feature flags
   slackFeatureEnabled = false;
   teamsFeatureEnabled = false;
+  aiFeatureEnabled = false;  // AI features (MCP, API access, AI-assisted creation)
   slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
   googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
 
@@ -2890,15 +2891,17 @@ export class SettingsComponent implements OnInit {
   }
 
   loadFeatureFlags(): void {
-    this.http.get<{ commercial: boolean; slack: boolean; teams: boolean }>('/api/features').subscribe({
+    this.http.get<{ commercial: boolean; slack: boolean; teams: boolean; ai_features: boolean }>('/api/features').subscribe({
       next: (features) => {
         this.slackFeatureEnabled = features.slack;
         this.teamsFeatureEnabled = features.teams;
+        this.aiFeatureEnabled = features.ai_features;
       },
       error: () => {
         // Default to disabled if can't load features
         this.slackFeatureEnabled = false;
         this.teamsFeatureEnabled = false;
+        this.aiFeatureEnabled = false;
       }
     });
   }
