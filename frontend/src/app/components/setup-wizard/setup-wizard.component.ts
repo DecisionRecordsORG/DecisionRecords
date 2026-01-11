@@ -201,7 +201,7 @@ interface SetupResponse {
                       Back
                     </button>
                     <button mat-raised-button class="primary-button" type="submit"
-                            [disabled]="!setupForm.valid || isSubmitting">
+                            [disabled]="!isFormValid || isSubmitting">
                       <mat-spinner *ngIf="isSubmitting" diameter="20"></mat-spinner>
                       <ng-container *ngIf="!isSubmitting">
                         <mat-icon>check</mat-icon>
@@ -475,15 +475,8 @@ export class SetupWizardComponent {
       confirmPassword: ['', Validators.required]
     });
 
-    // Add password match validator
-    this.setupForm.get('confirmPassword')?.valueChanges.subscribe(() => {
-      this.validatePasswordMatch();
-    });
-    this.setupForm.get('adminPassword')?.valueChanges.subscribe(() => {
-      this.validatePasswordMatch();
-    });
-
-    // Create step form groups for validation
+    // Create step form groups for stepper validation
+    // These reference the same controls as setupForm
     this.orgFormGroup = this.fb.group({
       organizationName: this.setupForm.get('organizationName'),
       domain: this.setupForm.get('domain')
@@ -495,27 +488,55 @@ export class SetupWizardComponent {
       adminPassword: this.setupForm.get('adminPassword'),
       confirmPassword: this.setupForm.get('confirmPassword')
     });
+
+    // Subscribe to password changes to validate match
+    this.setupForm.get('adminPassword')?.valueChanges.subscribe(() => {
+      this.updatePasswordMatchValidity();
+    });
+    this.setupForm.get('confirmPassword')?.valueChanges.subscribe(() => {
+      this.updatePasswordMatchValidity();
+    });
   }
 
-  private validatePasswordMatch() {
+  // Update confirmPassword validity based on password match
+  private updatePasswordMatchValidity(): void {
     const password = this.setupForm.get('adminPassword')?.value;
     const confirmPassword = this.setupForm.get('confirmPassword')?.value;
+    const confirmControl = this.setupForm.get('confirmPassword');
+
+    if (!confirmControl) return;
+
+    // Get current errors excluding passwordMismatch
+    const currentErrors = confirmControl.errors;
+    const { passwordMismatch, ...otherErrors } = currentErrors || {};
 
     if (confirmPassword && password !== confirmPassword) {
-      this.setupForm.get('confirmPassword')?.setErrors({ passwordMismatch: true });
-    } else if (confirmPassword) {
-      const errors = this.setupForm.get('confirmPassword')?.errors;
-      if (errors) {
-        delete errors['passwordMismatch'];
-        if (Object.keys(errors).length === 0) {
-          this.setupForm.get('confirmPassword')?.setErrors(null);
-        }
-      }
+      // Passwords don't match - add error
+      confirmControl.setErrors({ ...otherErrors, passwordMismatch: true });
+    } else {
+      // Passwords match - remove passwordMismatch error only
+      confirmControl.setErrors(Object.keys(otherErrors).length > 0 ? otherErrors : null);
     }
   }
 
+  // Check if form is ready for submission (all fields valid + passwords match)
+  get isFormValid(): boolean {
+    const password = this.setupForm.get('adminPassword')?.value;
+    const confirmPassword = this.setupForm.get('confirmPassword')?.value;
+    const passwordsMatch = password === confirmPassword;
+
+    // Check all required fields
+    const orgNameValid = this.setupForm.get('organizationName')?.valid;
+    const domainValid = this.setupForm.get('domain')?.valid;
+    const emailValid = this.setupForm.get('adminEmail')?.valid;
+    const passwordValid = this.setupForm.get('adminPassword')?.valid;
+    const confirmValid = confirmPassword && confirmPassword.length > 0;
+
+    return !!(orgNameValid && domainValid && emailValid && passwordValid && confirmValid && passwordsMatch);
+  }
+
   onSubmit() {
-    if (!this.setupForm.valid) {
+    if (!this.isFormValid) {
       return;
     }
 

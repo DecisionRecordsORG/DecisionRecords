@@ -194,9 +194,103 @@ test.describe('Setup Wizard - Community Edition', () => {
     const completeButton = page.locator('button:has-text("Complete Setup")');
     await expect(completeButton).toBeVisible({ timeout: 5000 });
 
+    // CRITICAL: Complete Setup button should be ENABLED when all fields are valid
+    await expect(completeButton).toBeEnabled({ timeout: 5000 });
+
     // Should see review information
     const reviewOrg = page.locator('text=Test Organization');
     await expect(reviewOrg).toBeVisible({ timeout: 5000 });
+  });
+
+  test('setup-wizard-complete-button-enabled: Complete Setup button is enabled with valid data', async ({ page }) => {
+    await page.goto('/setup');
+    await page.waitForLoadState('networkidle');
+
+    // Handle license acceptance if redirected
+    if (await acceptLicenseIfNeeded(page)) {
+      await page.goto('/setup');
+      await page.waitForLoadState('networkidle');
+    }
+
+    // Check system status
+    const statusResponse = await page.request.get('/api/system/status');
+    const status = await statusResponse.json();
+
+    if (!status.is_community) {
+      test.skip(true, 'Test only applies to Community Edition');
+      return;
+    }
+
+    if (status.has_tenants) {
+      test.skip(true, 'Setup already completed - cannot test wizard');
+      return;
+    }
+
+    // Step 1: Organization
+    await page.locator('input[formcontrolname="organizationName"]').fill('Acme Corp');
+    await page.locator('input[formcontrolname="domain"]').fill('acme.com');
+    await page.locator('button:has-text("Next")').first().click();
+    await page.waitForTimeout(300);
+
+    // Step 2: Admin Account
+    await page.locator('input[formcontrolname="adminName"]').fill('John Admin');
+    await page.locator('input[formcontrolname="adminEmail"]').fill('john@acme.com');
+    await page.locator('input[formcontrolname="adminPassword"]').fill('SecurePass123!');
+    await page.locator('input[formcontrolname="confirmPassword"]').fill('SecurePass123!');
+    await page.waitForTimeout(300);
+    await page.locator('button:has-text("Next")').first().click();
+    await page.waitForTimeout(300);
+
+    // Step 3: Review - Complete Setup button MUST be enabled
+    const completeButton = page.locator('button:has-text("Complete Setup")');
+    await expect(completeButton).toBeVisible({ timeout: 5000 });
+    await expect(completeButton).toBeEnabled({ timeout: 5000 });
+  });
+
+  test('setup-wizard-password-mismatch-disables-button: Mismatched passwords disable Complete button', async ({ page }) => {
+    await page.goto('/setup');
+    await page.waitForLoadState('networkidle');
+
+    // Handle license acceptance if redirected
+    if (await acceptLicenseIfNeeded(page)) {
+      await page.goto('/setup');
+      await page.waitForLoadState('networkidle');
+    }
+
+    // Check system status
+    const statusResponse = await page.request.get('/api/system/status');
+    const status = await statusResponse.json();
+
+    if (!status.is_community) {
+      test.skip(true, 'Test only applies to Community Edition');
+      return;
+    }
+
+    if (status.has_tenants) {
+      test.skip(true, 'Setup already completed - cannot test wizard');
+      return;
+    }
+
+    // Step 1: Organization
+    await page.locator('input[formcontrolname="organizationName"]').fill('Acme Corp');
+    await page.locator('input[formcontrolname="domain"]').fill('acme.com');
+    await page.locator('button:has-text("Next")').first().click();
+    await page.waitForTimeout(300);
+
+    // Step 2: Admin Account with MISMATCHED passwords
+    await page.locator('input[formcontrolname="adminName"]').fill('John Admin');
+    await page.locator('input[formcontrolname="adminEmail"]').fill('john@acme.com');
+    await page.locator('input[formcontrolname="adminPassword"]').fill('SecurePass123!');
+    await page.locator('input[formcontrolname="confirmPassword"]').fill('DifferentPass456!');
+    await page.waitForTimeout(300);
+
+    // Next button in step 2 should be disabled due to password mismatch
+    const nextButton = page.locator('button:has-text("Next")').first();
+    await expect(nextButton).toBeDisabled({ timeout: 5000 });
+
+    // Error message should be visible
+    const errorMessage = page.locator('mat-error:has-text("Passwords do not match")');
+    await expect(errorMessage).toBeVisible({ timeout: 5000 });
   });
 
   test('setup-wizard-back-to-home-link: Back to Home link works', async ({ page }) => {
