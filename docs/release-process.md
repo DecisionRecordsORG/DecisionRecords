@@ -37,9 +37,9 @@ git checkout main
 git pull origin main
 
 # Bump version (choose one)
-./scripts/version-bump.sh patch   # Bug fixes
-./scripts/version-bump.sh minor   # New features
-./scripts/version-bump.sh major   # Breaking changes
+./ee/scripts/version-bump.sh patch   # Bug fixes
+./ee/scripts/version-bump.sh minor   # New features
+./ee/scripts/version-bump.sh major   # Breaking changes
 
 # Commit version bump
 git add version.py
@@ -103,7 +103,7 @@ git add .
 git commit -m "Fix critical bug"
 
 # Bump patch version
-./scripts/version-bump.sh patch
+./ee/scripts/version-bump.sh patch
 
 # Merge to main
 git checkout main

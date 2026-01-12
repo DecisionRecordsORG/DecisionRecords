@@ -162,7 +162,7 @@ az network application-gateway create \
 # Build Docker image
 docker build --platform linux/amd64 \
   -t adrregistry2024eu.azurecr.io/architecture-decisions:latest \
-  -f deployment/Dockerfile.production .
+  -f ee/deployment/Dockerfile.production .
 
 # Push to registry
 az acr login --name adrregistry2024eu
@@ -287,7 +287,7 @@ az container restart \
 # 1. Build new image
 docker build --platform linux/amd64 \
   -t adrregistry2024eu.azurecr.io/architecture-decisions:latest \
-  -f deployment/Dockerfile.production .
+  -f ee/deployment/Dockerfile.production .
 
 # 2. Push to registry
 docker push adrregistry2024eu.azurecr.io/architecture-decisions:latest

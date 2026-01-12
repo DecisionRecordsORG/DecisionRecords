@@ -335,7 +335,7 @@ curl http://localhost:8000/api/slack/install  # Should 404
 
 ```bash
 # Build with ee/
-docker build -f deployment/Dockerfile.production -t dr:ee .
+docker build -f ee/deployment/Dockerfile.production -t dr:ee .
 
 # Run and verify EE routes work
 docker run -p 8000:8000 -e DECISION_RECORDS_EDITION=enterprise dr:ee

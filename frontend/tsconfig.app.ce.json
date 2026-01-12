@@ -1,0 +1,23 @@
+/**
+ * TypeScript App Configuration for Community Edition
+ *
+ * Extends tsconfig.ce.json (which remaps @ee/* to stubs)
+ * and includes the same files as tsconfig.app.json
+ */
+{
+  "extends": "./tsconfig.ce.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/app",
+    "types": [
+      "node"
+    ]
+  },
+  "files": [
+    "src/main.ts",
+    "src/main.server.ts",
+    "server.ts"
+  ],
+  "include": [
+    "src/**/*.d.ts"
+  ]
+}

@@ -159,7 +159,7 @@ When ready to deploy to production:
 
 3. **Deploy application**:
    ```bash
-   ./scripts/redeploy.sh patch
+   ./ee/scripts/redeploy.sh patch
    ```
 
 4. **Create Teams app package**:

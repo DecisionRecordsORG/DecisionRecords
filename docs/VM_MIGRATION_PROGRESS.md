@@ -21,7 +21,7 @@ Migrating from Azure Container Instances (~$40/mo) to Azure B-series VM (~$12/mo
 - [x] ARM template created: `infra/azure-deploy-vm.json`
 - [x] systemd service file created: `deployment/adr-app.service`
 - [x] VM setup script created: `scripts/setup-vm.sh`
-- [x] VM deployment script created: `scripts/redeploy-vm.sh`
+- [x] VM deployment script created: `ee/scripts/redeploy-vm.sh`
 - [x] Documentation updated: `infra/README.md`
 - [x] SSH key generated: `~/.ssh/adr-vm-key`
 - [x] All changes committed to git
@@ -86,7 +86,7 @@ Migrating from Azure Container Instances (~$40/mo) to Azure B-series VM (~$12/mo
 | `infra/azure-deploy-vm.json` | ARM template for VM deployment |
 | `deployment/adr-app.service` | systemd service for container |
 | `scripts/setup-vm.sh` | One-time VM configuration |
-| `scripts/redeploy-vm.sh` | Daily deployment script |
+| `ee/scripts/redeploy-vm.sh` | Daily deployment script |
 
 ## Rollback Plan
 

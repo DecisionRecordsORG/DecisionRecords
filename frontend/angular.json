@@ -69,6 +69,25 @@
                 "fonts": false
               }
             },
+            "community": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "900kB",
+                  "maximumError": "1.5MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "35kB",
+                  "maximumError": "50kB"
+                }
+              ],
+              "outputHashing": "all",
+              "optimization": {
+                "fonts": false
+              },
+              "tsConfig": "tsconfig.app.ce.json"
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,

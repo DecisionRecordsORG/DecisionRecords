@@ -16,7 +16,7 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:api.github.com)",
       "Bash(ls:*)",
-      "Bash(./scripts/redeploy.sh:*)",
+      "Bash(./ee/scripts/redeploy.sh:*)",
       "Bash(npm run start:*)",
       "Bash(python -m pytest:*)",
       "Bash(.venv/bin/python:*)",
@@ -33,7 +33,18 @@
       "WebFetch(domain:posthog.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:supabase.com)",
-      "Bash(DECISION_RECORDS_EDITION=community .venv/bin/python -m pytest:*)"
+      "Bash(DECISION_RECORDS_EDITION=community .venv/bin/python -m pytest:*)",
+      "mcp__MCP_DOCKER__browser_click",
+      "mcp__MCP_DOCKER__browser_type",
+      "mcp__MCP_DOCKER__browser_snapshot",
+      "mcp__MCP_DOCKER__browser_evaluate",
+      "mcp__MCP_DOCKER__browser_navigate",
+      "mcp__MCP_DOCKER__browser_close",
+      "Bash(xargs:*)",
+      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/ -v --tb=short 2>&1\")",
+      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/test_api_integration.py::TestAnalyticsSettingsAPI -v --tb=short 2>&1\")",
+      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/ --tb=no -q 2>&1\")",
+      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/test_teams_security.py -v --tb=short 2>&1\")"
     ],
     "deny": [],
     "ask": []

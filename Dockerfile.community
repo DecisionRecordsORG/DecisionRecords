@@ -41,8 +41,8 @@ RUN npm ci
 COPY frontend/ ./
 
 # Build Angular app for Community Edition
-# NOTE: Community builds do not include ee/frontend components
-RUN npm run build -- --configuration=production
+# Uses tsconfig.ce.json which remaps @ee/* imports to stub components
+RUN npm run build -- --configuration=community
 
 # ==============================================================================
 # Stage 2: Python backend with Angular frontend

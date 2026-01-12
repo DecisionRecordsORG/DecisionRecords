@@ -25,91 +25,37 @@ This project follows an **Open Core** model with a monorepo structure:
 - **Community Edition** (BSL 1.1 License): Core ADR functionality, open source
 - **Enterprise Edition** (Proprietary): Commercial features in `ee/` directory
 
-### Edition Selection
+**For detailed architecture documentation, see:**
+- [Open Core Model](docs/architecture/open-core-model.md) - Module structure, registration pattern, security model
+- [Adding EE Features](docs/architecture/adding-ee-features.md) - Step-by-step guide for new features
 
-The edition is controlled by the `DECISION_RECORDS_EDITION` environment variable:
+### Quick Reference
 
-```bash
-# Community Edition (default for self-hosting)
-DECISION_RECORDS_EDITION=community
+| Edition | Environment Variable | Dockerfile | Features |
+|---------|---------------------|------------|----------|
+| Community | `DECISION_RECORDS_EDITION=community` | `Dockerfile.community` | Core ADR, Multi-tenancy, WebAuthn, OIDC |
+| Enterprise | `DECISION_RECORDS_EDITION=enterprise` | `ee/deployment/Dockerfile.production` | + Slack, Teams, AI, Analytics |
 
-# Enterprise Edition (production decisionrecords.org)
-DECISION_RECORDS_EDITION=enterprise
-```
+### Key Directories
 
-### Feature Availability by Edition
+| Directory | Purpose |
+|-----------|---------|
+| `app.py`, `models.py` | Core Flask app and models |
+| `ee/backend/` | EE Python modules (Slack, Teams, AI, etc.) |
+| `ee/frontend/` | EE Angular components |
+| `frontend/src/app/` | Core Angular components |
+| `Dockerfile.community` | CE build (excludes `ee/`) |
 
-| Feature | Community | Enterprise |
-|---------|-----------|------------|
-| Architecture Decisions (CRUD) | ✅ | ✅ |
-| Multi-Tenancy | ✅ | ✅ |
-| WebAuthn/Passkeys | ✅ | ✅ |
-| Generic OIDC SSO | ✅ | ✅ |
-| Spaces (Visibility Control) | ✅ | ✅ |
-| Governance Model | ✅ | ✅ |
-| Audit Logging | ✅ | ✅ |
-| Slack Integration | ❌ | ✅ |
-| Microsoft Teams | ❌ | ✅ |
-| AI Features (MCP Server) | ❌ | ✅ |
-| Google OAuth | ❌ | ✅ |
-| PostHog Analytics | ❌ | ✅ |
-| Azure Key Vault | ❌ | ✅ |
+### EE Module Loading
 
-### Directory Structure
+EE modules are Flask Blueprints registered conditionally:
 
-```
-architecture-decisions/
-├── app.py                    # Main Flask app (core routes)
-├── models.py                 # SQLAlchemy models (shared)
-├── feature_flags.py          # Edition-based feature detection
-├── security.py               # Core security (CSRF, sanitization)
-├── requirements.txt          # Core dependencies only
-├── frontend/                 # Angular frontend (shared)
-│   └── src/app/
-│       ├── components/       # Core UI components
-│       └── services/         # Core services
-├── tests/                    # All tests (EE tests skip if unavailable)
-├── ee/                       # Enterprise Edition (proprietary)
-│   ├── LICENSE               # Proprietary license
-│   ├── requirements.txt      # Additional EE dependencies
-│   ├── backend/              # Python EE modules
-│   │   ├── ai/               # AI/LLM integration
-│   │   ├── slack/            # Slack integration
-│   │   ├── teams/            # Teams integration
-│   │   ├── analytics/        # PostHog integration
-│   │   ├── azure/            # Azure Key Vault
-│   │   ├── cloudflare/       # Cloudflare security
-│   │   └── oauth_providers/  # Google OAuth
-│   ├── frontend/             # Angular EE components
-│   │   ├── components/       # EE-specific components
-│   │   └── pages/            # EE-specific pages
-│   └── infra/                # Azure ARM templates
-├── deployment/
-│   └── Dockerfile.production # Enterprise Edition build
-├── Dockerfile.community      # Community Edition build
-├── docker-compose.yml        # Self-hosting compose file
-└── docs/
-    └── self-hosting.md       # Self-hosting guide
-```
-
-### How Code is Loaded
-
-**Backend (app.py)**:
 ```python
-from feature_flags import is_enterprise
-
-# EE modules are conditionally imported
+# app.py
 if is_enterprise():
-    from ee.backend.slack.slack_service import SlackService
-    from ee.backend.teams.teams_service import TeamsService
-    from ee.backend.ai import AIConfig
-    # Register EE routes...
+    from ee.backend import register_all_blueprints
+    register_all_blueprints(app)
 ```
-
-**Frontend**:
-- Core components are in `frontend/src/app/components/`
-- EE components are in `ee/frontend/components/` (loaded conditionally)
-- Feature flags service fetches `/api/features` to determine edition
 
 ## Architecture Decision Records (ADRs)
 
@@ -195,8 +141,8 @@ The deployment workflow is:
 # Correct workflow - use the redeploy script
 git add .
 git commit -m "Description of changes"
-./scripts/version-bump.sh patch  # Optional: if releasing new version
-./scripts/redeploy.sh  # Builds, pushes, and redeploys container
+./ee/scripts/version-bump.sh patch  # Optional: if releasing new version
+./ee/scripts/redeploy.sh  # Builds, pushes, and redeploys container
 ```
 
 The `redeploy.sh` script handles the full deployment:
@@ -210,12 +156,12 @@ The `redeploy.sh` script handles the full deployment:
 
 **Manual steps (if needed)**:
 ```bash
-docker build --platform linux/amd64 -t adrregistry2024eu.azurecr.io/architecture-decisions:latest -f deployment/Dockerfile.production .
+docker build --platform linux/amd64 -t adrregistry2024eu.azurecr.io/architecture-decisions:latest -f ee/deployment/Dockerfile.production .
 az acr login --name adrregistry2024eu
 docker push adrregistry2024eu.azurecr.io/architecture-decisions:latest
 az container stop --name adr-app-eu --resource-group adr-resources-eu
 az container start --name adr-app-eu --resource-group adr-resources-eu
-./scripts/update-gateway-backend.sh
+./ee/scripts/update-gateway-backend.sh
 ```
 
 ### Reasoning
@@ -238,9 +184,9 @@ The version is managed in `version.py`:
 Use the version bump script for releases:
 
 ```bash
-./scripts/version-bump.sh patch  # Bug fixes: 1.0.0 -> 1.0.1
-./scripts/version-bump.sh minor  # New features: 1.0.0 -> 1.1.0
-./scripts/version-bump.sh major  # Breaking changes: 1.0.0 -> 2.0.0
+./ee/scripts/version-bump.sh patch  # Bug fixes: 1.0.0 -> 1.0.1
+./ee/scripts/version-bump.sh minor  # New features: 1.0.0 -> 1.1.0
+./ee/scripts/version-bump.sh major  # Breaking changes: 1.0.0 -> 2.0.0
 ```
 
 ### Version Display
@@ -257,7 +203,7 @@ The version is displayed in:
 **When modifying SQLAlchemy models that affect existing database tables, you MUST:**
 
 1. **Update the model** in `models.py` with the new column/table definition
-2. **Create a migration script** in `scripts/migrate_to_vXXX.py` to add the column/table to existing databases
+2. **Create a migration script** in `ee/scripts/migrate_to_vXXX.py` to add the column/table to existing databases
 3. **Verify fresh initialization** works by testing with a new database (SQLAlchemy's `db.create_all()` handles this)
 4. **Run the migration** on production before deploying new code that uses the column
 
@@ -301,18 +247,18 @@ def add_new_column(cur, dry_run=False):
 
 ```bash
 # Preview changes (dry-run)
-DATABASE_URL="postgresql://..." python scripts/migrate_to_v113.py --dry-run --verbose
+DATABASE_URL="postgresql://..." python ee/scripts/migrate_to_v113.py --dry-run --verbose
 
 # Apply changes
-DATABASE_URL="postgresql://..." python scripts/migrate_to_v113.py --verbose
+DATABASE_URL="postgresql://..." python ee/scripts/migrate_to_v113.py --verbose
 ```
 
 ### Existing Migration Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/migrate_to_v15.py` | v1.5 Governance model (tenants, memberships) |
-| `scripts/migrate_to_v113.py` | v1.13 AI, Slack, Teams, Blog features |
+| `ee/scripts/migrate_to_v15.py` | v1.5 Governance model (tenants, memberships) |
+| `ee/scripts/migrate_to_v113.py` | v1.13 AI, Slack, Teams, Blog features |
 
 ### Common New Column Scenarios
 
@@ -504,7 +450,7 @@ The Angular dev server proxies `/api` and `/auth` calls to the Flask backend via
 | `ee/frontend/components/` | EE Angular components |
 | `ee/infra/` | Azure ARM templates |
 | `ee/requirements.txt` | EE Python dependencies |
-| `deployment/Dockerfile.production` | Enterprise Edition Docker build |
+| `ee/deployment/Dockerfile.production` | Enterprise Edition Docker build |
 
 ## Testing Requirements
 
@@ -844,7 +790,7 @@ az network application-gateway show-backend-health \
   --query "backendAddressPools[0].backendHttpSettingsCollection[0].servers[0]"
 
 # If unhealthy, run the update script
-./scripts/update-gateway-backend.sh
+./ee/scripts/update-gateway-backend.sh
 ```
 
 The container IP can change on restart because Azure Container Instances in VNets don't support static private IPs.
@@ -938,7 +884,7 @@ The container IP can change on restart because Azure Container Instances in VNet
 
 This project uses **Option A: Public Repo with Private Submodule** for open core:
 
-| Rep<br/>ository | URL | Visibility | Contains |
+| Rep<br/><br/>ository | URL | Visibility | Contains |
 |------------|-----|------------|----------|
 | **DecisionRecords** | `github.com/DecisionRecordsORG/DecisionRecords` | Public | Core code, docs, tests |
 | **ee** | `github.com/DecisionRecordsORG/ee` | Private | EE backend, frontend, infra |
@@ -1045,7 +991,7 @@ jobs:
 
       - name: Build Enterprise Edition
         run: |
-          docker build -f deployment/Dockerfile.production -t app:enterprise .
+          docker build -f ee/deployment/Dockerfile.production -t app:enterprise .
 ```
 
 ### Access Control

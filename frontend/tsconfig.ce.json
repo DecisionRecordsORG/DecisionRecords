@@ -1,0 +1,17 @@
+/**
+ * TypeScript Configuration for Community Edition
+ *
+ * Extends the base tsconfig but remaps @ee/* imports to stub components.
+ * This allows CE builds to compile without the ee/ directory.
+ *
+ * Usage: ng build --tsconfig tsconfig.ce.json
+ */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@app/*": ["src/app/*"],
+      "@ee/*": ["src/stubs/*"]
+    }
+  }
+}
