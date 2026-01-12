@@ -425,7 +425,7 @@ class TestTeamsJWTValidation:
             del os.environ['TEAMS_BOT_APP_ID']
 
             # Reset cached value
-            import teams_security
+            from ee.backend.teams import teams_security
             teams_security._teams_bot_app_id = None
 
             try:
@@ -446,7 +446,7 @@ class TestTeamsJWTValidation:
             result = validate_teams_jwt('Bearer not.a.valid.jwt.token')
             assert result is None
 
-    @patch('teams_security._get_jwks_client')
+    @patch('ee.backend.teams.teams_security._get_jwks_client')
     def test_validate_jwt_expired_returns_none(self, mock_jwks, app):
         """Expired JWT should return None."""
         with app.app_context():
@@ -561,7 +561,7 @@ class TestTeamsCredentialGetters:
         """Gets bot app ID from environment variable."""
         with app.app_context():
             # Reset cached value
-            import teams_security
+            from ee.backend.teams import teams_security
             teams_security._teams_bot_app_id = None
 
             os.environ['TEAMS_BOT_APP_ID'] = 'env-bot-app-id'
@@ -574,7 +574,7 @@ class TestTeamsCredentialGetters:
         """Gets bot app secret from environment variable."""
         with app.app_context():
             # Reset cached value
-            import teams_security
+            from ee.backend.teams import teams_security
             teams_security._teams_bot_app_secret = None
 
             os.environ['TEAMS_BOT_APP_SECRET'] = 'env-bot-secret'
@@ -587,7 +587,7 @@ class TestTeamsCredentialGetters:
         """Gets bot tenant ID from environment variable."""
         with app.app_context():
             # Reset cached value
-            import teams_security
+            from ee.backend.teams import teams_security
             teams_security._teams_bot_tenant_id = None
 
             os.environ['TEAMS_BOT_TENANT_ID'] = 'env-tenant-id'
@@ -602,7 +602,7 @@ class TestTeamsCredentialGetters:
 class TestTeamsOIDCTokenExchange:
     """Test Teams OIDC token exchange."""
 
-    @patch('teams_security.httpx.Client')
+    @patch('ee.backend.teams.teams_security.httpx.Client')
     def test_exchange_code_success(self, mock_client_class, app):
         """Successfully exchanges authorization code for tokens."""
         with app.app_context():
@@ -633,7 +633,7 @@ class TestTeamsOIDCTokenExchange:
             assert id_claims is not None
             assert id_claims['sub'] == 'user123'
 
-    @patch('teams_security.httpx.Client')
+    @patch('ee.backend.teams.teams_security.httpx.Client')
     def test_exchange_code_failure(self, mock_client_class, app):
         """Returns None on token exchange failure."""
         with app.app_context():
@@ -664,7 +664,7 @@ class TestTeamsOIDCTokenExchange:
 class TestTeamsGetUserInfo:
     """Test Teams user info retrieval from Graph API."""
 
-    @patch('teams_security.httpx.Client')
+    @patch('ee.backend.teams.teams_security.httpx.Client')
     def test_get_user_info_success(self, mock_client_class, app):
         """Successfully retrieves user info from Graph API."""
         with app.app_context():
@@ -692,7 +692,7 @@ class TestTeamsGetUserInfo:
             assert user_info['id'] == 'user-object-id-12345'
             assert user_info['mail'] == 'test@example.com'
 
-    @patch('teams_security.httpx.Client')
+    @patch('ee.backend.teams.teams_security.httpx.Client')
     def test_get_user_info_failure(self, mock_client_class, app):
         """Returns None on Graph API failure."""
         with app.app_context():

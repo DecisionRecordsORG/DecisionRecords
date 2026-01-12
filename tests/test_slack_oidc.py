@@ -443,7 +443,7 @@ class TestSlackOidcRoutes:
             os.environ.pop('CLIENT_SECRET', None)
 
             # Force re-check by clearing cache
-            import slack_security
+            from ee.backend.slack import slack_security
             slack_security._slack_signing_secret = None
 
             with full_app.test_client() as client:

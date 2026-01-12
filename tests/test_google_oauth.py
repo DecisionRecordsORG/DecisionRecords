@@ -265,7 +265,7 @@ class TestGoogleOAuthConfiguration:
 
             try:
                 # Mock Key Vault to prevent fallback to real credentials
-                with patch('keyvault_client.keyvault_client') as mock_kv:
+                with patch('ee.backend.azure.keyvault_client.keyvault_client') as mock_kv:
                     mock_kv.get_secret.return_value = None
                     result = is_google_oauth_configured()
                     assert result is False
@@ -463,7 +463,7 @@ class TestGoogleOAuthRoutes:
             clear_credential_cache()
 
             # Mock Key Vault to prevent fallback to real credentials
-            with patch('keyvault_client.keyvault_client') as mock_kv:
+            with patch('ee.backend.azure.keyvault_client.keyvault_client') as mock_kv:
                 mock_kv.get_secret.return_value = None
                 with full_app.test_client() as client:
                     response = client.get('/api/auth/google-status')
