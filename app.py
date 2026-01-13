@@ -143,6 +143,14 @@ _use_https = os.environ.get('USE_HTTPS', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_SECURE'] = _use_https
 app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to session cookie
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection - prevent cross-site cookie sending
+
+# Session cookie domain - allows cookies to be shared across subdomains
+# Required for OAuth flow: callback on decisionrecords.org, app on app.decisionrecords.org
+_cookie_domain = os.environ.get('SESSION_COOKIE_DOMAIN')
+if _cookie_domain:
+    app.config['SESSION_COOKIE_DOMAIN'] = _cookie_domain
+    logger.info(f"Session cookie domain set to: {_cookie_domain}")
+
 # Note: PERMANENT_SESSION_LIFETIME is set dynamically per session type (admin vs user)
 # Default max is 24 hours, but actual expiry is stored in session['_expires_at']
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=24)
