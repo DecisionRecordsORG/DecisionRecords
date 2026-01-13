@@ -303,6 +303,28 @@ def get_oauth_base_url():
     return base_url
 
 
+def get_app_base_url():
+    """Get the base URL for the application (for post-authentication redirects).
+
+    Priority:
+    1. APP_BASE_URL environment variable (for production with separate app subdomain)
+    2. request.host_url (for local development and standard setups)
+
+    In production, APP_BASE_URL should be set to 'https://app.decisionrecords.org'
+    so that after OAuth authentication (which happens on the root domain), users
+    are redirected to the correct app subdomain.
+    """
+    app_base_url = os.environ.get('APP_BASE_URL')
+    if app_base_url:
+        return app_base_url.rstrip('/')
+
+    # Fallback to request.host_url (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    return base_url
+
+
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
@@ -1677,15 +1699,21 @@ def slack_oidc_callback():
 
         logger.info(f"Slack OIDC login successful for {email}")
 
+        # Get app base URL for post-auth redirect (handles subdomain routing)
+        app_base = get_app_base_url()
+
         # Redirect to return URL or tenant home
         # Add slack_welcome param to trigger welcome modal in frontend
         if return_url and return_url != '/' and not return_url.startswith('/?'):
             # User had a specific destination, append welcome flag
             separator = '&' if '?' in return_url else '?'
+            # Ensure return_url is absolute if APP_BASE_URL is set
+            if return_url.startswith('/') and app_base:
+                return redirect(f'{app_base}{return_url}{separator}slack_welcome=1')
             return redirect(f'{return_url}{separator}slack_welcome=1')
 
         # Redirect to tenant dashboard with welcome modal trigger
-        return redirect(f'/{domain}?slack_welcome=1')
+        return redirect(f'{app_base}/{domain}?slack_welcome=1')
 
     except requests.RequestException as e:
         logger.error(f"Slack OIDC request error: {e}")
@@ -2010,12 +2038,18 @@ def google_oauth_callback():
 
         logger.info(f"Google OAuth login successful for {email}")
 
+        # Get app base URL for post-auth redirect (handles subdomain routing)
+        app_base = get_app_base_url()
+
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
+            # Ensure return_url is absolute if APP_BASE_URL is set
+            if return_url.startswith('/') and app_base:
+                return redirect(f'{app_base}{return_url}')
             return redirect(return_url)
 
         # Redirect to tenant dashboard
-        return redirect(f'/{domain}')
+        return redirect(f'{app_base}/{domain}')
 
     except http_requests.RequestException as e:
         logger.error(f"Google OAuth request error: {e}")
@@ -10674,7 +10708,18 @@ def teams_oidc_callback():
 
     logger.info(f"User {user.id} logged in via Teams OIDC")
 
-    return redirect(return_url)
+    # Get app base URL for post-auth redirect (handles subdomain routing)
+    app_base = get_app_base_url()
+
+    # Redirect to return URL or tenant home
+    if return_url and return_url != '/' and not return_url.startswith('/?'):
+        # Ensure return_url is absolute if APP_BASE_URL is set
+        if return_url.startswith('/') and app_base:
+            return redirect(f'{app_base}{return_url}')
+        return redirect(return_url)
+
+    # Redirect to tenant dashboard
+    return redirect(f'{app_base}/{domain}')
 
 
 if __name__ == '__main__':
