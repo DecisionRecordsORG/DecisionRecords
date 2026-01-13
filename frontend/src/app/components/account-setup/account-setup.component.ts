@@ -415,12 +415,10 @@ export class AccountSetupComponent implements OnInit {
           : 'Passkey registered successfully! Redirecting to login...';
         this.snackBar.open(successMsg, 'Close', { duration: 3000 });
 
-        // Refresh auth state
-        this.authService.loadCurrentUser().subscribe();
-
-        // Redirect to tenant login page
+        // Redirect to tenant login page after brief delay
+        // User needs to log in with their new credentials
         setTimeout(() => {
-          this.router.navigate([`/${this.user!.sso_domain}`]);
+          this.router.navigate([`/${this.user!.sso_domain}/login`]);
         }, 2000);
       }
     } catch (error: any) {
@@ -445,12 +443,10 @@ export class AccountSetupComponent implements OnInit {
           : 'Password set successfully! Redirecting to login...';
         this.snackBar.open(successMsg, 'Close', { duration: 3000 });
 
-        // Refresh auth state
-        this.authService.loadCurrentUser().subscribe();
-
-        // Redirect to tenant login page
+        // Redirect to tenant login page after brief delay
+        // User needs to log in with their new credentials
         setTimeout(() => {
-          this.router.navigate([`/${this.user!.sso_domain}`]);
+          this.router.navigate([`/${this.user!.sso_domain}/login`]);
         }, 2000);
       },
       error: (err) => {

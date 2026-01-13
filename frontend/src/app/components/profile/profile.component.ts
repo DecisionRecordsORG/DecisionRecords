@@ -1439,7 +1439,8 @@ export class ProfileComponent implements OnInit {
     if (this.pendingDomain) {
       this.router.navigate([`/${this.user?.sso_domain}/pending`]);
     } else {
-      this.router.navigate([`/${this.user?.sso_domain}`]);
+      // Redirect to tenant login page so user can test their new credentials
+      this.router.navigate([`/${this.user?.sso_domain}/login`]);
     }
   }
 
