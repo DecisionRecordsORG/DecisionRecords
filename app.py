@@ -1385,7 +1385,15 @@ def logout():
     session.clear()
     # Redirect to marketing site where Google/Slack OAuth is available
     marketing_url = get_oauth_base_url()  # Returns decisionrecords.org
-    return redirect(marketing_url)
+    response = redirect(marketing_url)
+    # Explicitly delete session cookie with correct domain for cross-subdomain logout
+    cookie_domain = app.config.get('SESSION_COOKIE_DOMAIN')
+    response.delete_cookie(
+        app.config.get('SESSION_COOKIE_NAME', 'session'),
+        domain=cookie_domain,
+        path='/'
+    )
+    return response
 
 
 @app.route('/api/auth/logout', methods=['POST'])
@@ -1394,10 +1402,18 @@ def api_logout():
     session.clear()
     # Include redirect URL for frontend to use (marketing site with OAuth options)
     marketing_url = get_oauth_base_url()
-    return jsonify({
+    response = jsonify({
         'message': 'Logged out successfully',
         'redirect_url': marketing_url
     })
+    # Explicitly delete session cookie with correct domain for cross-subdomain logout
+    cookie_domain = app.config.get('SESSION_COOKIE_DOMAIN')
+    response.delete_cookie(
+        app.config.get('SESSION_COOKIE_NAME', 'session'),
+        domain=cookie_domain,
+        path='/'
+    )
+    return response
 
 
 @app.route('/api/auth/csrf-token', methods=['GET'])
@@ -2055,7 +2071,6 @@ def google_oauth_callback():
 
         # Get app base URL for post-auth redirect (handles subdomain routing)
         app_base = get_app_base_url()
-        logger.info(f"Google OAuth redirect: app_base={app_base}, domain={domain}, redirect_target={app_base}/{domain}")
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
