@@ -100,3 +100,4 @@ style-guide/
 backups/
 local_secrets.py
 e2e/playwright-report/
+.env.dev
