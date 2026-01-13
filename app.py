@@ -7,9 +7,9 @@ import traceback
 
 # psycopg2 is only needed for PostgreSQL - make import optional for SQLite local dev
 try:
-    import psycopg
+    import psycopg2
 except ImportError:
-    psycopg = None
+    psycopg2 = None
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
