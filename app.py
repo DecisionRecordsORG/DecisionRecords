@@ -276,6 +276,33 @@ if is_enterprise():
     except Exception as e:
         logger.warning(f"Failed to initialize analytics tracking middleware: {e}")
 
+# ==================== OAuth Base URL Helper ====================
+# For OAuth callbacks, we need to generate redirect_uri that matches what's registered
+# with the OAuth provider. When app runs on a subdomain but OAuth is registered on the
+# root domain (via Cloudflare Worker routing), we need to override the base URL.
+
+def get_oauth_base_url():
+    """Get the base URL for OAuth callback URIs.
+
+    Priority:
+    1. OAUTH_BASE_URL environment variable (for production with Cloudflare Worker routing)
+    2. request.host_url (for local development and standard setups)
+
+    In production, OAUTH_BASE_URL should be set to 'https://decisionrecords.org' since
+    OAuth callbacks are registered on the root domain, which the Cloudflare Worker
+    routes to the app on app.decisionrecords.org.
+    """
+    oauth_base_url = os.environ.get('OAUTH_BASE_URL')
+    if oauth_base_url:
+        return oauth_base_url.rstrip('/')
+
+    # Fallback to request.host_url (force https in production)
+    base_url = request.host_url.rstrip('/')
+    if not base_url.startswith('https://') and 'localhost' not in base_url:
+        base_url = base_url.replace('http://', 'https://')
+    return base_url
+
+
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
@@ -1413,10 +1440,8 @@ def slack_oidc_initiate():
         logger.error(f"Failed to generate Slack OIDC state: {e}")
         return redirect('/?error=internal_error')
 
-    # Build redirect URI (force https in production)
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/slack/oidc/callback"
 
     # Build Slack authorization URL
@@ -1491,9 +1516,7 @@ def slack_oidc_callback():
         return redirect('/?error=slack_not_configured')
 
     # Build redirect URI (must match the one used in authorization)
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/slack/oidc/callback"
 
     try:
@@ -1749,10 +1772,8 @@ def google_oauth_initiate():
         logger.error(f"Failed to generate Google OAuth state: {e}")
         return redirect('/?error=internal_error')
 
-    # Build redirect URI (force https in production)
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/google/callback"
 
     # Build Google authorization URL
@@ -1829,9 +1850,7 @@ def google_oauth_callback():
         return redirect('/?error=google_not_configured')
 
     # Build redirect URI (must match the one used in authorization)
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/google/callback"
 
     try:
@@ -8335,10 +8354,8 @@ def slack_install():
         # Slack OAuth scopes
         scopes = 'chat:write,commands,users:read,users:read.email,channels:read,groups:read'
 
-        # Force https for production (request.host_url may be http behind proxy)
-        base_url = request.host_url.rstrip('/')
-        if not base_url.startswith('https://') and 'localhost' not in base_url:
-            base_url = base_url.replace('http://', 'https://')
+        # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+        base_url = get_oauth_base_url()
         redirect_uri = f"{base_url}/api/slack/oauth/callback"
 
         auth_url = (
@@ -8400,10 +8417,8 @@ def slack_oauth_callback():
     try:
         # Exchange code for token
         client = WebClient()
-        # Force https for production (request.host_url may be http behind proxy)
-        base_url = request.host_url.rstrip('/')
-        if not base_url.startswith('https://') and 'localhost' not in base_url:
-            base_url = base_url.replace('http://', 'https://')
+        # Build redirect URI (must match the one used in authorization)
+        base_url = get_oauth_base_url()
         redirect_uri = f"{base_url}/api/slack/oauth/callback"
 
         response = client.oauth_v2_access(
@@ -10064,10 +10079,8 @@ def teams_oauth_start():
         # Generate state with tenant_id
         state = generate_teams_oauth_state(tenant.id, user.id)
 
-        # Force https for production
-        base_url = request.host_url.rstrip('/')
-        if not base_url.startswith('https://') and 'localhost' not in base_url:
-            base_url = base_url.replace('http://', 'https://')
+        # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+        base_url = get_oauth_base_url()
         redirect_uri = f"{base_url}/api/teams/oauth/callback"
 
         # Azure AD OAuth URL
@@ -10493,10 +10506,8 @@ def teams_oidc_start():
     # Generate state
     state = generate_teams_oidc_state(return_url=return_url)
 
-    # Force https for production
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/teams/oidc/callback"
 
     # Build authorization URL
@@ -10554,10 +10565,8 @@ def teams_oidc_callback():
 
     return_url = state_data.get('return_url', '/')
 
-    # Force https for production
-    base_url = request.host_url.rstrip('/')
-    if not base_url.startswith('https://') and 'localhost' not in base_url:
-        base_url = base_url.replace('http://', 'https://')
+    # Build redirect URI (must match the one used in authorization)
+    base_url = get_oauth_base_url()
     redirect_uri = f"{base_url}/auth/teams/oidc/callback"
 
     # Exchange code for tokens
