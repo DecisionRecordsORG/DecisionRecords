@@ -1375,14 +1375,21 @@ def sso_callback():
 def logout():
     """Log out the current user."""
     session.clear()
-    return redirect('/')
+    # Redirect to marketing site where Google/Slack OAuth is available
+    marketing_url = get_oauth_base_url()  # Returns decisionrecords.org
+    return redirect(marketing_url)
 
 
 @app.route('/api/auth/logout', methods=['POST'])
 def api_logout():
     """API endpoint for logout - returns JSON instead of redirect."""
     session.clear()
-    return jsonify({'message': 'Logged out successfully'})
+    # Include redirect URL for frontend to use (marketing site with OAuth options)
+    marketing_url = get_oauth_base_url()
+    return jsonify({
+        'message': 'Logged out successfully',
+        'redirect_url': marketing_url
+    })
 
 
 @app.route('/api/auth/csrf-token', methods=['GET'])

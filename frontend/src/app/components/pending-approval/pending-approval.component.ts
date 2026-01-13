@@ -317,7 +317,14 @@ export class PendingApprovalComponent implements OnInit, OnDestroy {
 
   logout(): void {
     this.authService.logout().subscribe({
-      next: () => this.router.navigate(['/']),
+      next: (response: any) => {
+        // Redirect to marketing domain where OAuth login options are available
+        if (response?.redirect_url) {
+          window.location.href = response.redirect_url;
+        } else {
+          this.router.navigate(['/']);
+        }
+      },
       error: () => this.router.navigate(['/'])
     });
   }

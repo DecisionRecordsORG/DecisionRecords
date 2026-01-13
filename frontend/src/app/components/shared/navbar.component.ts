@@ -612,10 +612,15 @@ export class NavbarComponent {
     // Capture master status before logout clears user state
     const wasMaster = this.authService.isMasterAccount;
     this.authService.logout().subscribe({
-      next: () => {
+      next: (response: any) => {
         if (wasMaster) {
+          // Master accounts stay on app domain for superadmin login
           this.router.navigate(['/superadmin']);
+        } else if (response?.redirect_url) {
+          // Regular users go to marketing site (where Google/Slack OAuth is available)
+          window.location.href = response.redirect_url;
         } else {
+          // Fallback to root (will stay on app domain)
           this.router.navigate(['/']);
         }
       },
