@@ -1,1 +1,1 @@
-export { FeatureUnavailableComponent as LandingComponent } from '../../../app/components/feature-unavailable/feature-unavailable.component';
+export { LandingComponent } from '../../../app/components/landing/landing.component';

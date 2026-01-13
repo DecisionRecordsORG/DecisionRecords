@@ -1,20 +1,6 @@
-# Static pages (auto-generated - do not edit manually)
+# App routes (auto-generated - do not edit manually)
+# Marketing pages are served from separate static site at decisionrecords.org
 /
-/solutions
-/about
-/faq
-/integrations
-/terms
-/security
-/dpa
-/sla
-/slack-integration
-
-# Blog listing
-/blog
-
-# Blog posts (auto-generated from blog-post.component.ts)
-/blog/claude-code-integration-with-decision-records
-/blog/how-should-teams-document-important-decisions
-/blog/how-to-track-decisions-at-a-startup
-/blog/decision-habit-framework-fashion-brands
+/license
+/setup
+/superadmin

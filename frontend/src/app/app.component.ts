@@ -2,31 +2,37 @@ import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterOutlet, RouterModule, Router, NavigationEnd } from '@angular/router';
 import { NavbarComponent } from './components/shared/navbar.component';
-import { SiteNavComponent } from './components/shared/site-nav/site-nav.component';
-import { SiteFooterComponent } from './components/shared/site-footer/site-footer.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
 import { filter } from 'rxjs/operators';
 
+/**
+ * Root Application Component
+ *
+ * Architecture:
+ * - Marketing pages (homepage, blog, about, etc.) are served from a separate
+ *   marketing site at decisionrecords.org
+ * - This app (app.decisionrecords.org) handles authenticated tenant access
+ * - The landing page handles CE setup/signin and EE tenant discovery
+ *
+ * Navigation:
+ * - Landing page: Shows CE setup/signin or EE domain input
+ * - Tenant pages: Uses NavbarComponent for authenticated navigation
+ * - Super admin: Uses NavbarComponent
+ */
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent, SiteNavComponent, SiteFooterComponent],
+  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent],
   template: `
-    @if (showSiteNav && featureFlags.marketingPagesEnabled) {
-      <app-site-nav [darkBackground]="siteNavDarkBg" [lightTopBackground]="siteNavLightTopBg"></app-site-nav>
-    }
     @if (authService.isAuthenticated && showAppNavbar) {
       <app-navbar></app-navbar>
     }
     <main>
       <router-outlet></router-outlet>
     </main>
-    @if (showSiteFooter && featureFlags.marketingPagesEnabled) {
-      <app-site-footer></app-site-footer>
-    }
     @if (!isLandingPage) {
       <footer class="app-footer">
         <div class="footer-content">
@@ -79,43 +85,19 @@ import { filter } from 'rxjs/operators';
       font-family: monospace;
       cursor: help;
     }
-
-    .app-footer .sweden-badge {
-      height: 20px;
-      width: auto;
-      opacity: 0.8;
-    }
   `]
 })
 export class AppComponent implements OnInit {
   showAppNavbar = false;
-  showSiteNav = false;
-  showSiteFooter = false;
-  siteNavDarkBg = false;
-  siteNavLightTopBg = false;
   isLandingPage = false;
 
-  // Marketing/public pages that should show the site nav (EE only)
-  private publicRoutes = [
+  // Pages where we don't show the app navbar (landing, login, setup)
+  private noNavbarRoutes = [
     '/',
-    '/about',
-    '/blog',
-    '/solutions',
-    '/integrations',
-    '/faq',
-    '/terms',
-    '/security',
-    '/security-features',
-    '/dpa',
-    '/sla',
-    '/licensing'
+    '/license',
+    '/setup',
+    '/superadmin'
   ];
-
-  // Routes that need dark background on site nav
-  private darkBgRoutes = ['/', '/integrations/slack'];
-
-  // Routes that need light top background on site nav
-  private lightTopBgRoutes = ['/blog'];
 
   constructor(
     public authService: AuthService,
@@ -151,32 +133,19 @@ export class AppComponent implements OnInit {
     // Check if this is the landing page
     this.isLandingPage = path === '/';
 
-    // Check if current path is a public/marketing route
-    const isPublicRoute = this.publicRoutes.some(route => {
+    // Check if current path is a no-navbar route
+    const isNoNavbarRoute = this.noNavbarRoutes.some(route => {
       if (route === '/') {
         return path === '/';
       }
       return path === route || path.startsWith(route + '/');
     });
 
-    // Show site nav and footer on public pages (EE only - controlled in template)
-    this.showSiteNav = isPublicRoute;
-    this.showSiteFooter = isPublicRoute;
+    // Also hide navbar on tenant login pages
+    const isTenantLogin = path.match(/^\/[^/]+\/login$/);
 
-    // Show app navbar only on tenant routes (not public pages)
-    this.showAppNavbar = !isPublicRoute;
-
-    // Determine site nav background style
-    this.siteNavDarkBg = this.darkBgRoutes.some(route => {
-      if (route === '/') {
-        return path === '/';
-      }
-      return path === route || path.startsWith(route + '/');
-    });
-
-    this.siteNavLightTopBg = this.lightTopBgRoutes.some(route => {
-      return path === route || path.startsWith(route + '/');
-    });
+    // Show app navbar only on authenticated tenant/admin routes
+    this.showAppNavbar = !isNoNavbarRoute && !isTenantLogin;
   }
 
   get versionTooltip(): string {

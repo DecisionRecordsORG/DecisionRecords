@@ -80,6 +80,27 @@ SERVE_ANGULAR = os.path.exists(FRONTEND_DIR)
 
 app = Flask(__name__, static_folder=FRONTEND_DIR if SERVE_ANGULAR else 'static')
 
+# ==================== CORS Configuration for Marketing Site ====================
+# The marketing website runs on a separate domain and needs to call authentication
+# endpoints on the app domain. Configure CORS for these specific endpoints.
+from flask_cors import CORS
+
+# Marketing site origins (production + local development)
+MARKETING_ORIGINS = [
+    'https://decisionrecords.org',       # Production marketing site
+    'http://localhost:4201',              # Local marketing site development
+    'http://127.0.0.1:4201',              # Alternative localhost
+]
+
+# Enable CORS globally but with restricted origins
+# This allows the marketing site to call auth endpoints for signup/signin
+CORS(app, resources={
+    r"/api/auth/*": {"origins": MARKETING_ORIGINS, "supports_credentials": True},
+    r"/api/system/config": {"origins": MARKETING_ORIGINS},
+    r"/api/blog/*": {"origins": MARKETING_ORIGINS},
+    r"/api/contact": {"origins": MARKETING_ORIGINS},
+}, supports_credentials=True)
+
 # Global error state
 app_error_state = {
     'healthy': False,

@@ -1,0 +1,84 @@
+# Files to exclude when creating the public open source repository
+# Use: rsync -av --exclude-from='.gitignore-public' . ../DecisionRecords-public/
+
+# Enterprise Edition (will be a private submodule)
+ee/
+
+# Claude Code planning files
+.claude/
+
+# Local environment files with secrets
+.env
+.env.local
+.env.production
+*.env
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+.npm/
+
+# Build outputs
+dist/
+build/
+*.egg
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+instance/
+
+# Log files
+*.log
+logs/
+
+# Coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Credentials (should never be committed anyway)
+*credentials*
+*secret*
+*.pem
+*.key
+id_rsa*
+*.pfx
+
+# Internal documentation (moved to ee/)
+# These may have been in root before migration
+docs/internal/
+docs/planning/
+
+# Test artifacts
+e2e/test-results/
+e2e/playwright-report/
+playwright-report/
+test-results/
+
+# Playwright state
+e2e/.auth/
