@@ -2908,7 +2908,7 @@ def api_test_email():
 @master_required
 def api_get_system_email_config():
     """Get system-wide email configuration (super admin only)."""
-    from keyvault_client import keyvault_client
+    from ee.backend.azure.keyvault_client import keyvault_client
     
     config = EmailConfig.query.filter_by(domain='system').first()
     if not config:
@@ -2930,7 +2930,7 @@ def api_get_system_email_config():
 @master_required
 def api_save_system_email_config():
     """Create or update system-wide email configuration (super admin only)."""
-    from keyvault_client import keyvault_client
+    from ee.backend.azure.keyvault_client import keyvault_client
     data = request.get_json()
 
     # Username and password are not required since they come from Key Vault
@@ -8782,7 +8782,7 @@ def slack_events():
 @track_endpoint('api_slack_get_settings')
 def slack_get_settings():
     """Get Slack integration settings."""
-    from keyvault_client import keyvault_client
+    from ee.backend.azure.keyvault_client import keyvault_client
 
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()

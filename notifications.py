@@ -26,7 +26,7 @@ def send_email(email_config, to_email, subject, html_content, text_content=None)
 
         # If config uses Key Vault placeholders, fetch from Key Vault
         if smtp_username == 'from-keyvault' or smtp_password == 'from-keyvault':
-            from keyvault_client import keyvault_client
+            from ee.backend.azure.keyvault_client import keyvault_client
             kv_username, kv_password = keyvault_client.get_smtp_credentials()
 
             if not kv_username or not kv_password:

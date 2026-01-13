@@ -31,7 +31,7 @@ def _get_encryption_key():
     Returns:
         bytes: The Fernet encryption key, or None if unavailable
     """
-    from keyvault_client import keyvault_client
+    from ee.backend.azure.keyvault_client import keyvault_client
 
     # Try Key Vault first
     key = keyvault_client.get_secret(
