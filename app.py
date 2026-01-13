@@ -2055,6 +2055,7 @@ def google_oauth_callback():
 
         # Get app base URL for post-auth redirect (handles subdomain routing)
         app_base = get_app_base_url()
+        logger.info(f"Google OAuth redirect: app_base={app_base}, domain={domain}, redirect_target={app_base}/{domain}")
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
