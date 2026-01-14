@@ -446,6 +446,7 @@ db.init_app(app)
 # Database initialization flag
 _db_initialized = False
 
+# EE:START - Blog Seed Data
 # Blog posts to auto-seed (source of truth for blog metadata)
 # Content is stored in Angular component; this is metadata only
 BLOG_POSTS_SEED = [
@@ -518,6 +519,7 @@ def seed_blog_posts():
         logger.info(f"Seeded {created_count} new blog post(s)")
     else:
         logger.info("All blog posts already exist in database")
+# EE:END - Blog Seed Data
 
 
 def init_database():
@@ -843,7 +845,8 @@ def get_features():
     return jsonify(get_enabled_features()), 200
 
 
-# ==================== Blog API ====================
+# EE:START - Blog API
+# ==================== Blog API (Enterprise Edition) ====================
 
 @app.route('/api/blog/posts')
 def get_blog_posts():
@@ -874,6 +877,7 @@ def get_blog_post(slug):
         return jsonify({'error': 'Blog post not found'}), 404
 
     return jsonify(post.to_dict()), 200
+# EE:END - Blog API
 
 
 # ==================== Feedback & Sponsorship ====================
@@ -3321,6 +3325,7 @@ def api_save_ai_system_settings():
     })
 
 
+# EE:START - Analytics Settings (PostHog)
 @app.route('/api/admin/settings/analytics', methods=['GET'])
 @master_required
 @track_endpoint('api_admin_settings_analytics_get')
@@ -3618,9 +3623,11 @@ def api_delete_analytics_mapping(endpoint_name):
         })
     else:
         return jsonify({'error': 'Mapping not found'}), 404
+# EE:END - Analytics Settings (PostHog)
 
 
-# ==================== API Routes - Cloudflare Security Settings ====================
+# EE:START - Cloudflare Settings
+# ==================== API Routes - Cloudflare Security Settings (Enterprise Edition) ====================
 
 @app.route('/api/admin/settings/cloudflare', methods=['GET'])
 @master_required
@@ -3785,9 +3792,11 @@ def api_test_cloudflare_settings():
                 'error': str(e)
             }
         }), 400
+# EE:END - Cloudflare Settings
 
 
-# ==================== API Routes - Log Forwarding Settings ====================
+# EE:START - Log Forwarding Settings
+# ==================== API Routes - Log Forwarding Settings (Enterprise Edition) ====================
 
 @app.route('/api/admin/settings/log-forwarding', methods=['GET'])
 @master_required
@@ -3948,6 +3957,7 @@ def api_test_log_forwarding():
             'success': False,
             'message': message
         }), 400
+# EE:END - Log Forwarding Settings
 
 
 def get_tenant_user_count(domain):
