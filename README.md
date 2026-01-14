@@ -197,7 +197,7 @@ The `/ee` directory contains proprietary Enterprise Edition code under a [separa
 
 ## Support
 
-- [GitHub Issues](https://github.com/decisionrecords/decision-records/issues) - Bug reports and feature requests
+- [GitHub Issues](https://github.com/DecisionRecordsORG/DecisionRecords/issues) - Bug reports and feature requests
 - [Documentation](docs/) - Guides and references
 - [Enterprise Support](mailto:enterprise@decisionrecords.org) - Priority support for Enterprise customers
 
