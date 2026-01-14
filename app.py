@@ -58,6 +58,12 @@ else:
                 return os.environ.get(fallback_env_var, default)
             return os.environ.get(name.upper().replace('-', '_'), default)
 
+        def get_smtp_credentials(self):
+            """Get SMTP credentials from environment variables (CE stub)."""
+            username = os.environ.get('SMTP_USERNAME')
+            password = os.environ.get('SMTP_PASSWORD')
+            return username, password
+
     keyvault_client = KeyVaultClientStub()
     def track_endpoint(name): return lambda f: f  # No-op decorator
     def capture_exception(e, **kwargs): pass  # No-op
@@ -3000,8 +3006,7 @@ def api_test_email():
 @master_required
 def api_get_system_email_config():
     """Get system-wide email configuration (super admin only)."""
-    from ee.backend.azure.keyvault_client import keyvault_client
-    
+    # Uses global keyvault_client (EE) or KeyVaultClientStub (CE)
     config = EmailConfig.query.filter_by(domain='system').first()
     if not config:
         return jsonify(None)
@@ -3022,7 +3027,7 @@ def api_get_system_email_config():
 @master_required
 def api_save_system_email_config():
     """Create or update system-wide email configuration (super admin only)."""
-    from ee.backend.azure.keyvault_client import keyvault_client
+    # Uses global keyvault_client (EE) or KeyVaultClientStub (CE)
     data = request.get_json()
 
     # Username and password are not required since they come from Key Vault
