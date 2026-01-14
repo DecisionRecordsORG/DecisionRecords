@@ -80,18 +80,15 @@ jobs:
       - name: Wait for health check
         run: |
           echo "Waiting for application to be healthy..."
+          # Check the public endpoint directly instead of via VM command
           for i in {1..30}; do
-            RESULT=$(az vm run-command invoke \
-              --resource-group ${{ env.RESOURCE_GROUP }} \
-              --name ${{ env.VM_NAME }} \
-              --command-id RunShellScript \
-              --scripts "curl -sf http://localhost:8000/api/health" \
-              --query "value[0].message" -o tsv 2>/dev/null || echo "")
+            RESULT=$(curl -sf https://app.decisionrecords.org/api/health 2>/dev/null || echo "")
             if [[ "$RESULT" == *"ok"* ]] || [[ "$RESULT" == *"healthy"* ]]; then
+              echo "Health check response: $RESULT"
               echo "Application is healthy!"
               exit 0
             fi
-            echo "Attempt $i/30: Waiting..."
+            echo "Attempt $i/30: Waiting... (response: $RESULT)"
             sleep 10
           done
           echo "Health check failed after 30 attempts"
