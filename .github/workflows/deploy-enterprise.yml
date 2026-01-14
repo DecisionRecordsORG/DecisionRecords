@@ -47,6 +47,8 @@ jobs:
           VERSION=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
           git add version.py
           git commit -m "Bump version to $VERSION"
+          # Pull any changes that happened since checkout, then push
+          git pull --rebase origin main
           git push
 
       - name: Login to Azure
