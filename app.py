@@ -10015,10 +10015,12 @@ def _mcp_error_response(request_id, code, message):
             'message': message
         }
     })
+# EE:END - AI/LLM Integration
 
 
+# EE:START - Microsoft Teams Integration
 # =============================================================================
-# MICROSOFT TEAMS INTEGRATION ENDPOINTS
+# MICROSOFT TEAMS INTEGRATION ENDPOINTS (Enterprise Edition)
 # =============================================================================
 
 @app.route('/api/teams/webhook', methods=['POST'])
@@ -10758,6 +10760,7 @@ def teams_oidc_callback():
 
     # Redirect to tenant dashboard
     return redirect(f'{app_base}/{domain}')
+# EE:END - Microsoft Teams Integration
 
 
 if __name__ == '__main__':
