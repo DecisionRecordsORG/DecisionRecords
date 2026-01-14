@@ -74,6 +74,13 @@ id_rsa*
 docs/internal/
 docs/planning/
 
+# CLAUDE.md symlink (points to ee/docs/CLAUDE.md which won't exist in public repo)
+# Public repo will have its own simplified CLAUDE.md for contributors
+CLAUDE.md
+
+# Archived content (old components moved during refactoring)
+.archive/
+
 # Test artifacts
 e2e/test-results/
 e2e/playwright-report/
