@@ -44,7 +44,13 @@
       "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/ -v --tb=short 2>&1\")",
       "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/test_api_integration.py::TestAnalyticsSettingsAPI -v --tb=short 2>&1\")",
       "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/ --tb=no -q 2>&1\")",
-      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/test_teams_security.py -v --tb=short 2>&1\")"
+      "Bash(/bin/zsh -c \"DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest tests/test_teams_security.py -v --tb=short 2>&1\")",
+      "Bash(az vm run-command invoke:*)",
+      "Bash(DECISION_RECORDS_EDITION=enterprise .venv/bin/python -m pytest:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(__NEW_LINE_7559199e7d2fb678__ cd /tmp/ce-build)",
+      "Bash(__NEW_LINE_7559199e7d2fb678__ DECISION_RECORDS_EDITION=community python3 -c \"\nimport sys\nsys.path.insert\\(0, ''.''\\)\n\n# Test basic imports\nfrom feature_flags import is_enterprise, get_enabled_features, EDITION\nprint\\(f''Edition: {EDITION}''\\)\nprint\\(f''is_enterprise\\(\\): {is_enterprise\\(\\)}''\\)\n\n# Test that app.py compiles\nimport py_compile\npy_compile.compile\\(''app.py'', doraise=True\\)\nprint\\(''app.py: Syntax OK''\\)\n\npy_compile.compile\\(''models.py'', doraise=True\\)\nprint\\(''models.py: Syntax OK''\\)\n\n# Check features\nfeatures = get_enabled_features\\(\\)\nprint\\(f''Enabled features: {list\\(features.keys\\(\\)\\)[:10]}...''\\)\nprint\\(''CE import test PASSED''\\)\n\")"
     ],
     "deny": [],
     "ask": []

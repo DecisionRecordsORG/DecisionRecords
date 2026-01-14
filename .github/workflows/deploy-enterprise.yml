@@ -1,0 +1,125 @@
+name: Deploy Enterprise Edition
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - no-bump
+        default: patch
+
+env:
+  REGISTRY: adrregistry2024eu.azurecr.io
+  IMAGE_NAME: architecture-decisions
+  RESOURCE_GROUP: adr-resources-eu
+  VM_NAME: adr-vm-eu
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout with EE submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.EE_REPO_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bump version
+        if: inputs.version_bump != 'no-bump'
+        run: |
+          ./ee/scripts/version-bump.sh ${{ inputs.version_bump }}
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          VERSION=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
+          git add version.py
+          git commit -m "Bump version to $VERSION"
+          git push
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name adrregistry2024eu
+
+      - name: Build and push Docker image
+        run: |
+          docker build --platform linux/amd64 \
+            -f ee/deployment/Dockerfile.production \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            .
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Deploy to VM
+        run: |
+          az vm run-command invoke \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.VM_NAME }} \
+            --command-id RunShellScript \
+            --scripts "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest && systemctl restart adr-app"
+
+      - name: Wait for health check
+        run: |
+          echo "Waiting for application to be healthy..."
+          for i in {1..30}; do
+            RESULT=$(az vm run-command invoke \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --name ${{ env.VM_NAME }} \
+              --command-id RunShellScript \
+              --scripts "curl -sf http://localhost:8000/api/health" \
+              --query "value[0].message" -o tsv 2>/dev/null || echo "")
+            if [[ "$RESULT" == *"ok"* ]] || [[ "$RESULT" == *"healthy"* ]]; then
+              echo "Application is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/30: Waiting..."
+            sleep 10
+          done
+          echo "Health check failed after 30 attempts"
+          exit 1
+
+      - name: Purge Cloudflare cache
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ZONE_ID: 592b5c760ee2d37cabc0bcba764693ea
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            curl -s -X POST \
+              "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"purge_everything":true}'
+            echo "Cloudflare cache purged"
+          else
+            echo "Skipping cache purge (no token)"
+          fi
+
+      - name: Show deployment info
+        if: always()
+        run: |
+          echo "====================================="
+          echo "Deployment complete!"
+          echo "====================================="
+          echo "URL: https://decisionrecords.org"
+          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo ""
+          echo "To view logs, run:"
+          echo "  az vm run-command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.VM_NAME }} --command-id RunShellScript --scripts 'docker logs adr-app --tail 50'"
