@@ -1427,7 +1427,8 @@ def api_get_csrf_token():
     return jsonify({'csrf_token': token})
 
 
-# ==================== Slack OIDC Authentication ====================
+# EE:START - Slack OIDC Authentication
+# ==================== Slack OIDC Authentication (Enterprise Edition) ====================
 # Sign in with Slack using OpenID Connect (OIDC)
 # This provides a frictionless signup/login experience for Slack users
 
@@ -1768,9 +1769,11 @@ def slack_oidc_callback():
             failure_reason=f'Callback error: {str(e)[:200]}'
         )
         return redirect('/?error=internal_error')
+# EE:END - Slack OIDC Authentication
 
 
-# ==================== Google OAuth Authentication ====================
+# EE:START - Google OAuth Authentication
+# ==================== Google OAuth Authentication (Enterprise Edition) ====================
 # Sign in with Google using OAuth 2.0
 # This provides an alternative auth option for users whose orgs restrict Slack OIDC
 
@@ -2104,6 +2107,7 @@ def google_oauth_callback():
             failure_reason=f'Callback error: {str(e)[:200]}'
         )
         return redirect('/?error=internal_error')
+# EE:END - Google OAuth Authentication
 
 
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
@@ -8389,8 +8393,9 @@ def create_incomplete_test_user():
         return jsonify({'error': str(e)}), 500
 
 
+# EE:START - Slack Integration Endpoints
 # =============================================================================
-# SLACK INTEGRATION ENDPOINTS
+# SLACK INTEGRATION ENDPOINTS (Enterprise Edition)
 # =============================================================================
 
 @app.route('/api/slack/install')
@@ -9401,9 +9406,11 @@ def slack_link_complete():
     logger.info(f"User {user.id} linked Slack account {slack_user_id} in workspace {workspace_id}")
 
     return jsonify({'message': 'Account linked successfully'})
+# EE:END - Slack Integration Endpoints
 
 
-# ==================== API Routes - AI/LLM Integration ====================
+# EE:START - AI/LLM Integration
+# ==================== API Routes - AI/LLM Integration (Enterprise Edition) ====================
 
 # Import AI services (Enterprise only)
 if is_enterprise():
