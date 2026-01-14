@@ -99,7 +99,7 @@ jobs:
         if: always()
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: 592b5c760ee2d37cabc0bcba764693ea
+          CLOUDFLARE_ZONE_ID: 55dd53366f300d407b322ff4d9be173d
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             curl -s -X POST \
