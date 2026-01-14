@@ -40,8 +40,9 @@ class RequestedRole(enum.Enum):
     ADMIN = 'admin'
 
 
+# EE:START - AI/LLM Enums
 # ============================================================================
-# ENUMS for AI/LLM Integration
+# ENUMS for AI/LLM Integration (Enterprise Edition)
 # ============================================================================
 
 class LLMProvider(enum.Enum):
@@ -68,6 +69,7 @@ class AIAction(enum.Enum):
     CREATE = 'create'
     UPDATE = 'update'
     SUMMARIZE = 'summarize'
+# EE:END - AI/LLM Enums
 
 
 # Default master account credentials
@@ -1582,8 +1584,9 @@ def save_history(decision, change_reason=None, changed_by=None):
     return history_entry
 
 
+# EE:START - Slack Integration Models
 # ============================================================================
-# SLACK INTEGRATION MODELS
+# SLACK INTEGRATION MODELS (Enterprise Edition)
 # ============================================================================
 
 class SlackWorkspace(db.Model):
@@ -1697,10 +1700,12 @@ class SlackUserMapping(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'linked_at': self.linked_at.isoformat() if self.linked_at else None,
         }
+# EE:END - Slack Integration Models
 
 
+# EE:START - Microsoft Teams Integration Models
 # ============================================================================
-# MICROSOFT TEAMS INTEGRATION MODELS
+# MICROSOFT TEAMS INTEGRATION MODELS (Enterprise Edition)
 # ============================================================================
 
 class TeamsWorkspace(db.Model):
@@ -1861,10 +1866,12 @@ class TeamsConversationReference(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
+# EE:END - Microsoft Teams Integration Models
 
 
+# EE:START - Blog/Content Models
 class BlogPost(db.Model):
-    """Blog posts for the marketing website."""
+    """Blog posts for the marketing website. (Enterprise Edition)"""
 
     __tablename__ = 'blog_posts'
 
@@ -1906,10 +1913,12 @@ class BlogPost(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
         }
+# EE:END - Blog/Content Models
 
 
+# EE:START - AI/LLM Integration Models
 # ============================================================================
-# AI/LLM INTEGRATION MODELS
+# AI/LLM INTEGRATION MODELS (Enterprise Edition)
 # ============================================================================
 
 class AIApiKey(db.Model):
@@ -2089,3 +2098,4 @@ class AIInteractionLog(db.Model):
             'error_message': self.error_message,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+# EE:END - AI/LLM Integration Models
