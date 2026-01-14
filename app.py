@@ -3339,6 +3339,7 @@ def api_save_ai_system_settings():
 # EE:START - Analytics Settings (PostHog)
 @app.route('/api/admin/settings/analytics', methods=['GET'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_get')
 def api_get_analytics_settings():
     """Get analytics settings (super admin only).
@@ -3361,6 +3362,7 @@ def api_get_analytics_settings():
 
 @app.route('/api/admin/settings/analytics', methods=['POST', 'PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_save')
 def api_save_analytics_settings():
     """Update analytics settings (super admin only)."""
@@ -3434,6 +3436,7 @@ def api_save_analytics_settings():
 
 @app.route('/api/admin/settings/analytics/api-key', methods=['PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_api_key')
 def api_save_analytics_api_key():
     """Save analytics API key (super admin only).
@@ -3470,6 +3473,7 @@ def api_save_analytics_api_key():
 
 @app.route('/api/admin/settings/analytics/test', methods=['POST'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_test')
 def api_test_analytics():
     """Send a test event to PostHog (super admin only)."""
@@ -3512,6 +3516,7 @@ def api_test_analytics():
 
 @app.route('/api/admin/settings/analytics/reset-mappings', methods=['POST'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_reset')
 def api_reset_analytics_mappings():
     """Reset event mappings to defaults (super admin only)."""
@@ -3536,6 +3541,7 @@ def api_reset_analytics_mappings():
 
 @app.route('/api/admin/settings/analytics/mapping', methods=['PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_mapping_update')
 def api_update_analytics_mapping():
     """Add or update a single event mapping (super admin only).
@@ -3596,6 +3602,7 @@ def api_update_analytics_mapping():
 
 @app.route('/api/admin/settings/analytics/mapping/<endpoint_name>', methods=['DELETE'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_analytics_mapping_delete')
 def api_delete_analytics_mapping(endpoint_name):
     """Remove an event mapping (super admin only)."""

@@ -936,11 +936,16 @@ class TestSuccessResponseFormats:
 
 # ==================== Test: Analytics Settings API ====================
 
+# Check if running in Enterprise Edition mode
+_EE_ANALYTICS_AVAILABLE = os.environ.get('DECISION_RECORDS_EDITION', 'community') == 'enterprise'
+
+
+@pytest.mark.skipif(not _EE_ANALYTICS_AVAILABLE, reason="Analytics settings require Enterprise Edition")
 class TestAnalyticsSettingsAPI:
     """Integration tests for analytics settings endpoints.
 
     Tests the PostHog analytics configuration API which is only accessible
-    by super admins (master accounts).
+    by super admins (master accounts). These tests only run in Enterprise Edition.
 
     Endpoints:
     - GET /api/admin/settings/analytics - Get analytics config
