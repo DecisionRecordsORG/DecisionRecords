@@ -1,6 +1,8 @@
 # Configuration Reference
 
-This document describes all configuration options for Decision Records.
+Configuration guide for self-hosting Decision Records Community Edition.
+
+> **Note**: This documentation is for Community Edition self-hosters. Enterprise Edition users should refer to internal documentation.
 
 ## Environment Variables
 
@@ -61,14 +63,12 @@ Additional email settings (server, port, from address) are configured in the Adm
 |----------|---------|-------------|
 | `SKIP_CLOUDFLARE_CHECK` | `false` | Set to `true` for self-hosted deployments not behind Cloudflare |
 
-### Feature Flags
+### Edition
 
-The `DECISION_RECORDS_EDITION` variable controls which features are available:
-
-#### Community Edition (`community`)
+Community Edition is the default and only option for self-hosted deployments:
 
 ```bash
-DECISION_RECORDS_EDITION=community
+DECISION_RECORDS_EDITION=community  # Default, can be omitted
 ```
 
 Features included:
@@ -81,20 +81,6 @@ Features included:
 - IT Infrastructure mapping
 - Spaces and organization
 - Email notifications
-
-#### Enterprise Edition (`enterprise`)
-
-```bash
-DECISION_RECORDS_EDITION=enterprise
-```
-
-Additional features:
-- Slack integration
-- Microsoft Teams integration
-- Google OAuth
-- AI-powered features
-- PostHog analytics
-- Azure Key Vault integration
 
 ## Runtime Configuration
 

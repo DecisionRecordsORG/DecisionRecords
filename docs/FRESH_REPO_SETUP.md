@@ -4,7 +4,7 @@ This document describes how to create the fresh public DecisionRecords repositor
 
 ## Overview
 
-The goal is to create a clean public repository without git history that might contain sensitive information, while keeping the Enterprise Edition code in a private submodule.
+The goal is to create a clean public repository without git history that might contain sensitive information, while keeping the Enterprise Edition code in private submodules.
 
 ```
 DecisionRecordsORG/
@@ -12,14 +12,19 @@ DecisionRecordsORG/
 │   ├── app.py, models.py, etc.
 │   ├── frontend/
 │   ├── docs/
-│   └── ee/ → submodule         # Points to private repo
+│   └── ee/ → submodule         # Points to private ee repo
 │
-└── ee (PRIVATE)                 # Enterprise Edition
-    ├── backend/
-    ├── frontend/
-    ├── marketing/
-    └── deployment/
+├── ee (PRIVATE)                 # Enterprise Edition
+│   ├── backend/
+│   ├── frontend/
+│   ├── deployment/
+│   └── marketing/ → submodule  # Points to marketing repo
+│
+└── marketing (PRIVATE)          # Marketing website
+    └── (Angular app deployed to Azure Static Web Apps)
 ```
+
+**Note**: The marketing site (`ee/marketing`) is a nested submodule - it's a submodule within the `ee` repo, not directly in DecisionRecords.
 
 ## Prerequisites
 
@@ -27,16 +32,24 @@ DecisionRecordsORG/
 2. Access to create repositories in the organization
 3. SSH keys configured for GitHub
 
-## Step 1: Create the Private EE Repository
+## Existing Repository Structure
+
+The following repositories already exist in DecisionRecordsORG:
+
+| Repository | Visibility | Description |
+|------------|------------|-------------|
+| `ee` | Private | Enterprise Edition code |
+| `marketing` | Private | Marketing website (submodule of ee) |
+
+## Step 1: Verify EE Repository
+
+The `ee` repository should already exist with marketing as a submodule:
 
 ```bash
-# Create the ee repository on GitHub (private)
-gh repo create DecisionRecordsORG/ee --private --description "Decision Records Enterprise Edition"
-
-# Push current ee/ content
+# Verify ee repo exists and has marketing submodule
 cd ee
-git remote add origin git@github.com:DecisionRecordsORG/ee.git
-git push -u origin main
+git remote -v  # Should show DecisionRecordsORG/ee
+cat .gitmodules  # Should show marketing submodule
 cd ..
 ```
 
