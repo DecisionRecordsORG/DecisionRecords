@@ -1890,12 +1890,10 @@ class BlogPost(db.Model):
     publish_date = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))  # When to show as published
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    content = db.Column(db.Text, nullable=True)  # Full HTML content of the blog post
 
-    # Content is stored in Angular component, not DB (for now)
-    # This model manages metadata only
-
-    def to_dict(self):
-        return {
+    def to_dict(self, include_content=False):
+        data = {
             'id': self.id,
             'slug': self.slug,
             'title': self.title,
@@ -1913,6 +1911,9 @@ class BlogPost(db.Model):
             'createdAt': self.created_at.isoformat() if self.created_at else None,
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
         }
+        if include_content:
+            data['content'] = self.content
+        return data
 # EE:END - Blog/Content Models
 
 

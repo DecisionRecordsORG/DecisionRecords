@@ -104,7 +104,7 @@ class TestRequireAiApiKeyDecorator:
     def api_user_and_key(self, api_app, ai_tenant):
         """Create a user with API key having all scopes."""
         with api_app.app_context():
-            tenant = Tenant.query.get(ai_tenant)
+            tenant = db.session.get(Tenant, ai_tenant)
             user = User(
                 email='apiuser@aitest.com',
                 sso_domain='aitest.com',
@@ -333,7 +333,7 @@ class TestRequireAiApiKeyDecorator:
     def test_missing_required_scope_returns_403(self, client, api_app, enable_external_api, ai_tenant):
         """Returns 403 when API key lacks required scope."""
         with api_app.app_context():
-            tenant = Tenant.query.get(ai_tenant)
+            tenant = db.session.get(Tenant, ai_tenant)
             user = User(
                 email='readonly@aitest.com',
                 sso_domain='aitest.com',

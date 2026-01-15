@@ -209,11 +209,11 @@ try:
         # Angular production build and Material require:
         # - 'unsafe-inline': for Angular Material's stylesheet onload handlers
         # - 'unsafe-eval': only needed for dev; can be removed in strict production
-        'script-src': ["'self'", "'unsafe-inline'"],
+        'script-src': ["'self'", "'unsafe-inline'", "https://e.decisionrecords.org"],
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https:"],
-        'connect-src': ["'self'"],  # API calls - restrict to same origin
+        'connect-src': ["'self'", "https://e.decisionrecords.org"],  # API calls + analytics proxy
         'frame-ancestors': "'none'",  # Prevent clickjacking
         'form-action': "'self'",
         'base-uri': "'self'",
@@ -458,80 +458,9 @@ db.init_app(app)
 # Database initialization flag
 _db_initialized = False
 
-# EE:START - Blog Seed Data
-# Blog posts to auto-seed (source of truth for blog metadata)
-# Content is stored in Angular component; this is metadata only
-BLOG_POSTS_SEED = [
-    {
-        'slug': 'claude-code-integration-with-decision-records',
-        'title': 'Claude Code Integration With Decision Records',
-        'excerpt': "Two commands. That's all it takes to give Claude Code persistent access to your team's architecture decisions. Here's the complete setup guide.",
-        'author': 'Decision Records',
-        'category': 'Technical',
-        'read_time': '6 min read',
-        'image': '/assets/blog/claude-code-integration.svg',
-        'meta_description': 'Learn how to integrate Claude Code with Decision Records to give your AI assistant persistent access to architecture decisions. Complete setup guide with copy-paste commands.',
-        'featured': True,
-        'publish_date': datetime(2025, 1, 4, tzinfo=timezone.utc),
-    },
-    {
-        'slug': 'how-should-teams-document-important-decisions',
-        'title': 'How Should Teams Document Important Decisions?',
-        'excerpt': 'Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
-        'author': 'Decision Records',
-        'category': 'Documentation',
-        'read_time': '5 min read',
-        'image': '/assets/blog/documenting-decisions.svg',
-        'meta_description': 'Learn how teams can effectively document important decisions without creating overhead.',
-        'featured': False,
-        'publish_date': datetime(2024, 12, 1, tzinfo=timezone.utc),
-    },
-    {
-        'slug': 'how-to-track-decisions-at-a-startup',
-        'title': 'How to Track Decisions at a Startup',
-        'excerpt': "Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we'll remember. That assumption rarely holds.",
-        'author': 'Decision Records',
-        'category': 'Startups',
-        'read_time': '7 min read',
-        'image': '/assets/blog/startup-decisions.svg',
-        'meta_description': 'Practical guide to tracking decisions at fast-moving startups without slowing down.',
-        'featured': False,
-        'publish_date': datetime(2024, 12, 15, tzinfo=timezone.utc),
-    },
-    {
-        'slug': 'decision-habit-framework-fashion-brands',
-        'title': 'A Decision Habit Framework for Fast-Moving Fashion Brands',
-        'excerpt': 'Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
-        'author': 'Decision Records',
-        'category': 'Retail',
-        'read_time': '5 min read',
-        'image': '/assets/blog/fashion-decisions.svg',
-        'meta_description': 'A decision documentation framework designed for the fast pace of fashion retail.',
-        'featured': False,
-        'publish_date': datetime(2024, 12, 20, tzinfo=timezone.utc),
-    },
-]
-
-
-def seed_blog_posts():
-    """Seed blog posts that don't exist in the database yet."""
-    from models import BlogPost
-
-    created_count = 0
-    for post_data in BLOG_POSTS_SEED:
-        existing = BlogPost.query.filter_by(slug=post_data['slug']).first()
-        if not existing:
-            post = BlogPost(**post_data)
-            db.session.add(post)
-            logger.info(f"Seeding blog post: {post_data['slug']}")
-            created_count += 1
-
-    if created_count > 0:
-        db.session.commit()
-        logger.info(f"Seeded {created_count} new blog post(s)")
-    else:
-        logger.info("All blog posts already exist in database")
-# EE:END - Blog Seed Data
+# EE:START - Blog Module
+# Blog functionality moved to ee/backend/blog/ Blueprint
+# EE:END - Blog Module
 
 
 def init_database():
@@ -593,13 +522,17 @@ def init_database():
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                     # Continue anyway - migrations are for schema updates, not blocking
 
-                # Seed blog posts (auto-adds any missing posts from BLOG_POSTS_SEED)
-                logger.info("Checking blog posts...")
-                try:
-                    seed_blog_posts()
-                except Exception as blog_error:
-                    logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
-                    db.session.rollback()
+                # Seed EE data (blog posts, etc.) if Enterprise Edition
+                if is_enterprise():
+                    logger.info("Seeding Enterprise Edition data...")
+                    try:
+                        from ee.backend import seed_ee_data
+                        seed_ee_data(db)
+                    except ImportError:
+                        logger.debug("EE modules not available, skipping EE data seeding")
+                    except Exception as ee_error:
+                        logger.warning(f"EE data seeding failed (non-critical): {str(ee_error)}")
+                        db.session.rollback()
 
                 # Create default master account
                 logger.info("Creating default master account...")
@@ -628,79 +561,6 @@ def init_database():
                 except Exception as config_error:
                     logger.warning(f"System config initialization failed (non-critical): {str(config_error)}")
                     # Don't fail the entire initialization for this
-                    db.session.rollback()
-
-                # Seed blog posts if none exist
-                logger.info("Checking blog posts...")
-                try:
-                    from models import BlogPost
-                    if BlogPost.query.count() == 0:
-                        logger.info("Seeding default blog posts...")
-                        posts = [
-                            BlogPost(
-                                slug='how-should-teams-document-important-decisions',
-                                title='How Should Teams Document Important Decisions?',
-                                excerpt='Most teams make important decisions but lose the context behind them. We all agree documentation matters. But in practice, we want it to be brief and unobtrusive.',
-                                author='Decision Records',
-                                category='Documentation',
-                                read_time='5 min read',
-                                image='/assets/blog/documenting-decisions.svg',
-                                meta_description='Most teams make important decisions but lose the context behind them. This article explains how teams should document decisions to preserve shared understanding as they grow.',
-                                published=True,
-                                featured=True,
-                                publish_date=datetime(2025, 11, 1)
-                            ),
-                            BlogPost(
-                                slug='how-to-track-decisions-at-a-startup',
-                                title='How to Track Decisions at a Startup',
-                                excerpt="Startups make decisions constantly. Pricing changes, product bets, hiring trade-offs, positioning shifts. The assumption is simple: we'll remember. That assumption rarely holds.",
-                                author='Decision Records',
-                                category='Startups',
-                                read_time='7 min read',
-                                image='/assets/blog/startup-decisions.svg',
-                                meta_description='Learn how startups can track important decisions without slowing down. A practical guide to lightweight decision records that preserve context and support fast-moving teams.',
-                                published=True,
-                                featured=False,
-                                publish_date=datetime(2025, 11, 8)
-                            ),
-                            BlogPost(
-                                slug='decision-habit-framework-fashion-brands',
-                                title='A Decision Habit Framework for Fast-Moving Fashion Brands',
-                                excerpt='Fashion brands are not slow by accident. They are fast by necessity. The risk is not how decisions are made—it is how quickly decision context disappears.',
-                                author='Decision Records',
-                                category='Retail',
-                                read_time='5 min read',
-                                image='/assets/blog/fashion-decisions.svg',
-                                meta_description='Fashion brands make decisions under pressure every day. Learn how a lightweight decision habit can preserve context without slowing momentum.',
-                                published=True,
-                                featured=False,
-                                publish_date=datetime(2025, 11, 15)
-                            ),
-                        ]
-                        for post in posts:
-                            db.session.add(post)
-                        db.session.commit()
-                        logger.info(f"Seeded {len(posts)} blog posts")
-                    else:
-                        logger.info("Blog posts already exist")
-                    # Update existing posts to November 2025 if they have December 2024 dates
-                    posts_to_update = BlogPost.query.filter(
-                        BlogPost.publish_date < datetime(2025, 1, 1)
-                    ).all()
-                    if posts_to_update:
-                        logger.info(f"Updating {len(posts_to_update)} blog posts to November 2025 dates...")
-                        date_mapping = {
-                            'how-should-teams-document-important-decisions': datetime(2025, 11, 1),
-                            'how-to-track-decisions-at-a-startup': datetime(2025, 11, 8),
-                            'decision-habit-framework-fashion-brands': datetime(2025, 11, 15),
-                        }
-                        for post in posts_to_update:
-                            if post.slug in date_mapping:
-                                post.publish_date = date_mapping[post.slug]
-                        db.session.commit()
-                        logger.info("Blog post dates updated")
-                except Exception as blog_error:
-                    logger.warning(f"Blog post seeding failed (non-critical): {str(blog_error)}")
                     db.session.rollback()
 
                 _db_initialized = True
@@ -858,37 +718,7 @@ def get_features():
 
 
 # EE:START - Blog API
-# ==================== Blog API (Enterprise Edition) ====================
-
-@app.route('/api/blog/posts')
-def get_blog_posts():
-    """Get all published blog posts for the blog listing page.
-
-    Returns posts ordered by featured status (featured first), then by publish date (newest first).
-    """
-    from models import BlogPost
-
-    posts = BlogPost.query.filter_by(published=True).order_by(
-        BlogPost.featured.desc(),
-        BlogPost.publish_date.desc()
-    ).all()
-
-    return jsonify([post.to_dict() for post in posts]), 200
-
-
-@app.route('/api/blog/posts/<slug>')
-def get_blog_post(slug):
-    """Get a single blog post by slug.
-
-    Returns 404 if post not found or not published.
-    """
-    from models import BlogPost
-
-    post = BlogPost.query.filter_by(slug=slug, published=True).first()
-    if not post:
-        return jsonify({'error': 'Blog post not found'}), 404
-
-    return jsonify(post.to_dict()), 200
+# Blog API routes moved to ee/backend/blog/ Blueprint
 # EE:END - Blog API
 
 

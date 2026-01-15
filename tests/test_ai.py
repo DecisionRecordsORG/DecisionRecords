@@ -457,7 +457,7 @@ class TestAIApiKeyServiceCreateKey:
         )
         assert api_key.id is not None
 
-        found = AIApiKey.query.get(api_key.id)
+        found = db.session.get(AIApiKey, api_key.id)
         assert found is not None
         assert found.name == 'Test Key'
 
@@ -496,8 +496,8 @@ class TestAIApiKeyServiceCreateKey:
             expires_in_days=30
         )
         assert api_key.expires_at is not None
-        # Check it's approximately 30 days from now
-        expected = datetime.utcnow() + timedelta(days=30)
+        # Check it's approximately 30 days from now (use naive UTC to match DB storage)
+        expected = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=30)
         diff = abs((api_key.expires_at - expected).total_seconds())
         assert diff < 60  # Within 1 minute
 
@@ -551,7 +551,7 @@ class TestAIApiKeyServiceValidation:
             expires_in_days=1
         )
         # Manually set expiry to past
-        api_key.expires_at = datetime.utcnow() - timedelta(days=1)
+        api_key.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
         session.commit()
 
         validated = AIApiKeyService.validate_key(full_key)
@@ -1009,8 +1009,8 @@ class TestAIInteractionLoggerStats:
         )
 
         # Future date range should return zero
-        start = datetime.utcnow() + timedelta(days=1)
-        end = datetime.utcnow() + timedelta(days=2)
+        start = datetime.now(timezone.utc) + timedelta(days=1)
+        end = datetime.now(timezone.utc) + timedelta(days=2)
         stats = AIInteractionLogger.get_tenant_stats(sample_tenant.id, start_date=start, end_date=end)
 
         assert stats['total_interactions'] == 0
@@ -1054,7 +1054,7 @@ class TestAIApiKeyModel:
     def test_is_valid_returns_false_for_revoked_key(self, app, session, sample_user, sample_tenant, sample_membership):
         """is_valid returns False for revoked key."""
         api_key, _ = AIApiKeyService.create_key(sample_user, sample_tenant, 'Test Key')
-        api_key.revoked_at = datetime.utcnow()
+        api_key.revoked_at = datetime.now(timezone.utc)
         session.commit()
         assert api_key.is_valid is False
 
@@ -1064,9 +1064,8 @@ class TestAIApiKeyModel:
             sample_user, sample_tenant, 'Test Key',
             expires_in_days=1
         )
-        # Use timezone-naive datetime to match the model's utcnow() usage
-        from datetime import datetime as dt
-        api_key.expires_at = dt.utcnow() - timedelta(days=1)
+        # Use timezone-naive datetime to match DB storage
+        api_key.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
         session.commit()
         assert api_key.is_valid is False
 
