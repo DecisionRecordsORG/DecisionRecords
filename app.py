@@ -3649,19 +3649,21 @@ def api_delete_analytics_mapping(endpoint_name):
 
 @app.route('/api/admin/settings/cloudflare', methods=['GET'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_cloudflare_get')
 def api_get_cloudflare_settings():
     """Get Cloudflare security settings (super admin only)."""
-    from cloudflare_security import get_cloudflare_config_for_api
+    from ee.backend.cloudflare.cloudflare_security import get_cloudflare_config_for_api
     return jsonify(get_cloudflare_config_for_api())
 
 
 @app.route('/api/admin/settings/cloudflare', methods=['POST', 'PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_cloudflare_save')
 def api_save_cloudflare_settings():
     """Update Cloudflare security settings (super admin only)."""
-    from cloudflare_security import invalidate_cloudflare_cache
+    from ee.backend.cloudflare.cloudflare_security import invalidate_cloudflare_cache
 
     data = request.get_json() or {}
 
@@ -3714,13 +3716,14 @@ def api_save_cloudflare_settings():
 
 @app.route('/api/admin/settings/cloudflare/access-aud', methods=['PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_cloudflare_aud')
 def api_save_cloudflare_access_aud():
     """Save Cloudflare Access AUD (super admin only).
 
     The AUD (audience) tag is sensitive and stored separately.
     """
-    from cloudflare_security import invalidate_cloudflare_cache
+    from ee.backend.cloudflare.cloudflare_security import invalidate_cloudflare_cache
 
     data = request.get_json() or {}
     aud = data.get('access_aud', '').strip()
@@ -3746,6 +3749,7 @@ def api_save_cloudflare_access_aud():
 
 @app.route('/api/admin/settings/cloudflare/test', methods=['POST'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_cloudflare_test')
 def api_test_cloudflare_settings():
     """Test Cloudflare Access configuration (super admin only).
@@ -3754,7 +3758,7 @@ def api_test_cloudflare_settings():
     1. Can fetch public keys from the team domain
     2. Configuration is complete
     """
-    from cloudflare_security import get_cloudflare_access_keys, _get_cloudflare_config
+    from ee.backend.cloudflare.cloudflare_security import get_cloudflare_access_keys, _get_cloudflare_config
 
     config = _get_cloudflare_config()
 
@@ -3818,6 +3822,7 @@ def api_test_cloudflare_settings():
 
 @app.route('/api/admin/settings/log-forwarding', methods=['GET'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_logforwarding_get')
 def api_get_log_forwarding_settings():
     """Get log forwarding settings (super admin only)."""
@@ -3827,6 +3832,7 @@ def api_get_log_forwarding_settings():
 
 @app.route('/api/admin/settings/log-forwarding', methods=['POST', 'PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_logforwarding_save')
 def api_save_log_forwarding_settings():
     """Update log forwarding settings (super admin only)."""
@@ -3928,6 +3934,7 @@ def api_save_log_forwarding_settings():
 
 @app.route('/api/admin/settings/log-forwarding/api-key', methods=['PUT'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_logforwarding_api_key')
 def api_save_log_forwarding_api_key():
     """Save log forwarding API key (super admin only).
@@ -3958,6 +3965,7 @@ def api_save_log_forwarding_api_key():
 
 @app.route('/api/admin/settings/log-forwarding/test', methods=['POST'])
 @master_required
+@require_enterprise
 @track_endpoint('api_admin_settings_logforwarding_test')
 def api_test_log_forwarding():
     """Test log forwarding connection (super admin only)."""

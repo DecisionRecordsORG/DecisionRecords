@@ -92,11 +92,16 @@ export class AppComponent implements OnInit {
   isLandingPage = false;
 
   // Pages where we don't show the app navbar (landing, login, setup)
+  // Note: Only exact matches for login pages, NOT all routes under them
   private noNavbarRoutes = [
     '/',
     '/license',
-    '/setup',
-    '/superadmin'
+    '/setup'
+  ];
+
+  // Exact match routes (login pages only, not their sub-routes)
+  private exactMatchNoNavbarRoutes = [
+    '/superadmin'  // Only hide navbar on login page, not /superadmin/dashboard etc.
   ];
 
   constructor(
@@ -133,7 +138,7 @@ export class AppComponent implements OnInit {
     // Check if this is the landing page
     this.isLandingPage = path === '/';
 
-    // Check if current path is a no-navbar route
+    // Check if current path is a no-navbar route (prefix match)
     const isNoNavbarRoute = this.noNavbarRoutes.some(route => {
       if (route === '/') {
         return path === '/';
@@ -141,11 +146,14 @@ export class AppComponent implements OnInit {
       return path === route || path.startsWith(route + '/');
     });
 
+    // Check if current path is an exact match no-navbar route (login pages only)
+    const isExactNoNavbarRoute = this.exactMatchNoNavbarRoutes.some(route => path === route);
+
     // Also hide navbar on tenant login pages
     const isTenantLogin = path.match(/^\/[^/]+\/login$/);
 
     // Show app navbar only on authenticated tenant/admin routes
-    this.showAppNavbar = !isNoNavbarRoute && !isTenantLogin;
+    this.showAppNavbar = !isNoNavbarRoute && !isExactNoNavbarRoute && !isTenantLogin;
   }
 
   get versionTooltip(): string {
