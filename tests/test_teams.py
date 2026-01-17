@@ -145,6 +145,24 @@ def teams_workspace(session_fixture, sample_tenant):
 
 
 @pytest.fixture
+def teams_workspace_unlinked(session_fixture):
+    """Create a Teams workspace without a tenant (for testing auto-provisioning)."""
+    workspace = TeamsWorkspace(
+        tenant_id=None,  # Not linked to any tenant
+        ms_tenant_id='ms-tenant-unlinked-12345',
+        ms_tenant_name='Unlinked Microsoft Tenant',
+        service_url='https://smba.trafficmanager.net/amer/',
+        bot_id='test-bot-app-id-unlinked',
+        status=TeamsWorkspace.STATUS_ACTIVE,
+        is_active=True,
+        notifications_enabled=True,
+    )
+    session_fixture.add(workspace)
+    session_fixture.commit()
+    return workspace
+
+
+@pytest.fixture
 def sample_space(session_fixture, sample_tenant, sample_user):
     """Create a sample space."""
     space = Space(
@@ -366,23 +384,45 @@ class TestTeamsUserLinking:
             assert user is not None
             assert user.id == sample_user.id
             assert not needs_linking
-            assert mapping.link_method == 'auto_email'
+            assert mapping.link_method == 'auto_linked'  # Zero-friction: auto-linked by email
 
-    def test_unlinked_user_needs_linking(self, app, session_fixture, teams_workspace):
-        """User without matching email needs linking."""
+    def test_zero_friction_auto_provision_new_user(self, app, session_fixture, teams_workspace):
+        """Zero-friction: New user from valid domain is auto-provisioned."""
         with app.app_context():
             service = TeamsService(teams_workspace)
 
+            # User with a valid corporate domain (not onmicrosoft.com)
             mapping, user, needs_linking = service.get_or_link_user(
-                aad_object_id='aad-object-id-unlinked',
-                upn='nonexistent@other-domain.com',
-                display_name='Unknown User'
+                aad_object_id='aad-object-id-newuser',
+                upn='newuser@other-domain.com',
+                display_name='New User'
             )
 
             assert mapping is not None
+            assert user is not None  # Zero-friction: user is auto-provisioned
+            assert not needs_linking  # Zero-friction: no linking needed
+            assert mapping.user_id == user.id
+            assert mapping.link_method == 'auto_provisioned'
+            assert user.email == 'newuser@other-domain.com'
+            assert user.aad_object_id == 'aad-object-id-newuser'
+
+    def test_skip_onmicrosoft_domain(self, app, session_fixture, teams_workspace_unlinked):
+        """Users with onmicrosoft.com domain cannot be auto-provisioned (no existing tenant)."""
+        with app.app_context():
+            # Use workspace without a tenant to test domain-based provisioning
+            service = TeamsService(teams_workspace_unlinked)
+
+            # User with onmicrosoft.com domain (not a real corporate domain)
+            mapping, user, needs_linking = service.get_or_link_user(
+                aad_object_id='aad-object-id-onmicrosoft',
+                upn='user@contoso.onmicrosoft.com',
+                display_name='OnMicrosoft User'
+            )
+
+            # Should fail to provision because we skip onmicrosoft.com domains
+            # and the workspace has no pre-existing tenant
+            assert needs_linking  # Cannot auto-provision
             assert user is None
-            assert needs_linking
-            assert mapping.user_id is None
 
     def test_existing_linked_mapping_returns_user(self, app, session_fixture, teams_workspace, sample_user, sample_membership):
         """Existing linked mapping returns the user."""
