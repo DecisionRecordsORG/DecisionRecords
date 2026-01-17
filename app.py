@@ -9898,13 +9898,12 @@ def teams_webhook():
     This is the main webhook endpoint for the Teams bot.
     All messages, invokes, and events come through here.
     """
-    import asyncio
     from ee.backend.teams.teams_security import validate_teams_jwt
     from ee.backend.teams.teams_service import TeamsService
 
     # Validate JWT Bearer token from Bot Framework
     auth_header = request.headers.get('Authorization', '')
-    claims = asyncio.run(asyncio.coroutine(lambda: validate_teams_jwt(auth_header))())
+    claims = validate_teams_jwt(auth_header)
 
     if not claims:
         logger.warning("Invalid Teams webhook authorization")
