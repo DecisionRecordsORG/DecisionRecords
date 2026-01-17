@@ -746,7 +746,8 @@ class User(db.Model):
     password_hash = db.Column(db.String(255), nullable=True)  # For local/password authentication
     sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
-    auth_type = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', or 'local'
+    auth_type = db.Column(db.String(20), nullable=False, default='local')  # 'sso', 'webauthn', 'local', or 'teams'
+    aad_object_id = db.Column(db.String(50), nullable=True, index=True)  # Azure AD Object ID for Teams/SSO matching
     is_admin = db.Column(db.Boolean, default=False)
     email_verified = db.Column(db.Boolean, default=False)  # Email verification status
     has_seen_admin_onboarding = db.Column(db.Boolean, default=False)  # Track if admin has seen the onboarding modal
