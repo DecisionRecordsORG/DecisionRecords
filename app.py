@@ -9901,6 +9901,7 @@ def teams_webhook():
     This is the main webhook endpoint for the Teams bot.
     All messages, invokes, and events come through here.
     """
+    import asyncio
     from ee.backend.teams.teams_security import validate_teams_jwt
     from ee.backend.teams.teams_service import TeamsService
 
