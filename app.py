@@ -9943,9 +9943,11 @@ def teams_webhook():
                 logger.info(f"Teams webhook: Processing message activity")
                 text = activity.get('text', '')[:50]
                 logger.info(f"Teams webhook: Message text: {text}")
-                response = asyncio.run(service.handle_message(activity))
-                logger.info(f"Teams webhook: Got response type: {type(response)}, keys: {response.keys() if isinstance(response, dict) else 'N/A'}")
-                return _teams_card_response(response)
+                # handle_message sends reply via REST API and returns success bool
+                success = asyncio.run(service.handle_message(activity))
+                logger.info(f"Teams webhook: Message handled, reply sent: {success}")
+                # Return 200 to acknowledge receipt (reply already sent via REST API)
+                return '', 200
             return '', 200
 
         elif activity_type == 'invoke':
