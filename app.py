@@ -209,12 +209,15 @@ try:
         # Angular production build and Material require:
         # - 'unsafe-inline': for Angular Material's stylesheet onload handlers
         # - 'unsafe-eval': only needed for dev; can be removed in strict production
-        'script-src': ["'self'", "'unsafe-inline'", "https://e.decisionrecords.org"],
+        # - 'https://res.cdn.office.net': for Microsoft Teams SDK
+        'script-src': ["'self'", "'unsafe-inline'", "https://e.decisionrecords.org", "https://res.cdn.office.net"],
         'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https:"],
         'connect-src': ["'self'", "https://e.decisionrecords.org"],  # API calls + analytics proxy
-        'frame-ancestors': "'none'",  # Prevent clickjacking
+        # frame-ancestors: Allow Microsoft Teams to embed the app in iframes
+        # Teams uses various Microsoft domains for embedding tabs
+        'frame-ancestors': ["'self'", "https://teams.microsoft.com", "https://*.teams.microsoft.com", "https://*.microsoft.com", "https://*.office.com"],
         'form-action': "'self'",
         'base-uri': "'self'",
         'object-src': "'none'",
@@ -230,7 +233,7 @@ try:
         content_security_policy_nonce_in=[],  # Disabled - incompatible with Angular Material
         force_https=False,  # Azure handles HTTPS termination
         session_cookie_secure=_use_https,  # Only secure cookies over HTTPS
-        frame_options='DENY',
+        frame_options=False,  # Disabled - using CSP frame-ancestors instead (X-Frame-Options is deprecated)
         x_content_type_options=True,
         x_xss_protection=True,
         referrer_policy='strict-origin-when-cross-origin',
