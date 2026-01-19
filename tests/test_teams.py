@@ -27,7 +27,8 @@ from models import (
 try:
     from ee.backend.teams.teams_cards import (
         build_space_selector_card, build_decision_list_card,
-        build_menu_card, build_help_card, build_error_card
+        build_menu_card, build_help_card, build_error_card,
+        build_create_decision_form_card
     )
     from ee.backend.teams.teams_service import TeamsService
     EE_AVAILABLE = True
@@ -35,6 +36,7 @@ except ImportError:
     EE_AVAILABLE = False
     build_space_selector_card = None
     build_decision_list_card = None
+    build_create_decision_form_card = None
     TeamsService = None
 
 pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
@@ -250,25 +252,26 @@ class TestBuildSpaceSelectorCard:
     """Tests for build_space_selector_card function."""
 
     def test_builds_card_with_spaces(self, app, session, sample_spaces):
-        """Card should contain buttons for each space."""
+        """Card should contain buttons for each space (no 'All Spaces' option)."""
         card = build_space_selector_card(sample_spaces)
 
         assert card['type'] == 'AdaptiveCard'
         assert 'actions' in card
 
-        # Should have "All Spaces" + 3 spaces = 4 actions
-        assert len(card['actions']) == 4
+        # Should have 3 spaces = 3 actions (no "All Spaces")
+        assert len(card['actions']) == 3
 
-        # First action should be "All Spaces"
-        assert card['actions'][0]['data']['action'] == 'list_by_space'
-        assert card['actions'][0]['data']['space_id'] is None
+        # All actions should have list_by_space action with space_id
+        for action in card['actions']:
+            assert action['data']['action'] == 'list_by_space'
+            assert action['data']['space_id'] is not None
 
     def test_includes_space_names_in_buttons(self, app, session, sample_spaces):
         """Each space button should have the space name."""
         card = build_space_selector_card(sample_spaces)
 
-        # Check space names appear (skip first "All Spaces" action)
-        space_titles = [a['title'] for a in card['actions'][1:]]
+        # Check space names appear
+        space_titles = [a['title'] for a in card['actions']]
         assert any('Default' in t for t in space_titles)
         assert any('Engineering' in t for t in space_titles)
         assert any('Platform' in t for t in space_titles)
@@ -285,16 +288,14 @@ class TestBuildSpaceSelectorCard:
         assert default_action is not None
         assert '⭐' in default_action['title']
 
-    def test_without_all_spaces_option(self, app, session, sample_spaces):
-        """Can exclude 'All Spaces' option."""
-        card = build_space_selector_card(sample_spaces, include_all=False)
+    def test_default_space_is_first(self, app, session, sample_spaces):
+        """Default space should be listed first for convenience."""
+        card = build_space_selector_card(sample_spaces)
 
-        # Should only have 3 space actions
-        assert len(card['actions']) == 3
-
-        # No "All Spaces" action
-        titles = [a['title'] for a in card['actions']]
-        assert not any('All Spaces' in t for t in titles)
+        # First action should be the default space
+        first_action = card['actions'][0]
+        assert first_action['data']['space_id'] == sample_spaces[0].id
+        assert '⭐' in first_action['title']
 
     def test_limits_to_8_spaces(self, app, session, sample_tenant, sample_user):
         """Should limit to 8 spaces to avoid card overflow."""
@@ -314,15 +315,15 @@ class TestBuildSpaceSelectorCard:
 
         card = build_space_selector_card(spaces)
 
-        # Should have 1 "All Spaces" + 8 space buttons = 9 max
-        assert len(card['actions']) == 9
+        # Should have 8 space buttons max
+        assert len(card['actions']) == 8
 
     def test_empty_spaces_list(self, app, session):
-        """Should handle empty spaces list."""
+        """Should handle empty spaces list (no actions)."""
         card = build_space_selector_card([])
 
-        # Should still have "All Spaces" option
-        assert len(card['actions']) == 1
+        # No spaces = no actions
+        assert len(card['actions']) == 0
 
 
 class TestBuildDecisionListCardWithSpace:
@@ -364,3 +365,118 @@ class TestBuildDecisionListCardWithSpace:
         )
         assert change_space_action is not None
         assert 'Change Space' in change_space_action['title']
+
+
+class TestBuildCreateDecisionFormCard:
+    """Tests for build_create_decision_form_card with space and owner selection."""
+
+    def test_basic_form_has_required_fields(self, app, session):
+        """Create form should have title, context, decision, consequences, status fields."""
+        card = build_create_decision_form_card()
+
+        assert card['type'] == 'AdaptiveCard'
+        assert 'body' in card
+
+        # Extract input IDs
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'title' in input_ids
+        assert 'context' in input_ids
+        assert 'decision' in input_ids
+        assert 'consequences' in input_ids
+        assert 'status' in input_ids
+
+    def test_form_with_space_selection(self, app, session, sample_spaces):
+        """Create form should include space selector when spaces provided."""
+        card = build_create_decision_form_card(spaces=sample_spaces)
+
+        # Extract input IDs
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'space_id' in input_ids
+
+        # Find the space selector
+        space_selector = next(
+            (item for item in card['body'] if item.get('id') == 'space_id'),
+            None
+        )
+        assert space_selector is not None
+        assert space_selector['type'] == 'Input.ChoiceSet'
+
+        # Should have choices for all spaces
+        choices = space_selector['choices']
+        assert len(choices) == 3
+        choice_titles = [c['title'] for c in choices]
+        assert any('Default' in t for t in choice_titles)
+        assert any('Engineering' in t for t in choice_titles)
+        assert any('Platform' in t for t in choice_titles)
+
+    def test_default_space_preselected(self, app, session, sample_spaces):
+        """Default space should be pre-selected in space dropdown."""
+        card = build_create_decision_form_card(spaces=sample_spaces)
+
+        # Find the space selector
+        space_selector = next(
+            (item for item in card['body'] if item.get('id') == 'space_id'),
+            None
+        )
+        assert space_selector is not None
+
+        # The value should be the default space's ID
+        default_space = next(s for s in sample_spaces if s.is_default)
+        assert space_selector['value'] == str(default_space.id)
+
+    def test_form_with_owner_selection(self, app, session, sample_user):
+        """Create form should include owner selector when users provided."""
+        users = [sample_user]
+        card = build_create_decision_form_card(users=users)
+
+        # Extract input IDs
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'owner_id' in input_ids
+
+        # Find the owner selector
+        owner_selector = next(
+            (item for item in card['body'] if item.get('id') == 'owner_id'),
+            None
+        )
+        assert owner_selector is not None
+        assert owner_selector['type'] == 'Input.ChoiceSet'
+
+        # Should have "Me (default)" plus the user
+        choices = owner_selector['choices']
+        assert len(choices) == 2  # "-- Me (default) --" + user
+        assert any('Me (default)' in c['title'] for c in choices)
+        assert any(sample_user.email in c['title'] or 'Test User' in c['title'] for c in choices)
+
+    def test_form_with_both_spaces_and_owners(self, app, session, sample_spaces, sample_user):
+        """Create form should include both space and owner selection."""
+        card = build_create_decision_form_card(spaces=sample_spaces, users=[sample_user])
+
+        # Extract input IDs
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'space_id' in input_ids
+        assert 'owner_id' in input_ids
+
+    def test_form_has_submit_action(self, app, session):
+        """Create form should have submit action with correct action type."""
+        card = build_create_decision_form_card()
+
+        assert 'actions' in card
+        assert len(card['actions']) == 1
+
+        submit_action = card['actions'][0]
+        assert submit_action['type'] == 'Action.Submit'
+        assert submit_action['data']['action'] == 'submit_decision'
+
+    def test_form_without_spaces_has_no_space_selector(self, app, session):
+        """Create form without spaces should not have space selector."""
+        card = build_create_decision_form_card(spaces=None)
+
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'space_id' not in input_ids
+
+    def test_form_without_users_has_no_owner_selector(self, app, session):
+        """Create form without users should not have owner selector."""
+        card = build_create_decision_form_card(users=None)
+
+        input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
+        assert 'owner_id' not in input_ids
