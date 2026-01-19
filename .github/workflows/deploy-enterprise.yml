@@ -3,14 +3,16 @@ name: Deploy Enterprise Edition
 on:
   workflow_dispatch:
     inputs:
-      # Version bumping removed from CI to avoid conflicts with local developers.
-      # Bump version locally before deploying:
-      #   ./ee/scripts/version-bump.sh patch
-      #   git add version.py && git commit -m "Bump version to X.Y.Z" && git push
-      placeholder:
-        description: 'Deploy the current main branch to production'
-        required: false
-        default: 'deploy'
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - no-bump
+        default: patch
 
 env:
   REGISTRY: adrregistry2024eu.azurecr.io
@@ -31,11 +33,23 @@ jobs:
           submodules: recursive
           token: ${{ secrets.EE_REPO_TOKEN }}
 
-      - name: Show current version
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bump version
+        if: inputs.version_bump != 'no-bump'
         run: |
+          ./ee/scripts/version-bump.sh ${{ inputs.version_bump }}
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
           VERSION=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
-          echo "Deploying version: $VERSION"
-          echo "Commit: ${{ github.sha }}"
+          git add version.py
+          git commit -m "Bump version to $VERSION"
+          # Pull any changes that happened since checkout, then push
+          git pull --rebase origin main
+          git push
 
       - name: Login to Azure
         uses: azure/login@v2
