@@ -29,7 +29,7 @@ try:
         build_space_selector_card, build_decision_list_card,
         build_menu_card, build_help_card, build_error_card,
         build_create_decision_form_card, build_greeting_card,
-        build_decision_detail_card
+        build_decision_detail_card, build_create_prompt_card
     )
     from ee.backend.teams.teams_service import TeamsService
     EE_AVAILABLE = True
@@ -579,3 +579,32 @@ class TestDecisionDetailCard:
         assert view_action is not None
         assert view_action['type'] == 'Action.OpenUrl'
         assert 'url' in view_action
+
+
+class TestCreatePromptCard:
+    """Tests for build_create_prompt_card function."""
+
+    def test_prompt_card_has_dialog_button(self, app, session):
+        """Create prompt card should have a button that triggers task/fetch dialog."""
+        card = build_create_prompt_card()
+
+        assert card['type'] == 'AdaptiveCard'
+        assert 'actions' in card
+        assert len(card['actions']) == 1
+
+        # Button should trigger task/fetch dialog
+        action = card['actions'][0]
+        assert action['type'] == 'Action.Submit'
+        assert 'msteams' in action['data']
+        assert action['data']['msteams']['type'] == 'task/fetch'
+        assert action['data']['action'] == 'show_create_form'
+
+    def test_prompt_card_has_instructional_text(self, app, session):
+        """Create prompt card should have instructional text."""
+        card = build_create_prompt_card()
+
+        # Should have body with text
+        assert 'body' in card
+        body_texts = [b.get('text', '') for b in card['body'] if b.get('type') == 'TextBlock']
+        assert any('Create' in t for t in body_texts)
+        assert any('button' in t.lower() or 'click' in t.lower() for t in body_texts)
