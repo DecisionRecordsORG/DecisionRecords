@@ -28,7 +28,8 @@ try:
     from ee.backend.teams.teams_cards import (
         build_space_selector_card, build_decision_list_card,
         build_menu_card, build_help_card, build_error_card,
-        build_create_decision_form_card
+        build_create_decision_form_card, build_greeting_card,
+        build_decision_detail_card
     )
     from ee.backend.teams.teams_service import TeamsService
     EE_AVAILABLE = True
@@ -479,3 +480,102 @@ class TestBuildCreateDecisionFormCard:
         # People Picker should be present by default
         input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
         assert 'owner_entra_id' in input_ids
+
+
+class TestMenuCardDialogs:
+    """Tests for menu card dialog triggers (task/fetch)."""
+
+    def test_create_decision_uses_task_fetch(self, app, session):
+        """Create Decision button should trigger task/fetch dialog."""
+        card = build_menu_card()
+
+        # Find the Create Decision action
+        create_action = next(
+            (a for a in card['actions'] if 'Create' in a.get('title', '')),
+            None
+        )
+        assert create_action is not None
+        assert create_action['type'] == 'Action.Submit'
+
+        # Should have msteams task/fetch trigger
+        assert 'msteams' in create_action['data']
+        assert create_action['data']['msteams']['type'] == 'task/fetch'
+        assert create_action['data']['action'] == 'show_create_form'
+
+
+class TestGreetingCardDialogs:
+    """Tests for greeting card dialog triggers."""
+
+    def test_create_decision_uses_task_fetch(self, app, session):
+        """Create Decision button in greeting should trigger task/fetch dialog."""
+        card = build_greeting_card(user_name='Test User')
+
+        # Find the Create Decision action
+        create_action = next(
+            (a for a in card['actions'] if 'Create' in a.get('title', '')),
+            None
+        )
+        assert create_action is not None
+        assert create_action['type'] == 'Action.Submit'
+
+        # Should have msteams task/fetch trigger
+        assert 'msteams' in create_action['data']
+        assert create_action['data']['msteams']['type'] == 'task/fetch'
+        assert create_action['data']['action'] == 'show_create_form'
+
+
+class TestDecisionDetailCard:
+    """Tests for decision detail card."""
+
+    def test_no_change_status_button(self, app, session, sample_tenant, sample_user):
+        """Decision detail card should NOT have Change Status button (use Decisions Tab instead)."""
+        # Create a decision
+        decision = ArchitectureDecision(
+            title='Test Decision',
+            context='Test context',
+            decision='Test decision text',
+            status='proposed',
+            consequences='Test consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=1
+        )
+        decision.tenant = sample_tenant
+        session.add(decision)
+        session.commit()
+
+        card = build_decision_detail_card(decision)
+
+        # Should NOT have any action with 'Change Status' or 'open_status_modal'
+        for action in card.get('actions', []):
+            assert 'Status' not in action.get('title', '')
+            assert action.get('data', {}).get('action') != 'open_status_modal'
+
+    def test_has_view_full_decision_link(self, app, session, sample_tenant, sample_user):
+        """Decision detail card should have View Full Decision link."""
+        decision = ArchitectureDecision(
+            title='Test Decision',
+            context='Test context',
+            decision='Test decision text',
+            status='proposed',
+            consequences='Test consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=1
+        )
+        decision.tenant = sample_tenant
+        session.add(decision)
+        session.commit()
+
+        card = build_decision_detail_card(decision)
+
+        # Should have View Full Decision action
+        view_action = next(
+            (a for a in card.get('actions', []) if 'View' in a.get('title', '')),
+            None
+        )
+        assert view_action is not None
+        assert view_action['type'] == 'Action.OpenUrl'
+        assert 'url' in view_action
