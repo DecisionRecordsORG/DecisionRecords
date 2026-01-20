@@ -368,7 +368,7 @@ class TestBuildDecisionListCardWithSpace:
 
 
 class TestBuildCreateDecisionFormCard:
-    """Tests for build_create_decision_form_card with space and owner selection."""
+    """Tests for build_create_decision_form_card with space and Teams People Picker owner selection."""
 
     def test_basic_form_has_required_fields(self, app, session):
         """Create form should have title, context, decision, consequences, status fields."""
@@ -424,37 +424,35 @@ class TestBuildCreateDecisionFormCard:
         default_space = next(s for s in sample_spaces if s.is_default)
         assert space_selector['value'] == str(default_space.id)
 
-    def test_form_with_owner_selection(self, app, session, sample_user):
-        """Create form should include owner selector when users provided."""
-        users = [sample_user]
-        card = build_create_decision_form_card(users=users)
+    def test_form_has_teams_people_picker(self, app, session):
+        """Create form should have Teams People Picker for owner selection."""
+        card = build_create_decision_form_card()
 
         # Extract input IDs
         input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
-        assert 'owner_id' in input_ids
+        assert 'owner_entra_id' in input_ids
 
-        # Find the owner selector
-        owner_selector = next(
-            (item for item in card['body'] if item.get('id') == 'owner_id'),
+        # Find the owner People Picker
+        owner_picker = next(
+            (item for item in card['body'] if item.get('id') == 'owner_entra_id'),
             None
         )
-        assert owner_selector is not None
-        assert owner_selector['type'] == 'Input.ChoiceSet'
+        assert owner_picker is not None
+        assert owner_picker['type'] == 'Input.ChoiceSet'
 
-        # Should have "Me (default)" plus the user
-        choices = owner_selector['choices']
-        assert len(choices) == 2  # "-- Me (default) --" + user
-        assert any('Me (default)' in c['title'] for c in choices)
-        assert any(sample_user.email in c['title'] or 'Test User' in c['title'] for c in choices)
+        # Should have Data.Query for dynamic user search
+        assert 'choices.data' in owner_picker
+        assert owner_picker['choices.data']['type'] == 'Data.Query'
+        assert owner_picker['choices.data']['dataset'] == 'graph.microsoft.com/users'
 
-    def test_form_with_both_spaces_and_owners(self, app, session, sample_spaces, sample_user):
-        """Create form should include both space and owner selection."""
-        card = build_create_decision_form_card(spaces=sample_spaces, users=[sample_user])
+    def test_form_with_both_spaces_and_people_picker(self, app, session, sample_spaces):
+        """Create form should include both space selection and People Picker."""
+        card = build_create_decision_form_card(spaces=sample_spaces)
 
         # Extract input IDs
         input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
         assert 'space_id' in input_ids
-        assert 'owner_id' in input_ids
+        assert 'owner_entra_id' in input_ids
 
     def test_form_has_submit_action(self, app, session):
         """Create form should have submit action with correct action type."""
@@ -474,9 +472,10 @@ class TestBuildCreateDecisionFormCard:
         input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
         assert 'space_id' not in input_ids
 
-    def test_form_without_users_has_no_owner_selector(self, app, session):
-        """Create form without users should not have owner selector."""
-        card = build_create_decision_form_card(users=None)
+    def test_people_picker_always_present(self, app, session):
+        """Create form should always have People Picker (no need to pass users)."""
+        card = build_create_decision_form_card()
 
+        # People Picker should be present by default
         input_ids = [item.get('id') for item in card['body'] if item.get('type', '').startswith('Input')]
-        assert 'owner_id' not in input_ids
+        assert 'owner_entra_id' in input_ids
