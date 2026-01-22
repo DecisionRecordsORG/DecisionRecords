@@ -10247,6 +10247,105 @@ def teams_channels():
     return jsonify({'channels': channels})
 
 
+@app.route('/api/teams/tab/provision', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_tab_provision')
+def teams_tab_provision():
+    """Provision a user from the Teams Tab.
+
+    Called when a user first opens the Decisions Tab in Teams.
+    Uses the Teams context to auto-provision the user (zero-friction).
+
+    Expected request body:
+    {
+        "aadObjectId": "azure-ad-object-id",
+        "userPrincipalName": "user@domain.com",
+        "displayName": "User Name",
+        "msTenantId": "teams-tenant-id"
+    }
+
+    Returns:
+    {
+        "success": true,
+        "tenantDomain": "domain.com",
+        "user": { "id": 1, "email": "...", "name": "..." }
+    }
+    """
+    from ee.backend.teams.teams_service import TeamsService
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Invalid request body'}), 400
+
+    aad_object_id = data.get('aadObjectId')
+    upn = data.get('userPrincipalName')
+    display_name = data.get('displayName')
+    ms_tenant_id = data.get('msTenantId')
+
+    if not aad_object_id:
+        return jsonify({'error': 'aadObjectId is required'}), 400
+
+    # Find workspace by MS tenant ID
+    workspace = None
+    if ms_tenant_id:
+        workspace = TeamsWorkspace.query.filter_by(
+            ms_tenant_id=ms_tenant_id,
+            is_active=True
+        ).first()
+
+    if not workspace:
+        # Try to find any workspace linked to the user's domain
+        if upn and '@' in upn:
+            domain = upn.split('@')[1].lower()
+            tenant = Tenant.query.filter_by(domain=domain).first()
+            if tenant:
+                workspace = TeamsWorkspace.query.filter_by(
+                    tenant_id=tenant.id,
+                    is_active=True
+                ).first()
+
+    if not workspace:
+        return jsonify({
+            'error': 'Teams workspace not configured',
+            'code': 'WORKSPACE_NOT_FOUND'
+        }), 404
+
+    try:
+        service = TeamsService(workspace)
+        mapping, user, needs_linking = service.get_or_provision_user(
+            aad_object_id, upn, display_name
+        )
+
+        if not user:
+            return jsonify({
+                'error': 'Could not provision user',
+                'code': 'PROVISION_FAILED'
+            }), 400
+
+        # Get the tenant domain for the tab to use
+        tenant = workspace.tenant
+        if not tenant:
+            return jsonify({
+                'error': 'Tenant not configured for workspace',
+                'code': 'TENANT_NOT_FOUND'
+            }), 404
+
+        return jsonify({
+            'success': True,
+            'tenantDomain': tenant.domain,
+            'user': {
+                'id': user.id,
+                'email': user.email,
+                'name': user.get_full_name() if hasattr(user, 'get_full_name') else user.email
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Teams tab provision error: {str(e)}")
+        capture_exception(e, endpoint_name='teams_tab_provision')
+        return jsonify({'error': 'Internal server error'}), 500
+
+
 @app.route('/api/teams/test', methods=['POST'])
 @require_teams
 @login_required
