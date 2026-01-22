@@ -155,6 +155,14 @@ export const routes: Routes = [
         .then(m => m.TeamsTabConfigComponent)
         .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent))
   },
+  // Teams Decision Detail Dialog (opened from Kanban board cards)
+  {
+    path: 'teams/decision/:id',
+    loadComponent: () =>
+      import('@ee/components/teams-tab/teams-decision-detail.component')
+        .then(m => m.TeamsDecisionDetailComponent)
+        .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent))
+  },
   {
     path: ':tenant/admin/teams',
     loadComponent: () =>
