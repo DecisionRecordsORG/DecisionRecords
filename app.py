@@ -661,6 +661,17 @@ def add_security_headers(response):
     # Remove server identification headers (security best practice)
     response.headers.pop('Server', None)
 
+    # Teams tab runs in an iframe - disable caching so the latest Angular build is always loaded.
+    # Without this, browsers return 304 and use stale index.html referencing old JS chunk hashes.
+    if request.path.startswith('/teams/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        if 'ETag' in response.headers:
+            del response.headers['ETag']
+        if 'Last-Modified' in response.headers:
+            del response.headers['Last-Modified']
+
     return response
 
 
@@ -10330,9 +10341,17 @@ def teams_tab_provision():
                 'code': 'TENANT_NOT_FOUND'
             }), 404
 
+        # Generate a tab auth token for subsequent API calls.
+        # Teams tabs run in an iframe (teams.microsoft.com) so session cookies
+        # (SameSite=Lax) won't be sent. Token-based auth is used instead.
+        from ee.backend.teams.teams_security import generate_tab_auth_token
+        tab_token = generate_tab_auth_token(user.id, tenant.domain, user.email)
+        logger.info(f"Teams tab: Provisioned user {user.id} ({user.email}) with tab auth token")
+
         return jsonify({
             'success': True,
             'tenantDomain': tenant.domain,
+            'tabAuthToken': tab_token,
             'user': {
                 'id': user.id,
                 'email': user.email,
@@ -10344,6 +10363,97 @@ def teams_tab_provision():
         logger.error(f"Teams tab provision error: {str(e)}")
         capture_exception(e, endpoint_name='teams_tab_provision')
         return jsonify({'error': 'Internal server error'}), 500
+
+
+def _validate_tab_auth():
+    """Validate Teams tab auth token from Authorization header.
+
+    Returns (user, tenant_domain) tuple or raises an error response.
+    Teams tabs use token-based auth because session cookies (SameSite=Lax)
+    are not sent in cross-site iframe requests.
+    """
+    from ee.backend.teams.teams_security import verify_tab_auth_token
+
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('TabAuth '):
+        return None, None
+
+    token = auth_header[8:]  # Remove 'TabAuth ' prefix
+    token_data = verify_tab_auth_token(token)
+    if not token_data:
+        return None, None
+
+    user = db.session.get(User, token_data['user_id'])
+    if not user:
+        return None, None
+
+    return user, token_data.get('tenant_domain')
+
+
+@app.route('/api/teams/tab/decisions', methods=['GET'])
+@require_teams
+@track_endpoint('api_teams_tab_decisions')
+def teams_tab_decisions():
+    """List decisions for Teams Tab.
+
+    Uses token-based auth instead of session cookies because
+    Teams tabs run in a cross-site iframe.
+    """
+    user, tenant_domain = _validate_tab_auth()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    decisions = ArchitectureDecision.query.filter_by(
+        domain=user.sso_domain,
+        deleted_at=None
+    ).order_by(ArchitectureDecision.id.desc()).all()
+
+    return jsonify([d.to_dict() for d in decisions])
+
+
+@app.route('/api/teams/tab/decisions/<int:decision_id>', methods=['GET'])
+@require_teams
+@track_endpoint('api_teams_tab_decision_detail')
+def teams_tab_decision_detail(decision_id):
+    """Get a single decision for Teams Tab dialog.
+
+    Uses token-based auth instead of session cookies because
+    Teams dialogs run in a cross-site iframe.
+    """
+    user, tenant_domain = _validate_tab_auth()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    decision = db.session.get(ArchitectureDecision, decision_id)
+    if not decision:
+        return jsonify({'error': 'Decision not found'}), 404
+
+    # Verify the decision belongs to the user's tenant
+    if decision.domain != user.sso_domain:
+        return jsonify({'error': 'Access denied'}), 403
+
+    return jsonify(decision.to_dict_with_history())
+
+
+@app.route('/api/teams/tab/spaces', methods=['GET'])
+@require_teams
+@track_endpoint('api_teams_tab_spaces')
+def teams_tab_spaces():
+    """List spaces for Teams Tab.
+
+    Uses token-based auth instead of session cookies.
+    """
+    user, tenant_domain = _validate_tab_auth()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    from models import Space
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify([])
+
+    spaces = Space.query.filter_by(tenant_id=tenant.id).order_by(Space.name).all()
+    return jsonify([{'id': s.id, 'name': s.name, 'is_default': s.is_default} for s in spaces])
 
 
 @app.route('/api/teams/test', methods=['POST'])
