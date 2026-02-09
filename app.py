@@ -1970,6 +1970,487 @@ def google_oauth_callback():
 # EE:END - Google OAuth Authentication
 
 
+# EE:START - Microsoft OAuth Authentication
+# ==================== Microsoft OAuth Authentication (Enterprise Edition) ====================
+# Sign in with Microsoft using Entra ID OAuth 2.0
+# This provides SSO for Microsoft 365 / Azure AD organizations
+
+@app.route('/api/auth/microsoft-status', methods=['GET'])
+@track_endpoint('api_auth_microsoft_status')
+def microsoft_oauth_status():
+    """Check if Microsoft OAuth sign-in is enabled.
+
+    Returns whether Microsoft sign-in is available for the frontend to show/hide the button.
+    This is a public endpoint (no login required) since users need to see it before login.
+    """
+    try:
+        from ee.backend.oauth_providers.microsoft_oauth import is_microsoft_oauth_configured
+        if not is_microsoft_oauth_configured():
+            return jsonify({'enabled': False, 'reason': 'not_configured'})
+    except Exception as e:
+        logger.error(f"Error checking Microsoft OAuth status: {e}")
+        return jsonify({'enabled': False, 'reason': 'configuration_error'})
+
+    return jsonify({'enabled': True})
+
+
+@app.route('/auth/microsoft')
+@track_endpoint('auth_microsoft_initiate')
+def microsoft_oauth_initiate():
+    """Initiate Microsoft OAuth login flow.
+
+    Redirects the user to Microsoft's authorization page to sign in.
+    After authentication, Microsoft redirects back to /auth/microsoft/callback
+    with the authorization code.
+    """
+    from ee.backend.oauth_providers.microsoft_oauth import (
+        get_microsoft_client_id,
+        generate_microsoft_oauth_state,
+        is_microsoft_oauth_configured,
+        MICROSOFT_OAUTH_AUTHORIZE_URL,
+        MICROSOFT_OAUTH_SCOPES
+    )
+
+    # Check if Microsoft sign-in is enabled
+    if not is_microsoft_oauth_configured():
+        logger.warning("Microsoft OAuth attempted but not configured")
+        return redirect('/?error=microsoft_not_configured')
+
+    # Get Microsoft client ID
+    client_id = get_microsoft_client_id()
+    if not client_id:
+        logger.error("Microsoft client ID not configured for OAuth")
+        return redirect('/?error=microsoft_not_configured')
+
+    # Get optional return_url from query params (where to redirect after login)
+    return_url = request.args.get('return_url', '/')
+
+    # Generate encrypted state for CSRF protection
+    try:
+        state = generate_microsoft_oauth_state(return_url=return_url)
+    except Exception as e:
+        logger.error(f"Failed to generate Microsoft OAuth state: {e}")
+        return redirect('/?error=internal_error')
+
+    # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
+    base_url = get_oauth_base_url()
+    redirect_uri = f"{base_url}/auth/microsoft/callback"
+
+    # Build Microsoft authorization URL
+    import urllib.parse
+    auth_params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': MICROSOFT_OAUTH_SCOPES,
+        'redirect_uri': redirect_uri,
+        'state': state,
+        'response_mode': 'query',
+        'prompt': 'select_account'  # Always show account selector
+    }
+    auth_url = f"{MICROSOFT_OAUTH_AUTHORIZE_URL}?{urllib.parse.urlencode(auth_params)}"
+
+    return redirect(auth_url)
+
+
+@app.route('/auth/microsoft/callback')
+@track_endpoint('auth_microsoft_callback')
+def microsoft_oauth_callback():
+    """Handle Microsoft OAuth callback.
+
+    This endpoint receives the authorization code from Microsoft after the user
+    authenticates. It exchanges the code for tokens, fetches user info,
+    and creates/logs in the user based on their email domain.
+
+    IMPORTANT: Personal Microsoft accounts (outlook.com, hotmail.com) are blocked.
+    Only corporate/work accounts allowed.
+    The tenant is derived from the email domain (existing logic).
+    First user of a domain becomes provisional admin (existing logic).
+    """
+    import requests as http_requests
+    from ee.backend.oauth_providers.microsoft_oauth import (
+        get_microsoft_client_id,
+        get_microsoft_client_secret,
+        verify_microsoft_oauth_state,
+        MICROSOFT_OAUTH_TOKEN_URL,
+        MICROSOFT_GRAPH_USER_URL
+    )
+
+    # Capture request metadata for login history
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    user_agent = request.headers.get('User-Agent')
+
+    # Get callback parameters
+    code = request.args.get('code')
+    state = request.args.get('state')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description', '')
+
+    # Handle Microsoft errors
+    if error:
+        logger.warning(f"Microsoft OAuth error: {error} - {error_description}")
+        return redirect(f'/?error=microsoft_auth_error&message={error}')
+
+    if not code:
+        logger.warning("Microsoft OAuth callback missing code")
+        return redirect('/?error=missing_code')
+
+    # Verify state parameter (CSRF protection)
+    state_data = verify_microsoft_oauth_state(state)
+    if not state_data:
+        logger.warning("Invalid or expired Microsoft OAuth state")
+        return redirect('/?error=invalid_state')
+
+    return_url = state_data.get('return_url', '/')
+
+    # Get Microsoft credentials
+    client_id = get_microsoft_client_id()
+    client_secret = get_microsoft_client_secret()
+
+    if not client_id or not client_secret:
+        logger.error("Microsoft credentials not configured for OAuth callback")
+        return redirect('/?error=microsoft_not_configured')
+
+    # Build redirect URI (must match the one used in authorization)
+    base_url = get_oauth_base_url()
+    redirect_uri = f"{base_url}/auth/microsoft/callback"
+
+    try:
+        # Exchange code for tokens
+        token_response = http_requests.post(
+            MICROSOFT_OAUTH_TOKEN_URL,
+            data={
+                'client_id': client_id,
+                'client_secret': client_secret,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'grant_type': 'authorization_code',
+                'scope': 'openid email profile User.Read'
+            },
+            timeout=30
+        )
+
+        if not token_response.ok:
+            logger.error(f"Microsoft token exchange failed: {token_response.status_code}")
+            return redirect('/?error=token_exchange_failed')
+
+        token_data = token_response.json()
+        if 'error' in token_data:
+            logger.error(f"Microsoft token error: {token_data.get('error')}")
+            return redirect('/?error=token_exchange_failed')
+
+        access_token = token_data.get('access_token')
+        if not access_token:
+            logger.error("No access token in Microsoft OAuth response")
+            return redirect('/?error=no_access_token')
+
+        # Fetch user info from Microsoft Graph
+        userinfo_response = http_requests.get(
+            MICROSOFT_GRAPH_USER_URL,
+            headers={'Authorization': f'Bearer {access_token}'},
+            timeout=30
+        )
+
+        if not userinfo_response.ok:
+            logger.error(f"Microsoft Graph userinfo failed: {userinfo_response.status_code}")
+            return redirect('/?error=userinfo_failed')
+
+        userinfo = userinfo_response.json()
+
+        # Extract user details
+        # Microsoft Graph returns: mail, userPrincipalName, displayName, id
+        email = userinfo.get('mail') or userinfo.get('userPrincipalName')
+        name = userinfo.get('displayName') or userinfo.get('givenName', '')
+        microsoft_user_id = userinfo.get('id')  # Microsoft user object ID
+
+        if not email:
+            logger.warning("No email in Microsoft OAuth userinfo")
+            return redirect('/?error=no_email')
+
+        # Extract domain from email
+        domain = extract_domain_from_email(email)
+
+        # Check for public email domains (outlook.com, hotmail.com, live.com, etc.)
+        # IMPORTANT: Personal Microsoft accounts cannot sign up
+        if DomainApproval.is_public_domain(domain):
+            logger.warning(f"Public email domain rejected for Microsoft OAuth: {domain}")
+            return redirect('/?error=public_email&message=Please use your work email address. Personal Microsoft accounts are not allowed.')
+
+        # Check for disposable email domains
+        if DomainApproval.is_disposable_domain(domain):
+            logger.warning(f"Disposable email domain rejected for Microsoft OAuth: {domain}")
+            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
+
+        # Check if this is the first user for this domain
+        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+        is_first_user = existing_domain_users == 0
+
+        # Get or create user (using same function as Google OAuth)
+        user = get_or_create_user(email, name, microsoft_user_id, domain)
+
+        # Create Tenant if it doesn't exist (v1.5 governance)
+        tenant = Tenant.query.filter_by(domain=domain).first()
+        if not tenant:
+            tenant = Tenant(
+                domain=domain,
+                name=domain,  # Default name is domain
+                status='active',
+                maturity_state=MaturityState.BOOTSTRAP
+            )
+            db.session.add(tenant)
+            db.session.flush()
+            logger.info(f"Created tenant for Microsoft OAuth domain: {domain}")
+
+            # Create default auth config for new tenant
+            auth_config = AuthConfig.query.filter_by(domain=domain).first()
+            if not auth_config:
+                auth_config = AuthConfig(
+                    domain=domain,
+                    auth_method='local',  # Default to local, allowing multiple auth methods
+                    allow_password=True,
+                    allow_passkey=True,
+                    allow_slack_oidc=True,
+                    allow_google_oauth=True,
+                    allow_microsoft_oauth=True,
+                    allow_registration=True,
+                    require_approval=True,
+                    rp_name='Decision Records'
+                )
+                db.session.add(auth_config)
+                logger.info(f"Created AuthConfig for Microsoft OAuth domain: {domain}")
+
+            # Auto-approve corporate domain
+            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+            if not domain_approval:
+                domain_approval = DomainApproval(
+                    domain=domain,
+                    status='approved',
+                    requested_by_email=email,
+                    requested_by_name=name,
+                    auto_approved=True,
+                    reviewed_at=datetime.now(timezone.utc)
+                )
+                db.session.add(domain_approval)
+                logger.info(f"Auto-approved corporate domain via Microsoft OAuth: {domain}")
+
+        # Ensure TenantMembership exists
+        membership = TenantMembership.query.filter_by(
+            user_id=user.id,
+            tenant_id=tenant.id
+        ).first()
+
+        if not membership:
+            # Create membership with appropriate role
+            # First user becomes provisional admin
+            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+            membership = TenantMembership(
+                user_id=user.id,
+                tenant_id=tenant.id,
+                global_role=role
+            )
+            db.session.add(membership)
+            logger.info(f"Created TenantMembership for Microsoft OAuth user {email} in tenant {domain} with role {role.value}")
+
+        db.session.commit()
+
+        # Update auth_type to indicate Microsoft OAuth login
+        if not user.auth_type or user.auth_type == 'local':
+            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+            db.session.commit()
+
+        # Log successful Microsoft OAuth login
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_MICROSOFT_OAUTH,
+            success=True,
+            user_id=user.id,
+            tenant_domain=domain,
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
+        # Set session
+        session['user_id'] = user.id
+        set_session_expiry(is_admin=user.is_admin)
+
+        logger.info(f"Microsoft OAuth login successful for {email}")
+
+        # Get app base URL for post-auth redirect (handles subdomain routing)
+        app_base = get_app_base_url()
+
+        # Redirect to return URL or tenant home
+        if return_url and return_url != '/' and not return_url.startswith('/?'):
+            # Ensure return_url is absolute if APP_BASE_URL is set
+            if return_url.startswith('/') and app_base:
+                return redirect(f'{app_base}{return_url}')
+            return redirect(return_url)
+
+        # Redirect to tenant dashboard
+        return redirect(f'{app_base}/{domain}')
+
+    except http_requests.RequestException as e:
+        logger.error(f"Microsoft OAuth request error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_MICROSOFT_OAUTH,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Network error: {str(e)[:200]}'
+        )
+        return redirect('/?error=network_error')
+    except Exception as e:
+        logger.error(f"Microsoft OAuth callback error: {e}")
+        log_login_attempt(
+            email='unknown',
+            login_method=LoginHistory.METHOD_MICROSOFT_OAUTH,
+            success=False,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=f'Callback error: {str(e)[:200]}'
+        )
+        return redirect('/?error=internal_error')
+
+
+@app.route('/api/teams/sso/validate', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_sso_validate')
+def teams_sso_validate():
+    """Validate a Teams SSO token and return user info.
+
+    This endpoint is called from Teams apps (tab, bot) when they have a Teams SSO token
+    from microsoftTeams.authentication.getAuthToken().
+
+    The token is validated against Microsoft's public keys, and if valid,
+    the user is authenticated based on the token claims.
+
+    Request body:
+    {
+        "token": "<JWT from Teams getAuthToken()>"
+    }
+
+    Returns:
+    {
+        "valid": true,
+        "user": { user info },
+        "tenant_domain": "example.com",
+        "tab_auth_token": "..." (for subsequent requests)
+    }
+    """
+    from ee.backend.oauth_providers.microsoft_oauth import validate_teams_sso_token
+
+    data = request.get_json()
+    if not data or not data.get('token'):
+        return jsonify({'error': 'Token is required'}), 400
+
+    token = data.get('token')
+
+    # Validate the Teams SSO token
+    claims = validate_teams_sso_token(token)
+    if not claims:
+        return jsonify({'valid': False, 'error': 'Invalid or expired token'}), 401
+
+    email = claims.get('email')
+    name = claims.get('name')
+    microsoft_user_id = claims.get('oid')
+
+    if not email:
+        return jsonify({'valid': False, 'error': 'No email in token'}), 401
+
+    # Extract domain from email
+    domain = extract_domain_from_email(email)
+
+    # Check for public email domains
+    if DomainApproval.is_public_domain(domain):
+        return jsonify({'valid': False, 'error': 'Personal accounts not allowed'}), 403
+
+    # Get or create user
+    user = get_or_create_user(email, name or email.split('@')[0], microsoft_user_id, domain)
+
+    # Create Tenant if it doesn't exist
+    tenant = Tenant.query.filter_by(domain=domain).first()
+    if not tenant:
+        tenant = Tenant(
+            domain=domain,
+            name=domain,
+            status='active',
+            maturity_state=MaturityState.BOOTSTRAP
+        )
+        db.session.add(tenant)
+        db.session.flush()
+
+        # Create default auth config
+        auth_config = AuthConfig(
+            domain=domain,
+            auth_method='local',
+            allow_password=True,
+            allow_passkey=True,
+            allow_slack_oidc=True,
+            allow_google_oauth=True,
+            allow_microsoft_oauth=True,
+            allow_registration=True,
+            require_approval=True,
+            rp_name='Decision Records'
+        )
+        db.session.add(auth_config)
+
+        # Auto-approve corporate domain
+        domain_approval = DomainApproval(
+            domain=domain,
+            status='approved',
+            requested_by_email=email,
+            requested_by_name=name,
+            auto_approved=True,
+            reviewed_at=datetime.now(timezone.utc)
+        )
+        db.session.add(domain_approval)
+
+    # Ensure TenantMembership exists
+    existing_domain_users = User.query.filter_by(sso_domain=domain).count()
+    is_first_user = existing_domain_users <= 1  # <= 1 because we just created the user
+
+    membership = TenantMembership.query.filter_by(
+        user_id=user.id,
+        tenant_id=tenant.id
+    ).first()
+
+    if not membership:
+        role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
+        membership = TenantMembership(
+            user_id=user.id,
+            tenant_id=tenant.id,
+            global_role=role
+        )
+        db.session.add(membership)
+
+    db.session.commit()
+
+    # Log the Teams SSO login
+    log_login_attempt(
+        email=email,
+        login_method=LoginHistory.METHOD_TEAMS_SSO,
+        success=True,
+        user_id=user.id,
+        tenant_domain=domain,
+        ip_address=request.headers.get('CF-Connecting-IP', request.remote_addr),
+        user_agent=request.headers.get('User-Agent')
+    )
+
+    # Generate TabAuth token for subsequent requests
+    tab_auth_token = generate_teams_tab_auth_token(user.id, domain)
+
+    return jsonify({
+        'valid': True,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'name': user.name
+        },
+        'tenant_domain': domain,
+        'tab_auth_token': tab_auth_token
+    })
+# EE:END - Microsoft OAuth Authentication
+
+
 # ==================== Web Routes (Legacy - only when not serving Angular) ====================
 
 if not SERVE_ANGULAR:

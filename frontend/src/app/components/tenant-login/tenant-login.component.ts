@@ -21,6 +21,7 @@ interface TenantAuthConfig {
   allow_passkey: boolean;
   allow_slack_oidc: boolean;
   allow_google_oauth: boolean;
+  allow_microsoft_oauth: boolean;
   allow_registration: boolean;
   has_sso: boolean;
   sso_provider: string | null;
@@ -116,7 +117,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             </form>
 
             <!-- Social Sign-in Options -->
-            @if ((slackOidcEnabled && authConfig?.allow_slack_oidc) || (googleOauthEnabled && authConfig?.allow_google_oauth)) {
+            @if ((slackOidcEnabled && authConfig?.allow_slack_oidc) || (googleOauthEnabled && authConfig?.allow_google_oauth) || (microsoftOauthEnabled && authConfig?.allow_microsoft_oauth)) {
               <div class="social-divider">
                 <span>or</span>
               </div>
@@ -132,6 +133,13 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
                 <button mat-stroked-button class="google-signin-btn full-width" (click)="signInWithGoogle()">
                   <img src="/assets/google-logo.svg" alt="Google" class="google-logo">
                   <span>Sign in with Google</span>
+                </button>
+              }
+
+              @if (microsoftOauthEnabled && authConfig?.allow_microsoft_oauth) {
+                <button mat-stroked-button class="microsoft-signin-btn full-width" (click)="signInWithMicrosoft()">
+                  <img src="/assets/microsoft-logo.svg" alt="Microsoft" class="microsoft-logo">
+                  <span>Sign in with Microsoft</span>
                 </button>
               }
             }
@@ -711,6 +719,41 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
       display: inline-block;
     }
 
+    /* Microsoft Sign-in Button Styles - Following Microsoft Brand Guidelines */
+    .microsoft-signin-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px 24px !important;
+      border: 1px solid #8c8c8c !important;
+      border-radius: 4px !important;
+      background: #fff !important;
+      color: #5e5e5e !important;
+      font-weight: 600 !important;
+      font-size: 14px !important;
+      font-family: 'Segoe UI', Roboto, Arial, sans-serif !important;
+      transition: all 0.2s ease !important;
+      height: auto !important;
+      min-height: 48px;
+      margin-top: 8px;
+    }
+
+    .microsoft-signin-btn:hover {
+      background: #f8f9fa !important;
+      border-color: #8c8c8c !important;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    }
+
+    .microsoft-signin-btn .microsoft-logo {
+      width: 20px;
+      height: 20px;
+    }
+
+    .microsoft-signin-btn span {
+      display: inline-block;
+    }
+
     .recovery-link {
       margin-top: 24px;
       text-align: center;
@@ -799,6 +842,7 @@ export class TenantLoginComponent implements OnInit {
   webAuthnSupported = false;
   slackOidcEnabled = false;  // Global Slack OIDC availability
   googleOauthEnabled = false;  // Global Google OAuth availability
+  microsoftOauthEnabled = false;  // Global Microsoft OAuth availability
   // Whether approval is effectively required (tenant wants approval AND has admins who can approve)
   // If false, users will be auto-approved, so show "Join" UI instead of "Request Access"
   effectiveRequireApproval = true;
@@ -848,6 +892,9 @@ export class TenantLoginComponent implements OnInit {
     // Check global Google OAuth availability
     this.checkGoogleOauthStatus();
 
+    // Check global Microsoft OAuth availability
+    this.checkMicrosoftOauthStatus();
+
     // Pre-fill email from query params
     const email = this.route.snapshot.queryParamMap.get('email');
     if (email) {
@@ -875,6 +922,8 @@ export class TenantLoginComponent implements OnInit {
       this.error = 'Slack authentication failed. Please try again.';
     } else if (errorParam === 'google_auth_error') {
       this.error = 'Google authentication failed. Please try again.';
+    } else if (errorParam === 'microsoft_auth_error') {
+      this.error = 'Microsoft authentication failed. Please try again.';
     } else if (errorParam === 'public_email') {
       this.error = this.route.snapshot.queryParamMap.get('message') || 'Please use your work email address.';
     }
@@ -914,6 +963,23 @@ export class TenantLoginComponent implements OnInit {
     window.location.href = `/auth/google?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
+  private checkMicrosoftOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/microsoft-status').subscribe({
+      next: (response) => {
+        this.microsoftOauthEnabled = response.enabled;
+      },
+      error: () => {
+        this.microsoftOauthEnabled = false;
+      }
+    });
+  }
+
+  signInWithMicrosoft(): void {
+    // Include return URL to redirect back to tenant after login
+    const returnUrl = `/${this.tenant}/decisions`;
+    window.location.href = `/auth/microsoft?return_url=${encodeURIComponent(returnUrl)}`;
+  }
+
   loadAuthConfig(): void {
     this.http.get<TenantAuthConfig>(`/api/tenant/${this.tenant}/auth-config`).subscribe({
       next: (config) => {
@@ -928,6 +994,7 @@ export class TenantLoginComponent implements OnInit {
           allow_passkey: true,
           allow_slack_oidc: true,
           allow_google_oauth: true,
+          allow_microsoft_oauth: true,
           allow_registration: true,
           has_sso: false,
           sso_provider: null,

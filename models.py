@@ -496,6 +496,7 @@ class TenantSettings(db.Model):
     allow_passkey = db.Column(db.Boolean, default=True)
     allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack"
     allow_google_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Google"
+    allow_microsoft_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Microsoft"
     rp_name = db.Column(db.String(255), default='Architecture Decisions')
 
     # Registration settings
@@ -522,6 +523,7 @@ class TenantSettings(db.Model):
             'allow_passkey': self.allow_passkey,
             'allow_slack_oidc': self.allow_slack_oidc,
             'allow_google_oauth': self.allow_google_oauth,
+            'allow_microsoft_oauth': self.allow_microsoft_oauth,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,
@@ -671,7 +673,9 @@ class LoginHistory(db.Model):
     METHOD_SSO = 'sso'
     METHOD_SLACK_OIDC = 'slack_oidc'
     METHOD_GOOGLE_OAUTH = 'google_oauth'
+    METHOD_MICROSOFT_OAUTH = 'microsoft_oauth'
     METHOD_TEAMS_OIDC = 'teams_oidc'
+    METHOD_TEAMS_SSO = 'teams_sso'
     METHOD_MASTER = 'master'
 
     id = db.Column(db.Integer, primary_key=True)
@@ -935,6 +939,7 @@ class AuthConfig(db.Model):
     allow_passkey = db.Column(db.Boolean, default=True)  # Allow passkey/WebAuthn login
     allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack" option
     allow_google_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Google" option
+    allow_microsoft_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Microsoft" option
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
     rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
@@ -966,6 +971,7 @@ class AuthConfig(db.Model):
             'allow_passkey': self.allow_passkey,
             'allow_slack_oidc': self.allow_slack_oidc,
             'allow_google_oauth': self.allow_google_oauth,
+            'allow_microsoft_oauth': self.allow_microsoft_oauth,
             'allow_registration': self.allow_registration,
             'require_approval': self.require_approval,
             'rp_name': self.rp_name,

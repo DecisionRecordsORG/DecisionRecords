@@ -41,6 +41,7 @@ export interface AuthConfigRequest {
   allow_passkey?: boolean;
   allow_slack_oidc?: boolean;  // Allow "Sign in with Slack" option
   allow_google_oauth?: boolean;  // Allow "Sign in with Google" option
+  allow_microsoft_oauth?: boolean;  // Allow "Sign in with Microsoft" option
 }
 
 @Injectable({

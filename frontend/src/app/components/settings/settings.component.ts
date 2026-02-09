@@ -505,6 +505,20 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                     </div>
                   }
 
+                  <!-- Microsoft Sign-in Toggle (when not in SSO mode) -->
+                  @if (microsoftOauthGloballyEnabled && authConfigForm.value.auth_method !== 'sso') {
+                    <div class="microsoft-oauth-toggle-section">
+                      <h4 class="options-header">Microsoft Sign-in</h4>
+                      <mat-slide-toggle formControlName="allow_microsoft_oauth">
+                        Allow "Sign in with Microsoft" option
+                      </mat-slide-toggle>
+                      <p class="option-hint">
+                        When enabled, users with Microsoft 365 / Entra ID accounts from your domain can sign in using Microsoft.
+                        Personal Microsoft accounts are not allowed.
+                      </p>
+                    </div>
+                  }
+
                   <div class="registration-options" *ngIf="authConfigForm.value.auth_method !== 'sso'">
                       <h4 class="options-header">User Registration</h4>
 
@@ -2700,6 +2714,7 @@ export class SettingsComponent implements OnInit {
   aiFeatureEnabled = false;  // AI features (MCP, API access, AI-assisted creation)
   slackOidcGloballyEnabled = false;  // Global Slack OIDC sign-in availability
   googleOauthGloballyEnabled = false;  // Global Google OAuth sign-in availability
+  microsoftOauthGloballyEnabled = false;  // Global Microsoft OAuth sign-in availability
 
   // AI Settings
   aiSettings: AISettings | null = null;
@@ -2808,6 +2823,7 @@ export class SettingsComponent implements OnInit {
       auto_approve_users: [false],  // Inverted from require_approval for better UX
       allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
       allow_google_oauth: [true],   // Allow Google OAuth sign-in for tenant
+      allow_microsoft_oauth: [true],   // Allow Microsoft OAuth sign-in for tenant
       rp_name: ['Architecture Decisions']
     });
 
@@ -2834,6 +2850,7 @@ export class SettingsComponent implements OnInit {
     this.loadAuthConfig();
     this.checkSlackOidcStatus();
     this.checkGoogleOauthStatus();
+    this.checkMicrosoftOauthStatus();
     if (!this.authService.isMasterAccount) {
       this.loadAccessRequests();
       this.loadRoleRequests();
@@ -2924,6 +2941,17 @@ export class SettingsComponent implements OnInit {
       },
       error: () => {
         this.googleOauthGloballyEnabled = false;
+      }
+    });
+  }
+
+  checkMicrosoftOauthStatus(): void {
+    this.http.get<{ enabled: boolean }>('/api/auth/microsoft-status').subscribe({
+      next: (response) => {
+        this.microsoftOauthGloballyEnabled = response.enabled;
+      },
+      error: () => {
+        this.microsoftOauthGloballyEnabled = false;
       }
     });
   }
@@ -3143,6 +3171,7 @@ export class SettingsComponent implements OnInit {
             auto_approve_users: !this.authConfig.require_approval,  // Invert for UI
             allow_slack_oidc: this.authConfig.allow_slack_oidc !== false,  // Default true if undefined
             allow_google_oauth: this.authConfig.allow_google_oauth !== false,  // Default true if undefined
+            allow_microsoft_oauth: this.authConfig.allow_microsoft_oauth !== false,  // Default true if undefined
             rp_name: this.authConfig.rp_name
           });
         }
@@ -3154,6 +3183,7 @@ export class SettingsComponent implements OnInit {
           auth_method: 'webauthn',
           allow_registration: true,
           allow_google_oauth: true,  // Default true
+          allow_microsoft_oauth: true,  // Default true
           rp_name: 'Architecture Decisions'
         });
       }
@@ -3172,6 +3202,7 @@ export class SettingsComponent implements OnInit {
     let allowPasskey = true;
     let allowSlackOidc = formValue.allow_slack_oidc;
     let allowGoogleOauth = formValue.allow_google_oauth;
+    let allowMicrosoftOauth = formValue.allow_microsoft_oauth;
 
     switch (formValue.auth_method) {
       case 'both':
@@ -3190,6 +3221,7 @@ export class SettingsComponent implements OnInit {
         allowPasskey = false;
         allowSlackOidc = false;  // SSO mode disables Slack OIDC
         allowGoogleOauth = false;  // SSO mode disables Google OAuth
+        allowMicrosoftOauth = false;  // SSO mode disables Microsoft OAuth
         break;
       case 'slack_oidc':
         backendAuthMethod = 'slack_oidc';
@@ -3207,7 +3239,8 @@ export class SettingsComponent implements OnInit {
       allow_password: allowPassword,
       allow_passkey: allowPasskey,
       allow_slack_oidc: allowSlackOidc,
-      allow_google_oauth: allowGoogleOauth
+      allow_google_oauth: allowGoogleOauth,
+      allow_microsoft_oauth: allowMicrosoftOauth
     };
 
     this.adminService.saveAuthConfig(config).subscribe({
