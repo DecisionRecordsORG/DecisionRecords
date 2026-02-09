@@ -314,6 +314,11 @@ def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, la
     if user:
         # Update last login
         user.last_login = datetime.now(timezone.utc)
+        # Update SSO fields if not set or if domain matches
+        # This ensures users can log in via different SSO providers for the same domain
+        if not user.sso_domain or user.sso_domain == sso_domain:
+            user.sso_domain = sso_domain
+            user.sso_subject = sso_subject
         # Update name if changed
         if first_name or last_name:
             user.set_name(first_name=first_name, last_name=last_name)
