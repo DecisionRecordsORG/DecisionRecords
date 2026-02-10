@@ -166,13 +166,18 @@ def login_required(f):
             return redirect('/')
 
         # Check if user has completed credential setup
-        # Users must have at least one auth method (passkey or password)
+        # Users must have at least one auth method (passkey, password, or SSO)
+        # SSO users (auth_type 'sso' or 'teams') don't need local credentials -
+        # their identity is verified by the SSO provider (Slack, Google, Microsoft, etc.)
         if not is_master_account():
+            # SSO users are fully authenticated via their identity provider
+            is_sso_user = g.current_user.auth_type in ('sso', 'teams')
+
             has_passkey = len(g.current_user.webauthn_credentials) > 0 if g.current_user.webauthn_credentials else False
             has_password = g.current_user.has_password()
 
-            if not has_passkey and not has_password:
-                # User is in incomplete state - redirect to setup
+            if not is_sso_user and not has_passkey and not has_password:
+                # Non-SSO user without local credentials - incomplete signup, redirect to setup
                 # Allow access to setup-related endpoints
                 allowed_paths = [
                     '/api/webauthn/register',
