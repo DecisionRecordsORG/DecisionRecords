@@ -10931,10 +10931,76 @@ def teams_tab_spaces():
     from models import Space
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
-        return jsonify([])
+        return jsonify({'spaces': []})
 
     spaces = Space.query.filter_by(tenant_id=tenant.id).order_by(Space.name).all()
-    return jsonify([{'id': s.id, 'name': s.name, 'is_default': s.is_default} for s in spaces])
+    return jsonify({'spaces': [{'id': s.id, 'name': s.name, 'is_default': s.is_default} for s in spaces]})
+
+
+@app.route('/api/teams/tab/decisions', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_tab_create_decision')
+def teams_tab_create_decision():
+    """Create a decision from Teams Tab.
+
+    Uses token-based auth instead of session cookies because
+    Teams dialogs run in a cross-site iframe.
+    """
+    user, tenant_domain = _validate_tab_auth()
+    if not user:
+        return jsonify({'error': 'Authentication required'}), 401
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    title = data.get('title', '').strip()
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    from models import Space, DecisionSpace
+
+    # Get next decision number for tenant
+    max_decision = ArchitectureDecision.query.filter_by(
+        tenant_id=tenant.id
+    ).order_by(ArchitectureDecision.decision_number.desc()).first()
+    next_number = (max_decision.decision_number + 1) if max_decision else 1
+
+    # Create the decision
+    decision = ArchitectureDecision(
+        tenant_id=tenant.id,
+        domain=tenant.domain,
+        decision_number=next_number,
+        title=title,
+        status=data.get('status', 'proposed'),
+        context=data.get('context', ''),
+        decision=data.get('decision', ''),
+        consequences=data.get('consequences', ''),
+        created_by_id=user.id,
+        owner_id=user.id,
+        created_at=datetime.now(timezone.utc)
+    )
+
+    db.session.add(decision)
+    db.session.flush()
+
+    # Link to space if provided
+    space_id = data.get('space_id')
+    if space_id:
+        space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
+        if space:
+            decision_space = DecisionSpace(decision_id=decision.id, space_id=space.id)
+            db.session.add(decision_space)
+
+    db.session.commit()
+
+    logger.info(f"Teams Tab: Created decision ADR-{decision.decision_number} for tenant {tenant.domain}")
+
+    return jsonify({'decision': decision.to_dict()}), 201
 
 
 @app.route('/api/teams/test', methods=['POST'])

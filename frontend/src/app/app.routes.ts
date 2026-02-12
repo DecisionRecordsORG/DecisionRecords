@@ -163,6 +163,14 @@ export const routes: Routes = [
         .then(m => m.TeamsDecisionDetailComponent)
         .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent))
   },
+  // Teams Create Decision Dialog (opened from Tab create button)
+  {
+    path: 'teams/create',
+    loadComponent: () =>
+      import('@ee/components/teams-tab/teams-create-decision.component')
+        .then(m => m.TeamsCreateDecisionComponent)
+        .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent))
+  },
   {
     path: ':tenant/admin/teams',
     loadComponent: () =>
