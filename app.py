@@ -14,7 +14,7 @@ except ImportError:
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent
 
 # EE:START - EE Model Imports
 # Enterprise Edition models (Slack, Teams, AI integration)
@@ -1012,6 +1012,20 @@ def api_tenant_login():
             failure_reason='User not found'
         )
         return jsonify({'error': 'Invalid email or password'}), 401
+
+    # Block deleted/anonymized users from logging in
+    if user.is_anonymized or user.deleted_at is not None:
+        log_login_attempt(
+            email=email,
+            login_method=LoginHistory.METHOD_PASSWORD,
+            success=False,
+            user_id=user.id,
+            tenant_domain=user.sso_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='Account deleted'
+        )
+        return jsonify({'error': 'This account has been deleted and cannot be restored.'}), 401
 
     if not user.has_password():
         log_login_attempt(
@@ -3106,6 +3120,416 @@ def api_dismiss_admin_onboarding():
     db.session.commit()
 
     return jsonify({'message': 'Admin onboarding dismissed', 'user': user.to_dict()})
+
+
+# ==================== API Routes - GDPR (Art. 17, 20) ====================
+
+def anonymize_user(user_id):
+    """
+    Anonymize a user's personal data per GDPR Art. 17 and deletion-controls.md spec.
+
+    Preserves contributions (decisions remain, author set to None).
+    Redacts PII from audit logs and login history.
+    """
+    import uuid
+
+    user = db.session.get(User, user_id)
+    if not user or user.is_anonymized:
+        return False
+
+    anonymous_email = f"deleted-{uuid.uuid4()}@anonymized.local"
+
+    # Anonymize user PII
+    original_email = user.email
+    user.email = anonymous_email
+    user.name = 'Former Member'
+    user.first_name = None
+    user.last_name = None
+    user.password_hash = None
+    user.sso_subject = None
+    user.aad_object_id = None
+    user.is_anonymized = True
+    user.deleted_at = datetime.now(timezone.utc)
+
+    # Detach decisions (keep content, remove author link)
+    for decision in user.decisions_created:
+        decision.created_by_id = None
+
+    # Remove WebAuthn credentials
+    for cred in list(user.webauthn_credentials):
+        db.session.delete(cred)
+
+    # Remove tenant memberships
+    memberships = TenantMembership.query.filter_by(user_id=user.id).all()
+    for membership in memberships:
+        db.session.delete(membership)
+
+    # Redact LoginHistory entries
+    login_entries = LoginHistory.query.filter_by(user_id=user.id).all()
+    for entry in login_entries:
+        entry.email = anonymous_email
+        entry.ip_address = None
+        entry.user_agent = None
+
+    # Redact AuditLog details containing user email
+    audit_entries = AuditLog.query.filter(
+        AuditLog.details.isnot(None)
+    ).all()
+    for entry in audit_entries:
+        if entry.details and isinstance(entry.details, dict):
+            details_str = json.dumps(entry.details)
+            if original_email in details_str:
+                details_str = details_str.replace(original_email, 'deleted-user')
+                entry.details = json.loads(details_str)
+
+    db.session.commit()
+    return True
+
+
+@app.route('/api/user/delete-request', methods=['POST'])
+@login_required
+@track_endpoint('api_user_delete_request')
+def api_request_account_deletion():
+    """Request account deletion with 7-day grace period (GDPR Art. 17)."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot be deleted through this endpoint'}), 400
+
+    user = g.current_user
+
+    # Already pending deletion
+    if user.deletion_requested_at:
+        return jsonify({
+            'message': 'Deletion already requested',
+            'deletion_scheduled_at': user.deletion_scheduled_at.isoformat()
+        })
+
+    # Set deletion request with 7-day grace period
+    user.deletion_requested_at = datetime.now(timezone.utc)
+    user.deletion_scheduled_at = datetime.now(timezone.utc) + timedelta(days=7)
+
+    # Log to audit trail
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if tenant:
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            action_type=AuditLog.ACTION_USER_DELETION_REQUESTED,
+            target_entity='user',
+            target_id=user.id,
+            details={'scheduled_at': user.deletion_scheduled_at.isoformat()}
+        )
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Account deletion requested. Your account will be deleted in 7 days. You can cancel this at any time before then.',
+        'deletion_requested_at': user.deletion_requested_at.isoformat(),
+        'deletion_scheduled_at': user.deletion_scheduled_at.isoformat()
+    })
+
+
+@app.route('/api/user/cancel-deletion', methods=['POST'])
+@login_required
+@track_endpoint('api_user_cancel_deletion')
+def api_cancel_account_deletion():
+    """Cancel a pending account deletion request."""
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    user = g.current_user
+
+    if not user.deletion_requested_at:
+        return jsonify({'error': 'No deletion request pending'}), 400
+
+    # Log before clearing
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if tenant:
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            action_type=AuditLog.ACTION_USER_DELETION_CANCELLED,
+            target_entity='user',
+            target_id=user.id,
+            details={'was_scheduled_at': user.deletion_scheduled_at.isoformat() if user.deletion_scheduled_at else None}
+        )
+
+    user.deletion_requested_at = None
+    user.deletion_scheduled_at = None
+    db.session.commit()
+
+    return jsonify({'message': 'Account deletion cancelled.'})
+
+
+@app.route('/api/user/deletion-status', methods=['GET'])
+@login_required
+@track_endpoint('api_user_deletion_status')
+def api_get_deletion_status():
+    """Check account deletion status."""
+    if is_master_account():
+        return jsonify({'deletion_pending': False})
+
+    user = g.current_user
+    return jsonify({
+        'deletion_pending': user.deletion_requested_at is not None,
+        'deletion_requested_at': user.deletion_requested_at.isoformat() if user.deletion_requested_at else None,
+        'deletion_scheduled_at': user.deletion_scheduled_at.isoformat() if user.deletion_scheduled_at else None,
+    })
+
+
+@app.route('/api/user/export-data', methods=['POST'])
+@login_required
+@track_endpoint('api_user_export_data')
+def api_export_user_data():
+    """Export all personal data for the current user (GDPR Art. 20 — data portability)."""
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    user = g.current_user
+
+    # Gather all personal data
+    export = {
+        'export_date': datetime.now(timezone.utc).isoformat(),
+        'data_subject': {
+            'id': user.id,
+            'email': user.email,
+            'name': user.get_full_name(),
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+        },
+        'profile': {
+            'auth_type': user.auth_type,
+            'email_verified': user.email_verified,
+            'created_at': user.created_at.isoformat(),
+            'last_login': user.last_login.isoformat() if user.last_login else None,
+            'sso_domain': user.sso_domain,
+        },
+        'decisions_authored': [],
+        'memberships': [],
+        'audit_trail': [],
+        'login_history': [],
+    }
+
+    # Decisions authored
+    decisions = ArchitectureDecision.query.filter_by(created_by_id=user.id).all()
+    for d in decisions:
+        export['decisions_authored'].append({
+            'id': d.id,
+            'title': d.title,
+            'status': d.status,
+            'created_at': d.created_at.isoformat() if d.created_at else None,
+            'updated_at': d.updated_at.isoformat() if d.updated_at else None,
+        })
+
+    # Tenant memberships
+    memberships = TenantMembership.query.filter_by(user_id=user.id).all()
+    for m in memberships:
+        tenant = db.session.get(Tenant, m.tenant_id)
+        export['memberships'].append({
+            'tenant_name': tenant.name if tenant else None,
+            'tenant_domain': tenant.domain if tenant else None,
+            'role': m.global_role.value,
+            'joined_at': m.joined_at.isoformat() if m.joined_at else None,
+        })
+
+    # Audit trail (actions performed by this user)
+    audit_entries = AuditLog.query.filter_by(actor_user_id=user.id).order_by(AuditLog.created_at.desc()).limit(500).all()
+    for entry in audit_entries:
+        export['audit_trail'].append({
+            'action': entry.action_type,
+            'target': entry.target_entity,
+            'created_at': entry.created_at.isoformat(),
+        })
+
+    # Login history
+    login_entries = LoginHistory.query.filter_by(user_id=user.id).order_by(LoginHistory.created_at.desc()).limit(500).all()
+    for entry in login_entries:
+        export['login_history'].append({
+            'method': entry.login_method,
+            'success': entry.success,
+            'ip_address': entry.ip_address,
+            'created_at': entry.created_at.isoformat() if entry.created_at else None,
+        })
+
+    # Log the export action
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+    if tenant:
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            action_type=AuditLog.ACTION_USER_DATA_EXPORTED,
+            target_entity='user',
+            target_id=user.id,
+            details={'export_sections': list(export.keys())}
+        )
+
+    response = jsonify(export)
+    response.headers['Content-Disposition'] = f'attachment; filename="data-export-{user.id}-{datetime.now(timezone.utc).strftime("%Y%m%d")}.json"'
+    return response
+
+
+@app.route('/api/user/consents', methods=['GET'])
+@login_required
+@track_endpoint('api_user_consents_get')
+def api_get_user_consents():
+    """Get all consent statuses for the current user (GDPR Art. 7)."""
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    user = g.current_user
+    consents = UserConsent.query.filter_by(user_id=user.id).all()
+
+    # Return all consent types, defaulting to not granted if no record exists
+    result = {}
+    for consent_type in UserConsent.VALID_CONSENT_TYPES:
+        consent = next((c for c in consents if c.consent_type == consent_type), None)
+        if consent:
+            result[consent_type] = consent.to_dict()
+        else:
+            result[consent_type] = {'consent_type': consent_type, 'granted': False}
+
+    return jsonify(result)
+
+
+@app.route('/api/user/consents', methods=['POST'])
+@login_required
+@track_endpoint('api_user_consents_update')
+def api_update_user_consent():
+    """Grant or withdraw consent for a processing activity (GDPR Art. 7)."""
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    data = request.get_json() or {}
+    consent_type = data.get('consent_type')
+    granted = data.get('granted')
+
+    if consent_type not in UserConsent.VALID_CONSENT_TYPES:
+        return jsonify({'error': f'Invalid consent type. Valid types: {UserConsent.VALID_CONSENT_TYPES}'}), 400
+
+    if granted is None or not isinstance(granted, bool):
+        return jsonify({'error': 'granted must be a boolean'}), 400
+
+    user = g.current_user
+    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+
+    consent = UserConsent.query.filter_by(user_id=user.id, consent_type=consent_type).first()
+
+    if not consent:
+        consent = UserConsent(
+            user_id=user.id,
+            consent_type=consent_type,
+            granted=granted,
+            ip_address=ip_address
+        )
+        db.session.add(consent)
+    else:
+        consent.granted = granted
+        consent.ip_address = ip_address
+
+    if granted:
+        consent.granted_at = datetime.now(timezone.utc)
+        consent.withdrawn_at = None
+    else:
+        consent.withdrawn_at = datetime.now(timezone.utc)
+
+    # Sync ai_processing consent with membership ai_opt_out setting
+    if consent_type == UserConsent.CONSENT_AI_PROCESSING:
+        tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
+        if tenant:
+            membership = TenantMembership.query.filter_by(
+                user_id=user.id, tenant_id=tenant.id
+            ).first()
+            if membership:
+                # ai_opt_out is the inverse of consent
+                membership.ai_opt_out = not granted
+
+    db.session.commit()
+
+    return jsonify(consent.to_dict())
+
+
+@app.route('/api/admin/execute-gdpr-tasks', methods=['POST'])
+@track_endpoint('api_admin_execute_gdpr_tasks')
+def api_execute_gdpr_tasks():
+    """
+    Execute scheduled GDPR tasks: anonymize users past grace period,
+    purge expired soft-deletes, clean old login history.
+
+    Requires master account session OR X-Cron-Secret header.
+    """
+    # Auth: master account or cron secret
+    cron_secret = request.headers.get('X-Cron-Secret')
+    expected_secret = os.environ.get('GDPR_CRON_SECRET')
+
+    is_cron = cron_secret and expected_secret and cron_secret == expected_secret
+
+    if not is_cron:
+        # Require master account
+        if not (session.get('is_master') and session.get('master_id')):
+            return jsonify({'error': 'Master account or cron authentication required'}), 403
+        from models import MasterAccount
+        master = db.session.get(MasterAccount, session.get('master_id'))
+        if not master:
+            return jsonify({'error': 'Authentication required'}), 403
+
+    now = datetime.now(timezone.utc)
+    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0}
+
+    # 1. Anonymize users past their scheduled deletion date
+    users_to_delete = User.query.filter(
+        User.deletion_scheduled_at <= now,
+        User.deleted_at.is_(None),
+        User.is_anonymized == False
+    ).all()
+
+    for user in users_to_delete:
+        if anonymize_user(user.id):
+            results['anonymized_users'] += 1
+
+    # 2. Hard-delete decisions past 30-day soft-delete retention
+    expired_decisions = ArchitectureDecision.query.filter(
+        ArchitectureDecision.deleted_at.isnot(None),
+        ArchitectureDecision.deletion_expires_at <= now
+    ).all()
+
+    for decision in expired_decisions:
+        # Delete associated history entries first
+        DecisionHistory.query.filter_by(decision_id=decision.id).delete()
+        # Delete decision-space associations
+        DecisionSpace.query.filter_by(decision_id=decision.id).delete()
+        db.session.delete(decision)
+        results['purged_decisions'] += 1
+
+    if results['purged_decisions'] > 0:
+        db.session.commit()
+
+    # 3. Hard-delete tenants past 30-day soft-delete retention
+    expired_tenants = Tenant.query.filter(
+        Tenant.deleted_at.isnot(None),
+        Tenant.deletion_expires_at <= now
+    ).all()
+
+    for tenant in expired_tenants:
+        # Delete tenant memberships
+        TenantMembership.query.filter_by(tenant_id=tenant.id).delete()
+        # Delete tenant settings
+        TenantSettings.query.filter_by(tenant_id=tenant.id).delete()
+        # Delete spaces
+        Space.query.filter_by(tenant_id=tenant.id).delete()
+        db.session.delete(tenant)
+        results['purged_tenants'] += 1
+
+    if results['purged_tenants'] > 0:
+        db.session.commit()
+
+    # 4. Clean LoginHistory entries older than 90 days
+    cutoff = now.replace(tzinfo=None) - timedelta(days=90)
+    cleaned = LoginHistory.query.filter(LoginHistory.created_at < cutoff).delete()
+    if cleaned > 0:
+        db.session.commit()
+    results['cleaned_login_history'] = cleaned
+
+    logger.info(f"GDPR tasks executed: {results}")
+    return jsonify({'message': 'GDPR tasks executed', 'results': results})
 
 
 # ==================== API Routes - Admin (SSO Config) ====================

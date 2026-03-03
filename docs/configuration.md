@@ -62,6 +62,7 @@ Additional email settings (server, port, from address) are configured in the Adm
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SKIP_CLOUDFLARE_CHECK` | `false` | Set to `true` for self-hosted deployments not behind Cloudflare |
+| `GDPR_CRON_SECRET` | - | Shared secret for authenticating automated GDPR task execution via cron. Required if using the `/api/admin/execute-gdpr-tasks` endpoint. Generate with: `openssl rand -hex 32` |
 
 ### Edition
 
@@ -105,6 +106,27 @@ Access via `/:tenant/admin/settings`.
 | SSO/OIDC | Auth Settings | Configure identity provider |
 | Tenant email | Email Settings | Override system email config |
 | Governance | Tenant Settings | Maturity state and policies |
+
+### GDPR / Privacy
+
+The platform enforces the following data retention and privacy settings:
+
+| Setting | Value | Description |
+|---------|-------|-------------|
+| Account deletion grace period | 7 days | Time before a deletion request becomes permanent. Users can cancel during this period. |
+| Soft-delete retention | 30 days | Soft-deleted decisions and tenants are permanently purged after this period. |
+| Login history retention | 90 days | Authentication log entries are automatically cleaned up after this period. |
+| Anonymisation behaviour | "Former Member" | Deleted users' contributions are preserved with attribution changed to "Former Member". |
+
+**Consent types** managed through user profile settings:
+
+| Consent Type | Default | Description |
+|--------------|---------|-------------|
+| Analytics tracking | Off | Controls PostHog analytics collection for the user |
+| AI processing | Off | Controls whether the user's data may be processed by AI/LLM features |
+| Email notifications | Off | Controls whether the user receives email notifications |
+
+These retention periods and consent types are currently fixed and not configurable via environment variables. Automated enforcement requires setting up the GDPR cron job (see [Self-Hosting Guide](self-hosting.md#gdpr-compliance)).
 
 ## Authentication Methods
 

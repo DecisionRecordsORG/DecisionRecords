@@ -43,6 +43,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.angular/
 frontend/.sass-cache/
+
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -101,3 +102,4 @@ backups/
 local_secrets.py
 e2e/playwright-report/
 .env.dev
+.env.dev.local

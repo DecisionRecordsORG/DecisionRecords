@@ -40,6 +40,9 @@ export interface User {
   membership?: TenantMembership;
   global_role?: GlobalRole;  // Convenience field populated by backend
   tenant_info?: TenantInfo;  // Tenant status info for governance UI
+  // GDPR fields
+  deletion_requested_at?: string;
+  deletion_scheduled_at?: string;
 }
 
 export interface MasterAccount {

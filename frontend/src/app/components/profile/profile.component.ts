@@ -549,6 +549,106 @@ const PASSWORD_REQUIRES_NUMBER = true;
           </mat-card>
         }
       }
+
+        <!-- Privacy & Data Section (hidden during setup mode) -->
+        @if (!setupMode && !authService.isMasterAccount) {
+          <mat-card class="privacy-card">
+            <mat-card-header>
+              <mat-icon mat-card-avatar>shield</mat-icon>
+              <mat-card-title>Privacy & Data</mat-card-title>
+              <mat-card-subtitle>Manage your data and privacy preferences</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <div class="privacy-section">
+                <h3>Data Export</h3>
+                <p class="privacy-description">Download a copy of all your personal data in JSON format.</p>
+                <button mat-stroked-button (click)="exportData()" [disabled]="isExportingData">
+                  @if (isExportingData) {
+                    <mat-spinner diameter="18"></mat-spinner>
+                  } @else {
+                    <mat-icon>download</mat-icon>
+                  }
+                  Export My Data
+                </button>
+              </div>
+
+              <mat-divider></mat-divider>
+
+              <div class="privacy-section">
+                <h3>Privacy Preferences</h3>
+                <p class="privacy-description">Control how your data is used for optional features. Changes take effect immediately.</p>
+                @if (isLoadingConsents) {
+                  <mat-spinner diameter="24"></mat-spinner>
+                } @else {
+                  <div class="consent-toggles">
+                    <mat-slide-toggle
+                      [checked]="consents.analytics"
+                      (change)="updateConsent('analytics', $event.checked)">
+                      Analytics
+                    </mat-slide-toggle>
+                    <p class="consent-hint">Help us improve the product with anonymous usage data</p>
+
+                    <mat-slide-toggle
+                      [checked]="consents.ai_processing"
+                      (change)="updateConsent('ai_processing', $event.checked)">
+                      AI Processing
+                    </mat-slide-toggle>
+                    <p class="consent-hint">Allow AI features to process your decision content</p>
+
+                    <mat-slide-toggle
+                      [checked]="consents.email_notifications"
+                      (change)="updateConsent('email_notifications', $event.checked)">
+                      Email Notifications
+                    </mat-slide-toggle>
+                    <p class="consent-hint">Receive email updates about decisions and activity</p>
+                  </div>
+                }
+              </div>
+            </mat-card-content>
+          </mat-card>
+        }
+
+        <!-- Delete Account Section (hidden during setup mode) -->
+        @if (!setupMode && !authService.isMasterAccount) {
+          @if (user?.deletion_scheduled_at) {
+            <div class="deletion-pending-banner">
+              <mat-icon>warning</mat-icon>
+              <div>
+                <strong>Account deletion scheduled</strong>
+                <p>Your account will be permanently deleted on {{ user!.deletion_scheduled_at | date:'mediumDate' }}.
+                   Your personal data will be removed, but your contributions will remain as "Former Member".</p>
+              </div>
+              <button mat-raised-button color="primary" (click)="cancelDeletion()" [disabled]="isCancellingDeletion">
+                Cancel Deletion
+              </button>
+            </div>
+          }
+          <mat-card class="delete-account-card">
+            <mat-card-header>
+              <mat-icon mat-card-avatar class="danger-icon">delete_forever</mat-icon>
+              <mat-card-title>Delete Account</mat-card-title>
+              <mat-card-subtitle>Permanently remove your account and personal data</mat-card-subtitle>
+            </mat-card-header>
+            <mat-card-content>
+              <p class="delete-warning">
+                Deleting your account removes your personal information, but your work contributions remain as
+                part of your organisation's shared record. Your name will be replaced by "Former Member".
+              </p>
+              <p class="delete-warning">
+                After requesting deletion, you have 7 days to change your mind before it becomes permanent.
+              </p>
+              <button mat-raised-button color="warn" (click)="requestDeletion()"
+                      [disabled]="isDeletingAccount || !!user?.deletion_scheduled_at">
+                @if (isDeletingAccount) {
+                  <mat-spinner diameter="18"></mat-spinner>
+                } @else {
+                  <mat-icon>delete_forever</mat-icon>
+                }
+                {{ user?.deletion_scheduled_at ? 'Deletion Scheduled' : 'Delete My Account' }}
+              </button>
+            </mat-card-content>
+          </mat-card>
+        }
     </div>
   `,
   styles: [`
@@ -1146,6 +1246,81 @@ const PASSWORD_REQUIRES_NUMBER = true;
       flex-shrink: 0;
       margin-top: 2px;
     }
+
+    /* Privacy & Data */
+    .privacy-card, .delete-account-card {
+      margin-bottom: 24px;
+    }
+
+    .privacy-section {
+      padding: 16px 0;
+    }
+
+    .privacy-section h3 {
+      margin: 0 0 4px 0;
+      font-size: 16px;
+    }
+
+    .privacy-description {
+      color: #666;
+      font-size: 14px;
+      margin: 0 0 12px 0;
+    }
+
+    .consent-toggles {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .consent-toggles mat-slide-toggle {
+      margin-top: 8px;
+    }
+
+    .consent-hint {
+      color: #888;
+      font-size: 12px;
+      margin: 2px 0 0 44px;
+    }
+
+    /* Delete Account */
+    .danger-icon {
+      color: #d32f2f;
+    }
+
+    .delete-warning {
+      color: #666;
+      font-size: 14px;
+      margin: 0 0 8px 0;
+    }
+
+    .delete-account-card {
+      border: 1px solid #ffcdd2;
+    }
+
+    .deletion-pending-banner {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: #fff3e0;
+      border: 1px solid #ffb74d;
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .deletion-pending-banner mat-icon {
+      color: #f57c00;
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+    }
+
+    .deletion-pending-banner p {
+      margin: 4px 0 0 0;
+      font-size: 14px;
+      color: #666;
+    }
   `]
 })
 export class ProfileComponent implements OnInit {
@@ -1173,6 +1348,17 @@ export class ProfileComponent implements OnInit {
   newKeyScopes = { read: true, search: true, write: false };
   newlyCreatedKey: string | null = null;
   aiExternalAccessEnabled = false;
+
+  // GDPR - Privacy & Data
+  isExportingData = false;
+  isDeletingAccount = false;
+  isCancellingDeletion = false;
+  isLoadingConsents = true;
+  consents: { analytics: boolean; ai_processing: boolean; email_notifications: boolean } = {
+    analytics: false,
+    ai_processing: false,
+    email_notifications: false
+  };
 
   /**
    * Check if user can request a role elevation
@@ -1245,6 +1431,9 @@ export class ProfileComponent implements OnInit {
 
       // Check AI external access and load API keys
       this.checkAiAccess();
+
+      // Load GDPR consent preferences
+      this.loadConsents();
 
       // Check for setup mode (new account passkey setup)
       this.route.queryParams.subscribe(async params => {
@@ -1621,5 +1810,113 @@ export class ProfileComponent implements OnInit {
    */
   dismissNewKey(): void {
     this.newlyCreatedKey = null;
+  }
+
+  // ============ GDPR Methods ============
+
+  loadConsents(): void {
+    this.isLoadingConsents = true;
+    this.http.get<Record<string, { granted: boolean }>>('/api/user/consents').subscribe({
+      next: (response) => {
+        this.consents = {
+          analytics: response['analytics']?.granted || false,
+          ai_processing: response['ai_processing']?.granted || false,
+          email_notifications: response['email_notifications']?.granted || false,
+        };
+        this.isLoadingConsents = false;
+      },
+      error: () => {
+        this.isLoadingConsents = false;
+      }
+    });
+  }
+
+  updateConsent(consentType: string, granted: boolean): void {
+    this.http.post('/api/user/consents', { consent_type: consentType, granted }).subscribe({
+      next: () => {
+        this.snackBar.open(
+          granted ? 'Consent granted' : 'Consent withdrawn',
+          'Close',
+          { duration: 2000 }
+        );
+      },
+      error: () => {
+        // Revert toggle on failure
+        (this.consents as any)[consentType] = !granted;
+        this.snackBar.open('Failed to update preference', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  exportData(): void {
+    this.isExportingData = true;
+    this.http.post('/api/user/export-data', {}, { responseType: 'blob', observe: 'response' }).subscribe({
+      next: (response) => {
+        this.isExportingData = false;
+        const blob = response.body;
+        if (blob) {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `data-export-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+        }
+        this.snackBar.open('Data exported successfully', 'Close', { duration: 3000 });
+      },
+      error: () => {
+        this.isExportingData = false;
+        this.snackBar.open('Failed to export data', 'Close', { duration: 3000 });
+      }
+    });
+  }
+
+  requestDeletion(): void {
+    const dialogRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Delete Your Account',
+        message: 'Are you sure you want to delete your account? Your personal data will be removed after 7 days, but your contributions will remain as "Former Member". You can cancel this during the grace period.',
+        confirmText: 'Delete My Account',
+        cancelText: 'Keep Account',
+        isDanger: true
+      }
+    });
+
+    dialogRef.afterClosed().subscribe(confirmed => {
+      if (confirmed) {
+        this.isDeletingAccount = true;
+        this.http.post<{ deletion_scheduled_at: string }>('/api/user/delete-request', {}).subscribe({
+          next: (response) => {
+            this.isDeletingAccount = false;
+            if (this.user) {
+              this.user.deletion_scheduled_at = response.deletion_scheduled_at;
+            }
+            this.snackBar.open('Account deletion scheduled. You have 7 days to cancel.', 'Close', { duration: 5000 });
+          },
+          error: (err) => {
+            this.isDeletingAccount = false;
+            this.snackBar.open(err.error?.error || 'Failed to request deletion', 'Close', { duration: 3000 });
+          }
+        });
+      }
+    });
+  }
+
+  cancelDeletion(): void {
+    this.isCancellingDeletion = true;
+    this.http.post('/api/user/cancel-deletion', {}).subscribe({
+      next: () => {
+        this.isCancellingDeletion = false;
+        if (this.user) {
+          this.user.deletion_scheduled_at = undefined;
+          this.user.deletion_requested_at = undefined;
+        }
+        this.snackBar.open('Account deletion cancelled', 'Close', { duration: 3000 });
+      },
+      error: (err) => {
+        this.isCancellingDeletion = false;
+        this.snackBar.open(err.error?.error || 'Failed to cancel deletion', 'Close', { duration: 3000 });
+      }
+    });
   }
 }

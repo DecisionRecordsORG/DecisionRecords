@@ -7,6 +7,7 @@ import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
 import { filter } from 'rxjs/operators';
+import { CookieConsentComponent, CookieConsentStatus } from './components/shared/cookie-consent.component';
 
 /**
  * Root Application Component
@@ -25,7 +26,7 @@ import { filter } from 'rxjs/operators';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent],
+  imports: [CommonModule, RouterOutlet, RouterModule, NavbarComponent, CookieConsentComponent],
   template: `
     @if (authService.isAuthenticated && showAppNavbar) {
       <app-navbar></app-navbar>
@@ -43,6 +44,9 @@ import { filter } from 'rxjs/operators';
           </small>
         </div>
       </footer>
+    }
+    @if (featureFlags.analyticsEnabled) {
+      <app-cookie-consent (consentChanged)="onCookieConsentChanged($event)"></app-cookie-consent>
     }
   `,
   styles: [`
@@ -111,9 +115,12 @@ export class AppComponent implements OnInit {
     private router: Router,
     private postHogService: PostHogService
   ) {
-    // Initialize PostHog analytics (only if enabled)
+    // Initialize PostHog analytics only if enabled AND cookie consent was given
     if (this.featureFlags.analyticsEnabled) {
-      this.postHogService.init();
+      const consent = CookieConsentComponent.getConsent();
+      if (consent === 'accepted') {
+        this.postHogService.init();
+      }
     }
     // Load feature flags on startup
     this.featureFlags.loadFlags().subscribe();
@@ -160,5 +167,11 @@ export class AppComponent implements OnInit {
     const info = this.versionService.currentVersion;
     if (!info) return '';
     return `Build: ${info.build_date}\nCommit: ${info.git_commit}\nEnvironment: ${info.environment}`;
+  }
+
+  onCookieConsentChanged(status: CookieConsentStatus): void {
+    if (status === 'accepted' && this.featureFlags.analyticsEnabled) {
+      this.postHogService.init();
+    }
   }
 }

@@ -281,6 +281,66 @@ docker-compose up -d
 4. **Regular backups** - Automate daily backups
 5. **Keep updated** - Pull new images regularly
 
+## GDPR Compliance
+
+Decision Records includes built-in GDPR features: account deletion with anonymisation, personal data export, and consent management. These work out of the box for user-initiated actions.
+
+### Automated GDPR Tasks
+
+To enforce data retention policies automatically (purging expired soft-deleted records, cleaning up login history, completing account anonymisation after the grace period), you need to set up a cron job that calls the GDPR task execution endpoint.
+
+#### 1. Set the cron secret
+
+Add a shared secret to your environment:
+
+```bash
+# In your docker-compose.yml or .env file
+GDPR_CRON_SECRET=your-secure-random-secret-here
+```
+
+Generate a strong secret:
+
+```bash
+openssl rand -hex 32
+```
+
+#### 2. Configure the cron job
+
+Set up a cron job to call the endpoint (hourly recommended):
+
+```bash
+# Add to your server's crontab (crontab -e)
+0 * * * * curl -s -X POST http://localhost:3000/api/admin/execute-gdpr-tasks \
+  -H "Content-Type: application/json" \
+  -H "X-Cron-Secret: your-secure-random-secret-here" \
+  > /var/log/gdpr-tasks.log 2>&1
+```
+
+Or using docker-compose:
+
+```bash
+0 * * * * docker exec decision-records curl -s -X POST http://localhost:8000/api/admin/execute-gdpr-tasks \
+  -H "Content-Type: application/json" \
+  -H "X-Cron-Secret: your-secure-random-secret-here" \
+  >> /var/log/gdpr-tasks.log 2>&1
+```
+
+#### 3. What the automated tasks do
+
+| Task | Frequency | Description |
+|------|-----------|-------------|
+| Account anonymisation | Hourly | Completes deletion for accounts past the 7-day grace period |
+| History cleanup | Hourly | Removes login history entries older than 90 days |
+| Record purge | Hourly | Permanently deletes soft-deleted decisions/tenants older than 30 days |
+
+#### 4. Existing installations
+
+If upgrading from a version before v2.28.0, run the migration script to add the consent tables:
+
+```bash
+DATABASE_URL="postgresql://..." python ee/scripts/migrate_to_v228.py --verbose
+```
+
 ## Support
 
 - [GitHub Issues](https://github.com/DecisionRecordsORG/DecisionRecords/issues)

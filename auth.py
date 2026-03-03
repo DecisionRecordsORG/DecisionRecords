@@ -23,7 +23,12 @@ def get_current_user():
     if not user_id:
         return None
 
-    return db.session.get(User, user_id)
+    user = db.session.get(User, user_id)
+    if user and (user.is_anonymized or user.deleted_at is not None):
+        session.clear()
+        return None
+
+    return user
 
 
 def is_master_account():

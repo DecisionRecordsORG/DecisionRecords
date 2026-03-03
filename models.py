@@ -644,6 +644,10 @@ class AuditLog(db.Model):
     ACTION_ROLE_REQUEST_CREATED = 'role_request_created'
     ACTION_ROLE_REQUEST_APPROVED = 'role_request_approved'
     ACTION_ROLE_REQUEST_REJECTED = 'role_request_rejected'
+    ACTION_USER_DELETION_REQUESTED = 'user_deletion_requested'
+    ACTION_USER_DELETION_CANCELLED = 'user_deletion_cancelled'
+    ACTION_USER_DELETION_EXECUTED = 'user_deletion_executed'
+    ACTION_USER_DATA_EXPORTED = 'user_data_exported'
 
     def to_dict(self):
         return {
@@ -855,6 +859,55 @@ class User(db.Model):
             'last_login': self.last_login.isoformat() if self.last_login else None,
             'has_passkey': len(self.webauthn_credentials) > 0 if self.webauthn_credentials else False,
             'has_password': self.has_password(),
+            'deletion_requested_at': self.deletion_requested_at.isoformat() if self.deletion_requested_at else None,
+            'deletion_scheduled_at': self.deletion_scheduled_at.isoformat() if self.deletion_scheduled_at else None,
+        }
+
+
+class UserConsent(db.Model):
+    """
+    Tracks user consent for optional processing activities (GDPR Art. 7).
+
+    Each record represents a specific consent type for a user.
+    Withdrawal must be as easy as granting — same interface, immediate effect.
+    """
+    __tablename__ = 'user_consents'
+
+    # Consent type constants
+    CONSENT_ANALYTICS = 'analytics'
+    CONSENT_AI_PROCESSING = 'ai_processing'
+    CONSENT_EMAIL_NOTIFICATIONS = 'email_notifications'
+
+    VALID_CONSENT_TYPES = [CONSENT_ANALYTICS, CONSENT_AI_PROCESSING, CONSENT_EMAIL_NOTIFICATIONS]
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    consent_type = db.Column(db.String(50), nullable=False)
+    granted = db.Column(db.Boolean, nullable=False, default=False)
+    granted_at = db.Column(db.DateTime, nullable=True)
+    withdrawn_at = db.Column(db.DateTime, nullable=True)
+    ip_address = db.Column(db.String(45), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('consents', lazy='dynamic'))
+
+    # Unique constraint: one record per user per consent type
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'consent_type', name='uq_user_consent_type'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'consent_type': self.consent_type,
+            'granted': self.granted,
+            'granted_at': self.granted_at.isoformat() if self.granted_at else None,
+            'withdrawn_at': self.withdrawn_at.isoformat() if self.withdrawn_at else None,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
         }
 
 
