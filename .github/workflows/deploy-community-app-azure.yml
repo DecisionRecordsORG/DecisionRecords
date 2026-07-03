@@ -1,0 +1,156 @@
+name: Deploy Community App to Azure
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: decision-records-community
+
+concurrency:
+  group: production-public-app
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Community App Preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Check Community/Enterprise boundary
+        run: python scripts/check_ce_boundary.py
+
+      - name: Compile Python files
+        run: |
+          python -m py_compile \
+            app.py \
+            models.py \
+            auth.py \
+            governance.py \
+            notifications.py \
+            security.py \
+            webauthn_auth.py \
+            scripts/check_ce_boundary.py \
+            scripts/qa_check.py
+
+      - name: Run backend tests
+        env:
+          DECISION_RECORDS_EDITION: community
+          DATABASE_URL: sqlite:///test.db
+          SECRET_KEY: test-secret-key
+          FLASK_ENV: testing
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm ci
+          npx tsc -p tsconfig.app.ce.json --noEmit
+          npm run build -- --configuration=community --progress=false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify Community Docker build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.community
+          push: false
+          tags: decision-records-community:preflight
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Build and Deploy Container App
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: production-public
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.AZURE_ACR_LOGIN_SERVER }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+      PUBLIC_APP_HEALTH_URL: ${{ vars.PUBLIC_APP_HEALTH_URL }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Azure variables
+        run: |
+          test -n "${{ vars.AZURE_CLIENT_ID }}"
+          test -n "${{ vars.AZURE_TENANT_ID }}"
+          test -n "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          test -n "$ACR_NAME"
+          test -n "$ACR_LOGIN_SERVER"
+          test -n "$RESOURCE_GROUP"
+          test -n "$CONTAINER_APP_NAME"
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to Azure Container Registry
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Build and push Community image
+        run: |
+          IMAGE="$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}"
+          docker build --platform linux/amd64 \
+            -f Dockerfile.community \
+            -t "$IMAGE" \
+            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest" \
+            .
+          docker push "$IMAGE"
+          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Update Azure Container App
+        run: |
+          az containerapp update \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --image "$IMAGE"
+
+      - name: Wait for health check
+        if: env.PUBLIC_APP_HEALTH_URL != ''
+        run: |
+          for i in {1..30}; do
+            RESULT=$(curl -sf "$PUBLIC_APP_HEALTH_URL" 2>/dev/null || true)
+            if [[ "$RESULT" == *"ok"* ]] || [[ "$RESULT" == *"healthy"* ]]; then
+              echo "Health check passed: $RESULT"
+              exit 0
+            fi
+            echo "Attempt $i/30 failed; waiting..."
+            sleep 10
+          done
+          echo "Health check failed after 30 attempts"
+          exit 1

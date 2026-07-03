@@ -40,7 +40,11 @@ except ImportError:
     build_create_decision_form_card = None
     TeamsService = None
 
-pytestmark = pytest.mark.skipif(not EE_AVAILABLE, reason="Enterprise Edition modules not available")
+EE_TESTS_ENABLED = EE_AVAILABLE and os.environ.get('DECISION_RECORDS_EDITION', 'community') == 'enterprise'
+pytestmark = pytest.mark.skipif(
+    not EE_TESTS_ENABLED,
+    reason="Enterprise Edition tests require DECISION_RECORDS_EDITION=enterprise and EE modules",
+)
 
 
 # ============================================================================

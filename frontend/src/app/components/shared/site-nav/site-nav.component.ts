@@ -22,12 +22,9 @@ import { AuthService } from '../../../services/auth.service';
         </a>
         <div class="nav-links">
           <a routerLink="/">Home</a>
-          <a routerLink="/solutions">Solutions</a>
           <a routerLink="/security-features">Security</a>
-          <a routerLink="/integrations">Integrations</a>
-          <a routerLink="/blog">Blog</a>
-          <a routerLink="/faq">FAQ</a>
-          <a routerLink="/about">About</a>
+          <a routerLink="/terms">Terms</a>
+          <a href="https://github.com/DecisionRecordsORG/DecisionRecords" target="_blank" rel="noopener noreferrer">GitHub</a>
         </div>
         <div class="nav-actions">
           <a *ngIf="!isAuthenticated" (click)="signIn()" class="nav-signin">Sign In</a>
@@ -40,12 +37,9 @@ import { AuthService } from '../../../services/auth.service';
       <!-- Mobile Menu -->
       <div class="nav-mobile-menu" [class.open]="mobileMenuOpen">
         <a routerLink="/" (click)="mobileMenuOpen = false">Home</a>
-        <a routerLink="/solutions" (click)="mobileMenuOpen = false">Solutions</a>
         <a routerLink="/security-features" (click)="mobileMenuOpen = false">Security</a>
-        <a routerLink="/integrations" (click)="mobileMenuOpen = false">Integrations</a>
-        <a routerLink="/blog" (click)="mobileMenuOpen = false">Blog</a>
-        <a routerLink="/faq" (click)="mobileMenuOpen = false">FAQ</a>
-        <a routerLink="/about" (click)="mobileMenuOpen = false">About</a>
+        <a routerLink="/terms" (click)="mobileMenuOpen = false">Terms</a>
+        <a href="https://github.com/DecisionRecordsORG/DecisionRecords" target="_blank" rel="noopener noreferrer" (click)="mobileMenuOpen = false">GitHub</a>
         <a *ngIf="!isAuthenticated" (click)="signIn()" class="nav-signin-mobile">Sign In</a>
         <a *ngIf="isAuthenticated" (click)="goToTenant()" class="nav-signin-mobile">Your Decisions</a>
       </div>

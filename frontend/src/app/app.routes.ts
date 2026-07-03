@@ -14,10 +14,10 @@ import { authGuard, adminGuard, masterGuard, guestGuard, tenantGuard } from './g
  * - Backend APIs enforce edition checks via decorators (@require_slack, @require_teams)
  * - Feature flags service provides runtime visibility control
  *
- * Marketing/Public Pages:
- * - Marketing pages (blog, faq, about, integrations, pricing, etc.) are served
- *   from a separate marketing site at decisionrecords.org
- * - This app (app.decisionrecords.org) handles only authenticated tenant access
+ * Public Pages:
+ * - The Community Edition homepage and legal/security pages are public and
+ *   indexable for decisionrecords.org
+ * - App, setup, admin, tenant, and integration routes are noindex
  *
  * In Community Edition builds (Dockerfile.community):
  * - The ee/ directory is physically excluded
@@ -33,12 +33,26 @@ export const routes: Routes = [
   // License acceptance page (shown on first-time setup)
   {
     path: 'license',
-    loadComponent: () => import('./components/license-acceptance/license-acceptance.component').then(m => m.LicenseAcceptanceComponent)
+    loadComponent: () => import('./components/license-acceptance/license-acceptance.component').then(m => m.LicenseAcceptanceComponent),
+    data: {
+      seo: {
+        title: 'Accept License - Decision Records',
+        description: 'Accept the Decision Records Community Edition license before completing setup.',
+        robots: 'noindex, nofollow'
+      }
+    }
   },
   // Setup wizard for Community Edition first-time setup
   {
     path: 'setup',
-    loadComponent: () => import('./components/setup-wizard/setup-wizard.component').then(m => m.SetupWizardComponent)
+    loadComponent: () => import('./components/setup-wizard/setup-wizard.component').then(m => m.SetupWizardComponent),
+    data: {
+      seo: {
+        title: 'Setup - Decision Records',
+        description: 'Set up a self-hosted Decision Records Community Edition instance.',
+        robots: 'noindex, nofollow'
+      }
+    }
   },
 
   // ============================================================================
@@ -51,7 +65,75 @@ export const routes: Routes = [
     loadComponent: () =>
       import('@ee/pages/landing/landing.component')
         .then(m => m.LandingComponent)
-        .catch(() => import('./components/landing/landing.component').then(m => m.LandingComponent))
+        .catch(() => import('./components/landing/landing.component').then(m => m.LandingComponent)),
+    data: {
+      seo: {
+        title: 'Decision Records - Open Source Architecture Decision Records',
+        description: 'Decision Records is an open source platform for capturing and preserving the reasoning behind important architecture decisions.',
+        canonicalPath: '/',
+        index: true
+      }
+    }
+  },
+  {
+    path: 'security-features',
+    loadComponent: () => import('./components/security/security.component').then(m => m.SecurityComponent),
+    data: {
+      seo: {
+        title: 'Security Features - Decision Records',
+        description: 'Explore Decision Records security features including passkeys, SSO, role-based access, tenant isolation, and audit logging.',
+        canonicalPath: '/security-features',
+        index: true
+      }
+    }
+  },
+  {
+    path: 'security',
+    loadComponent: () => import('./components/security-policy/security-policy.component').then(m => m.SecurityPolicyComponent),
+    data: {
+      seo: {
+        title: 'Security Overview - Decision Records',
+        description: 'Read how Decision Records approaches hosted service security, access control, data protection, operations, and incident response.',
+        canonicalPath: '/security',
+        index: true
+      }
+    }
+  },
+  {
+    path: 'terms',
+    loadComponent: () => import('./components/terms-of-service/terms-of-service.component').then(m => m.TermsOfServiceComponent),
+    data: {
+      seo: {
+        title: 'Terms of Service - Decision Records',
+        description: 'Terms for using the Decision Records hosted cloud service and self-hosted Community Edition.',
+        canonicalPath: '/terms',
+        index: true
+      }
+    }
+  },
+  {
+    path: 'dpa',
+    loadComponent: () => import('./components/data-processing-agreement/data-processing-agreement.component').then(m => m.DataProcessingAgreementComponent),
+    data: {
+      seo: {
+        title: 'Data Processing Addendum - Decision Records',
+        description: 'A public summary of Decision Records hosted service data processing roles, categories, security measures, and data handling.',
+        canonicalPath: '/dpa',
+        index: true
+      }
+    }
+  },
+  {
+    path: 'sla',
+    loadComponent: () => import('./components/service-level-agreement/service-level-agreement.component').then(m => m.ServiceLevelAgreementComponent),
+    data: {
+      seo: {
+        title: 'Service Level Agreement - Decision Records',
+        description: 'Availability and support commitments for Decision Records paid hosted service plans.',
+        canonicalPath: '/sla',
+        index: true
+      }
+    }
   },
 
   // ============================================================================
@@ -60,7 +142,14 @@ export const routes: Routes = [
   {
     path: 'superadmin',
     loadComponent: () => import('./components/superadmin-login/superadmin-login.component').then(m => m.SuperadminLoginComponent),
-    canActivate: [guestGuard]
+    canActivate: [guestGuard],
+    data: {
+      seo: {
+        title: 'Super Admin Sign In - Decision Records',
+        description: 'Decision Records super admin sign in.',
+        robots: 'noindex, nofollow'
+      }
+    }
   },
   {
     path: 'superadmin/dashboard',

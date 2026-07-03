@@ -2,6 +2,7 @@ import os
 import enum
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, timezone
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
@@ -256,16 +257,25 @@ class MasterAccount(db.Model):
     def create_default_master(db_session):
         """Create the default master account if it doesn't exist."""
         existing = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
-        if not existing:
-            master = MasterAccount(
-                username=DEFAULT_MASTER_USERNAME,
-                name='System Administrator'
-            )
-            master.set_password(DEFAULT_MASTER_PASSWORD)
-            db_session.add(master)
+        if existing:
+            return existing
+
+        master = MasterAccount(
+            username=DEFAULT_MASTER_USERNAME,
+            name='System Administrator'
+        )
+        master.set_password(DEFAULT_MASTER_PASSWORD)
+        db_session.add(master)
+
+        try:
             db_session.commit()
             return master
-        return existing
+        except IntegrityError:
+            db_session.rollback()
+            existing = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
+            if existing:
+                return existing
+            raise
 
 
 # ============================================================================

@@ -57,7 +57,7 @@ def generate_encryption_key():
         python -c "from crypto import generate_encryption_key; print(generate_encryption_key())"
 
     Then store in Key Vault:
-        az keyvault secret set --vault-name adr-keyvault-eu --name smtp-encryption-key --value "KEY_HERE"
+        az keyvault secret set --vault-name <vault-name> --name smtp-encryption-key --value "KEY_HERE"
 
     Returns:
         str: A new Fernet key (URL-safe base64 encoded)

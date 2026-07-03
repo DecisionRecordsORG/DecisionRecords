@@ -1,4 +1,5 @@
-import { Injectable } from '@angular/core';
+import { Inject, Injectable, PLATFORM_ID } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of, BehaviorSubject } from 'rxjs';
 import { catchError, tap } from 'rxjs/operators';
@@ -16,36 +17,46 @@ export interface VersionInfo {
 export class VersionService {
   private versionSubject = new BehaviorSubject<VersionInfo | null>(null);
   public version$ = this.versionSubject.asObservable();
+  private fallbackVersion: VersionInfo = {
+    version: '1.0.0',
+    build_date: 'unknown',
+    git_commit: 'unknown',
+    environment: 'unknown'
+  };
 
-  constructor(private http: HttpClient) {
-    this.loadVersion();
+  constructor(
+    private http: HttpClient,
+    @Inject(PLATFORM_ID) private platformId: object
+  ) {
+    if (isPlatformBrowser(this.platformId)) {
+      this.loadVersion();
+    } else {
+      this.versionSubject.next(this.fallbackVersion);
+    }
   }
 
   loadVersion(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      this.versionSubject.next(this.fallbackVersion);
+      return;
+    }
+
     this.http.get<VersionInfo>('/api/version').pipe(
       tap(info => this.versionSubject.next(info)),
       catchError(() => {
-        // Fallback version if API fails
-        const fallback: VersionInfo = {
-          version: '1.0.0',
-          build_date: 'unknown',
-          git_commit: 'unknown',
-          environment: 'unknown'
-        };
-        this.versionSubject.next(fallback);
-        return of(fallback);
+        this.versionSubject.next(this.fallbackVersion);
+        return of(this.fallbackVersion);
       })
     ).subscribe();
   }
 
   getVersion(): Observable<VersionInfo> {
+    if (!isPlatformBrowser(this.platformId)) {
+      return of(this.fallbackVersion);
+    }
+
     return this.http.get<VersionInfo>('/api/version').pipe(
-      catchError(() => of({
-        version: '1.0.0',
-        build_date: 'unknown',
-        git_commit: 'unknown',
-        environment: 'unknown'
-      }))
+      catchError(() => of(this.fallbackVersion))
     );
   }
 

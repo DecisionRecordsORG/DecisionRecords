@@ -6,6 +6,7 @@ import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
+import { SeoService } from './services/seo.service';
 import { filter } from 'rxjs/operators';
 import { CookieConsentComponent, CookieConsentStatus } from './components/shared/cookie-consent.component';
 
@@ -113,8 +114,11 @@ export class AppComponent implements OnInit {
     public versionService: VersionService,
     public featureFlags: FeatureFlagsService,
     private router: Router,
-    private postHogService: PostHogService
+    private postHogService: PostHogService,
+    private seoService: SeoService
   ) {
+    this.seoService.init();
+
     // Initialize PostHog analytics only if enabled AND cookie consent was given
     if (this.featureFlags.analyticsEnabled) {
       const consent = CookieConsentComponent.getConsent();
