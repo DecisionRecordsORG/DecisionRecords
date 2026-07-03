@@ -1,6 +1,6 @@
-# App routes (auto-generated - do not edit manually)
-# Marketing pages are served from separate static site at decisionrecords.org
 /
-/license
-/setup
-/superadmin
+/security-features
+/security
+/terms
+/dpa
+/sla

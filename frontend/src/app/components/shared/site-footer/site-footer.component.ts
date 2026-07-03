@@ -42,12 +42,10 @@ import { HttpClient } from '@angular/common/http';
           <div class="footer-resources-col">
             <h4>Resources</h4>
             <nav class="footer-legal-links">
-              <a routerLink="/solutions">Solutions</a>
               <a routerLink="/security-features">Security</a>
-              <a routerLink="/integrations">Integrations</a>
-              <a routerLink="/blog">Blog</a>
-              <a routerLink="/faq">FAQ</a>
-              <a routerLink="/about">About</a>
+              <a href="https://github.com/DecisionRecordsORG/DecisionRecords" target="_blank" rel="noopener noreferrer">GitHub</a>
+              <a href="https://github.com/DecisionRecordsORG/DecisionRecords/blob/main/docs/self-hosting.md" target="_blank" rel="noopener noreferrer">Self-Hosting</a>
+              <a href="https://github.com/DecisionRecordsORG/DecisionRecords/issues" target="_blank" rel="noopener noreferrer">Issues</a>
             </nav>
           </div>
           <div class="footer-legal-col">
@@ -103,11 +101,10 @@ import { HttpClient } from '@angular/common/http';
 
             <button mat-raised-button type="submit" class="submit-button"
                     [disabled]="!contactForm.valid || contactSubmitting">
-              @if (contactSubmitting) {
+              <ng-container *ngIf="contactSubmitting; else contactSubmitText">
                 <mat-spinner diameter="20"></mat-spinner>
-              } @else {
-                Send Message
-              }
+              </ng-container>
+              <ng-template #contactSubmitText>Send Message</ng-template>
             </button>
           </form>
         } @else {

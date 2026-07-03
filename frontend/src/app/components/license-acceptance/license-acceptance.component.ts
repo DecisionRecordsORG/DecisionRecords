@@ -1,5 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, Inject, OnInit, PLATFORM_ID } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { MatCardModule } from '@angular/material/card';
@@ -90,12 +91,9 @@ import { FormsModule } from '@angular/forms';
                   color="primary"
                   (click)="acceptLicense()"
                   [disabled]="!accepted || submitting">
-            @if (submitting) {
-              <mat-spinner diameter="20"></mat-spinner>
-            } @else {
-              <mat-icon>check</mat-icon>
-              Accept and Continue
-            }
+            <mat-spinner *ngIf="submitting" diameter="20"></mat-spinner>
+            <mat-icon *ngIf="!submitting">check</mat-icon>
+            <span *ngIf="!submitting">Accept and Continue</span>
           </button>
         </mat-card-actions>
       </mat-card>
@@ -260,10 +258,15 @@ export class LicenseAcceptanceComponent implements OnInit {
 
   constructor(
     private http: HttpClient,
-    private router: Router
+    private router: Router,
+    @Inject(PLATFORM_ID) private platformId: object
   ) {}
 
   ngOnInit(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
+
     // Check if license is already accepted
     this.http.get<{ accepted: boolean }>('/api/system/license').subscribe({
       next: (response) => {

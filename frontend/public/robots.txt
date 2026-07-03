@@ -1,0 +1,17 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /auth/
+Disallow: /license
+Disallow: /setup
+Disallow: /superadmin
+Disallow: /slack/
+Disallow: /teams/
+Disallow: /*/admin
+Disallow: /*/decision
+Disallow: /*/login
+Disallow: /*/pending
+Disallow: /*/profile
+Disallow: /*/setup
+
+Sitemap: https://decisionrecords.org/sitemap.xml

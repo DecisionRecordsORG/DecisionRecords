@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { isPlatformBrowser } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -51,14 +52,50 @@ interface TenantInfo {
             An open source platform for capturing and preserving the reasoning behind
             important architecture decisions using the ADR format.
           </p>
+          <div class="source-banner">
+            <span>
+              <mat-icon>public</mat-icon>
+              Community Edition source is available on GitHub
+            </span>
+            <a mat-stroked-button
+               class="source-button"
+               href="https://github.com/DecisionRecordsORG/DecisionRecords"
+               target="_blank"
+               rel="noopener noreferrer">
+              <mat-icon>code</mat-icon>
+              GitHub
+            </a>
+          </div>
 
           <!-- Loading State -->
           <div class="cta-section" *ngIf="loading">
             <mat-spinner diameter="40"></mat-spinner>
           </div>
 
+          <!-- Static public website: no backend API is attached -->
+          <div class="cta-section" *ngIf="!loading && publicSiteMode && !isLoggedIn">
+            <div class="public-cta">
+              <a mat-raised-button
+                 class="primary-button large-button"
+                 href="https://github.com/DecisionRecordsORG/DecisionRecords"
+                 target="_blank"
+                 rel="noopener noreferrer">
+                <mat-icon>code</mat-icon>
+                View Source
+              </a>
+              <a mat-stroked-button
+                 class="secondary-button large-button"
+                 href="https://github.com/DecisionRecordsORG/DecisionRecords/blob/main/docs/self-hosting.md"
+                 target="_blank"
+                 rel="noopener noreferrer">
+                <mat-icon>terminal</mat-icon>
+                Self-Host
+              </a>
+            </div>
+          </div>
+
           <!-- Community Edition: Fresh Install (No Tenants) -->
-          <div class="cta-section" *ngIf="!loading && isCommunity && !hasTenants && !isLoggedIn">
+          <div class="cta-section" *ngIf="!loading && !publicSiteMode && isCommunity && !hasTenants && !isLoggedIn">
             <div class="setup-cta">
               <button mat-raised-button class="primary-button large-button" (click)="goToSetup()">
                 <mat-icon>rocket_launch</mat-icon>
@@ -148,7 +185,7 @@ interface TenantInfo {
         </div>
       </div>
 
-      <div class="admin-section">
+      <div class="admin-section" *ngIf="!publicSiteMode">
         <a routerLink="/superadmin" class="admin-link">
           <mat-icon>admin_panel_settings</mat-icon>
           Super Admin Login
@@ -202,8 +239,50 @@ interface TenantInfo {
       font-size: 1.1rem;
       opacity: 0.8;
       max-width: 600px;
-      margin: 0 auto 40px;
+      margin: 0 auto 24px;
       line-height: 1.6;
+    }
+
+    .source-banner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin: 0 auto 40px;
+      padding: 10px 12px 10px 18px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.28);
+      color: white;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.95rem;
+    }
+
+    .source-banner span,
+    .source-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .source-banner mat-icon {
+      font-size: 20px;
+      width: 20px;
+      height: 20px;
+    }
+
+    .source-button {
+      min-height: 36px;
+      color: white !important;
+      border-color: rgba(255, 255, 255, 0.45) !important;
+      border-radius: 8px !important;
+      text-decoration: none;
+    }
+
+    .source-button:hover {
+      background: rgba(255, 255, 255, 0.12) !important;
+      border-color: white !important;
     }
 
     .cta-section {
@@ -214,11 +293,21 @@ interface TenantInfo {
     }
 
     .setup-cta,
-    .signin-cta {
+    .signin-cta,
+    .public-cta {
       display: flex;
-      flex-direction: column;
       align-items: center;
       gap: 16px;
+    }
+
+    .setup-cta,
+    .signin-cta {
+      flex-direction: column;
+    }
+
+    .public-cta {
+      justify-content: center;
+      flex-wrap: wrap;
     }
 
     .cta-hint {
@@ -243,6 +332,21 @@ interface TenantInfo {
     .primary-button:disabled {
       background: rgba(255, 255, 255, 0.3) !important;
       color: rgba(255, 255, 255, 0.6) !important;
+    }
+
+    .secondary-button {
+      color: white !important;
+      border-color: rgba(255, 255, 255, 0.55) !important;
+      border-radius: 8px !important;
+      font-weight: 500 !important;
+      text-transform: none !important;
+      letter-spacing: 0 !important;
+      text-decoration: none !important;
+    }
+
+    .secondary-button:hover {
+      background: rgba(255, 255, 255, 0.12) !important;
+      border-color: white !important;
     }
 
     .large-button {
@@ -405,6 +509,11 @@ interface TenantInfo {
         font-size: 1.2rem;
       }
 
+      .source-banner {
+        width: 100%;
+        max-width: 340px;
+      }
+
       .domain-input {
         flex-direction: column;
         width: 100%;
@@ -418,6 +527,11 @@ interface TenantInfo {
         width: 100%;
         max-width: 300px;
       }
+
+      .public-cta {
+        width: 100%;
+        flex-direction: column;
+      }
     }
   `]
 })
@@ -426,6 +540,7 @@ export class LandingComponent implements OnInit {
   private router = inject(Router);
   private http = inject(HttpClient);
   private featureFlags = inject(FeatureFlagsService);
+  private platformId = inject(PLATFORM_ID);
 
   domain = '';
   isLoggedIn = false;
@@ -434,11 +549,21 @@ export class LandingComponent implements OnInit {
   hasTenants = false;
   tenantDomain = '';
   tenantName = '';
+  publicSiteMode = false;
 
   ngOnInit() {
+    if (!isPlatformBrowser(this.platformId)) {
+      this.publicSiteMode = true;
+      this.isCommunity = true;
+      this.hasTenants = false;
+      this.loading = false;
+      return;
+    }
+
     // Check system status to determine what to show
     this.http.get<SystemStatus>('/api/system/status').subscribe({
       next: (status) => {
+        this.publicSiteMode = false;
         this.isCommunity = status.is_community;
         this.hasTenants = status.has_tenants;
 
@@ -456,23 +581,12 @@ export class LandingComponent implements OnInit {
         this.loading = false;
       },
       error: () => {
-        // Fallback to feature flags service if status endpoint fails
-        this.isCommunity = this.featureFlags.isCommunity;
+        // Static public website builds do not have a backend API attached.
+        // Keep the homepage usable instead of redirecting to app setup.
+        this.publicSiteMode = true;
+        this.isCommunity = true;
+        this.hasTenants = false;
         this.loading = false;
-
-        // Check license for Community Edition
-        if (this.isCommunity) {
-          this.http.get<{ accepted: boolean }>('/api/system/license').subscribe({
-            next: (response) => {
-              if (!response.accepted) {
-                this.router.navigate(['/license']);
-              }
-            },
-            error: () => {
-              this.router.navigate(['/license']);
-            }
-          });
-        }
       }
     });
 

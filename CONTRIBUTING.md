@@ -46,6 +46,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 ### Prerequisites
 
 - Python 3.11+
+- uv
 - Node.js 18+
 - npm 9+
 
@@ -56,18 +57,17 @@ By participating in this project, you agree to maintain a respectful and inclusi
 git clone https://github.com/YOUR-USERNAME/decision-records.git
 cd decision-records
 
-# Create Python virtual environment
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Create Python virtual environment and install dependencies
+uv venv --python 3.12
+uv pip install -r requirements.txt pytest pytest-cov
 
 # Install frontend dependencies
 cd frontend
 npm ci
 cd ..
-
+# Optional Enterprise setup when private ee/ is checked out
+uv pip install -r ee/requirements.txt
+ln -sfn ../../frontend/node_modules ee/frontend/node_modules
 # Run development server
 # Terminal 1: Backend
 FLASK_ENV=development python run_local.py
@@ -83,7 +83,22 @@ Access the app at http://localhost:4200
 
 ```bash
 # Backend tests
-.venv/bin/python -m pytest tests/ -v
+uv run pytest tests/ -v
+
+# Enterprise backend tests when ee/ is checked out
+DECISION_RECORDS_EDITION=enterprise AZURE_KEYVAULT_URL= uv run pytest tests/ -q --tb=short
+
+# Community/Enterprise boundary check
+uv run python scripts/check_ce_boundary.py
+
+# Open-source artifact boundary check
+uv run python scripts/check_public_artifacts.py --mode staged
+
+# Commit-time QA checks
+uv run python scripts/qa_check.py --mode commit
+
+# Full local QA before release/deploy
+uv run python scripts/qa_check.py --mode full
 
 # Frontend tests
 cd frontend
@@ -92,6 +107,36 @@ npm test
 # E2E tests
 npx playwright test
 ```
+
+### Git Hook Setup
+
+Enable the versioned pre-commit hook once per checkout:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hook runs fast staged QA before commits. It can be bypassed with `SKIP_COMMIT_QA=1 git commit` only for emergencies.
+
+The hook also blocks production infrastructure snapshots, exact private Azure
+resource identifiers, and high-confidence secret material from the public
+repository. Put Enterprise infrastructure source and generated snapshots under
+the private `ee/infra` boundary.
+
+Verify the hook wiring and the private-artifact rejection path with:
+
+```bash
+uv run python scripts/verify_git_hooks.py
+```
+
+### Git Safety With Enterprise Submodule
+
+- The public repository and `ee/` are separate Git repositories. Check both statuses before committing.
+- If `ee` is on detached `HEAD`, switch to a named branch before making or keeping changes.
+- Commit and push private `ee` changes first, then update the public parent submodule pointer.
+- Do not put production infra snapshots, exact Azure resource names, or commercial module code in the public tree.
+- Do not commit generated files such as `ee/infra/aca/main.json` or local symlinks such as `ee/frontend/node_modules`.
+- Do not use destructive Git cleanup commands unless the intended revert/reset is explicit.
 
 ## Coding Standards
 
@@ -148,6 +193,8 @@ If you're interested in contributing to Enterprise features, please contact us.
 ### Before Submitting
 
 - [ ] Code compiles without errors
+- [ ] Community/Enterprise boundary check passes
+- [ ] Commit-time QA passes
 - [ ] Tests pass locally
 - [ ] Code follows style guidelines
 - [ ] Documentation updated if needed

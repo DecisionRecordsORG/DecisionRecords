@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+set -eu
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "pre-commit: uv is required. Install uv before committing."
+  exit 1
+fi
+
+exec uv run python scripts/qa_check.py --mode commit

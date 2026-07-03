@@ -399,13 +399,9 @@ export interface DecisionModalResult {
           <button mat-flat-button color="primary"
                   (click)="onSubmit()"
                   [disabled]="form.invalid || isSaving">
-            @if (isSaving) {
-              <mat-spinner diameter="18"></mat-spinner>
-              Saving...
-            } @else {
-              <mat-icon>{{ isCreate ? 'add' : 'save' }}</mat-icon>
-              {{ isCreate ? 'Create Decision' : 'Save Changes' }}
-            }
+            <mat-spinner *ngIf="isSaving" diameter="18"></mat-spinner>
+            <mat-icon *ngIf="!isSaving">{{ isCreate ? 'add' : 'save' }}</mat-icon>
+            <span>{{ isSaving ? 'Saving...' : (isCreate ? 'Create Decision' : 'Save Changes') }}</span>
           </button>
         }
       }

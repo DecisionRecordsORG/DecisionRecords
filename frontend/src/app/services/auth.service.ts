@@ -1,4 +1,5 @@
-import { Injectable, signal, computed } from '@angular/core';
+import { Inject, Injectable, PLATFORM_ID, signal, computed } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap, catchError, of, BehaviorSubject, switchMap, map } from 'rxjs';
 import { User, MasterAccount, SSOConfig, Subscription } from '../models/decision.model';
@@ -20,8 +21,15 @@ export class AuthService {
   private isLoadingSubject = new BehaviorSubject<boolean>(true);
   isLoading$ = this.isLoadingSubject.asObservable();
 
-  constructor(private http: HttpClient) {
-    this.loadCurrentUser().subscribe();
+  constructor(
+    private http: HttpClient,
+    @Inject(PLATFORM_ID) private platformId: object
+  ) {
+    if (isPlatformBrowser(this.platformId)) {
+      this.loadCurrentUser().subscribe();
+    } else {
+      this.isLoadingSubject.next(false);
+    }
   }
 
   get currentUser(): CurrentUser | null {
@@ -79,6 +87,12 @@ export class AuthService {
   }
 
   loadCurrentUser(): Observable<CurrentUser | null> {
+    if (!isPlatformBrowser(this.platformId)) {
+      this.currentUserSubject.next(null);
+      this.isLoadingSubject.next(false);
+      return of(null);
+    }
+
     this.isLoadingSubject.next(true);
     return this.http.get<User | MasterAccount>(`${this.apiUrl}/user/me`).pipe(
       map(user => {

@@ -1,4 +1,5 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, PLATFORM_ID, inject } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, of } from 'rxjs';
 import { tap, catchError, map } from 'rxjs/operators';
@@ -60,6 +61,7 @@ const DEFAULT_FLAGS: FeatureFlags = {
 })
 export class FeatureFlagsService {
   private http = inject(HttpClient);
+  private platformId = inject(PLATFORM_ID);
   private flagsSubject = new BehaviorSubject<FeatureFlags>(DEFAULT_FLAGS);
   private loaded = false;
 
@@ -80,6 +82,11 @@ export class FeatureFlagsService {
   loadFlags(): Observable<FeatureFlags> {
     if (this.loaded) {
       return of(this.flags);
+    }
+
+    if (!isPlatformBrowser(this.platformId)) {
+      this.loaded = true;
+      return of(DEFAULT_FLAGS);
     }
 
     return this.http.get<FeatureFlags>('/api/features').pipe(

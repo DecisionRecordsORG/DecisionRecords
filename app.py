@@ -4,6 +4,7 @@ import secrets
 import logging
 import sys
 import traceback
+import threading
 
 # psycopg2 is only needed for PostgreSQL - make import optional for SQLite local dev
 try:
@@ -460,6 +461,7 @@ db.init_app(app)
 
 # Database initialization flag
 _db_initialized = False
+_db_init_lock = threading.Lock()
 
 # EE:START - Blog Module
 # Blog functionality moved to ee/backend/blog/ Blueprint
@@ -540,7 +542,7 @@ def init_database():
                 # Create default master account
                 logger.info("Creating default master account...")
                 MasterAccount.create_default_master(db.session)
-                logger.info("Default master account created")
+                logger.info("Default master account ensured")
 
                 # Initialize default system config if not exists in a separate transaction
                 logger.info("Checking system configuration...")
@@ -638,7 +640,9 @@ def initialize_db():
     # Initialize database for any request except static files
     if not _db_initialized and not (request.endpoint and request.endpoint.startswith('static')):
         try:
-            init_database()
+            with _db_init_lock:
+                if not _db_initialized:
+                    init_database()
         except Exception as e:
             logger.error(f"Critical error during database initialization: {str(e)}")
             logger.error(traceback.format_exc())
@@ -4161,13 +4165,12 @@ def api_save_analytics_settings():
     if 'event_mappings' in data:
         mappings = data['event_mappings']
         if isinstance(mappings, dict):
-            # Allow any endpoint name - supports custom mappings for new endpoints
             valid_mappings = {}
             for key, value in mappings.items():
                 # Sanitize key and value
                 sanitized_key = sanitize_text_field(key, max_length=100)
                 sanitized_value = sanitize_text_field(value, max_length=100) if value else None
-                if sanitized_key and sanitized_value:
+                if sanitized_key in DEFAULT_EVENT_MAPPINGS and sanitized_value:
                     valid_mappings[sanitized_key] = sanitized_value
             SystemConfig.set(
                 SystemConfig.KEY_ANALYTICS_EVENT_MAPPINGS,

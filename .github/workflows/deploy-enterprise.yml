@@ -14,17 +14,86 @@ on:
           - no-bump
         default: patch
 
-env:
-  REGISTRY: adrregistry2024eu.azurecr.io
-  IMAGE_NAME: architecture-decisions
-  RESOURCE_GROUP: adr-resources-eu
-  VM_NAME: adr-vm-eu
+concurrency:
+  group: production-private-app
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  preflight:
+    name: Enterprise Preflight
     runs-on: ubuntu-latest
     permissions:
+      contents: read
+
+    steps:
+      - name: Checkout with EE submodule
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.EE_REPO_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Enterprise QA dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r ee/requirements.txt pytest pytest-cov
+
+      - name: Verify EE submodule checkout
+        run: test -d ee
+
+      - name: Check public artifact boundary
+        run: python scripts/check_public_artifacts.py --mode all
+
+      - name: Check public CE/EE boundary
+        run: python scripts/check_ce_boundary.py
+
+      - name: Compile public Python gateway files
+        run: |
+          python -m py_compile \
+            app.py \
+            models.py \
+            auth.py \
+            governance.py \
+            notifications.py \
+            security.py \
+            webauthn_auth.py \
+            scripts/check_public_artifacts.py \
+            scripts/check_ce_boundary.py \
+            scripts/qa_check.py
+
+      - name: Compile Enterprise Python modules
+        run: |
+          git -C ee ls-files '*.py' ':!:marketing/*' \
+            | sed 's#^#ee/#' \
+            | xargs python -m py_compile
+
+      - name: Run Enterprise tests
+        env:
+          DECISION_RECORDS_EDITION: enterprise
+          DATABASE_URL: sqlite:///test.db
+          SECRET_KEY: test-secret-key
+          FLASK_ENV: testing
+          AZURE_KEYVAULT_URL: ""
+        run: python -m pytest tests/ -q --tb=short
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: preflight
+    environment: production-private
+    permissions:
       contents: write
+      id-token: write
+    env:
+      ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
+      ACR_LOGIN_SERVER: ${{ vars.AZURE_ACR_LOGIN_SERVER }}
+      IMAGE_NAME: ${{ vars.AZURE_ENTERPRISE_IMAGE_NAME || 'architecture-decisions' }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      VM_NAME: ${{ vars.AZURE_VM_NAME }}
+      HEALTH_URL: ${{ vars.ENTERPRISE_HEALTH_URL || 'https://app.decisionrecords.org/api/health' }}
 
     steps:
       - name: Checkout with EE submodule
@@ -51,38 +120,51 @@ jobs:
           git pull --rebase origin main
           git push
 
+      - name: Validate Azure variables
+        run: |
+          test -n "${{ vars.AZURE_CLIENT_ID }}"
+          test -n "${{ vars.AZURE_TENANT_ID }}"
+          test -n "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          test -n "$ACR_NAME"
+          test -n "$ACR_LOGIN_SERVER"
+          test -n "$IMAGE_NAME"
+          test -n "$RESOURCE_GROUP"
+          test -n "$VM_NAME"
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Login to Azure Container Registry
-        run: az acr login --name adrregistry2024eu
+        run: az acr login --name "$ACR_NAME"
 
       - name: Build and push Docker image
         run: |
           docker build --platform linux/amd64 \
             -f ee/deployment/Dockerfile.production \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest" \
+            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}" \
             .
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest"
+          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}"
 
       - name: Deploy to VM
         run: |
           az vm run-command invoke \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name ${{ env.VM_NAME }} \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$VM_NAME" \
             --command-id RunShellScript \
-            --scripts "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest && systemctl restart adr-app"
+            --scripts "docker pull $ACR_LOGIN_SERVER/$IMAGE_NAME:latest && systemctl restart adr-app"
 
       - name: Wait for health check
         run: |
           echo "Waiting for application to be healthy..."
           # Check the public endpoint directly instead of via VM command
           for i in {1..30}; do
-            RESULT=$(curl -sf https://app.decisionrecords.org/api/health 2>/dev/null || echo "")
+            RESULT=$(curl -sf "$HEALTH_URL" 2>/dev/null || echo "")
             if [[ "$RESULT" == *"ok"* ]] || [[ "$RESULT" == *"healthy"* ]]; then
               echo "Health check response: $RESULT"
               echo "Application is healthy!"
@@ -98,9 +180,9 @@ jobs:
         if: always()
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ZONE_ID: 55dd53366f300d407b322ff4d9be173d
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
         run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ZONE_ID" ]; then
             curl -s -X POST \
               "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
               -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
@@ -108,7 +190,7 @@ jobs:
               --data '{"purge_everything":true}'
             echo "Cloudflare cache purged"
           else
-            echo "Skipping cache purge (no token)"
+            echo "Skipping cache purge (missing token or zone id)"
           fi
 
       - name: Show deployment info
@@ -117,8 +199,8 @@ jobs:
           echo "====================================="
           echo "Deployment complete!"
           echo "====================================="
-          echo "URL: https://decisionrecords.org"
-          echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "URL: $HEALTH_URL"
+          echo "Image: $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}"
           echo ""
           echo "To view logs, run:"
-          echo "  az vm run-command invoke --resource-group ${{ env.RESOURCE_GROUP }} --name ${{ env.VM_NAME }} --command-id RunShellScript --scripts 'docker logs adr-app --tail 50'"
+          echo "  az vm run-command invoke --resource-group $RESOURCE_GROUP --name $VM_NAME --command-id RunShellScript --scripts 'docker logs adr-app --tail 50'"
