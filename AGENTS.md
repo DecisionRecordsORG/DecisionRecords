@@ -42,6 +42,8 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Do not commit secrets, local credentials, or generated runtime databases.
 - Keep private commercial modules out of the public CE tree unless the licensing and release boundary is intentional.
 - Keep production infra snapshots and exact private Azure resource identifiers under `ee/infra`, not the public tree.
+- Treat `website` as the commercial marketing site from the private marketing repository, available to operators under `ee/marketing`. Do not deploy the `frontend/` Community app build to `decisionrecords.org` or to the marketing Azure Static Web App.
+- The Community Edition is source code and release artifacts only; there is no official `production-public` deployment target for the Community app.
 - Do not deploy production from a local Azure CLI session. Normal deployments go through GitHub Actions and GitHub Environments.
 
 ## Git Safety Rules
