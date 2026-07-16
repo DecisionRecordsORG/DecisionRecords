@@ -1,6 +1,8 @@
-# Public Website SEO Plan
+# Community App SEO Notes
 
-The public website should be indexable, fast to crawl, and clear about the open-source Community Edition.
+The canonical commercial website SEO lives in the private marketing repository, not in this public Community repository.
+
+This file covers the Community app's public/static SEO surface for self-hosted and open-source builds. There is no hosted Community production deployment. Do not deploy the Community app build to `decisionrecords.org` or to the commercial marketing Azure Static Web App.
 
 ## Indexable Pages
 
@@ -25,7 +27,7 @@ Do not index setup, admin, tenant, auth, or API routes.
 
 ## Content Direction
 
-The homepage should make these points visible in the first viewport:
+The Community app public surface should make these points visible where appropriate:
 
 - Decision Records is open source.
 - The Community Edition source is available on GitHub.

@@ -13,10 +13,10 @@ set -euo pipefail
 #
 # Optional role assignment:
 #   ASSIGN_AZURE_ROLES=1 AZURE_ACR_NAME=<acr> AZURE_RESOURCE_GROUP=<rg> AZURE_VM_NAME=<vm> scripts/configure_azure_oidc.sh production-private
-#   ASSIGN_AZURE_ROLES=1 AZURE_ACR_NAME=<acr> AZURE_RESOURCE_GROUP=<rg> AZURE_CONTAINER_APP_NAME=<app> scripts/configure_azure_oidc.sh production-public
+#   ASSIGN_AZURE_ROLES=1 AZURE_ACR_NAME=<acr> AZURE_RESOURCE_GROUP=<rg> AZURE_CONTAINER_APP_NAME=<app> scripts/configure_azure_oidc.sh production-private
 #
-# Pass environment names as arguments to override the default app environments:
-#   scripts/configure_azure_oidc.sh production-public production-private
+# Pass environment names as arguments to override the default deployment environment:
+#   scripts/configure_azure_oidc.sh production-private
 
 OWNER="${GITHUB_OWNER:-DecisionRecordsORG}"
 REPO="${GITHUB_REPO:-DecisionRecords}"
@@ -26,7 +26,7 @@ ASSIGN_ROLES="${ASSIGN_AZURE_ROLES:-0}"
 if [[ "$#" -gt 0 ]]; then
   ENVIRONMENTS=("$@")
 else
-  ENVIRONMENTS=(production-public production-private)
+  ENVIRONMENTS=(production-private)
 fi
 
 for command in az gh; do

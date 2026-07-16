@@ -54,7 +54,7 @@ gh api \
   "/repos/${OWNER}/${REPO}/branches/${BRANCH}/protection" \
   --input "$tmpfile" >/dev/null
 
-for environment in production-website production-public production-private; do
+for environment in production-private; do
   echo "Ensuring GitHub Environment: ${environment}"
   gh api \
     --method PUT \

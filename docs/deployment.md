@@ -1,79 +1,47 @@
 # Deployment
 
-This repository supports two deployment tracks:
+This repository supports these deployment tracks:
 
-- Public website: static Angular output deployed to Azure Static Web Apps.
-- Application/backend: Docker image deployed to Azure Container Apps or the existing Enterprise VM workflow.
+- Commercial website: private marketing site, deployed from the private marketing repository to Azure Static Web Apps.
+- Community Edition: public source code and release artifacts only; it is not deployed as a hosted production app.
+- Enterprise app/backend: private-module image deployed through the Enterprise workflow.
 
 Normal deployments should be started by GitHub Actions only. Do not use a local Azure CLI session or a coding agent shell to update production containers, restart VMs, or push production images except during an explicit break-glass incident.
 
-## Public Website
+## Commercial Website
 
-The public website should use the Community Edition frontend build and deploy only the static browser output.
+The public marketing website is not deployed from this public Community repository.
 
-GitHub workflow:
+Source of truth:
 
-- `.github/workflows/deploy-public-website.yml`
+- Private marketing repository, checked out for operators under `ee/marketing`.
 
-Required secret:
+Deployment:
 
-- `AZURE_STATIC_WEB_APPS_API_TOKEN`
+- The marketing repository owns its Azure Static Web Apps workflow and deployment token.
+- Do not store the marketing Static Web Apps deployment token in this public repository.
+- Do not deploy the `frontend/` Community app build to `decisionrecords.org`.
 
-GitHub Environment:
+Content changes for the commercial website, including homepage copy, legal pages, SEO metadata, `robots.txt`, `sitemap.xml`, and marketing assets, should be committed and deployed from the private marketing repository.
 
-- `production-website`
+The `frontend/` directory in this repository is the Community app UI, not the commercial marketing website.
 
-Recommended Azure setup:
+## Community Release Artifacts
 
-- Create an Azure Static Web Apps resource.
-- Connect it to this GitHub repository, or copy its deployment token into the repository secret above.
-- Set the production hostname to `decisionrecords.org`.
-
-The workflow builds:
-
-```bash
-cd frontend
-npm ci
-npm run build -- --configuration=community --progress=false
-```
-
-Then uploads:
-
-```text
-frontend/dist/frontend/browser
-```
-
-## Community App and Backend
-
-Use the Docker workflow when backend code, API behavior, database behavior, or the self-hosted app changes.
+The Community Edition is not deployed as a production service by this repository. It remains open-source code plus release artifacts for users to run themselves.
 
 GitHub workflow:
 
-- `.github/workflows/deploy-community-app-azure.yml`
+- `.github/workflows/release.yml`
 
-Required secret:
+Trigger:
 
-- none for Azure login; this workflow uses GitHub OIDC
+- Version tags matching `v*.*.*`
 
-GitHub Environment:
+Output:
 
-- `production-public`
-
-Required `production-public` environment variables:
-
-- `AZURE_CLIENT_ID`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-- `AZURE_ACR_NAME`
-- `AZURE_ACR_LOGIN_SERVER`
-- `AZURE_RESOURCE_GROUP`
-- `AZURE_CONTAINER_APP_NAME`
-
-Optional `production-public` environment variable:
-
-- `PUBLIC_APP_HEALTH_URL`
-
-The workflow builds `Dockerfile.community`, pushes the image to Azure Container Registry, and updates the configured Azure Container App.
+- Community Docker image published to GitHub Container Registry.
+- GitHub Release notes for the tag.
 
 ## Enterprise App
 
@@ -112,13 +80,13 @@ The preflight installs public and private Python requirements, runs the open-sou
 
 ## When To Deploy What
 
-Public website only:
+Commercial website only:
 
-- Homepage copy, legal pages, SEO metadata, robots.txt, sitemap.xml, static assets, public route changes.
+- Homepage copy, legal pages, SEO metadata, `robots.txt`, `sitemap.xml`, marketing static assets, and marketing route changes. Deploy from the private marketing repository only.
 
-Community app/backend:
+Community Edition source or release artifacts:
 
-- `app.py`, models, migrations, auth, feature flags, Dockerfile, Python dependencies, or frontend app behavior used by self-hosted users.
+- `app.py`, models, migrations, auth, feature flags, Dockerfile, Python dependencies, or frontend app behavior used by self-hosted users. Run CI and publish releases from tags; do not deploy a hosted Community production app.
 
 Enterprise app:
 
@@ -126,7 +94,7 @@ Enterprise app:
 
 ## Pre-Deployment Checks
 
-Run locally before deploying:
+Run locally before releasing Community artifacts or deploying Enterprise:
 
 ```bash
 uv run python scripts/check_ce_boundary.py
@@ -138,19 +106,19 @@ npm run build -- --configuration=community --progress=false
 
 ## GitHub and Azure Integration Notes
 
-Azure Static Web Apps can deploy from GitHub Actions by uploading a built static output folder. Azure Container Apps can deploy new revisions when a workflow pushes a container image and updates the container app. Keep those paths separate: static website deployments should not require backend secrets, and backend deployments should not run for copy-only website changes.
+Azure Static Web Apps deployment for the commercial marketing website belongs to the private marketing repository. This public repository does not deploy a hosted Community app. Keep marketing, open-source release, and Enterprise deployment paths separate: marketing website deployments should not require backend secrets, Community release publishing should not require Azure production access, and backend deployments should not run for copy-only website changes.
 
 The production Enterprise app is currently on the VM path. Exact Enterprise infrastructure plans and snapshots belong in the private `ee/infra` repo boundary; keep the VM workflow available until the ACA deployment has survived one billing cycle.
 
 ## Azure OIDC Setup
 
-Application and Enterprise deployments use GitHub OIDC instead of a long-lived `AZURE_CREDENTIALS` JSON secret. Configure the Azure app registration, federated credentials, and GitHub Environment variables with:
+Enterprise deployments use GitHub OIDC instead of a long-lived `AZURE_CREDENTIALS` JSON secret. Configure the Azure app registration, federated credentials, and GitHub Environment variables with:
 
 ```bash
 GITHUB_OWNER=DecisionRecordsORG GITHUB_REPO=DecisionRecords scripts/configure_azure_oidc.sh
 ```
 
-The script updates these variables on `production-public` and `production-private`:
+The script updates these variables on `production-private`:
 
 - `AZURE_CLIENT_ID`
 - `AZURE_TENANT_ID`
@@ -168,7 +136,7 @@ GITHUB_REPO=DecisionRecords \
 scripts/configure_azure_oidc.sh production-private
 ```
 
-For Community Container App deployment this grants `AcrPush` on the registry and `Azure Container Apps Contributor` on the Container App:
+For a future Enterprise Container App deployment this grants `AcrPush` on the registry and `Azure Container Apps Contributor` on the Container App:
 
 ```bash
 ASSIGN_AZURE_ROLES=1 \
@@ -177,7 +145,7 @@ AZURE_ACR_NAME=<acr-name> \
 AZURE_CONTAINER_APP_NAME=<container-app-name> \
 GITHUB_OWNER=DecisionRecordsORG \
 GITHUB_REPO=DecisionRecords \
-scripts/configure_azure_oidc.sh production-public
+scripts/configure_azure_oidc.sh production-private
 ```
 
 After one successful OIDC deployment, remove the legacy `AZURE_CREDENTIALS` secret if it exists.
@@ -190,4 +158,4 @@ Apply the Phase 1 GitHub repository settings with:
 GITHUB_OWNER=DecisionRecordsORG GITHUB_REPO=DecisionRecords scripts/configure_github_guardrails.sh
 ```
 
-This configures `main` branch protection to require pull requests and the `Quality Gate` check, without requiring a second approving reviewer. That keeps solo-maintainer deployments unblocked while preventing direct pushes. The script also creates the production GitHub Environments used by deployment workflows. Add required reviewers to production environments when there is a second maintainer or operator.
+This configures `main` branch protection to require pull requests and the `Quality Gate` check, without requiring a second approving reviewer. That keeps solo-maintainer deployments unblocked while preventing direct pushes. The script also creates the production GitHub Environments used by public-repo deployment workflows. Add required reviewers to production environments when there is a second maintainer or operator.
