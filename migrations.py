@@ -166,6 +166,11 @@ MIGRATIONS = [
         "description": "Add setup wizard support columns",
         "migrate": lambda db: migrate_1_14_1(db)
     },
+    {
+        "version": "1.15.0",
+        "description": "Add decision comments table",
+        "migrate": lambda db: migrate_1_15_0(db)
+    },
 ]
 
 
@@ -267,6 +272,64 @@ def migrate_1_14_1(db):
         if not column_exists(db, 'users', 'password_hash'):
             add_column(db, 'users', 'password_hash', 'VARCHAR(255)')
             changes += 1
+
+    return changes
+
+
+def migrate_1_15_0(db):
+    """Migration for v1.15.0 - ADR comments."""
+    db_type = get_db_type(db)
+    changes = 0
+
+    if not table_exists(db, 'decision_comments'):
+        if db_type == 'sqlite':
+            create_sql = """
+                CREATE TABLE decision_comments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    body TEXT NOT NULL,
+                    author_display VARCHAR(255),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP,
+                    deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+            """
+        else:  # PostgreSQL
+            create_sql = """
+                CREATE TABLE decision_comments (
+                    id SERIAL PRIMARY KEY,
+                    decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    body TEXT NOT NULL,
+                    author_display VARCHAR(255),
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP,
+                    deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+                )
+            """
+
+        with db.engine.connect() as conn:
+            conn.execute(db.text(create_sql))
+            conn.commit()
+
+        logger.info("Created decision_comments table")
+        changes += 1
+
+    with db.engine.connect() as conn:
+        conn.execute(db.text(
+            "CREATE INDEX IF NOT EXISTS idx_decision_comments_decision_id "
+            "ON decision_comments(decision_id)"
+        ))
+        conn.execute(db.text(
+            "CREATE INDEX IF NOT EXISTS idx_decision_comments_tenant_id "
+            "ON decision_comments(tenant_id)"
+        ))
+        conn.commit()
 
     return changes
 

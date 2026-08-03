@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import (
     db, User, Tenant, TenantMembership, SystemConfig, GlobalRole, MaturityState,
-    AIApiKey, ArchitectureDecision, DecisionHistory
+    AIApiKey, ArchitectureDecision, DecisionHistory, DecisionComment
 )
 
 # Enterprise Edition imports - skip tests if not available
@@ -60,9 +60,9 @@ class TestGetTools:
         assert isinstance(tools, list)
 
     def test_get_tools_returns_correct_number(self, app, session):
-        """get_tools returns all 5 tools."""
+        """get_tools returns all 7 tools."""
         tools = get_tools()
-        assert len(tools) == 5
+        assert len(tools) == 7
 
     def test_get_tools_returns_expected_tool_names(self, app, session):
         """get_tools returns tools with expected names."""
@@ -73,7 +73,9 @@ class TestGetTools:
             'get_decision',
             'list_decisions',
             'create_decision',
-            'get_decision_history'
+            'get_decision_history',
+            'list_decision_comments',
+            'add_decision_comment'
         ]
         assert tool_names == expected_names
 
@@ -315,6 +317,43 @@ class TestValidateToolInput:
         })
         assert error is None
 
+    def test_validate_list_decision_comments_valid(self, app, session):
+        """validate_tool_input returns None for valid list_decision_comments input."""
+        error = validate_tool_input('list_decision_comments', {'id': 'ADR-42'})
+        assert error is None
+
+    def test_validate_list_decision_comments_invalid_order(self, app, session):
+        """validate_tool_input returns error for invalid comment order."""
+        error = validate_tool_input('list_decision_comments', {
+            'id': '42',
+            'order': 'newest'
+        })
+        assert error is not None
+        assert 'must be one of' in error
+
+    def test_validate_add_decision_comment_valid(self, app, session):
+        """validate_tool_input returns None for valid add_decision_comment input."""
+        error = validate_tool_input('add_decision_comment', {
+            'id': '42',
+            'body': 'This ADR needs a rollout note.'
+        })
+        assert error is None
+
+    def test_validate_add_decision_comment_missing_body(self, app, session):
+        """validate_tool_input returns error when comment body is missing."""
+        error = validate_tool_input('add_decision_comment', {'id': '42'})
+        assert error is not None
+        assert 'Missing required field: body' in error
+
+    def test_validate_add_decision_comment_body_max_length(self, app, session):
+        """validate_tool_input returns error for comments over the max length."""
+        error = validate_tool_input('add_decision_comment', {
+            'id': '42',
+            'body': 'x' * 10001
+        })
+        assert error is not None
+        assert 'exceeds maximum length' in error
+
     def test_validate_allows_extra_fields(self, app, session):
         """validate_tool_input allows extra fields (ignores them)."""
         error = validate_tool_input('search_decisions', {
@@ -542,6 +581,45 @@ class TestMCPToolHandlerExecuteTool:
         assert 'error' in result
         assert 'not found' in result['error']
 
+    def test_execute_list_decision_comments_success(self, app, session, handler_read_only, sample_decision, ai_enabled_tenant, sample_user):
+        """execute_tool successfully lists comments for a decision."""
+        comment = DecisionComment(
+            decision_id=sample_decision.id,
+            tenant_id=ai_enabled_tenant.id,
+            user_id=sample_user.id,
+            body='Existing comment'
+        )
+        session.add(comment)
+        session.commit()
+
+        success, result = handler_read_only.execute_tool('list_decision_comments', {
+            'id': str(sample_decision.id)
+        })
+        assert success is True
+        assert result['decision_id'] == sample_decision.id
+        assert result['count'] == 1
+        assert result['comments'][0]['body'] == 'Existing comment'
+
+    def test_execute_add_decision_comment_requires_write_scope(self, app, session, handler_read_only, sample_decision):
+        """execute_tool returns error when adding a comment without write scope."""
+        success, result = handler_read_only.execute_tool('add_decision_comment', {
+            'id': str(sample_decision.id),
+            'body': 'Needs write permission'
+        })
+        assert success is False
+        assert 'write permission' in result['error']
+
+    def test_execute_add_decision_comment_success(self, app, session, handler_with_write, sample_decision):
+        """execute_tool successfully adds a comment with write scope."""
+        success, result = handler_with_write.execute_tool('add_decision_comment', {
+            'id': str(sample_decision.id),
+            'body': 'This should be discussed with platform owners.'
+        })
+        assert success is True
+        assert result['decision_id'] == sample_decision.id
+        assert result['comment']['body'] == 'This should be discussed with platform owners.'
+        assert DecisionComment.query.filter_by(decision_id=sample_decision.id).count() == 1
+
 
 class TestAuthenticateMCPRequest:
     """Test authenticate_mcp_request() function."""
@@ -674,7 +752,22 @@ class TestHandleMCPRequest:
         assert response['id'] == 1
         assert 'result' in response
         assert 'tools' in response['result']
-        assert len(response['result']['tools']) == 5
+        assert len(response['result']['tools']) == 7
+
+    def test_handle_request_server_discover(
+        self, app, session, enable_mcp, valid_api_key
+    ):
+        """handle_mcp_request returns discovery metadata for server/discover."""
+        response = handle_mcp_request(
+            {'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover'},
+            valid_api_key
+        )
+        assert response['jsonrpc'] == '2.0'
+        assert response['id'] == 1
+        assert 'result' in response
+        assert 'protocolVersions' in response['result']
+        assert '2025-11-25' in response['result']['protocolVersions']
+        assert response['result']['capabilities']['tools'] == {}
 
     def test_handle_request_tools_call_success(
         self, app, session, enable_mcp, valid_api_key, sample_decision
@@ -889,10 +982,31 @@ class TestMCPAPIEndpoint:
             json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
             headers={'Authorization': 'Bearer adr_invalid_key_12345'}
         )
-        # The endpoint returns 200 with JSON-RPC error for auth failures
+        assert response.status_code == 400
         data = response.get_json()
         assert 'error' in data
         assert 'Invalid' in data['error']['message'] or 'expired' in data['error']['message']
+
+    def test_get_sse_missing_authorization_header(self, mcp_client, enable_mcp_system):
+        """Authenticated SSE probe returns 401 when Authorization header is missing."""
+        response = mcp_client.get('/api/mcp', headers={'Accept': 'text/event-stream'})
+        assert response.status_code == 401
+        data = response.get_json()
+        assert 'Authorization header' in data['error']['message']
+
+    def test_get_sse_request_success(self, mcp_client, mcp_tenant_and_key):
+        """Authenticated GET returns an SSE stream for compatible MCP clients."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.get(
+            '/api/mcp',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Accept': 'text/event-stream'
+            }
+        )
+        assert response.status_code == 200
+        assert response.content_type.startswith('text/event-stream')
+        assert b'decision-records MCP stream ready' in response.data
 
     def test_invalid_json_body(self, mcp_client, enable_mcp_system, mcp_tenant_and_key):
         """Returns 400 when request body is not valid JSON."""
@@ -955,7 +1069,36 @@ class TestMCPAPIEndpoint:
         data = response.get_json()
         assert 'result' in data
         assert 'tools' in data['result']
-        assert len(data['result']['tools']) == 5
+        assert len(data['result']['tools']) == 7
+
+    def test_mcp_method_header_routes_request(self, mcp_client, mcp_tenant_and_key):
+        """Mcp-Method header can supply the JSON-RPC method for newer clients."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={'jsonrpc': '2.0', 'id': 1},
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Mcp-Method': 'tools/list'
+            }
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'tools' in data['result']
+
+    def test_server_discover_request_success(self, mcp_client, mcp_tenant_and_key):
+        """Successfully returns server discovery metadata."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover'},
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'result' in data
+        assert 'protocolVersions' in data['result']
+        assert '2026-07-28' in data['result']['protocolVersions']
 
     def test_tools_call_search_decisions(self, mcp_client, mcp_tenant_and_key):
         """Successfully calls search_decisions tool."""
@@ -1073,6 +1216,72 @@ class TestMCPAPIEndpoint:
         assert 'result' in data
         content = json.loads(data['result']['content'][0]['text'])
         assert 'history' in content or 'error' in content
+
+    def test_tools_call_add_decision_comment(self, mcp_client, mcp_tenant_and_key):
+        """Successfully calls add_decision_comment tool."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'add_decision_comment',
+                    'arguments': {
+                        'id': '1',
+                        'body': 'Comment created through MCP.'
+                    }
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'result' in data
+        content = json.loads(data['result']['content'][0]['text'])
+        assert content['comment']['body'] == 'Comment created through MCP.'
+
+    def test_tools_call_list_decision_comments(self, mcp_client, mcp_tenant_and_key):
+        """Successfully calls list_decision_comments tool."""
+        _, _, api_key = mcp_tenant_and_key
+
+        mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'add_decision_comment',
+                    'arguments': {
+                        'id': '1',
+                        'body': 'Comment to list through MCP.'
+                    }
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 2,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'list_decision_comments',
+                    'arguments': {'id': '1'}
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert 'result' in data
+        content = json.loads(data['result']['content'][0]['text'])
+        assert content['count'] == 1
+        assert content['comments'][0]['body'] == 'Comment to list through MCP.'
 
     def test_unknown_method_returns_404(self, mcp_client, mcp_tenant_and_key):
         """Returns 404 for unknown MCP method."""

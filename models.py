@@ -1246,6 +1246,7 @@ class ArchitectureDecision(db.Model):
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
     owner = db.relationship('User', foreign_keys=[owner_id])
     history = db.relationship('DecisionHistory', backref='decision_record', lazy=True, order_by='DecisionHistory.changed_at.desc()')
+    comments = db.relationship('DecisionComment', backref='decision_record', lazy='dynamic', cascade='all, delete-orphan')
     infrastructure = db.relationship('ITInfrastructure', secondary=decision_infrastructure, backref=db.backref('decisions', lazy='dynamic'))
     # v1.5 relationships
     tenant = db.relationship('Tenant', backref=db.backref('decisions', lazy='dynamic'))
@@ -1269,6 +1270,13 @@ class ArchitectureDecision(db.Model):
             return f"{auth_config.tenant_prefix}-{self.decision_number:03d}"
         return f"ADR-{self.decision_number:03d}"  # Fallback format
 
+    @property
+    def comment_count(self):
+        """Count non-deleted comments attached to this decision."""
+        if not self.id:
+            return 0
+        return self.comments.filter(DecisionComment.deleted_at == None).count()
+
     def to_dict(self, include_spaces=False):
         result = {
             'id': self.id,
@@ -1288,6 +1296,7 @@ class ArchitectureDecision(db.Model):
             'owner': self.owner.to_dict() if self.owner else None,
             'owner_id': self.owner_id,
             'owner_email': self.owner_email,
+            'comment_count': self.comment_count,
             'infrastructure': [i.to_dict() for i in self.infrastructure] if self.infrastructure else [],
         }
         if include_spaces:
@@ -1297,6 +1306,11 @@ class ArchitectureDecision(db.Model):
     def to_dict_with_history(self):
         data = self.to_dict()
         data['history'] = [h.to_dict() for h in self.history]
+        data['comments'] = [
+            c.to_dict() for c in self.comments.filter(
+                DecisionComment.deleted_at == None
+            ).order_by(DecisionComment.created_at.asc()).all()
+        ]
         return data
 
 
@@ -1335,6 +1349,45 @@ class DecisionHistory(db.Model):
             'changed_at': self.changed_at.isoformat(),
             'change_reason': self.change_reason,
             'changed_by': self.changed_by.to_dict() if self.changed_by else None,
+        }
+
+
+class DecisionComment(db.Model):
+    """Comments attached to Architecture Decision Records."""
+
+    __tablename__ = 'decision_comments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    decision_id = db.Column(db.Integer, db.ForeignKey('architecture_decisions.id'), nullable=False, index=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    body = db.Column(db.Text, nullable=False)
+    author_display = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)
+    deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    user = db.relationship('User', foreign_keys=[user_id])
+    deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
+    tenant = db.relationship('Tenant', backref=db.backref('decision_comments', lazy='dynamic'))
+
+    def get_author_name(self):
+        """Return the best display name for the comment author."""
+        if self.user:
+            return self.user.get_full_name() or self.user.email
+        return self.author_display or 'Unknown'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'decision_id': self.decision_id,
+            'tenant_id': self.tenant_id,
+            'body': self.body,
+            'author': self.get_author_name(),
+            'user_id': self.user_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
         }
 
 

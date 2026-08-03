@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import (
     db, User, Tenant, TenantMembership, ArchitectureDecision,
-    DecisionHistory, GlobalRole, MaturityState, AuditLog
+    DecisionHistory, DecisionComment, GlobalRole, MaturityState, AuditLog
 )
 
 
@@ -317,16 +317,47 @@ class TestDecisionHistory:
         assert len(decision.history) == 3
 
     def test_to_dict_with_history(self, session, sample_decision, admin_user):
-        """to_dict_with_history includes history entries."""
+        """to_dict_with_history includes history entries and comments."""
         from models import save_history
 
         save_history(sample_decision, change_reason='Test', changed_by=admin_user)
+        comment = DecisionComment(
+            decision_id=sample_decision.id,
+            tenant_id=sample_decision.tenant_id,
+            user_id=admin_user.id,
+            body='Comment included in detail response'
+        )
+        session.add(comment)
         session.commit()
 
         data = sample_decision.to_dict_with_history()
         assert 'history' in data
         assert len(data['history']) == 1
         assert data['history'][0]['change_reason'] == 'Test'
+        assert 'comments' in data
+        assert len(data['comments']) == 1
+        assert data['comments'][0]['body'] == 'Comment included in detail response'
+
+
+class TestDecisionComments:
+    """Test decision comments."""
+
+    def test_comment_to_dict_uses_author_name(self, session, sample_decision, admin_user):
+        """DecisionComment serializes author and timestamps."""
+        comment = DecisionComment(
+            decision_id=sample_decision.id,
+            tenant_id=sample_decision.tenant_id,
+            user_id=admin_user.id,
+            body='Please review the rollback plan.'
+        )
+        session.add(comment)
+        session.commit()
+
+        data = comment.to_dict()
+        assert data['decision_id'] == sample_decision.id
+        assert data['body'] == 'Please review the rollback plan.'
+        assert data['author'] == admin_user.get_full_name()
+        assert data['created_at'] is not None
 
 
 class TestDecisionModel:
