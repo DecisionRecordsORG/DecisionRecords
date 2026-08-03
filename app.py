@@ -12,10 +12,10 @@ try:
 except ImportError:
     psycopg2 = None
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
+from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent
 
 # EE:START - EE Model Imports
 # Enterprise Edition models (Slack, Teams, AI integration)
@@ -2993,6 +2993,110 @@ def api_get_decision_history(decision_id):
 
     history = DecisionHistory.query.filter_by(decision_id=decision_id).order_by(DecisionHistory.changed_at.desc()).all()
     return jsonify([h.to_dict() for h in history])
+
+
+@app.route('/api/decisions/<int:decision_id>/comments', methods=['GET'])
+@login_required
+def api_get_decision_comments(decision_id):
+    """List comments for a decision."""
+    if is_master_account():
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first_or_404()
+
+    comments = DecisionComment.query.filter_by(
+        decision_id=decision.id,
+        deleted_at=None
+    ).order_by(DecisionComment.created_at.asc()).all()
+
+    return jsonify([c.to_dict() for c in comments])
+
+
+@app.route('/api/decisions/<int:decision_id>/comments', methods=['POST'])
+@login_required
+def api_add_decision_comment(decision_id):
+    """Add a comment to a decision."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot comment on decisions. Please log in with a tenant account.'}), 403
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first_or_404()
+
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+
+    sanitized, errors = sanitize_request_data(data, {
+        'body': {'type': 'text', 'max_length': 10000, 'required': True},
+    })
+
+    if errors:
+        return jsonify({'error': errors[0]}), 400
+
+    body = sanitized.get('body', '').strip()
+    if not body:
+        return jsonify({'error': 'body is required'}), 400
+
+    tenant = decision.tenant or Tenant.query.filter_by(domain=g.current_user.sso_domain).first()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    comment = DecisionComment(
+        decision_id=decision.id,
+        tenant_id=tenant.id,
+        user_id=g.current_user.id,
+        author_display=g.current_user.get_full_name() or g.current_user.email,
+        body=body
+    )
+    db.session.add(comment)
+    db.session.commit()
+
+    return jsonify(comment.to_dict()), 201
+
+
+@app.route('/api/decisions/<int:decision_id>/comments/<int:comment_id>', methods=['DELETE'])
+@login_required
+def api_delete_decision_comment(decision_id, comment_id):
+    """Soft delete a decision comment."""
+    if is_master_account():
+        return jsonify({'error': 'Master accounts cannot modify tenant comments'}), 403
+
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=g.current_user.sso_domain,
+        deleted_at=None
+    ).first_or_404()
+
+    comment = DecisionComment.query.filter_by(
+        id=comment_id,
+        decision_id=decision.id,
+        deleted_at=None
+    ).first_or_404()
+
+    membership = get_current_membership()
+    allowed_roles = [GlobalRole.ADMIN, GlobalRole.STEWARD]
+    if decision.tenant and decision.tenant.maturity_state == MaturityState.BOOTSTRAP:
+        allowed_roles.append(GlobalRole.PROVISIONAL_ADMIN)
+
+    can_delete = comment.user_id == g.current_user.id
+    if membership and membership.global_role in allowed_roles:
+        can_delete = True
+
+    if not can_delete:
+        return jsonify({'error': 'Permission denied'}), 403
+
+    comment.deleted_at = datetime.now(timezone.utc)
+    comment.deleted_by_id = g.current_user.id
+    db.session.commit()
+
+    return jsonify({'message': 'Comment deleted successfully'})
 
 
 # ==================== API Routes - User ====================
@@ -10704,9 +10808,8 @@ def api_mcp_handler():
     - tools/list: List available tools
     - tools/call: Execute a tool
     """
-    from ee.backend.ai.mcp import handle_mcp_request, get_tools
+    from ee.backend.ai.mcp import authenticate_mcp_request, handle_mcp_request
     from ee.backend.ai.config import AIConfig
-    import uuid
 
     # Check system-level MCP availability
     if not AIConfig.get_system_ai_enabled():
@@ -10717,38 +10820,110 @@ def api_mcp_handler():
 
     # Handle GET request (SSE stream for server-initiated messages)
     if request.method == 'GET':
-        # For now, we don't support server-initiated messages
-        # Return 405 to indicate GET is not supported for this endpoint
-        return jsonify({
-            'error': 'GET method not supported. Use POST for MCP requests.'
-        }), 405
+        api_key, auth_error = _extract_mcp_api_key()
+        if auth_error:
+            return _mcp_error_response(None, -32600, auth_error), 401
+
+        success, _handler, error = authenticate_mcp_request(api_key)
+        if not success:
+            return _mcp_error_response(None, -32600, error), 401
+
+        return _mcp_sse_response()
 
     # POST request handling
     # Get API key from Authorization header
-    auth_header = request.headers.get('Authorization', '')
-    if not auth_header.startswith('Bearer '):
-        return _mcp_error_response(None, -32600,
-            'Missing or invalid Authorization header. Use: Bearer <api_key>'), 401
-
-    api_key = auth_header[7:]  # Remove 'Bearer ' prefix
+    api_key, auth_error = _extract_mcp_api_key()
+    if auth_error:
+        return _mcp_error_response(None, -32600, auth_error), 401
 
     if not request.is_json:
         return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
 
-    request_data = request.get_json()
-    request_id = request_data.get('id')
-    method = request_data.get('method', '')
+    request_data = request.get_json(silent=True)
+    if request_data is None:
+        return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
 
-    # Handle initialize method specially
+    if isinstance(request_data, list):
+        if not request_data:
+            return _mcp_error_response(None, -32600, 'Invalid Request: batch cannot be empty'), 400
+
+        batch_responses = []
+        status_code = 200
+        session_id = None
+        for item in request_data:
+            response_data, item_status, item_session_id = _handle_mcp_post_message(item, api_key)
+            if item_session_id:
+                session_id = item_session_id
+            if item_status >= 400 and status_code < 400:
+                status_code = item_status
+            if response_data is not None:
+                batch_responses.append(response_data)
+
+        if not batch_responses:
+            return '', 202
+
+        response = jsonify(batch_responses)
+        _decorate_mcp_response(response, session_id=session_id)
+        return response, status_code
+
+    response_data, status_code, session_id = _handle_mcp_post_message(request_data, api_key)
+    if response_data is None:
+        return '', status_code
+
+    response = jsonify(response_data)
+    _decorate_mcp_response(response, session_id=session_id)
+    return response, status_code
+
+
+def _extract_mcp_api_key():
+    """Extract a bearer API key from the MCP Authorization header."""
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return None, 'Missing or invalid Authorization header. Use: Bearer <api_key>'
+
+    api_key = auth_header[7:].strip()
+    if not api_key:
+        return None, 'Missing or invalid Authorization header. Use: Bearer <api_key>'
+
+    return api_key, None
+
+
+def _handle_mcp_post_message(message, api_key):
+    """Handle one JSON-RPC message from an MCP POST body."""
+    from ee.backend.ai.mcp import authenticate_mcp_request, handle_mcp_request
+    import uuid
+
+    if not isinstance(message, dict):
+        return _mcp_error_payload(None, -32600, 'Invalid Request: expected JSON-RPC object'), 400, None
+
+    request_id = message.get('id')
+    method = message.get('method', '')
+
+    if not method:
+        header_method = request.headers.get('Mcp-Method')
+        if header_method:
+            message = dict(message)
+            method = header_method
+            message['method'] = method
+
+    if method == 'tools/call' and request.headers.get('Mcp-Name'):
+        message = dict(message)
+        params = dict(message.get('params') or {})
+        params.setdefault('name', request.headers.get('Mcp-Name'))
+        message['params'] = params
+
     if method == 'initialize':
-        # Generate session ID
+        success, _handler, error = authenticate_mcp_request(api_key)
+        if not success:
+            return _mcp_error_payload(request_id, -32600, error), 401, None
+
         session_id = str(uuid.uuid4())
         _mcp_sessions[session_id] = {
             'api_key': api_key,
             'created_at': datetime.now(timezone.utc).isoformat()
         }
 
-        response = jsonify({
+        return {
             'jsonrpc': '2.0',
             'id': request_id,
             'result': {
@@ -10761,48 +10936,75 @@ def api_mcp_handler():
                     'version': '1.0.0'
                 }
             }
-        })
-        response.headers['MCP-Session-Id'] = session_id
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        }, 200, session_id
 
-    # Handle initialized notification (client confirms initialization)
     if method == 'notifications/initialized':
-        return '', 202
+        return None, 202, None
 
-    # Handle the MCP request
-    response_data = handle_mcp_request(request_data, api_key)
+    response_data = handle_mcp_request(message, api_key)
+    return response_data, _mcp_http_status(response_data), None
 
-    # Build response with proper headers
-    response = jsonify(response_data)
+
+def _mcp_http_status(response_data):
+    """Map JSON-RPC errors to HTTP status codes for MCP responses."""
+    if not isinstance(response_data, dict) or 'error' not in response_data:
+        return 200
+
+    error_code = response_data['error'].get('code', -32000)
+    if error_code == -32600:
+        return 400
+    if error_code == -32601:
+        return 404
+    return 200
+
+
+def _decorate_mcp_response(response, session_id=None):
+    """Apply shared MCP response headers."""
     response.headers['Content-Type'] = 'application/json'
+    response.headers['MCP-Protocol-Version'] = request.headers.get('MCP-Protocol-Version', MCP_PROTOCOL_VERSION)
 
-    # Include session ID if present in request
-    session_id = request.headers.get('MCP-Session-Id')
+    session_id = session_id or request.headers.get('MCP-Session-Id')
     if session_id:
         response.headers['MCP-Session-Id'] = session_id
-
-    # Determine status code based on response
-    if 'error' in response_data:
-        error_code = response_data['error'].get('code', -32000)
-        if error_code == -32600:  # Invalid Request
-            return response, 400
-        elif error_code == -32601:  # Method not found
-            return response, 404
 
     return response
 
 
-def _mcp_error_response(request_id, code, message):
-    """Helper to create MCP error response."""
-    return jsonify({
+def _mcp_sse_response():
+    """Return a lightweight SSE stream for Streamable HTTP clients that probe GET."""
+    def event_stream():
+        yield 'retry: 30000\n'
+        yield ': decision-records MCP stream ready\n\n'
+
+    response = Response(event_stream(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['X-Accel-Buffering'] = 'no'
+    response.headers['MCP-Protocol-Version'] = request.headers.get('MCP-Protocol-Version', MCP_PROTOCOL_VERSION)
+
+    session_id = request.headers.get('MCP-Session-Id')
+    if session_id:
+        response.headers['MCP-Session-Id'] = session_id
+
+    return response
+
+
+def _mcp_error_payload(request_id, code, message):
+    """Create an MCP JSON-RPC error payload."""
+    return {
         'jsonrpc': '2.0',
         'id': request_id,
         'error': {
             'code': code,
             'message': message
         }
-    })
+    }
+
+
+def _mcp_error_response(request_id, code, message):
+    """Helper to create MCP error response."""
+    response = jsonify(_mcp_error_payload(request_id, code, message))
+    _decorate_mcp_response(response)
+    return response
 # EE:END - AI/LLM Integration
 
 
