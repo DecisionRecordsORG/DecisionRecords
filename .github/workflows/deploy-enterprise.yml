@@ -26,11 +26,19 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout with EE submodule
+      - name: Checkout public repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          token: ${{ secrets.EE_REPO_TOKEN }}
+          submodules: false
+
+      - name: Checkout private submodules
+        env:
+          EE_REPO_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+        run: |
+          test -n "$EE_REPO_TOKEN"
+          git submodule sync --recursive
+          git -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            submodule update --init --recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -96,11 +104,19 @@ jobs:
       HEALTH_URL: ${{ vars.ENTERPRISE_HEALTH_URL || 'https://app.decisionrecords.org/api/health' }}
 
     steps:
-      - name: Checkout with EE submodule
+      - name: Checkout public repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          token: ${{ secrets.EE_REPO_TOKEN }}
+          submodules: false
+
+      - name: Checkout private submodules
+        env:
+          EE_REPO_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+        run: |
+          test -n "$EE_REPO_TOKEN"
+          git submodule sync --recursive
+          git -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            submodule update --init --recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5
