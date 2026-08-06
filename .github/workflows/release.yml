@@ -11,7 +11,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: decisionrecordsorg/decisionrecords
 
 jobs:
   release:
@@ -75,14 +75,14 @@ jobs:
             ## Docker Installation
 
             ```bash
-            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            docker pull ghcr.io/decisionrecordsorg/decisionrecords:${{ github.ref_name }}
             ```
 
             Or use docker-compose:
 
             ```bash
-            curl -O https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml
+            curl -O https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/docker-compose.yml
             docker-compose up -d
             ```
 
-            See [Installation Guide](https://github.com/${{ github.repository }}/blob/main/docs/docker-install.md) for details.
+            See [Self-Hosting Guide](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/self-hosting.md) for details.

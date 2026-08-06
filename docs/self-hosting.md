@@ -27,7 +27,7 @@ version: '3.8'
 
 services:
   app:
-    image: ghcr.io/decisionrecordsorg/decision-records:latest
+    image: ghcr.io/decisionrecordsorg/decisionrecords:latest
     ports:
       - "3000:8000"
     environment:
@@ -48,7 +48,7 @@ version: '3.8'
 
 services:
   app:
-    image: ghcr.io/decisionrecordsorg/decision-records:latest
+    image: ghcr.io/decisionrecordsorg/decisionrecords:latest
     ports:
       - "3000:8000"
     environment:
@@ -81,7 +81,7 @@ docker run -d \
   -p 3000:8000 \
   -v decision-records-data:/data \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
-  ghcr.io/decisionrecordsorg/decision-records:latest
+  ghcr.io/decisionrecordsorg/decisionrecords:latest
 
 # With PostgreSQL
 docker run -d \
@@ -89,7 +89,7 @@ docker run -d \
   -p 3000:8000 \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
   -e DATABASE_URL="postgresql://user:pass@host:5432/decisions" \
-  ghcr.io/decisionrecordsorg/decision-records:latest
+  ghcr.io/decisionrecordsorg/decisionrecords:latest
 ```
 
 ## Environment Variables
@@ -173,7 +173,7 @@ decisions.example.com {
 # docker-compose.yml with Traefik labels
 services:
   app:
-    image: ghcr.io/decisionrecordsorg/decision-records:latest
+    image: ghcr.io/decisionrecordsorg/decisionrecords:latest
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.decisions.rule=Host(`decisions.example.com`)"
