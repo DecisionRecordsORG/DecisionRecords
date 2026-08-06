@@ -2,17 +2,6 @@ name: Deploy Enterprise Edition
 
 on:
   workflow_dispatch:
-    inputs:
-      version_bump:
-        description: 'Version bump type'
-        required: true
-        type: choice
-        options:
-          - patch
-          - minor
-          - major
-          - no-bump
-        default: patch
 
 concurrency:
   group: production-private-app
@@ -94,7 +83,7 @@ jobs:
     needs: preflight
     environment: production-private
     permissions:
-      contents: write
+      contents: read
       id-token: write
     env:
       ACR_NAME: ${{ vars.AZURE_ACR_NAME }}
@@ -123,23 +112,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Bump version
-        if: inputs.version_bump != 'no-bump'
-        env:
-          TARGET_REF: ${{ github.ref_name }}
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          ./ee/scripts/version-bump.sh ${{ inputs.version_bump }}
-          VERSION=$(grep -o '__version__ = "[^"]*"' version.py | cut -d'"' -f2)
-          git add version.py
-          if git diff --cached --quiet; then
-            echo "No version changes to commit"
-            exit 0
-          fi
-          git commit -m "Bump version to $VERSION"
-          git push origin "HEAD:${TARGET_REF}"
 
       - name: Validate Azure variables
         run: |
