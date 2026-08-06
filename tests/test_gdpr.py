@@ -21,6 +21,7 @@ from models import (
     UserConsent, WebAuthnCredential, DecisionHistory, DecisionSpace, Space,
     VisibilityPolicy, log_login_attempt
 )
+from tests.app_test_utils import load_test_app
 
 
 # ==================== Helpers ====================
@@ -1100,30 +1101,9 @@ class TestGDPREndpointsHTTP:
         Uses the full Flask app with all routes registered.
         Ensures a clean SQLite test database for each test.
         """
-        os.environ['FLASK_ENV'] = 'testing'
-        os.environ['TESTING'] = 'True'
-        os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-gdpr-12345'
-        # Remove DATABASE_URL to prevent connecting to a real PostgreSQL
-        os.environ.pop('DATABASE_URL', None)
-
-        # Remove leftover test database file if it exists
-        test_db_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'test_database.db'
+        app_module, test_app = load_test_app(
+            secret_key='test-secret-key-gdpr-12345'
         )
-        if os.path.exists(test_db_path):
-            os.remove(test_db_path)
-
-        import app as app_module
-        test_app = app_module.app
-
-        app_module._db_initialized = False
-
-        test_app.config['TESTING'] = True
-        test_app.config['SECRET_KEY'] = 'test-secret-key-gdpr-12345'
-        test_app.config['SESSION_COOKIE_SAMESITE'] = None
-        test_app.config['SESSION_COOKIE_HTTPONLY'] = False
-        test_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 
         with test_app.app_context():
             db.create_all()
