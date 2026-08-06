@@ -49,6 +49,7 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 ## Git Safety Rules
 
 - Treat the public repository and `ee/` as separate Git repositories. Always check both with `git status --short --branch` and `git -C ee status --short --branch` before editing, committing, or summarizing work.
+- Keep only one open public PR per branch/head SHA. If a retry branch supersedes an earlier PR, close the earlier PR before retriggering CI again so required checks attach to a single live PR.
 - Never edit a detached `ee` HEAD. If `ee` is detached, create or switch to a named private branch before making or keeping changes, for example `git -C ee switch -c infra/<topic>`.
 - Commit private `ee` changes inside `ee` first, push that private branch, then update the public parent submodule pointer. Do not commit a public parent submodule pointer that refers to uncommitted private `ee` work.
 - Keep production infra, snapshots, deployment resource names, and commercial module code in `ee/`; the public parent should contain only generic docs, CE code, stubs, and the submodule pointer.

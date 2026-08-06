@@ -12,7 +12,8 @@ Update rules:
 
 - [ ] Decide whether `Deploy Enterprise Edition` should remain manual-only or become gated auto-deploy after `CI` on `main`.
 - [ ] Re-run and verify the current enterprise deploy from `main` after the workflow fixes merged.
-- [ ] Replace deprecated GitHub Actions dependencies still running on forced Node.js 24 compatibility mode.
+- [ ] Extract the shared CI job graph into a reusable workflow after revalidating required check names against branch protection on `main`.
+- [ ] Decide whether a dedicated `ci-recovery.yml` wrapper is still needed once the reusable workflow split lands.
 
 ## Versioning / Releases
 
