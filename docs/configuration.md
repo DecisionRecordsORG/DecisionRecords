@@ -201,8 +201,8 @@ GET /api/version
 Response:
 ```json
 {
-  "version": "1.14.2",
-  "build_date": "2024-01-15",
+  "version": "2.0.28",
+  "build_date": "2026-03-06",
   "git_commit": "abc1234",
   "environment": "production"
 }
