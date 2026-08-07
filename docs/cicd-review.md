@@ -21,6 +21,7 @@ This review covers the public Community repository. The commercial marketing web
 
 ## Gaps
 
+- The private `ee` repository does not currently expose a canonical pull-request CI lane of its own. GitHub reported no checks on the `fix/marketing-release-feed` branch, so Enterprise validation still depends on the public repository workflows and local/operator runs instead of an EE-native PR check.
 - Enterprise deployment still uses `az vm run-command` and a VM restart instead of immutable Azure app revisions.
 - Azure OIDC still needs a one-time app registration/federated credential setup in Azure.
 - Enterprise app deployments rebuild from source instead of promoting a CI-created image.
