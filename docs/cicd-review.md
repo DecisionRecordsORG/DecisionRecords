@@ -14,8 +14,10 @@ This review covers the public Community repository. The commercial marketing web
 ## Operating Rules
 
 - Keep one live public PR per branch/head SHA. If a retry branch replaces an earlier PR, close the earlier PR before retriggering CI so required checks attach to one PR only.
-- Prefer re-running or manually dispatching the existing `CI` workflow over cloning the job graph into ad hoc recovery workflows.
-- Treat `workflow_dispatch` as a recovery tool, not a parallel validation lane. Concurrency should collapse duplicate runs on the same branch.
+- Prefer re-running the existing `pull_request` CI run over starting a manual `workflow_dispatch` run when a PR is waiting on required checks.
+- Treat `workflow_dispatch` as a diagnostic lane, not a merge-validation lane. Required PR checks must come from `pull_request` or `merge_group` events.
+- Keep `workflow_dispatch` concurrency separate from `pull_request` concurrency so a manual diagnostic run cannot cancel the canonical PR validation run.
+- If a PR run is missing, stale, or was cancelled, push a no-op follow-up commit to trigger a fresh `pull_request` synchronize event.
 
 ## Gaps
 
@@ -26,6 +28,7 @@ This review covers the public Community repository. The commercial marketing web
 - Rollback steps are documented only implicitly through previous images/revisions.
 - Version bumping is coupled to Enterprise deployment and pushes from a deployment workflow.
 - The CI job graph is still defined directly in `ci.yml`; reusable workflow extraction should happen only after required-check naming is revalidated against branch protection.
+- Manual CI diagnostics still live in the main `ci.yml`; consider splitting them into a separate non-required workflow if operator usage grows.
 
 ## Target Deployment Model
 
@@ -128,3 +131,12 @@ Temporary local bypass, for emergencies only:
 ```bash
 SKIP_COMMIT_QA=1 git commit
 ```
+
+## PR Check Recovery
+
+When a PR is blocked on checks:
+
+1. Inspect the canonical PR lane first: `gh pr checks <number>` and the `pull_request` run in GitHub Actions.
+2. Use GitHub's native "Re-run jobs" on that `pull_request` run when possible.
+3. If the canonical PR run was cancelled or never attached, push a trivial follow-up commit to the PR branch to trigger a fresh `pull_request` event.
+4. Use `workflow_dispatch` only for branch diagnostics. Its `Quality Gate (Manual)` result is intentionally non-required and must not be treated as merge approval.

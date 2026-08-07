@@ -7,6 +7,7 @@ run-name: >-
   CI [${{ github.event_name }}] ${{ github.event.pull_request.head.ref || github.ref_name }}
 
 on:
+  # Diagnostic only. Required PR checks must come from pull_request or merge_group runs.
   workflow_dispatch:
   push:
     branches: [main]
@@ -18,7 +19,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}
+  # Keep manual diagnostics from cancelling the canonical pull_request lane.
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -211,7 +213,7 @@ jobs:
           flake8 app.py models.py auth.py --max-line-length=120 --ignore=E501,W503
 
   quality-gate:
-    name: Quality Gate
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     needs: [release-metadata, public-artifact-check, boundary-check, python-syntax, test-backend, build-frontend, build-docker]
