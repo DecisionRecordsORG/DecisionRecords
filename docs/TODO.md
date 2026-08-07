@@ -20,7 +20,7 @@ Update rules:
 ## Versioning / Releases
 
 - [ ] Verify the live marketing `/releases` page after the latest deploy finishes.
-- [ ] Make the marketing `/releases` page load real GitHub Release data and show the GHCR pull command for each Community Edition release.
+- [ ] Decide whether the marketing `/releases` page should keep using the runtime GitHub Releases API or switch to a build-time release snapshot for stronger SEO and lower runtime dependency.
 - [ ] Add a clearer compatibility note explaining how public Community releases relate to Enterprise deployments.
 - [ ] Decide whether release notes should stay GitHub-driven only or also be curated in-site.
 

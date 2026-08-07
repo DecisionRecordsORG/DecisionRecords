@@ -20,6 +20,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Verify local port ownership before trusting a local screenshot. Use `lsof -i :<port>` or equivalent when a port was already in use.
 - Keep Angular HTML/app-shell responses on `no-cache`/`no-store`; hashed JavaScript assets can otherwise strand stale app shells.
 - A successful asset upload is not a successful deployment. The acceptance check is a nonblank production page with the expected commercial homepage content.
+- For the commercial marketing site in `ee/marketing`, a new route is not deployable until three surfaces are kept in sync: `src/app/app.routes.ts`, `src/app/services/seo.service.ts`, and `scripts/prerender-blog.py`. Missing the prerender entry causes direct URL requests like `/releases` to fall back to the generic SPA shell in production.
 
 ## MCP Validation
 
