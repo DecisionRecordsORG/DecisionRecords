@@ -64,7 +64,8 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 
 ## Operational Memory
 
-- After any CI/CD, deployment, release, or production incident that reveals a new failure mode, record the lesson in `docs/production-lessons-kb.md` in the same change when practical.
+- After any CI/CD, deployment, release, or production incident that reveals a new failure mode, record the lesson in `docs/production-lessons-kb.md` in the same change when practical, without waiting for a user prompt.
+- When a task adds or changes a marketing route, review the full route surface before calling it done: `ee/marketing/src/app/app.routes.ts`, `ee/marketing/src/app/services/seo.service.ts`, `ee/marketing/scripts/prerender-blog.py`, and `ee/infra/cloudflare-worker.js`.
 - If the incident fix leaves meaningful follow-up work, add it to `docs/TODO.md` before ending the session.
 
 ## Notes From Claude Artifacts

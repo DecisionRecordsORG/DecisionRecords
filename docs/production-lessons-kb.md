@@ -21,6 +21,8 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Keep Angular HTML/app-shell responses on `no-cache`/`no-store`; hashed JavaScript assets can otherwise strand stale app shells.
 - A successful asset upload is not a successful deployment. The acceptance check is a nonblank production page with the expected commercial homepage content.
 - For the commercial marketing site in `ee/marketing`, a new route is not deployable until three surfaces are kept in sync: `src/app/app.routes.ts`, `src/app/services/seo.service.ts`, and `scripts/prerender-blog.py`. Missing the prerender entry causes direct URL requests like `/releases` to fall back to the generic SPA shell in production.
+- If the marketing site is routed through the Cloudflare edge worker, a route change is not complete until `ee/infra/cloudflare-worker.js` is updated and deployed with the marketing path allowlist change. Shipping the page code without the edge routing update can send users to the app or sign-in flow instead of the marketing page.
+- For route-specific production regressions, compare `curl -I` on the broken URL against a known-good marketing URL. Marketing responses should look like static-site traffic; app headers such as backend CSP or rate-limit headers usually mean the request is still being routed to the backend.
 - The marketing Angular build must stay independent of local machine quirks and live internet fetches. Keep Angular CLI disk cache disabled for local builds and keep production font inlining disabled; on macOS, Angular 18 + LMDB cache can abort under Node 20, and Google Fonts inlining makes builds fail in restricted-network environments.
 
 ## MCP Validation
