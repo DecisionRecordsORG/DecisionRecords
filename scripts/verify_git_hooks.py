@@ -13,11 +13,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PRE_COMMIT_HOOK = REPO_ROOT / ".githooks" / "pre-commit"
+EE_ROOT = REPO_ROOT / "ee"
+EE_PRE_COMMIT_HOOK = EE_ROOT / ".githooks" / "pre-commit"
+EE_MARKETING_ROOT = EE_ROOT / "marketing"
 
 
 def run(
     command: list[str],
     *,
+    cwd: Path = REPO_ROOT,
     env: dict[str, str] | None = None,
     input_text: str | None = None,
     check: bool = True,
@@ -28,7 +32,7 @@ def run(
 
     result = subprocess.run(
         command,
-        cwd=REPO_ROOT,
+        cwd=cwd,
         env=process_env,
         input=input_text,
         text=True,
@@ -62,9 +66,31 @@ def verify_hook_config() -> None:
     print("hooks: core.hooksPath is .githooks")
 
 
+def verify_optional_ee_hook_config() -> None:
+    if not EE_ROOT.exists() or not EE_PRE_COMMIT_HOOK.exists():
+        return
+
+    mode = EE_PRE_COMMIT_HOOK.stat().st_mode
+    require(bool(mode & stat.S_IXUSR), "ee/.githooks/pre-commit is not executable")
+
+    hooks_path = run(["git", "-C", str(EE_ROOT), "config", "--get", "core.hooksPath"], check=False).stdout.strip()
+    require(
+        hooks_path == ".githooks",
+        "ee core.hooksPath is not set to .githooks; run: git -C ee config core.hooksPath .githooks",
+    )
+
+    print("hooks: ee core.hooksPath is .githooks")
+
+
 def prepare_index(index_path: str) -> dict[str, str]:
     env = {"GIT_INDEX_FILE": index_path}
     run(["git", "read-tree", "HEAD"], env=env)
+    return env
+
+
+def prepare_ee_index(index_path: str) -> dict[str, str]:
+    env = {"GIT_INDEX_FILE": index_path}
+    run(["git", "read-tree", "HEAD"], cwd=EE_ROOT, env=env)
     return env
 
 
@@ -80,7 +106,7 @@ def verify_positive_hook_run() -> None:
 def verify_private_artifact_rejection() -> None:
     with tempfile.TemporaryDirectory(prefix="decisionrecords-hooks-") as temp_dir:
         env = prepare_index(str(Path(temp_dir) / "index"))
-        blob = run(["git", "hash-object", "-w", "--stdin"], input_text="{}\n").stdout.strip()
+        blob = run(["git", "rev-parse", "HEAD:app.py"]).stdout.strip()
         run(
             [
                 "git",
@@ -101,10 +127,38 @@ def verify_private_artifact_rejection() -> None:
     print("hooks: private artifact rejection test passed")
 
 
+def verify_optional_ee_hook_run() -> None:
+    if not EE_PRE_COMMIT_HOOK.exists():
+        return
+
+    result = run([str(EE_PRE_COMMIT_HOOK)], cwd=EE_ROOT, check=False)
+    require(result.returncode == 0, "ee pre-commit hook did not pass on a clean ee index")
+    require("repo-boundary: ee checks passed." in result.stdout, "ee pre-commit hook did not run boundary checks")
+    print("hooks: ee pre-commit run passed")
+
+
+def verify_optional_ee_marketing_pointer_run() -> None:
+    if not EE_PRE_COMMIT_HOOK.exists() or not EE_MARKETING_ROOT.exists():
+        return
+
+    with tempfile.TemporaryDirectory(prefix="decisionrecords-ee-hooks-") as temp_dir:
+        env = prepare_ee_index(str(Path(temp_dir) / "index"))
+        run(["git", "add", "marketing"], cwd=EE_ROOT, env=env)
+
+        result = run([str(EE_PRE_COMMIT_HOOK)], cwd=EE_ROOT, env=env, check=False)
+        require(result.returncode == 0, "ee pre-commit hook did not pass with a staged marketing pointer")
+        require("repo-boundary: ee checks passed." in result.stdout, "ee pre-commit hook did not validate staged marketing pointer")
+
+    print("hooks: ee staged marketing pointer run passed")
+
+
 def main() -> int:
     verify_hook_config()
+    verify_optional_ee_hook_config()
     verify_positive_hook_run()
     verify_private_artifact_rejection()
+    verify_optional_ee_hook_run()
+    verify_optional_ee_marketing_pointer_run()
     print("hooks: verification passed")
     return 0
 

@@ -1007,6 +1007,7 @@ class TestMCPAPIEndpoint:
         assert response.status_code == 200
         assert response.content_type.startswith('text/event-stream')
         assert b'decision-records MCP stream ready' in response.data
+        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
 
     def test_invalid_json_body(self, mcp_client, enable_mcp_system, mcp_tenant_and_key):
         """Returns 400 when request body is not valid JSON."""
@@ -1070,6 +1071,59 @@ class TestMCPAPIEndpoint:
         assert 'result' in data
         assert 'tools' in data['result']
         assert len(data['result']['tools']) == 7
+        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
+
+    def test_initialize_legacy_protocol_returns_session_header(self, mcp_client, mcp_tenant_and_key):
+        """Legacy initialize still negotiates a session header for older clients."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'initialize',
+                'params': {
+                    'protocolVersion': '2025-11-25'
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['result']['protocolVersion'] == '2025-11-25'
+        assert response.headers['MCP-Protocol-Version'] == '2025-11-25'
+        assert 'MCP-Session-Id' in response.headers
+
+    def test_modern_protocol_does_not_emit_session_header(self, mcp_client, mcp_tenant_and_key):
+        """Current stateless MCP requests should not receive a session header."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'MCP-Protocol-Version': '2026-07-28'
+            }
+        )
+        assert response.status_code == 200
+        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
+        assert 'MCP-Session-Id' not in response.headers
+
+    def test_unsupported_protocol_version_returns_400(self, mcp_client, mcp_tenant_and_key):
+        """Unsupported protocol versions are rejected explicitly."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'MCP-Protocol-Version': '2099-01-01'
+            }
+        )
+        assert response.status_code == 400
+        data = response.get_json()
+        assert 'error' in data
+        assert 'Unsupported MCP protocol version' in data['error']['message']
 
     def test_mcp_method_header_routes_request(self, mcp_client, mcp_tenant_and_key):
         """Mcp-Method header can supply the JSON-RPC method for newer clients."""
@@ -1097,8 +1151,11 @@ class TestMCPAPIEndpoint:
         assert response.status_code == 200
         data = response.get_json()
         assert 'result' in data
+        assert data['result']['protocolVersion'] == '2026-07-28'
         assert 'protocolVersions' in data['result']
         assert '2026-07-28' in data['result']['protocolVersions']
+        assert data['result']['transport']['stateless'] is True
+        assert data['result']['documentationUrl'].endswith('/integrations/mcp')
 
     def test_tools_call_search_decisions(self, mcp_client, mcp_tenant_and_key):
         """Successfully calls search_decisions tool."""

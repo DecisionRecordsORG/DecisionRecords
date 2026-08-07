@@ -22,13 +22,15 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Install frontend dependencies from `frontend/` with `npm ci`.
 - Build the Community frontend with `npm run build -- --configuration=community`.
 - For Enterprise frontend typechecks, create the ignored local symlink `ln -sfn ../../frontend/node_modules ee/frontend/node_modules`, then run `npx tsc -p tsconfig.app.json --noEmit` from `frontend/`.
+- The private marketing site under `ee/marketing` expects Node 20 (`.nvmrc` / `package.json` engines). Its Angular workspace keeps the persistent disk cache off for local builds and keeps Google Fonts inlining off for production builds so macOS local builds do not crash in LMDB native cache code or depend on live font fetches.
 - Run local CE backend with `python run_local.py --community`.
 - Run Angular dev server from `frontend/` with `npm start`.
 - Check the CE/EE boundary locally with `uv run python scripts/check_ce_boundary.py`.
 - Check the open-source artifact boundary with `uv run python scripts/check_public_artifacts.py --mode staged`.
 - Run commit QA with `uv run python scripts/qa_check.py --mode commit`.
 - Run full release QA with `uv run python scripts/qa_check.py --mode full`.
-- Use `git config core.hooksPath .githooks` to enable the versioned pre-commit hook.
+- Use `git config core.hooksPath .githooks` to enable the versioned pre-commit hook in the public repo.
+- Use `git -C ee config core.hooksPath .githooks` to enable the versioned pre-commit hook in the private `ee` repo.
 - Verify local hook wiring with `uv run python scripts/verify_git_hooks.py`.
 - Configure GitHub branch/environment guardrails with `scripts/configure_github_guardrails.sh` when authenticated as a repo admin.
 - Configure GitHub Actions Azure OIDC with `scripts/configure_azure_oidc.sh` when authenticated to Azure and GitHub.
@@ -49,14 +51,16 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 ## Git Safety Rules
 
 - Treat the public repository and `ee/` as separate Git repositories. Always check both with `git status --short --branch` and `git -C ee status --short --branch` before editing, committing, or summarizing work.
+- When marketing changes are involved, treat `ee/marketing` as a third repository. Check all three statuses before editing, committing, or summarizing work: `git status --short --branch`, `git -C ee status --short --branch`, and `git -C ee/marketing status --short --branch`.
 - Keep only one open public PR per branch/head SHA. If a retry branch supersedes an earlier PR, close the earlier PR before retriggering CI again so required checks attach to a single live PR.
 - Do not treat `workflow_dispatch` CI runs as a substitute for PR-required checks. For PR recovery, re-run the canonical `pull_request` run or push a no-op commit to trigger a fresh `pull_request` synchronize event.
 - Never edit a detached `ee` HEAD. If `ee` is detached, create or switch to a named private branch before making or keeping changes, for example `git -C ee switch -c infra/<topic>`.
-- Commit private `ee` changes inside `ee` first, push that private branch, then update the public parent submodule pointer. Do not commit a public parent submodule pointer that refers to uncommitted private `ee` work.
+- Never edit a detached `ee/marketing` HEAD. If `ee/marketing` is detached, create or switch to a named private branch before making or keeping changes there.
+- Commit order is strict when nested repos change: commit inside `ee/marketing` first, then commit the `marketing` pointer inside `ee`, then update the public `ee` submodule pointer. Do not commit a parent pointer that refers to dirty child work.
 - Keep production infra, snapshots, deployment resource names, and commercial module code in `ee/`; the public parent should contain only generic docs, CE code, stubs, and the submodule pointer.
 - Do not stage generated or local-only files such as `ee/infra/aca/main.json`, `ee/frontend/node_modules`, local databases, `.env*`, or Azure credential files.
 - Do not use destructive Git commands such as `git reset --hard`, `git checkout -- <path>`, or submodule deinit/reinit to clean up without explicit user approval.
-- Before relying on hooks, ensure `git config core.hooksPath .githooks` is set and run `uv run python scripts/verify_git_hooks.py`.
+- Before relying on hooks, ensure `git config core.hooksPath .githooks` and `git -C ee config core.hooksPath .githooks` are set, then run `uv run python scripts/verify_git_hooks.py`.
 
 ## Operational Memory
 

@@ -131,12 +131,19 @@ uv run python scripts/verify_git_hooks.py
 
 ### Git Safety With Enterprise Submodule
 
-- The public repository and `ee/` are separate Git repositories. Check both statuses before committing.
-- If `ee` is on detached `HEAD`, switch to a named branch before making or keeping changes.
-- Commit and push private `ee` changes first, then update the public parent submodule pointer.
+- The public repository, `ee/`, and `ee/marketing/` are separate Git repositories. Check all relevant statuses before committing.
+- If `ee` or `ee/marketing` is on detached `HEAD`, switch to a named branch before making or keeping changes.
+- Commit order is strict when nested repos change: `ee/marketing` first, then `ee`, then the public parent submodule pointer.
 - Do not put production infra snapshots, exact Azure resource names, or commercial module code in the public tree.
 - Do not commit generated files such as `ee/infra/aca/main.json` or local symlinks such as `ee/frontend/node_modules`.
 - Do not use destructive Git cleanup commands unless the intended revert/reset is explicit.
+- Enable both hook paths and verify them:
+
+```bash
+git config core.hooksPath .githooks
+git -C ee config core.hooksPath .githooks
+uv run python scripts/verify_git_hooks.py
+```
 
 ## Coding Standards
 
