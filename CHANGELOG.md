@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.28.0] - 2026-03-03
+## [2.0.28] - 2026-03-03
 
 ### Added
 - GDPR Art. 17: Account deletion with 7-day grace period and anonymisation
@@ -15,14 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GDPR Art. 7: Consent management (analytics, AI processing, email notifications)
 - Cookie consent banner with PostHog conditional loading
 - Automated GDPR task execution endpoint (scheduled anonymisation, history cleanup, expired record purge)
-- UserConsent model and database migration (`ee/scripts/migrate_to_v228.py`)
+- UserConsent model and automatic Community Edition database migration for consent tables
 - Breach notification procedure documentation
 - Data Protection Impact Assessments (AI/LLM, Analytics, Integrations)
 - Sub-processor list documentation
 - GDPR backend test suite (67 tests)
 - GDPR E2E test suite (11 tests)
 
-## [2.27.0]
+## [2.0.27]
 
 ### Added
 - Open source release under BSL 1.1 license
@@ -82,7 +82,7 @@ Security-related changes and fixes
 
 ---
 
-[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.28.0...HEAD
-[2.28.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.27.0...v2.28.0
-[2.27.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v1.15.0...v2.27.0
+[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.28...HEAD
+[2.0.28]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.27...v2.0.28
+[2.0.27]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v1.15.0...v2.0.27
 [1.15.0]: https://github.com/DecisionRecordsORG/DecisionRecords/releases/tag/v1.15.0

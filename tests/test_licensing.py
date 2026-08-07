@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import Flask
 from flask.testing import FlaskClient
+from tests.app_test_utils import load_test_app
 
 
 class TestSystemConfigLicensing:
@@ -42,13 +43,8 @@ class TestUserLimitLogic:
     @pytest.fixture
     def app(self):
         """Create test Flask application."""
-        os.environ['FLASK_ENV'] = 'testing'
-        os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-        os.environ['SECRET_KEY'] = 'test-secret-key'
-
-        from app import app, db
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        _, app = load_test_app(secret_key='test-secret-key')
+        from app import db
 
         with app.app_context():
             db.create_all()
@@ -174,13 +170,8 @@ class TestLicensingAPIEndpoints:
     @pytest.fixture
     def app(self):
         """Create test Flask application."""
-        os.environ['FLASK_ENV'] = 'testing'
-        os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-        os.environ['SECRET_KEY'] = 'test-secret-key'
-
-        from app import app, db
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        _, app = load_test_app(secret_key='test-secret-key')
+        from app import db
 
         with app.app_context():
             db.create_all()
@@ -281,13 +272,8 @@ class TestAccessRequestUserLimit:
     @pytest.fixture
     def app(self):
         """Create test Flask application."""
-        os.environ['FLASK_ENV'] = 'testing'
-        os.environ['DATABASE_URL'] = 'sqlite:///:memory:'
-        os.environ['SECRET_KEY'] = 'test-secret-key'
-
-        from app import app, db
-        app.config['TESTING'] = True
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        _, app = load_test_app(secret_key='test-secret-key')
+        from app import db
 
         with app.app_context():
             db.create_all()

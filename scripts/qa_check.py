@@ -28,6 +28,11 @@ FORBIDDEN_STAGED_PATTERNS = (
     ".venv/*",
 )
 
+ALLOWED_FORBIDDEN_EXCEPTIONS = (
+    ".env.example",
+    ".env.dev.local.example",
+)
+
 FRONTEND_QA_PREFIXES = (
     "frontend/src/",
     "frontend/public/",
@@ -78,7 +83,12 @@ def path_matches(path: str, patterns: tuple[str, ...]) -> bool:
 
 
 def check_forbidden_files(files: list[str]) -> None:
-    blocked = [path for path in files if path_matches(path, FORBIDDEN_STAGED_PATTERNS)]
+    blocked = [
+        path
+        for path in files
+        if path_matches(path, FORBIDDEN_STAGED_PATTERNS)
+        and path not in ALLOWED_FORBIDDEN_EXCEPTIONS
+    ]
     if blocked:
         print("qa: refusing to commit generated, local, or secret-like files:")
         for path in blocked:
@@ -141,6 +151,7 @@ def run_commit_checks() -> None:
 
 def run_full_checks() -> None:
     run_commit_checks()
+    run(["uv", "run", "python", "scripts/check_release_metadata.py"])
     run(["uv", "run", "pytest", "tests/", "-q", "--tb=short"], env=COMMUNITY_TEST_ENV)
     run(["npx", "tsc", "-p", "tsconfig.app.ce.json", "--noEmit"], cwd=FRONTEND_ROOT)
     run(["npm", "run", "build", "--", "--configuration=community", "--progress=false"], cwd=FRONTEND_ROOT)

@@ -11,6 +11,14 @@ This review covers the public Community repository. The commercial marketing web
 - `release.yml` publishes Community Docker images to GitHub Container Registry for version tags.
 - Enterprise Azure login now uses GitHub OIDC variables scoped to the deployment environment.
 
+## Operating Rules
+
+- Keep one live public PR per branch/head SHA. If a retry branch replaces an earlier PR, close the earlier PR before retriggering CI so required checks attach to one PR only.
+- Prefer re-running the existing `pull_request` CI run over starting a manual `workflow_dispatch` run when a PR is waiting on required checks.
+- Treat `workflow_dispatch` as a diagnostic lane, not a merge-validation lane. Required PR checks must come from `pull_request` or `merge_group` events.
+- Keep `workflow_dispatch` concurrency separate from `pull_request` concurrency so a manual diagnostic run cannot cancel the canonical PR validation run.
+- If a PR run is missing, stale, or was cancelled, push a no-op follow-up commit to trigger a fresh `pull_request` synchronize event.
+
 ## Gaps
 
 - Enterprise deployment still uses `az vm run-command` and a VM restart instead of immutable Azure app revisions.
@@ -19,6 +27,8 @@ This review covers the public Community repository. The commercial marketing web
 - Style lint is advisory because existing Python lint debt must be cleaned before it can become a quality gate.
 - Rollback steps are documented only implicitly through previous images/revisions.
 - Version bumping is coupled to Enterprise deployment and pushes from a deployment workflow.
+- The CI job graph is still defined directly in `ci.yml`; reusable workflow extraction should happen only after required-check naming is revalidated against branch protection.
+- Manual CI diagnostics still live in the main `ci.yml`; consider splitting them into a separate non-required workflow if operator usage grows.
 
 ## Target Deployment Model
 
@@ -30,6 +40,7 @@ This review covers the public Community repository. The commercial marketing web
 6. Azure Container Apps or Azure App Service revisions replace VM run-command restarts.
 7. Rollback uses Azure revision/image rollback from GitHub Actions.
 8. Local machines do not run `az containerapp update`, `az vm run-command`, or production Docker pushes for normal deployment.
+9. Merge queue support uses the `merge_group` event so required checks continue to report when GitHub merge queue is enabled later.
 
 ## Migration Plan
 
@@ -120,3 +131,12 @@ Temporary local bypass, for emergencies only:
 ```bash
 SKIP_COMMIT_QA=1 git commit
 ```
+
+## PR Check Recovery
+
+When a PR is blocked on checks:
+
+1. Inspect the canonical PR lane first: `gh pr checks <number>` and the `pull_request` run in GitHub Actions.
+2. Use GitHub's native "Re-run jobs" on that `pull_request` run when possible.
+3. If the canonical PR run was cancelled or never attached, push a trivial follow-up commit to the PR branch to trigger a fresh `pull_request` event.
+4. Use `workflow_dispatch` only for branch diagnostics. Its `Quality Gate (Manual)` result is intentionally non-required and must not be treated as merge approval.

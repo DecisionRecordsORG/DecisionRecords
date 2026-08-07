@@ -29,6 +29,17 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Test missing auth, invalid auth, and valid API-key paths separately.
 - Re-check the current official MCP transport docs before claiming compatibility with a protocol version.
 
+## CI And PR Checks
+
+- Required PR checks must come from the `pull_request` or `merge_group` lane. Do not assume a green `workflow_dispatch` run will satisfy GitHub branch protection for a PR.
+- Do not share a concurrency group between `pull_request` and `workflow_dispatch`. Include the event type in the concurrency key so manual diagnostics cannot cancel the canonical PR run.
+- Keep the required check name reserved for the canonical lane. Manual diagnostics should publish a distinct check name such as `Quality Gate (Manual)`.
+- When GitHub shows a PR as blocked with missing checks, inspect all three views before changing code: `gh pr checks <number>`, `gh run view <run-id>`, and `gh api repos/<owner>/<repo>/commits/<sha>/check-runs`.
+- Recovery order for stuck PR checks:
+  1. Re-run the existing `pull_request` job graph.
+  2. If that lane was cancelled or never attached, push a no-op commit to trigger a fresh `pull_request` synchronize event.
+  3. Use `workflow_dispatch` only to diagnose the branch outside the required-check path.
+
 ## Git And Repository Safety
 
 - Treat the public repo and `ee/` as separate Git repositories.

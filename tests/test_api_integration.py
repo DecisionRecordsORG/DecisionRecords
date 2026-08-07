@@ -55,6 +55,7 @@ from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
     GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus
 )
+from tests.app_test_utils import load_test_app
 
 
 # ==================== Fixtures ====================
@@ -69,26 +70,9 @@ def api_app():
     Note: The app module is already configured to use sqlite:///:memory:
     when FLASK_ENV=testing (see app.py lines 55-57).
     """
-    # Set testing environment BEFORE importing app
-    os.environ['FLASK_ENV'] = 'testing'
-    os.environ['TESTING'] = 'True'
-    # Set a consistent secret key for testing BEFORE importing app
-    os.environ['FLASK_SECRET_KEY'] = 'test-secret-key-for-api-integration-12345'
-
-    # Import app module to get the configured Flask app
-    # This will already be configured with sqlite:///:memory: due to FLASK_ENV=testing
-    import app as app_module
-    test_app = app_module.app
-
-    # Reset the global _db_initialized flag to ensure proper initialization
-    # This is necessary because the flag persists across test runs
-    app_module._db_initialized = False
-
-    # Ensure testing mode is on and relax session cookie settings for testing
-    test_app.config['TESTING'] = True
-    test_app.config['SECRET_KEY'] = 'test-secret-key-for-api-integration-12345'  # Ensure consistent secret
-    test_app.config['SESSION_COOKIE_SAMESITE'] = None  # Allow test client to work properly
-    test_app.config['SESSION_COOKIE_HTTPONLY'] = False  # Allow test client session access
+    app_module, test_app = load_test_app(
+        secret_key='test-secret-key-for-api-integration-12345'
+    )
 
     with test_app.app_context():
         # Create all tables from models

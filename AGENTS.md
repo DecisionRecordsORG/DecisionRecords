@@ -49,12 +49,19 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 ## Git Safety Rules
 
 - Treat the public repository and `ee/` as separate Git repositories. Always check both with `git status --short --branch` and `git -C ee status --short --branch` before editing, committing, or summarizing work.
+- Keep only one open public PR per branch/head SHA. If a retry branch supersedes an earlier PR, close the earlier PR before retriggering CI again so required checks attach to a single live PR.
+- Do not treat `workflow_dispatch` CI runs as a substitute for PR-required checks. For PR recovery, re-run the canonical `pull_request` run or push a no-op commit to trigger a fresh `pull_request` synchronize event.
 - Never edit a detached `ee` HEAD. If `ee` is detached, create or switch to a named private branch before making or keeping changes, for example `git -C ee switch -c infra/<topic>`.
 - Commit private `ee` changes inside `ee` first, push that private branch, then update the public parent submodule pointer. Do not commit a public parent submodule pointer that refers to uncommitted private `ee` work.
 - Keep production infra, snapshots, deployment resource names, and commercial module code in `ee/`; the public parent should contain only generic docs, CE code, stubs, and the submodule pointer.
 - Do not stage generated or local-only files such as `ee/infra/aca/main.json`, `ee/frontend/node_modules`, local databases, `.env*`, or Azure credential files.
 - Do not use destructive Git commands such as `git reset --hard`, `git checkout -- <path>`, or submodule deinit/reinit to clean up without explicit user approval.
 - Before relying on hooks, ensure `git config core.hooksPath .githooks` is set and run `uv run python scripts/verify_git_hooks.py`.
+
+## Operational Memory
+
+- After any CI/CD, deployment, release, or production incident that reveals a new failure mode, record the lesson in `docs/production-lessons-kb.md` in the same change when practical.
+- If the incident fix leaves meaningful follow-up work, add it to `docs/TODO.md` before ending the session.
 
 ## Notes From Claude Artifacts
 

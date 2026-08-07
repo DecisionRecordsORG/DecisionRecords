@@ -38,6 +38,7 @@ Super Admin access (for managing multiple tenants): `admin` / `changeme`
 - **Spaces & Organization** - Organize decisions into projects or team spaces
 - **Email Notifications** - Subscribe to decision updates
 - **Self-Hosted** - Run on your own infrastructure with SQLite or PostgreSQL
+- **Public Releases** - Versioned Docker images published to GitHub Container Registry
 
 ### Enterprise Edition
 
@@ -51,6 +52,21 @@ The Enterprise Edition adds:
 - Priority support
 
 [Contact us](mailto:enterprise@decisionrecords.org) for Enterprise licensing.
+
+## Releases
+
+Community Edition release artifacts are published from this repository as:
+
+- GitHub Releases: [DecisionRecordsORG/DecisionRecords releases](https://github.com/DecisionRecordsORG/DecisionRecords/releases)
+- Container images: `ghcr.io/decisionrecordsorg/decisionrecords`
+
+Example:
+
+```bash
+docker pull ghcr.io/decisionrecordsorg/decisionrecords:latest
+```
+
+For a pinned install, prefer a version tag such as `v2.0.28` once that release is published.
 
 ## Installation
 
@@ -134,9 +150,7 @@ decision-records/
 │   └── src/app/
 │       ├── components/    # UI components
 │       └── services/      # API services
-├── ee/                    # Enterprise Edition (proprietary)
-│   ├── backend/           # EE backend modules
-│   └── frontend/          # EE frontend components
+├── ee/                    # Private Enterprise submodule (optional checkout)
 └── docs/                  # Documentation
 ```
 
@@ -193,7 +207,7 @@ This project is licensed under the [Business Source License 1.1](LICENSE).
 - Cannot offer as a competing hosted service
 - Converts to Apache 2.0 after 4 years
 
-The `/ee` directory contains proprietary Enterprise Edition code under a [separate license](ee/LICENSE).
+The `ee/` directory is a private Enterprise repository/submodule and is not part of the public Community Edition distribution.
 
 ## Support
 

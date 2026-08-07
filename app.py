@@ -5,6 +5,7 @@ import logging
 import sys
 import traceback
 import threading
+from sqlalchemy.pool import StaticPool
 
 # psycopg2 is only needed for PostgreSQL - make import optional for SQLite local dev
 try:
@@ -126,15 +127,26 @@ app_error_state = {
 # This ensures secrets are never hardcoded and can be rotated without redeployment
 
 # Database URL (Key Vault or environment variable)
-# IMPORTANT: When FLASK_ENV=testing, use isolated SQLite database to protect production
-if os.environ.get('FLASK_ENV') == 'testing':
-    database_url = 'sqlite:///test_database.db'
-    logger.info("TESTING MODE: Using isolated SQLite test database")
+# IMPORTANT: In testing mode, always prefer an explicit test database URL.
+is_testing_mode = (
+    os.environ.get('FLASK_ENV') == 'testing'
+    or os.environ.get('TESTING', '').lower() in {'1', 'true', 'yes'}
+)
+
+if is_testing_mode:
+    database_url = os.environ.get('DATABASE_URL', 'sqlite:///:memory:')
+    logger.info(f"TESTING MODE: Using test database {database_url}")
 else:
     database_url = keyvault_client.get_database_url()
 logger.info(f"Database URL configured: {database_url.split('@')[1] if '@' in database_url else database_url}")
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+if database_url == 'sqlite:///:memory:':
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'connect_args': {'check_same_thread': False},
+        'poolclass': StaticPool,
+    }
 
 # SECRET_KEY for session signing (Key Vault or environment variable)
 # This MUST be persistent across restarts for sessions to remain valid

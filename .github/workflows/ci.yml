@@ -1,30 +1,56 @@
 # Continuous Integration
-# Runs on every push and pull request to main branch
+# Runs on every push, pull request, and merge queue entry for main branch
 
 name: CI
 
+run-name: >-
+  CI [${{ github.event_name }}] ${{ github.event.pull_request.head.ref || github.ref_name }}
+
 on:
+  # Diagnostic only. Required PR checks must come from pull_request or merge_group runs.
   workflow_dispatch:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Keep manual diagnostics from cancelling the canonical pull_request lane.
+  group: ci-${{ github.event.pull_request.head.ref || github.ref_name }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
+  release-metadata:
+    name: Release Metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate release metadata
+        run: python scripts/check_release_metadata.py
+
   # Open-source Artifact Boundary
   public-artifact-check:
     name: Open-source Artifact Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -34,13 +60,14 @@ jobs:
   # Community/Enterprise Boundary
   boundary-check:
     name: CE Boundary Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -50,13 +77,14 @@ jobs:
   # Python Syntax
   python-syntax:
     name: Python Syntax
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -72,18 +100,20 @@ jobs:
             webauthn_auth.py \
             scripts/check_public_artifacts.py \
             scripts/check_ce_boundary.py \
+            scripts/check_release_metadata.py \
             scripts/qa_check.py
 
   # Backend Tests
   test-backend:
     name: Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: 'pip'
@@ -106,13 +136,14 @@ jobs:
   # Frontend Build
   build-frontend:
     name: Build Frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: 'npm'
@@ -129,7 +160,7 @@ jobs:
           npm run build -- --configuration=community
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: frontend-build
           path: frontend/dist/
@@ -138,11 +169,12 @@ jobs:
   # Docker Build (Community Edition)
   build-docker:
     name: Build Docker Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     needs: [boundary-check, python-syntax, test-backend, build-frontend]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -160,14 +192,15 @@ jobs:
   # Style lint is advisory until the existing Python style debt is cleaned up.
   lint:
     name: Style Audit (Advisory)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     continue-on-error: true
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -180,14 +213,16 @@ jobs:
           flake8 app.py models.py auth.py --max-line-length=120 --ignore=E501,W503
 
   quality-gate:
-    name: Quality Gate
-    runs-on: ubuntu-latest
-    needs: [public-artifact-check, boundary-check, python-syntax, test-backend, build-frontend, build-docker]
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [release-metadata, public-artifact-check, boundary-check, python-syntax, test-backend, build-frontend, build-docker]
     if: always()
 
     steps:
       - name: Verify required CI jobs passed
         run: |
+          if [ "${{ needs.release-metadata.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.boundary-check.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.public-artifact-check.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.python-syntax.result }}" != "success" ]; then exit 1; fi
