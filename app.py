@@ -10799,11 +10799,14 @@ def api_get_tenant_ai_logs():
 
 # --- MCP Server Endpoint (Claude Code Compatible) ---
 
-# MCP Protocol Version supported
-MCP_PROTOCOL_VERSION = "2025-11-25"
-
-# Simple in-memory session store (in production, use Redis or similar)
-_mcp_sessions = {}
+# MCP protocol support: default to the current stateless transport while
+# keeping legacy initialize compatibility for older remote clients.
+MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
+MCP_PROTOCOL_VERSION = "2026-07-28"
+MCP_SUPPORTED_PROTOCOL_VERSIONS = [
+    MCP_LEGACY_PROTOCOL_VERSION,
+    MCP_PROTOCOL_VERSION,
+]
 
 @app.route('/api/mcp', methods=['GET', 'POST'])
 def api_mcp_handler():
@@ -10862,10 +10865,13 @@ def api_mcp_handler():
         batch_responses = []
         status_code = 200
         session_id = None
+        protocol_version = None
         for item in request_data:
-            response_data, item_status, item_session_id = _handle_mcp_post_message(item, api_key)
+            response_data, item_status, item_session_id, item_protocol_version = _handle_mcp_post_message(item, api_key)
             if item_session_id:
                 session_id = item_session_id
+            if item_protocol_version:
+                protocol_version = item_protocol_version
             if item_status >= 400 and status_code < 400:
                 status_code = item_status
             if response_data is not None:
@@ -10875,15 +10881,15 @@ def api_mcp_handler():
             return '', 202
 
         response = jsonify(batch_responses)
-        _decorate_mcp_response(response, session_id=session_id)
+        _decorate_mcp_response(response, session_id=session_id, protocol_version=protocol_version)
         return response, status_code
 
-    response_data, status_code, session_id = _handle_mcp_post_message(request_data, api_key)
+    response_data, status_code, session_id, protocol_version = _handle_mcp_post_message(request_data, api_key)
     if response_data is None:
         return '', status_code
 
     response = jsonify(response_data)
-    _decorate_mcp_response(response, session_id=session_id)
+    _decorate_mcp_response(response, session_id=session_id, protocol_version=protocol_version)
     return response, status_code
 
 
@@ -10906,7 +10912,7 @@ def _handle_mcp_post_message(message, api_key):
     import uuid
 
     if not isinstance(message, dict):
-        return _mcp_error_payload(None, -32600, 'Invalid Request: expected JSON-RPC object'), 400, None
+        return _mcp_error_payload(None, -32600, 'Invalid Request: expected JSON-RPC object'), 400, None, None
 
     request_id = message.get('id')
     method = message.get('method', '')
@@ -10924,22 +10930,24 @@ def _handle_mcp_post_message(message, api_key):
         params.setdefault('name', request.headers.get('Mcp-Name'))
         message['params'] = params
 
+    protocol_version, protocol_error = _resolve_mcp_protocol_version(message)
+    if protocol_error:
+        return _mcp_error_payload(request_id, -32600, protocol_error), 400, None, None
+
     if method == 'initialize':
         success, _handler, error = authenticate_mcp_request(api_key)
         if not success:
-            return _mcp_error_payload(request_id, -32600, error), 401, None
+            return _mcp_error_payload(request_id, -32600, error), 401, None, protocol_version
 
-        session_id = str(uuid.uuid4())
-        _mcp_sessions[session_id] = {
-            'api_key': api_key,
-            'created_at': datetime.now(timezone.utc).isoformat()
-        }
+        session_id = None
+        if protocol_version == MCP_LEGACY_PROTOCOL_VERSION:
+            session_id = str(uuid.uuid4())
 
         return {
             'jsonrpc': '2.0',
             'id': request_id,
             'result': {
-                'protocolVersion': MCP_PROTOCOL_VERSION,
+                'protocolVersion': protocol_version,
                 'capabilities': {
                     'tools': {}
                 },
@@ -10948,13 +10956,31 @@ def _handle_mcp_post_message(message, api_key):
                     'version': '1.0.0'
                 }
             }
-        }, 200, session_id
+        }, 200, session_id, protocol_version
 
     if method == 'notifications/initialized':
-        return None, 202, None
+        return None, 202, None, protocol_version
 
     response_data = handle_mcp_request(message, api_key)
-    return response_data, _mcp_http_status(response_data), None
+    return response_data, _mcp_http_status(response_data), None, protocol_version
+
+
+def _resolve_mcp_protocol_version(message=None):
+    """Negotiate the requested MCP protocol version for a request."""
+    requested_version = request.headers.get('MCP-Protocol-Version')
+    if not requested_version and isinstance(message, dict):
+        params = message.get('params')
+        if isinstance(params, dict):
+            requested_version = params.get('protocolVersion')
+
+    if not requested_version:
+        return MCP_PROTOCOL_VERSION, None
+
+    requested_version = str(requested_version).strip()
+    if requested_version not in MCP_SUPPORTED_PROTOCOL_VERSIONS:
+        return None, f'Unsupported MCP protocol version: {requested_version}'
+
+    return requested_version, None
 
 
 def _mcp_http_status(response_data):
@@ -10970,13 +10996,13 @@ def _mcp_http_status(response_data):
     return 200
 
 
-def _decorate_mcp_response(response, session_id=None):
+def _decorate_mcp_response(response, session_id=None, protocol_version=None):
     """Apply shared MCP response headers."""
     response.headers['Content-Type'] = 'application/json'
-    response.headers['MCP-Protocol-Version'] = request.headers.get('MCP-Protocol-Version', MCP_PROTOCOL_VERSION)
+    response.headers['MCP-Protocol-Version'] = protocol_version or _response_mcp_protocol_version()
 
     session_id = session_id or request.headers.get('MCP-Session-Id')
-    if session_id:
+    if session_id and (protocol_version or _response_mcp_protocol_version()) == MCP_LEGACY_PROTOCOL_VERSION:
         response.headers['MCP-Session-Id'] = session_id
 
     return response
@@ -10991,13 +11017,21 @@ def _mcp_sse_response():
     response = Response(event_stream(), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['X-Accel-Buffering'] = 'no'
-    response.headers['MCP-Protocol-Version'] = request.headers.get('MCP-Protocol-Version', MCP_PROTOCOL_VERSION)
+    response.headers['MCP-Protocol-Version'] = _response_mcp_protocol_version()
 
     session_id = request.headers.get('MCP-Session-Id')
-    if session_id:
+    if session_id and _response_mcp_protocol_version() == MCP_LEGACY_PROTOCOL_VERSION:
         response.headers['MCP-Session-Id'] = session_id
 
     return response
+
+
+def _response_mcp_protocol_version():
+    """Choose the protocol version to reflect in response headers."""
+    requested_version = request.headers.get('MCP-Protocol-Version')
+    if requested_version in MCP_SUPPORTED_PROTOCOL_VERSIONS:
+        return requested_version
+    return MCP_PROTOCOL_VERSION
 
 
 def _mcp_error_payload(request_id, code, message):

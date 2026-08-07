@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from check_git_repo_boundaries import BoundaryCheckError, check_public_repo
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = REPO_ROOT / "frontend"
@@ -17,6 +19,8 @@ FRONTEND_ROOT = REPO_ROOT / "frontend"
 FORBIDDEN_STAGED_PATTERNS = (
     ".env",
     ".env.*",
+    ".DS_Store",
+    "*/.DS_Store",
     "*.db",
     "*.sqlite",
     "*.sqlite3",
@@ -108,6 +112,14 @@ def check_public_artifacts() -> None:
     run(["uv", "run", "python", "scripts/check_public_artifacts.py", "--mode", "staged"])
 
 
+def check_repo_boundaries() -> None:
+    try:
+        check_public_repo()
+    except BoundaryCheckError as error:
+        print(f"qa: {error}")
+        raise SystemExit(1)
+
+
 def staged_python_files(files: list[str]) -> list[str]:
     return [path for path in files if path.endswith(".py") and Path(REPO_ROOT / path).exists()]
 
@@ -142,6 +154,7 @@ def check_frontend_typecheck(files: list[str]) -> None:
 def run_commit_checks() -> None:
     files = staged_files()
     check_forbidden_files(files)
+    check_repo_boundaries()
     check_public_artifacts()
     check_staged_whitespace()
     check_ce_boundary()

@@ -21,6 +21,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Keep Angular HTML/app-shell responses on `no-cache`/`no-store`; hashed JavaScript assets can otherwise strand stale app shells.
 - A successful asset upload is not a successful deployment. The acceptance check is a nonblank production page with the expected commercial homepage content.
 - For the commercial marketing site in `ee/marketing`, a new route is not deployable until three surfaces are kept in sync: `src/app/app.routes.ts`, `src/app/services/seo.service.ts`, and `scripts/prerender-blog.py`. Missing the prerender entry causes direct URL requests like `/releases` to fall back to the generic SPA shell in production.
+- The marketing Angular build must stay independent of local machine quirks and live internet fetches. Keep Angular CLI disk cache disabled for local builds and keep production font inlining disabled; on macOS, Angular 18 + LMDB cache can abort under Node 20, and Google Fonts inlining makes builds fail in restricted-network environments.
 
 ## MCP Validation
 
@@ -50,10 +51,14 @@ Before building, deploying, or validating anything, identify which artifact is b
 ## Git And Repository Safety
 
 - Treat the public repo and `ee/` as separate Git repositories.
+- Treat `ee/marketing` as a third repository whenever the commercial website changes.
 - Do not stage `ee/` changes into the public repo by accident; only the submodule pointer should change there.
 - Do not mix unrelated private infra or marketing changes into an application/MCP commit.
+- Commit order for nested repo work is strict: `ee/marketing` first, then `ee`, then the public repo. A parent pointer update must never reference dirty child work.
+- Nested Git checks launched from hooks must clear inherited `GIT_*` environment variables before inspecting child repositories, or staged parent commits can be misread as dirty nested submodules.
 - Run the CE/EE boundary check before public commits.
 - Run commit QA before committing: `uv run python scripts/qa_check.py --mode commit`.
+- Enable hooks in both the public repo and `ee`, then verify them with `uv run python scripts/verify_git_hooks.py`.
 
 ## Deployment Rule
 
