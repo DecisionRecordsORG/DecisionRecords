@@ -40,6 +40,12 @@ Before building, deploying, or validating anything, identify which artifact is b
   2. If that lane was cancelled or never attached, push a no-op commit to trigger a fresh `pull_request` synchronize event.
   3. Use `workflow_dispatch` only to diagnose the branch outside the required-check path.
 
+## Community Release Publishing
+
+- A release tag is not just a packaging event. It must re-run enough Community validation to stand on its own before publishing public artifacts.
+- Do not assume prior PR CI is a sufficient release gate. Tagging the wrong commit or tagging after drift on `main` can still publish a broken public image if release-time validation is too shallow.
+- Release metadata checks must cover the public version surface, not only `version.py`. Pinned version examples in release-facing docs should match the current Community version.
+
 ## Git And Repository Safety
 
 - Treat the public repo and `ee/` as separate Git repositories.

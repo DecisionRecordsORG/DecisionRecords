@@ -15,6 +15,7 @@ Update rules:
 - [ ] Extract the shared CI job graph into a reusable workflow after revalidating required check names against branch protection on `main`.
 - [ ] Decide whether a dedicated `ci-recovery.yml` wrapper is still needed once the reusable workflow split lands.
 - [ ] Decide whether manual CI diagnostics should move out of `.github/workflows/ci.yml` into a separate non-required workflow after the PR check recovery fix settles.
+- [ ] Collapse duplicated Community CI and release validation steps into a reusable workflow once the tag-release hardening has proven stable.
 
 ## Versioning / Releases
 
