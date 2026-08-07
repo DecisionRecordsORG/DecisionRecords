@@ -8,7 +8,7 @@ This review covers the public Community repository. The commercial marketing web
 
 - `ci.yml` validates the Community Edition boundary, Python syntax, backend tests, frontend build, Docker build, and exposes a single required `Quality Gate`.
 - `deploy-enterprise.yml` verifies the private `ee` submodule checkout, runs artifact guards, compiles public and EE Python, runs Enterprise pytest, then deploys through the `production-private` GitHub Environment.
-- `release.yml` publishes Community Docker images to GitHub Container Registry for version tags.
+- `release.yml` validates Community release metadata, CE/EE boundaries, backend tests, frontend typecheck/build, then publishes Community Docker images to GitHub Container Registry for version tags.
 - Enterprise Azure login now uses GitHub OIDC variables scoped to the deployment environment.
 
 ## Operating Rules
@@ -21,6 +21,7 @@ This review covers the public Community repository. The commercial marketing web
 
 ## Gaps
 
+- The private `ee` repository does not currently expose a canonical pull-request CI lane of its own. GitHub reported no checks on the `fix/marketing-release-feed` branch, so Enterprise validation still depends on the public repository workflows and local/operator runs instead of an EE-native PR check.
 - Enterprise deployment still uses `az vm run-command` and a VM restart instead of immutable Azure app revisions.
 - Azure OIDC still needs a one-time app registration/federated credential setup in Azure.
 - Enterprise app deployments rebuild from source instead of promoting a CI-created image.
@@ -29,6 +30,7 @@ This review covers the public Community repository. The commercial marketing web
 - Version bumping is coupled to Enterprise deployment and pushes from a deployment workflow.
 - The CI job graph is still defined directly in `ci.yml`; reusable workflow extraction should happen only after required-check naming is revalidated against branch protection.
 - Manual CI diagnostics still live in the main `ci.yml`; consider splitting them into a separate non-required workflow if operator usage grows.
+- Release validation duplicates part of the Community CI graph. That duplication is intentional for now so tag publishing is self-validating, but it should eventually be collapsed into a reusable workflow.
 
 ## Target Deployment Model
 
@@ -140,3 +142,9 @@ When a PR is blocked on checks:
 2. Use GitHub's native "Re-run jobs" on that `pull_request` run when possible.
 3. If the canonical PR run was cancelled or never attached, push a trivial follow-up commit to the PR branch to trigger a fresh `pull_request` event.
 4. Use `workflow_dispatch` only for branch diagnostics. Its `Quality Gate (Manual)` result is intentionally non-required and must not be treated as merge approval.
+
+## Community Release Validation
+
+- A version tag must pass Community release validation before any public artifact is published.
+- Required release checks are: release metadata, open-source artifact boundary, CE/EE boundary, backend pytest, Community frontend typecheck, and Community frontend build.
+- The release workflow builds and pushes the Community image only after those checks pass.

@@ -14,13 +14,10 @@ env:
   IMAGE_NAME: decisionrecordsorg/decisionrecords
 
 jobs:
-  release:
-    name: Build and Push Docker Image
+  validate:
+    name: Validate Community Release
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v6
@@ -29,9 +26,65 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: 'pip'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
 
       - name: Validate release metadata
         run: python scripts/check_release_metadata.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Check open-source artifact boundary
+        run: python scripts/check_public_artifacts.py --mode all
+
+      - name: Check Community/Enterprise boundary
+        run: python scripts/check_ce_boundary.py
+
+      - name: Run backend tests
+        env:
+          DECISION_RECORDS_EDITION: community
+          DATABASE_URL: sqlite:///test.db
+          SECRET_KEY: test-secret-key
+          FLASK_ENV: testing
+          AZURE_KEYVAULT_URL: ""
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Typecheck frontend
+        run: |
+          cd frontend
+          npx tsc -p tsconfig.app.ce.json --noEmit
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run build -- --configuration=community --progress=false
+
+  release:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: validate
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -49,6 +102,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=${{ github.ref_name }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}

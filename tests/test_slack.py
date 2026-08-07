@@ -796,8 +796,10 @@ class TestSlackModalSubmission:
                 }
             }
 
+            mock_conversations_open = MagicMock(return_value={'ok': True, 'channel': {'id': 'D_MOCK_DM'}})
             with patch.object(service.client, 'chat_postMessage'):
-                response = service._create_decision_from_modal(payload)
+                with patch.object(service.client, 'conversations_open', mock_conversations_open):
+                    response = service._create_decision_from_modal(payload)
 
             # Check decision was created
             decision = ArchitectureDecision.query.filter_by(
@@ -809,6 +811,62 @@ class TestSlackModalSubmission:
             assert decision.decision == 'Test decision from modal'
             assert decision.consequences == 'Test consequences from modal'
             assert decision.status == 'proposed'
+            assert decision.tenant_id == sample_tenant.id
+
+    def test_create_decision_from_modal_tolerates_dm_open_failure(self, app, session_fixture, slack_workspace, sample_user, sample_tenant, sample_membership):
+        """Decision creation should succeed even when Slack DM open fails."""
+        with app.app_context():
+            service = SlackService(slack_workspace)
+
+            payload = {
+                'user': {'id': 'U12345'},
+                'view': {
+                    'callback_id': 'create_decision',
+                    'private_metadata': str(sample_user.id),
+                    'state': {
+                        'values': {
+                            'title_block': {
+                                'title': {
+                                    'value': 'Decision With DM Failure'
+                                }
+                            },
+                            'context_block': {
+                                'context': {
+                                    'value': 'Context'
+                                }
+                            },
+                            'decision_block': {
+                                'decision': {
+                                    'value': 'Decision text'
+                                }
+                            },
+                            'consequences_block': {
+                                'consequences': {
+                                    'value': 'Consequences text'
+                                }
+                            },
+                            'status_block': {
+                                'status': {
+                                    'selected_option': {
+                                        'value': 'proposed'
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            with patch.object(service.client, 'chat_postMessage'):
+                with patch.object(service.client, 'conversations_open', side_effect=OSError('dns failure')):
+                    response = service._create_decision_from_modal(payload)
+
+            decision = ArchitectureDecision.query.filter_by(
+                title='Decision With DM Failure'
+            ).first()
+
+            assert response == {}
+            assert decision is not None
             assert decision.tenant_id == sample_tenant.id
 
     def test_modal_validation_errors(self, app, slack_workspace, sample_user):

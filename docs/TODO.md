@@ -12,14 +12,16 @@ Update rules:
 
 - [ ] Decide whether `Deploy Enterprise Edition` should remain manual-only or become gated auto-deploy after `CI` on `main`.
 - [ ] Re-run and verify the current enterprise deploy from `main` after the workflow fixes merged.
+- [ ] Define a canonical GitHub PR CI path for the private `ee` repository; today EE-only branches do not report hosted PR checks on GitHub.
 - [ ] Extract the shared CI job graph into a reusable workflow after revalidating required check names against branch protection on `main`.
 - [ ] Decide whether a dedicated `ci-recovery.yml` wrapper is still needed once the reusable workflow split lands.
 - [ ] Decide whether manual CI diagnostics should move out of `.github/workflows/ci.yml` into a separate non-required workflow after the PR check recovery fix settles.
+- [ ] Collapse duplicated Community CI and release validation steps into a reusable workflow once the tag-release hardening has proven stable.
 
 ## Versioning / Releases
 
 - [ ] Verify the live marketing `/releases` page after the latest deploy finishes.
-- [ ] Make the marketing `/releases` page load real GitHub Release data and show the GHCR pull command for each Community Edition release.
+- [ ] Decide whether the marketing `/releases` page should keep using the runtime GitHub Releases API or switch to a build-time release snapshot for stronger SEO and lower runtime dependency.
 - [ ] Add a clearer compatibility note explaining how public Community releases relate to Enterprise deployments.
 - [ ] Decide whether release notes should stay GitHub-driven only or also be curated in-site.
 
