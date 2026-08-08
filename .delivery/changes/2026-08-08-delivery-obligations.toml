@@ -1,7 +1,7 @@
 schema_version = 1
 id = "2026-08-08-delivery-obligations"
 title = "Introduce delivery contracts and obligation tracking"
-summary = "Adds a deterministic contract and obligation model so future sessions can tell whether CE release, enterprise deploy, or marketing deploy work is still owed after a merge."
+summary = "Adds a deterministic contract and obligation model so future sessions can tell whether CE release, enterprise deploy, or marketing deploy work is still owed after a merge, including public GitHub API fallback for obligation reporting when no local token is present."
 change_type = "ops"
 surfaces = ["ops_docs_only"]
 

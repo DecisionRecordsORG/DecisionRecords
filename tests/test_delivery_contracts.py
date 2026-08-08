@@ -113,3 +113,46 @@ def test_resolve_required_status_marks_descendant_reference(monkeypatch):
     assert status.state == "resolved"
     assert status.resolved_by is not None
     assert status.resolved_by.name == "v2.0.2"
+
+
+def test_list_successful_workflow_runs_supports_public_repo_without_token(monkeypatch):
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_github_json(url: str, token: str | None):
+        calls.append((url, token))
+        return {
+            "workflow_runs": [
+                {
+                    "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "html_url": "https://github.com/example/run/1",
+                    "created_at": "2026-08-08T18:00:00Z",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(delivery_contracts, "github_json", fake_github_json)
+
+    runs = delivery_contracts.list_successful_workflow_runs(
+        "DecisionRecordsORG/DecisionRecords",
+        "deploy-enterprise.yml",
+        None,
+    )
+
+    assert len(runs) == 1
+    assert runs[0].head_sha == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert calls and calls[0][1] is None
+
+
+def test_list_successful_workflow_runs_ignores_private_repo_without_token(monkeypatch):
+    def fake_github_json(url: str, token: str | None):
+        raise RuntimeError(f"GitHub API request failed (404) for {url}: {{}}")
+
+    monkeypatch.setattr(delivery_contracts, "github_json", fake_github_json)
+
+    runs = delivery_contracts.list_successful_workflow_runs(
+        "DecisionRecordsORG/marketing",
+        "azure-static-web-apps.yml",
+        None,
+    )
+
+    assert runs == []

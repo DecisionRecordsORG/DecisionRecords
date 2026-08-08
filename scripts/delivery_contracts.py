@@ -579,9 +579,6 @@ def github_json(url: str, token: str | None) -> dict[str, Any]:
 
 
 def list_successful_workflow_runs(repo: str, workflow: str, token: str | None) -> list[WorkflowRun]:
-    if not token:
-        return []
-
     encoded_workflow = urllib_parse.quote(workflow, safe="")
     runs: list[WorkflowRun] = []
     page = 1
@@ -591,7 +588,12 @@ def list_successful_workflow_runs(repo: str, workflow: str, token: str | None) -
             f"https://api.github.com/repos/{repo}/actions/workflows/{encoded_workflow}/runs"
             f"?branch=main&status=success&per_page=100&page={page}"
         )
-        payload = github_json(url, token)
+        try:
+            payload = github_json(url, token)
+        except RuntimeError as error:
+            if token is None and ("(404)" in str(error) or "(403)" in str(error)):
+                return []
+            raise
         workflow_runs = payload.get("workflow_runs", [])
         for run in workflow_runs:
             runs.append(
