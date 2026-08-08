@@ -6,10 +6,11 @@ This review covers the public Community repository. The commercial marketing web
 
 ## Current State
 
-- `ci.yml` validates the Community Edition boundary, Python syntax, backend tests, frontend build, Docker build, and exposes a single required `Quality Gate`.
+- `ci.yml` validates the Community Edition boundary, delivery contracts, Python syntax, backend tests, frontend build, Docker build, and exposes a single required `Quality Gate`.
 - `deploy-enterprise.yml` verifies the private `ee` submodule checkout, runs artifact guards, compiles public and EE Python, runs Enterprise pytest, then deploys through the `production-private` GitHub Environment.
 - `ci.yml` and `deploy-enterprise.yml` now validate that the public `ee` gitlink and nested `ee/marketing` gitlink both resolve on the child repository `main` branches before accepting or deploying a parent pointer.
 - `release.yml` validates Community release metadata, CE/EE boundaries, backend tests, frontend typecheck/build, then publishes Community Docker images to GitHub Container Registry for version tags.
+- `delivery-obligations.yml` runs on `main` and publishes a derived summary of open Community release, enterprise deploy, and marketing deploy obligations.
 - Enterprise Azure login now uses GitHub OIDC variables scoped to the deployment environment.
 
 ## Operating Rules
@@ -22,7 +23,6 @@ This review covers the public Community repository. The commercial marketing web
 
 ## Gaps
 
-- The private `ee` repository does not currently expose a canonical pull-request CI lane of its own. GitHub reported no checks on the `fix/marketing-release-feed` branch, so Enterprise validation still depends on the public repository workflows and local/operator runs instead of an EE-native PR check.
 - Nested submodule repos must preserve child commit SHAs on merge. Rebase merges and squash merges in `ee` or `marketing` rewrite the child commit SHA and break durable parent gitlinks unless a follow-up pointer sync lands immediately.
 - Enterprise deployment still uses `az vm run-command` and a VM restart instead of immutable Azure app revisions.
 - Azure OIDC still needs a one-time app registration/federated credential setup in Azure.
@@ -33,6 +33,7 @@ This review covers the public Community repository. The commercial marketing web
 - The CI job graph is still defined directly in `ci.yml`; reusable workflow extraction should happen only after required-check naming is revalidated against branch protection.
 - Manual CI diagnostics still live in the main `ci.yml`; consider splitting them into a separate non-required workflow if operator usage grows.
 - Release validation duplicates part of the Community CI graph. That duplication is intentional for now so tag publishing is self-validating, but it should eventually be collapsed into a reusable workflow.
+- Delivery contracts are currently enforced in the public repository. Mirroring the same contract model into the private `ee` and `marketing` repositories would remove the last remaining need to back-propagate delivery intent through submodule pointer updates alone.
 
 ## Target Deployment Model
 
@@ -52,11 +53,13 @@ This review covers the public Community repository. The commercial marketing web
 
 - Run `scripts/configure_github_guardrails.sh` with an authenticated GitHub admin account.
 - Require `Quality Gate` before merge.
+- Require `Delivery Contract` before merge.
 - Configure GitHub Environments:
   - `production-private`
 - Add required reviewers for the Enterprise production environment when there is a second maintainer or operator.
 - Keep local pre-commit QA enabled with `.githooks/pre-commit`.
 - Keep merge commits enabled in repos that are referenced as submodules (`DecisionRecordsORG/ee` and `DecisionRecordsORG/marketing`), disable rebase and squash merges there, and do not require linear history on those child `main` branches.
+- Require every public-repo PR to carry one current delivery contract under `.delivery/changes/`, with optional backfill contracts only when historical obligations must be captured after the fact.
 
 Repository-side Phase 1 guardrails are implemented. Apply the GitHub repository settings with:
 

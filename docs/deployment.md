@@ -88,6 +88,12 @@ Community Edition source or release artifacts:
 
 - `app.py`, models, migrations, auth, feature flags, Dockerfile, Python dependencies, or frontend app behavior used by self-hosted users. Run CI and publish releases from tags; do not deploy a hosted Community production app.
 
+Shared-core changes should also carry a delivery contract under `.delivery/changes/` so the repository can state, deterministically, whether:
+
+- an enterprise deployment is required
+- a Community release is required or only queued as a release candidate
+- no deploy/release follow-up is required because the change was ops/docs only
+
 Enterprise app:
 
 - Private modules under `ee/`, Enterprise-only frontend components, Slack, Teams, AI, analytics, Key Vault, Cloudflare, or production app infrastructure changes.
@@ -109,6 +115,21 @@ npm run build -- --configuration=community --progress=false
 Azure Static Web Apps deployment for the commercial marketing website belongs to the private marketing repository. This public repository does not deploy a hosted Community app. Keep marketing, open-source release, and Enterprise deployment paths separate: marketing website deployments should not require backend secrets, Community release publishing should not require Azure production access, and backend deployments should not run for copy-only website changes.
 
 The production Enterprise app is currently on the VM path. Exact Enterprise infrastructure plans and snapshots belong in the private `ee/infra` repo boundary; keep the VM workflow available until the ACA deployment has survived one billing cycle.
+
+## Delivery Obligation Tracking
+
+Use the repo-owned delivery contracts to answer "what still needs to happen after this merge?":
+
+```bash
+uv run python scripts/list_open_obligations.py --format markdown
+```
+
+For example, a shared-core security fix should normally show:
+
+- `enterprise_app: required`
+- `community_release: required (patch)`
+
+until both the successful enterprise deploy and the Community release tag exist.
 
 ## Azure OIDC Setup
 

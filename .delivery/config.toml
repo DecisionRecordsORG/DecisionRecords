@@ -1,0 +1,16 @@
+schema_version = 1
+
+[artifacts.enterprise_app]
+repo = "DecisionRecordsORG/DecisionRecords"
+workflow = "deploy-enterprise.yml"
+local_path = "."
+
+[artifacts.community_release]
+repo = "DecisionRecordsORG/DecisionRecords"
+tag_pattern = "v*.*.*"
+local_path = "."
+
+[artifacts.marketing_website]
+repo = "DecisionRecordsORG/marketing"
+workflow = "azure-static-web-apps.yml"
+local_path = "ee/marketing"

@@ -1,0 +1,62 @@
+name: Delivery Obligations
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  summarize:
+    name: Summarize Open Obligations
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Fetch release tags
+        run: git fetch --force --tags origin
+
+      - name: Checkout private submodules when token is available
+        env:
+          EE_REPO_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+        run: |
+          if [ -z "$EE_REPO_TOKEN" ]; then
+            echo "EE_REPO_TOKEN not available; marketing obligation resolution may remain unknown."
+            exit 0
+          fi
+          git submodule sync --recursive
+          git -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            submodule update --init --recursive
+          git -C ee -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git -C ee/marketing -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Summarize open delivery obligations
+        run: |
+          python scripts/list_open_obligations.py \
+            --format markdown \
+            --json-output delivery-obligations.json \
+            --write-summary
+
+      - name: Upload obligations artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: delivery-obligations
+          path: delivery-obligations.json
+          retention-days: 14

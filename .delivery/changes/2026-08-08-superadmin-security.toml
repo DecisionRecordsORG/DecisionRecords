@@ -1,0 +1,13 @@
+schema_version = 1
+id = "2026-08-08-superadmin-security"
+title = "Backfill superadmin security release obligations"
+summary = "Records that the merged superadmin security hardening change affected shared core behavior and therefore required both an enterprise deploy and a Community patch release."
+change_type = "security_fix"
+surfaces = ["shared_core"]
+tracked_commit = "dfd0cd8ce3b42f12373af9c9191781d60149e873"
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
