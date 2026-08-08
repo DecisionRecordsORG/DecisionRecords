@@ -14,8 +14,6 @@ jobs:
     name: Summarize Open Obligations
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v6
@@ -48,6 +46,9 @@ jobs:
           python-version: '3.12'
 
       - name: Summarize open delivery obligations
+        env:
+          GITHUB_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/list_open_obligations.py \
             --format markdown \
