@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Checkout public repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
           fetch-depth: 0
@@ -29,11 +29,20 @@ jobs:
           git submodule sync --recursive
           git -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
             submodule update --init --recursive
+          git -C ee -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git -C ee/marketing -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      - name: Check private submodule lineage
+        run: |
+          python scripts/check_submodule_lineage.py --repo public
+          python scripts/check_submodule_lineage.py --repo ee
 
       - name: Install Enterprise QA dependencies
         run: |
@@ -61,6 +70,7 @@ jobs:
             webauthn_auth.py \
             scripts/check_public_artifacts.py \
             scripts/check_ce_boundary.py \
+            scripts/check_submodule_lineage.py \
             scripts/qa_check.py
 
       - name: Compile Enterprise Python modules
@@ -95,7 +105,7 @@ jobs:
 
     steps:
       - name: Checkout public repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: false
 
@@ -109,7 +119,7 @@ jobs:
             submodule update --init --recursive
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 

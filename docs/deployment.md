@@ -152,10 +152,35 @@ After one successful OIDC deployment, remove the legacy `AZURE_CREDENTIALS` secr
 
 ## Repository Guardrails
 
-Apply the Phase 1 GitHub repository settings with:
+Apply the Phase 1 GitHub repository settings for the public repo with:
 
 ```bash
 GITHUB_OWNER=DecisionRecordsORG GITHUB_REPO=DecisionRecords scripts/configure_github_guardrails.sh
 ```
 
 This configures `main` branch protection to require pull requests and the `Quality Gate` check, without requiring a second approving reviewer. That keeps solo-maintainer deployments unblocked while preventing direct pushes. The script also creates the production GitHub Environments used by public-repo deployment workflows. Add required reviewers to production environments when there is a second maintainer or operator.
+
+For child repos referenced by submodule pointers, use the same script with child-safe settings. Those repos must allow merge commits, disable rebase and squash merges, and disable linear-history enforcement so the parent gitlink can keep pointing at an unchanged child SHA:
+
+```bash
+GITHUB_OWNER=DecisionRecordsORG \
+GITHUB_REPO=ee \
+GITHUB_REQUIRED_CONTEXTS="Enterprise Quality Gate" \
+GITHUB_REQUIRE_LINEAR_HISTORY=false \
+GITHUB_ALLOW_MERGE_COMMIT=true \
+GITHUB_ALLOW_REBASE_MERGE=false \
+GITHUB_ALLOW_SQUASH_MERGE=false \
+GITHUB_DELETE_BRANCH_ON_MERGE=true \
+scripts/configure_github_guardrails.sh
+
+GITHUB_OWNER=DecisionRecordsORG \
+GITHUB_REPO=marketing \
+GITHUB_REQUIRED_CONTEXTS="Build and Deploy" \
+GITHUB_REQUIRE_LINEAR_HISTORY=false \
+GITHUB_ALLOW_MERGE_COMMIT=true \
+GITHUB_ALLOW_REBASE_MERGE=false \
+GITHUB_ALLOW_SQUASH_MERGE=false \
+GITHUB_DELETE_BRANCH_ON_MERGE=true \
+GITHUB_ENVIRONMENTS= \
+scripts/configure_github_guardrails.sh
+```
