@@ -156,3 +156,63 @@ def test_list_successful_workflow_runs_ignores_private_repo_without_token(monkey
     )
 
     assert runs == []
+
+
+def test_gather_contract_statuses_only_fetches_required_artifact_runs(monkeypatch):
+    calls: list[tuple[str, str, str | None]] = []
+
+    monkeypatch.setattr(
+        delivery_contracts,
+        "list_release_tags",
+        lambda repo_root, pattern: [],
+    )
+    monkeypatch.setattr(
+        delivery_contracts,
+        "contract_anchor_commit",
+        lambda contract: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+
+    def fake_list_successful_workflow_runs(repo: str, workflow: str, token: str | None):
+        calls.append((repo, workflow, token))
+        return []
+
+    monkeypatch.setattr(
+        delivery_contracts,
+        "list_successful_workflow_runs",
+        fake_list_successful_workflow_runs,
+    )
+
+    config = delivery_contracts.DeliveryConfig(
+        schema_version=1,
+        enterprise_app=delivery_contracts.ArtifactConfig(
+            repo="DecisionRecordsORG/DecisionRecords",
+            workflow="deploy-enterprise.yml",
+            local_path=".",
+        ),
+        community_release=delivery_contracts.ArtifactConfig(
+            repo="DecisionRecordsORG/DecisionRecords",
+            tag_pattern="v*.*.*",
+            local_path=".",
+        ),
+        marketing_website=delivery_contracts.ArtifactConfig(
+            repo="DecisionRecordsORG/marketing",
+            workflow="azure-static-web-apps.yml",
+            local_path="ee/marketing",
+        ),
+    )
+
+    statuses = delivery_contracts.gather_contract_statuses(
+        [
+            make_contract(
+                tracked_commit="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                enterprise_app="required",
+                community_release="required",
+                marketing_website="none",
+            )
+        ],
+        config,
+        github_token="token",
+    )
+
+    assert len(statuses) == 1
+    assert calls == [("DecisionRecordsORG/DecisionRecords", "deploy-enterprise.yml", "token")]

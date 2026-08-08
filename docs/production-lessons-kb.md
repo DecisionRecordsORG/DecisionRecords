@@ -46,6 +46,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Keep required CI helpers inside the repository that owns the workflow, or on a dependency revision that is already guaranteed on that workflow's base branch. Do not make a private-repo PR check depend on a new helper that exists only on an unreleased public-repo branch.
 - When validating private submodule lineage in CI, fetch child `origin/main` inside the workflow step that already has the repository token. Do not assume a generic helper can authenticate an ad hoc fetch from a private submodule remote on its own.
 - When a public-repo workflow needs to read GitHub Actions metadata from a private sibling repo, do not rely on the public repo's default `github.token`. Pass the private repo token into the specific step that calls the GitHub API, and keep the public token available separately for public-repo lookups.
+- Delivery-obligation summaries should fetch deployment metadata lazily. Do not query enterprise or marketing workflow history unless at least one current contract actually requires that artifact, or a non-required private repo can turn a healthy summary job into an unnecessary failure.
 
 ## Community Release Publishing
 

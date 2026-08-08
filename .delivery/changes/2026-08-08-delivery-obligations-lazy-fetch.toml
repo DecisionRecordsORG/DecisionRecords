@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-08-08-delivery-obligations-lazy-fetch"
+title = "Fetch delivery metadata only when contracts require it"
+summary = "Updates delivery obligation status collection so enterprise and marketing workflow metadata are fetched only when at least one current contract requires those artifact checks."
+change_type = "ops"
+surfaces = ["ops_docs_only"]
+
+[artifacts]
+enterprise_app = "none"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
