@@ -191,6 +191,8 @@ def authenticated_client(app, sample_user):
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['user_id'] = sample_user.id
+        sess['_csrf_token'] = 'test-csrf-token'
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
     return client
 
 
@@ -200,6 +202,8 @@ def admin_client(app, admin_user):
     client = app.test_client()
     with client.session_transaction() as sess:
         sess['user_id'] = admin_user.id
+        sess['_csrf_token'] = 'test-csrf-token'
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
     return client
 
 
@@ -220,4 +224,7 @@ def master_session(app, sample_master):
     with client.session_transaction() as sess:
         sess['master_id'] = sample_master.id
         sess['is_master'] = True
+        sess['master_username'] = sample_master.username
+        sess['_csrf_token'] = 'test-csrf-token'
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
     return client

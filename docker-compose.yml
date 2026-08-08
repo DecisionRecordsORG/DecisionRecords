@@ -24,6 +24,8 @@ services:
       - adr-data:/data
     environment:
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
+      - MASTER_USERNAME=${MASTER_USERNAME:-admin}
+      - MASTER_PASSWORD=${MASTER_PASSWORD:-}
       - DATABASE_URL=${DATABASE_URL:-sqlite:////data/architecture_decisions.db}
       - DECISION_RECORDS_EDITION=community
       - SKIP_CLOUDFLARE_CHECK=true

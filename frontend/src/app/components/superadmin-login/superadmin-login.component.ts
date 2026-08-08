@@ -64,9 +64,6 @@ import { AuthService } from '../../services/auth.service';
             </button>
           </form>
 
-          <p class="hint-text">
-            Default credentials: admin / changeme
-          </p>
         </mat-card-content>
 
         <mat-card-actions>

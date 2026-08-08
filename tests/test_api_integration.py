@@ -53,9 +53,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
-    GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus
+    GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus,
+    SystemConfig, DEFAULT_MASTER_PASSWORD
 )
 from tests.app_test_utils import load_test_app
+
+
+def attach_csrf_header(client, login_response=None):
+    """Persist the current CSRF token into the test client's default headers."""
+    token = None
+    if login_response is not None:
+        token = login_response.headers.get('X-CSRF-Token')
+
+    if not token:
+        csrf_response = client.get('/api/auth/csrf-token')
+        token = csrf_response.get_json()['csrf_token']
+
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = token
+    return token
 
 
 # ==================== Fixtures ====================
@@ -139,6 +154,7 @@ def master_client(api_app, master_account):
     if response.status_code != 200:
         raise RuntimeError(f"Master login failed: {response.status_code} - {response.data}")
 
+    attach_csrf_header(client, response)
     return client
 
 
@@ -244,6 +260,7 @@ def user_client(api_app, test_user):
     })
     if response.status_code != 200:
         raise RuntimeError(f"User login failed: {response.status_code} - {response.data}")
+    attach_csrf_header(client, response)
     return client
 
 
@@ -260,6 +277,7 @@ def admin_client(api_app, admin_user):
     })
     if response.status_code != 200:
         raise RuntimeError(f"Admin login failed: {response.status_code} - {response.data}")
+    attach_csrf_header(client, response)
     return client
 
 
@@ -276,6 +294,7 @@ def steward_client(api_app, steward_user):
     })
     if response.status_code != 200:
         raise RuntimeError(f"Steward login failed: {response.status_code} - {response.data}")
+    attach_csrf_header(client, response)
     return client
 
 
@@ -1192,3 +1211,78 @@ class TestAnalyticsSettingsAPI:
         get_response = master_client.get('/api/admin/settings/analytics')
         data = json.loads(get_response.data)
         assert data['host'].startswith('http')
+
+
+class TestSuperadminSecurityCoverage:
+    """Security-focused integration coverage for the superadmin HTTP surface."""
+
+    def test_system_config_requires_master_auth(self, api_client):
+        """Unauthenticated requests cannot read superadmin system configuration."""
+        response = api_client.get('/api/system/config')
+        assert response.status_code == 401
+
+    def test_system_config_is_not_cors_readable_from_marketing_origin(self, master_client):
+        """Cross-origin reads from the marketing site must not expose system config."""
+        SystemConfig.set(
+            SystemConfig.KEY_ANALYTICS_API_KEY,
+            'phc_security_review_secret',
+            description='Security test seed'
+        )
+
+        response = master_client.get(
+            '/api/system/config',
+            headers={'Origin': 'https://decisionrecords.org'}
+        )
+
+        assert response.status_code == 200
+        assert response.headers.get('Access-Control-Allow-Origin') is None
+        assert response.headers.get('Access-Control-Allow-Credentials') is None
+
+        data = json.loads(response.data)
+        assert SystemConfig.KEY_ANALYTICS_API_KEY not in data
+
+    def test_superadmin_write_rejects_missing_csrf_token(self, master_client):
+        """Privileged writes should fail without a valid CSRF token."""
+        response = master_client.put(
+            '/api/system/super-admin-email',
+            data=json.dumps({'email': 'security-review@example.com'}),
+            content_type='application/json',
+            environ_overrides={'HTTP_X_CSRF_TOKEN': ''}
+        )
+
+        assert response.status_code == 403
+
+    def test_superadmin_login_blocks_insecure_bootstrap_password(self, api_app, master_account, monkeypatch):
+        """The well-known bootstrap password must not remain usable without explicit config."""
+        monkeypatch.setattr(
+            MasterAccount,
+            'bootstrap_password_configured',
+            staticmethod(lambda: False)
+        )
+
+        client = api_app.test_client()
+        response = client.post('/auth/local', json={
+            'username': master_account.username,
+            'password': DEFAULT_MASTER_PASSWORD,
+        })
+
+        assert response.status_code == 403
+        data = response.get_json()
+        assert 'disabled' in data['error']
+
+        with client.session_transaction() as sess:
+            assert 'master_id' not in sess
+
+    def test_tenant_delete_records_master_username(self, master_client, master_account, test_tenant):
+        """Destructive superadmin actions should preserve the real actor identity."""
+        response = master_client.delete(
+            f'/api/tenants/{test_tenant.domain}',
+            data=json.dumps({'confirm_delete': True}),
+            content_type='application/json'
+        )
+
+        assert response.status_code == 200
+
+        db.session.expire_all()
+        deleted_tenant = db.session.get(Tenant, test_tenant.id)
+        assert deleted_tenant.deleted_by_admin == master_account.username

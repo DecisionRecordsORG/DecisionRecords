@@ -208,6 +208,9 @@ class TestLicensingAPIEndpoints:
         with client.session_transaction() as sess:
             sess['master_id'] = master_id
             sess['is_master'] = True
+            sess['master_username'] = DEFAULT_MASTER_USERNAME
+            sess['_csrf_token'] = 'test-csrf-token'
+        client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
 
         return client
 
@@ -369,6 +372,9 @@ class TestAccessRequestUserLimit:
         with client.session_transaction() as sess:
             sess['master_id'] = master_id
             sess['is_master'] = True
+            sess['master_username'] = DEFAULT_MASTER_USERNAME
+            sess['_csrf_token'] = 'test-csrf-token'
+        client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
 
         # Try to approve the access request
         request_id = setup_tenant_at_limit['access_request_id']

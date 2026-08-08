@@ -129,6 +129,15 @@ def validate_tenant_ownership(obj, allow_master=True):
 
 # ==================== CSRF Protection ====================
 
+CSRF_SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+CSRF_SESSION_EXEMPT_PATHS = {
+    '/logout',
+    '/api/auth/logout',
+}
+CSRF_SESSION_EXEMPT_PREFIXES = (
+    '/api/test/',
+)
+
 def generate_csrf_token():
     """Generate a CSRF token for the current session."""
     if '_csrf_token' not in session:
@@ -144,6 +153,29 @@ def validate_csrf_token(token):
     return hmac.compare_digest(session_token, token)
 
 
+def get_request_csrf_token():
+    """Extract a CSRF token from the current request."""
+    return (
+        request.headers.get('X-CSRF-Token')
+        or request.form.get('csrf_token')
+        or (request.get_json(silent=True) or {}).get('csrf_token')
+    )
+
+
+def should_enforce_csrf():
+    """Return True when the current request must present a CSRF token."""
+    if request.method in CSRF_SAFE_METHODS:
+        return False
+
+    if request.path in CSRF_SESSION_EXEMPT_PATHS:
+        return False
+
+    if any(request.path.startswith(prefix) for prefix in CSRF_SESSION_EXEMPT_PREFIXES):
+        return False
+
+    return 'user_id' in session or 'master_id' in session
+
+
 def csrf_protect(f):
     """
     Decorator to protect an endpoint from CSRF attacks.
@@ -155,19 +187,13 @@ def csrf_protect(f):
     """
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        if not should_enforce_csrf():
             return f(*args, **kwargs)
 
-        # Check for CSRF token
-        token = request.headers.get('X-CSRF-Token') or \
-                request.form.get('csrf_token') or \
-                (request.get_json(silent=True) or {}).get('csrf_token')
-
-        # For now, log but don't block (gradual rollout)
-        # TODO: Enable strict enforcement after frontend is updated
+        token = get_request_csrf_token()
         if not validate_csrf_token(token):
-            logger.debug(f"CSRF token missing or invalid for {request.path}")
-            # return jsonify({'error': 'CSRF token missing or invalid'}), 403
+            logger.warning(f"CSRF token missing or invalid for {request.path}")
+            return jsonify({'error': 'CSRF token missing or invalid'}), 403
 
         return f(*args, **kwargs)
     return decorated_function

@@ -1,11 +1,13 @@
 import os
 import enum
+import logging
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -76,6 +78,27 @@ class AIAction(enum.Enum):
 # Default master account credentials
 DEFAULT_MASTER_USERNAME = os.environ.get('MASTER_USERNAME', 'admin')
 DEFAULT_MASTER_PASSWORD = os.environ.get('MASTER_PASSWORD', 'changeme')
+INSECURE_DEFAULT_MASTER_PASSWORD = 'changeme'
+
+
+def is_testing_environment():
+    """Return True when running under the automated test harness."""
+    return (
+        os.environ.get('FLASK_ENV') == 'testing'
+        or os.environ.get('TESTING', '').lower() in {'1', 'true', 'yes'}
+    )
+
+
+def get_bootstrap_master_password():
+    """Return the configured bootstrap password, or None when bootstrap is disabled."""
+    if is_testing_environment():
+        return DEFAULT_MASTER_PASSWORD
+
+    explicit_password = os.environ.get('MASTER_PASSWORD')
+    if explicit_password and explicit_password != INSECURE_DEFAULT_MASTER_PASSWORD:
+        return explicit_password
+
+    return None
 
 
 class SystemConfig(db.Model):
@@ -242,6 +265,15 @@ class MasterAccount(db.Model):
         """Check if the provided password matches."""
         return check_password_hash(self.password_hash, password)
 
+    def uses_insecure_default_password(self):
+        """Check whether this account still uses the well-known bootstrap password."""
+        return self.check_password(INSECURE_DEFAULT_MASTER_PASSWORD)
+
+    @staticmethod
+    def bootstrap_password_configured():
+        """Return True when super admin bootstrap is allowed in this environment."""
+        return get_bootstrap_master_password() is not None
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -258,13 +290,29 @@ class MasterAccount(db.Model):
         """Create the default master account if it doesn't exist."""
         existing = MasterAccount.query.filter_by(username=DEFAULT_MASTER_USERNAME).first()
         if existing:
+            bootstrap_password = get_bootstrap_master_password()
+            if (
+                bootstrap_password
+                and bootstrap_password != INSECURE_DEFAULT_MASTER_PASSWORD
+                and existing.uses_insecure_default_password()
+            ):
+                existing.set_password(bootstrap_password)
+                db_session.commit()
+                logger.info("Rotated bootstrap super admin password from configured environment variable")
             return existing
+
+        bootstrap_password = get_bootstrap_master_password()
+        if not bootstrap_password:
+            logger.warning(
+                "MASTER_PASSWORD is not configured securely; skipping automatic super admin bootstrap"
+            )
+            return None
 
         master = MasterAccount(
             username=DEFAULT_MASTER_USERNAME,
             name='System Administrator'
         )
-        master.set_password(DEFAULT_MASTER_PASSWORD)
+        master.set_password(bootstrap_password)
         db_session.add(master)
 
         try:
