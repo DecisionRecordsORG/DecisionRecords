@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-08-08-delivery-obligations-token-fix"
+title = "Fix delivery obligations workflow token routing"
+summary = "Updates the post-merge delivery obligations workflow so private sibling repository workflow lookups use EE_REPO_TOKEN when available instead of the public repo's default GitHub token."
+change_type = "ops"
+surfaces = ["ops_docs_only"]
+
+[artifacts]
+enterprise_app = "none"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
