@@ -1,0 +1,22 @@
+schema_version = 1
+id = "YYYY-MM-DD-short-slug"
+title = "Describe the change in one line"
+summary = "Short explanation of what changed and why it matters for delivery."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"
+
+# Optional for historical backfills when the change already merged before the
+# contract existed.
+# tracked_commit = "0123456789abcdef0123456789abcdef01234567"
+
+# Required when marketing_website = "required". The value should be a marketing
+# repo SHA that the marketing deploy run must contain or descend from.
+#
+# [targets]
+# marketing_target_sha = "0123456789abcdef0123456789abcdef01234567"

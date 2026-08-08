@@ -24,6 +24,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  delivery-contract:
+    name: Delivery Contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Validate delivery contracts
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python scripts/check_delivery_contract.py --mode pr --base-ref "refs/remotes/origin/${{ github.base_ref }}" --head-ref HEAD
+          else
+            python scripts/check_delivery_contract.py --mode repo
+          fi
+
   release-metadata:
     name: Release Metadata
     runs-on: ubuntu-24.04
@@ -166,8 +193,11 @@ jobs:
             webauthn_auth.py \
             scripts/check_public_artifacts.py \
             scripts/check_ce_boundary.py \
+            scripts/check_delivery_contract.py \
+            scripts/delivery_contracts.py \
             scripts/check_release_metadata.py \
             scripts/check_submodule_lineage.py \
+            scripts/list_open_obligations.py \
             scripts/qa_check.py
 
   # Backend Tests
@@ -283,12 +313,13 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, build-frontend, build-docker]
+    needs: [delivery-contract, release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, build-frontend, build-docker]
     if: always()
 
     steps:
       - name: Verify required CI jobs passed
         run: |
+          if [ "${{ needs.delivery-contract.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.release-metadata.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.boundary-check.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.public-artifact-check.result }}" != "success" ]; then exit 1; fi

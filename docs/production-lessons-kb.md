@@ -51,6 +51,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - A release tag is not just a packaging event. It must re-run enough Community validation to stand on its own before publishing public artifacts.
 - Do not assume prior PR CI is a sufficient release gate. Tagging the wrong commit or tagging after drift on `main` can still publish a broken public image if release-time validation is too shallow.
 - Release metadata checks must cover the public version surface, not only `version.py`. Pinned version examples in release-facing docs should match the current Community version.
+- A successful enterprise deploy does not imply that self-hosted Community users received the same shared-core fix. Shared-core changes need an explicit Community release decision, and shared-core security fixes should stay tracked as required Community patch releases until the release tag exists.
 
 ## Git And Repository Safety
 
@@ -64,6 +65,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Run the CE/EE boundary check before public commits.
 - Run commit QA before committing: `uv run python scripts/qa_check.py --mode commit`.
 - Enable hooks in both the public repo and `ee`, then verify them with `uv run python scripts/verify_git_hooks.py`.
+- Keep delivery obligations in repo state, not in memory. If a merge creates release or deploy follow-up work, record it through `.delivery/changes/*.toml` so the next session can derive what is still owed.
 
 ## Deployment Rule
 

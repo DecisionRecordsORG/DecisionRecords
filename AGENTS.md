@@ -27,6 +27,8 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Run Angular dev server from `frontend/` with `npm start`.
 - Check the CE/EE boundary locally with `uv run python scripts/check_ce_boundary.py`.
 - Check the open-source artifact boundary with `uv run python scripts/check_public_artifacts.py --mode staged`.
+- Validate the staged delivery contract with `uv run python scripts/check_delivery_contract.py --mode staged`.
+- List currently open delivery obligations with `uv run python scripts/list_open_obligations.py --format markdown`.
 - Run commit QA with `uv run python scripts/qa_check.py --mode commit`.
 - Run full release QA with `uv run python scripts/qa_check.py --mode full`.
 - Use `git config core.hooksPath .githooks` to enable the versioned pre-commit hook in the public repo.
@@ -58,6 +60,7 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Never edit a detached `ee/marketing` HEAD. If `ee/marketing` is detached, create or switch to a named private branch before making or keeping changes there.
 - Commit order is strict when nested repos change: commit inside `ee/marketing` first, then commit the `marketing` pointer inside `ee`, then update the public `ee` submodule pointer. Do not commit a parent pointer that refers to dirty child work.
 - Merge strategy is strict when a repo is the child side of a submodule pointer. For `ee/marketing` and `ee`, merge PRs with a merge commit so the parent repo can point at a durable child `main` SHA. Do not use rebase merge or squash merge for PRs whose commits are meant to be referenced by a parent submodule pointer.
+- Delivery obligations are explicit. Shared-core work must declare the enterprise deploy requirement and the Community release posture in `.delivery/changes/*.toml`; do not leave CE-vs-enterprise follow-up work implicit in PR text or session memory.
 - Keep production infra, snapshots, deployment resource names, and commercial module code in `ee/`; the public parent should contain only generic docs, CE code, stubs, and the submodule pointer.
 - Do not stage generated or local-only files such as `ee/infra/aca/main.json`, `ee/frontend/node_modules`, local databases, `.env*`, or Azure credential files.
 - Do not use destructive Git commands such as `git reset --hard`, `git checkout -- <path>`, or submodule deinit/reinit to clean up without explicit user approval.

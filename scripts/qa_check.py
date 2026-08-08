@@ -112,6 +112,10 @@ def check_public_artifacts() -> None:
     run(["uv", "run", "python", "scripts/check_public_artifacts.py", "--mode", "staged"])
 
 
+def check_delivery_contract() -> None:
+    run(["uv", "run", "python", "scripts/check_delivery_contract.py", "--mode", "staged"])
+
+
 def check_repo_boundaries() -> None:
     try:
         check_public_repo()
@@ -156,6 +160,7 @@ def run_commit_checks() -> None:
     check_forbidden_files(files)
     check_repo_boundaries()
     check_public_artifacts()
+    check_delivery_contract()
     check_staged_whitespace()
     check_ce_boundary()
     check_python_compile(files)
@@ -164,6 +169,7 @@ def run_commit_checks() -> None:
 
 def run_full_checks() -> None:
     run_commit_checks()
+    run(["uv", "run", "python", "scripts/check_delivery_contract.py", "--mode", "repo"])
     run(["uv", "run", "python", "scripts/check_release_metadata.py"])
     run(["uv", "run", "pytest", "tests/", "-q", "--tb=short"], env=COMMUNITY_TEST_ENV)
     run(["npx", "tsc", "-p", "tsconfig.app.ce.json", "--noEmit"], cwd=FRONTEND_ROOT)
