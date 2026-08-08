@@ -59,7 +59,7 @@ Recommended branch pattern:
 For repositories that are referenced by a parent submodule pointer:
 
 - Merge the child PR first.
-- Use a commit-preserving merge method on the child repository (`rebase` or `merge commit`).
+- Use a merge commit on the child repository. Do not use rebase merge or squash merge because both replace the child commit SHA that the parent gitlink needs.
 - Only merge the parent pointer PR after the child commit is reachable from the child repository `main`.
 - Do not use squash merge for `ee/marketing` or `ee` PRs whose commits will be referenced by a parent gitlink.
 

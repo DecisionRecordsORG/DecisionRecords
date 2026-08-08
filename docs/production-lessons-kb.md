@@ -43,6 +43,8 @@ Before building, deploying, or validating anything, identify which artifact is b
   1. Re-run the existing `pull_request` job graph.
   2. If that lane was cancelled or never attached, push a no-op commit to trigger a fresh `pull_request` synchronize event.
   3. Use `workflow_dispatch` only to diagnose the branch outside the required-check path.
+- Keep required CI helpers inside the repository that owns the workflow, or on a dependency revision that is already guaranteed on that workflow's base branch. Do not make a private-repo PR check depend on a new helper that exists only on an unreleased public-repo branch.
+- When validating private submodule lineage in CI, fetch child `origin/main` inside the workflow step that already has the repository token. Do not assume a generic helper can authenticate an ad hoc fetch from a private submodule remote on its own.
 
 ## Community Release Publishing
 
@@ -57,7 +59,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Do not stage `ee/` changes into the public repo by accident; only the submodule pointer should change there.
 - Do not mix unrelated private infra or marketing changes into an application/MCP commit.
 - Commit order for nested repo work is strict: `ee/marketing` first, then `ee`, then the public repo. A parent pointer update must never reference dirty child work.
-- Merge order and merge strategy are also strict: merge `ee/marketing` before `ee`, then `ee` before the public repo, and use a commit-preserving merge method on `marketing` and `ee`. Squash-merging child repos breaks durable parent submodule pointers because the gitlink SHA no longer lands on child `main`.
+- Merge order and merge strategy are also strict: merge `ee/marketing` before `ee`, then `ee` before the public repo, and use merge commits on `marketing` and `ee`. Rebase and squash merges on child repos break durable parent submodule pointers because the gitlink SHA no longer lands on child `main`.
 - Nested Git checks launched from hooks must clear inherited `GIT_*` environment variables before inspecting child repositories, or staged parent commits can be misread as dirty nested submodules.
 - Run the CE/EE boundary check before public commits.
 - Run commit QA before committing: `uv run python scripts/qa_check.py --mode commit`.

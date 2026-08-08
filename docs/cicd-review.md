@@ -23,7 +23,7 @@ This review covers the public Community repository. The commercial marketing web
 ## Gaps
 
 - The private `ee` repository does not currently expose a canonical pull-request CI lane of its own. GitHub reported no checks on the `fix/marketing-release-feed` branch, so Enterprise validation still depends on the public repository workflows and local/operator runs instead of an EE-native PR check.
-- Nested submodule repos must preserve child commit SHAs on merge. Squash-only merges in `ee` or `marketing` break durable parent gitlinks unless a follow-up pointer sync lands immediately.
+- Nested submodule repos must preserve child commit SHAs on merge. Rebase merges and squash merges in `ee` or `marketing` rewrite the child commit SHA and break durable parent gitlinks unless a follow-up pointer sync lands immediately.
 - Enterprise deployment still uses `az vm run-command` and a VM restart instead of immutable Azure app revisions.
 - Azure OIDC still needs a one-time app registration/federated credential setup in Azure.
 - Enterprise app deployments rebuild from source instead of promoting a CI-created image.
@@ -56,7 +56,7 @@ This review covers the public Community repository. The commercial marketing web
   - `production-private`
 - Add required reviewers for the Enterprise production environment when there is a second maintainer or operator.
 - Keep local pre-commit QA enabled with `.githooks/pre-commit`.
-- Keep commit-preserving merge methods enabled in repos that are referenced as submodules (`DecisionRecordsORG/ee` and `DecisionRecordsORG/marketing`).
+- Keep merge commits enabled in repos that are referenced as submodules (`DecisionRecordsORG/ee` and `DecisionRecordsORG/marketing`), disable rebase and squash merges there, and do not require linear history on those child `main` branches.
 
 Repository-side Phase 1 guardrails are implemented. Apply the GitHub repository settings with:
 

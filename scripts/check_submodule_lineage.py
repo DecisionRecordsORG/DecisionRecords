@@ -113,8 +113,8 @@ def require_commit_reachable_from_main(repo_root: Path, commit_sha: str, child_l
     raise LineageError(
         f"The {parent_label} repo points at {child_label} commit {commit_sha}, but that commit is not on {child_label} origin/main.\n"
         f"Remote refs containing the commit: {reachable}\n"
-        "Next step: merge the child PR with a commit-preserving strategy (rebase or merge commit), or update the parent pointer after child main advances.\n"
-        "Do not rely on squash-only child merges for submodule pointers."
+        "Next step: merge the child PR with a merge commit, or update the parent pointer after child main advances.\n"
+        "Do not rely on rebase or squash merges for child repos that are referenced by submodule pointers."
     )
 
 
