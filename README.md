@@ -13,6 +13,8 @@ Decision Records helps teams remember why decisions were made. Based on the [Arc
 # Clone and run with Docker
 git clone https://github.com/DecisionRecordsORG/DecisionRecords.git
 cd DecisionRecords
+cp .env.example .env
+# Set SECRET_KEY and MASTER_PASSWORD in .env first
 docker-compose up -d
 
 # Open http://localhost:3000
@@ -22,7 +24,8 @@ On first run, the **Setup Wizard** will guide you through:
 1. Creating your organization
 2. Setting up your admin account
 
-Super Admin access (for managing multiple tenants): `admin` / `changeme`
+Super Admin access (for managing multiple tenants) uses `MASTER_USERNAME` / `MASTER_PASSWORD`.
+The default bootstrap username is `admin`; you must set a strong `MASTER_PASSWORD` before first start.
 
 ## Features
 
@@ -91,6 +94,7 @@ cd frontend && npm ci && npm run build && cd ..
 
 # Set environment variables
 export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
+export MASTER_PASSWORD=$(python -c "import secrets; print(secrets.token_urlsafe(24))")
 export DATABASE_URL=sqlite:///instance/decisions.db
 
 # Run
@@ -104,6 +108,7 @@ See [docs/self-hosting.md](docs/self-hosting.md) for detailed deployment instruc
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `SECRET_KEY` | Flask secret key for sessions | Required |
+| `MASTER_PASSWORD` | Bootstrap super admin password | Required for self-hosted setup |
 | `DATABASE_URL` | Database connection string | `sqlite:///decisions.db` |
 | `DECISION_RECORDS_EDITION` | `community` or `enterprise` | `community` |
 

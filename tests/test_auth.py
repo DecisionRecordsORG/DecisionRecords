@@ -352,3 +352,13 @@ class TestMasterAccountModel:
         # Calling create_default_master should return the existing account
         master2 = MasterAccount.create_default_master(session)
         assert master2.id == master1.id
+
+    def test_create_default_master_skips_insecure_bootstrap_in_production(self, session, monkeypatch):
+        """Production bootstrap requires an explicit non-default master password."""
+        monkeypatch.delenv('TESTING', raising=False)
+        monkeypatch.setenv('FLASK_ENV', 'production')
+        monkeypatch.delenv('MASTER_PASSWORD', raising=False)
+
+        master = MasterAccount.create_default_master(session)
+        assert master is None
+        assert MasterAccount.query.count() == 0

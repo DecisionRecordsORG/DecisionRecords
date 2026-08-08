@@ -1130,6 +1130,7 @@ class TestGDPREndpointsHTTP:
         })
         if response.status_code != 200:
             pytest.skip(f"Master login failed: {response.status_code}")
+        client.environ_base['HTTP_X_CSRF_TOKEN'] = response.headers.get('X-CSRF-Token', '')
         return client
 
     @pytest.fixture
@@ -1166,6 +1167,8 @@ class TestGDPREndpointsHTTP:
         client = api_app.test_client()
         with client.session_transaction() as sess:
             sess['user_id'] = user.id
+            sess['_csrf_token'] = 'test-csrf-token'
+        client.environ_base['HTTP_X_CSRF_TOKEN'] = 'test-csrf-token'
 
         return user, client, tenant
 

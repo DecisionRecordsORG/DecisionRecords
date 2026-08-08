@@ -11,6 +11,9 @@ The fastest way to get started:
 git clone https://github.com/DecisionRecordsORG/DecisionRecords.git
 cd DecisionRecords
 
+# Copy the example environment and set secrets
+cp .env.example .env
+
 # Start with docker-compose
 docker-compose up -d
 
@@ -32,6 +35,8 @@ services:
       - "3000:8000"
     environment:
       - SECRET_KEY=${SECRET_KEY}
+      - MASTER_USERNAME=${MASTER_USERNAME:-admin}
+      - MASTER_PASSWORD=${MASTER_PASSWORD}
       - DATABASE_URL=sqlite:////data/decisions.db
     volumes:
       - decision-records-data:/data
@@ -53,6 +58,8 @@ services:
       - "3000:8000"
     environment:
       - SECRET_KEY=${SECRET_KEY}
+      - MASTER_USERNAME=${MASTER_USERNAME:-admin}
+      - MASTER_PASSWORD=${MASTER_PASSWORD}
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/decisions
     depends_on:
       - db
@@ -81,6 +88,8 @@ docker run -d \
   -p 3000:8000 \
   -v decision-records-data:/data \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
+  -e MASTER_USERNAME="admin" \
+  -e MASTER_PASSWORD="$(openssl rand -hex 24)" \
   ghcr.io/decisionrecordsorg/decisionrecords:latest
 
 # With PostgreSQL
@@ -88,6 +97,8 @@ docker run -d \
   --name decision-records \
   -p 3000:8000 \
   -e SECRET_KEY="$(openssl rand -hex 32)" \
+  -e MASTER_USERNAME="admin" \
+  -e MASTER_PASSWORD="$(openssl rand -hex 24)" \
   -e DATABASE_URL="postgresql://user:pass@host:5432/decisions" \
   ghcr.io/decisionrecordsorg/decisionrecords:latest
 ```
@@ -99,12 +110,14 @@ docker run -d \
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `SECRET_KEY` | Flask session secret (min 32 chars) | `openssl rand -hex 32` |
+| `MASTER_PASSWORD` | Bootstrap super admin password | `openssl rand -hex 24` |
 
 ### Optional
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | Database connection string | `sqlite:////data/decisions.db` |
+| `MASTER_USERNAME` | Bootstrap super admin username | `admin` |
 | `DECISION_RECORDS_EDITION` | `community` or `enterprise` | `community` |
 | `ENVIRONMENT` | `development` or `production` | `production` |
 | `SKIP_CLOUDFLARE_CHECK` | Skip Cloudflare validation | `true` |
@@ -190,9 +203,9 @@ services:
    - Configuring authentication
 
 3. **Super Admin access** (for managing multiple tenants):
-   - Username: `admin`
-   - Password: `changeme`
-   - **Important**: Change this password immediately!
+   - Username: value of `MASTER_USERNAME` (defaults to `admin`)
+   - Password: value of `MASTER_PASSWORD`
+   - **Important**: Set a strong password before first start and store it securely.
 
 ## Backups
 

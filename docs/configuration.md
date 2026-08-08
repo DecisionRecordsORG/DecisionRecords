@@ -11,6 +11,8 @@ Configuration guide for self-hosting Decision Records Community Edition.
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `SECRET_KEY` | **Yes** | - | Flask secret key for session signing. Must be at least 32 characters. Generate with: `openssl rand -hex 32` |
+| `MASTER_PASSWORD` | **Yes** | - | Bootstrap super admin password for `/superadmin`. If omitted, no bootstrap super admin account is created. |
+| `MASTER_USERNAME` | No | `admin` | Bootstrap super admin username |
 | `DATABASE_URL` | No | `sqlite:////data/decisions.db` | Database connection string |
 | `DECISION_RECORDS_EDITION` | No | `community` | Edition: `community` or `enterprise` |
 | `ENVIRONMENT` | No | `production` | Runtime environment: `development` or `production` |

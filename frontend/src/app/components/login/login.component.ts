@@ -155,11 +155,6 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
                 </button>
               </form>
 
-              @if (ssoConfigs.length === 0) {
-                <p class="hint-text">
-                  Default credentials: admin / changeme
-                </p>
-              }
             </div>
           }
 

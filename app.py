@@ -33,7 +33,8 @@ from webauthn_auth import (
 )
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
-    generate_csrf_token, apply_security_headers,
+    generate_csrf_token, validate_csrf_token, get_request_csrf_token,
+    should_enforce_csrf, apply_security_headers,
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data, sanitize_string
 )
@@ -110,7 +111,6 @@ MARKETING_ORIGINS = [
 # This allows the marketing site to call auth endpoints for signup/signin
 CORS(app, resources={
     r"/api/auth/*": {"origins": MARKETING_ORIGINS, "supports_credentials": True},
-    r"/api/system/config": {"origins": MARKETING_ORIGINS},
     r"/api/blog/*": {"origins": MARKETING_ORIGINS},
     r"/api/contact": {"origins": MARKETING_ORIGINS},
 }, supports_credentials=True)
@@ -551,10 +551,13 @@ def init_database():
                         logger.warning(f"EE data seeding failed (non-critical): {str(ee_error)}")
                         db.session.rollback()
 
-                # Create default master account
-                logger.info("Creating default master account...")
-                MasterAccount.create_default_master(db.session)
-                logger.info("Default master account ensured")
+                # Create default master account when bootstrap credentials are configured.
+                logger.info("Checking super admin bootstrap configuration...")
+                master_account = MasterAccount.create_default_master(db.session)
+                if master_account:
+                    logger.info("Super admin account ensured")
+                else:
+                    logger.info("Super admin bootstrap skipped until MASTER_PASSWORD is configured securely")
 
                 # Initialize default system config if not exists in a separate transaction
                 logger.info("Checking system configuration...")
@@ -644,6 +647,20 @@ def check_session_expiry():
             # API request - return 401
             return  # Let the login_required decorator handle it
         # Browser request - redirect will happen naturally
+
+
+@app.before_request
+def enforce_csrf_for_session_auth():
+    """Require CSRF tokens for state-changing requests tied to a browser session."""
+    if not should_enforce_csrf():
+        return None
+
+    token = get_request_csrf_token()
+    if validate_csrf_token(token):
+        return None
+
+    log_security_event('csrf', f"Blocked request with missing or invalid CSRF token: {request.path}", severity='WARNING')
+    return jsonify({'error': 'CSRF token missing or invalid'}), 403
 
 
 @app.before_request
@@ -950,6 +967,23 @@ def local_login():
                              sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
                              error='Username and password are required')
 
+    master_candidate = MasterAccount.query.filter_by(username=username).first()
+    if (
+        master_candidate
+        and master_candidate.uses_insecure_default_password()
+        and not MasterAccount.bootstrap_password_configured()
+        and master_candidate.check_password(password)
+    ):
+        log_security_event('auth', 'Blocked super admin login with insecure bootstrap password', severity='WARNING')
+        message = 'Super admin bootstrap credentials are disabled. Configure MASTER_PASSWORD and restart the app.'
+        if request.is_json:
+            return jsonify({'error': message}), 403
+        return render_template(
+            'login.html',
+            sso_configs=SSOConfig.query.filter_by(enabled=True).all(),
+            error=message
+        )
+
     master = authenticate_master(username, password)
     if master:
         # Log successful master login
@@ -962,6 +996,7 @@ def local_login():
         )
         session['master_id'] = master.id
         session['is_master'] = True
+        session['master_username'] = master.username
         set_session_expiry(is_admin=True)  # 1 hour default for super admin
         if request.is_json:
             return jsonify({'message': 'Login successful'}), 200
@@ -7428,18 +7463,41 @@ def api_save_auth_config():
 
 # ==================== API Routes - System Configuration (Super Admin) ====================
 
+SENSITIVE_SYSTEM_CONFIG_KEYS = {
+    SystemConfig.KEY_ANALYTICS_API_KEY,
+    SystemConfig.KEY_CLOUDFLARE_ACCESS_AUD,
+    SystemConfig.KEY_LOG_FORWARDING_API_KEY,
+    SystemConfig.KEY_AI_LLM_API_KEY_SECRET,
+}
+
+
+def is_sensitive_system_config_key(key):
+    """Return True when the generic config API should not expose or mutate a key."""
+    return key in SENSITIVE_SYSTEM_CONFIG_KEYS
+
 @app.route('/api/system/config', methods=['GET'])
 @master_required
 def api_get_system_config():
     """Get all system configuration settings (super admin only)."""
     configs = SystemConfig.query.all()
-    return jsonify({c.key: {'value': c.value, 'description': c.description, 'updated_at': c.updated_at.isoformat()} for c in configs})
+    return jsonify({
+        c.key: {
+            'value': c.value,
+            'description': c.description,
+            'updated_at': c.updated_at.isoformat()
+        }
+        for c in configs
+        if not is_sensitive_system_config_key(c.key)
+    })
 
 
 @app.route('/api/system/config/<key>', methods=['GET'])
 @master_required
 def api_get_system_config_key(key):
     """Get a specific system configuration setting (super admin only)."""
+    if is_sensitive_system_config_key(key):
+        return jsonify({'error': 'Use the dedicated endpoint for this sensitive configuration key'}), 403
+
     config = SystemConfig.query.filter_by(key=key).first()
     if config:
         return jsonify(config.to_dict())
@@ -7458,6 +7516,9 @@ def api_set_system_config():
     key = data['key']
     value = data.get('value', '')
     description = data.get('description')
+
+    if is_sensitive_system_config_key(key):
+        return jsonify({'error': 'Use the dedicated endpoint for this sensitive configuration key'}), 403
 
     config = SystemConfig.set(key, value, description)
     return jsonify(config.to_dict())
@@ -7562,6 +7623,12 @@ def api_get_system_status():
     # Check if super admin is configured (MasterAccount exists with password)
     super_admin = MasterAccount.query.first()
     has_super_admin = super_admin is not None and super_admin.password_hash is not None
+    if (
+        has_super_admin
+        and super_admin.uses_insecure_default_password()
+        and not MasterAccount.bootstrap_password_configured()
+    ):
+        has_super_admin = False
 
     # Check license acceptance
     license_accepted = SystemConfig.get_bool(SystemConfig.KEY_LICENSE_ACCEPTED, default=False)
@@ -8310,6 +8377,7 @@ def api_delete_tenant(domain):
     deletion_time = datetime.now(timezone.utc)
     retention_days = 30  # Configurable retention window
     deletion_expires_at = deletion_time + timedelta(days=retention_days)
+    master_username = getattr(g.current_user, 'username', None) or session.get('master_username', 'super_admin')
 
     try:
         # Get counts for reporting
@@ -8327,7 +8395,7 @@ def api_delete_tenant(domain):
 
         # Soft-delete the tenant (keep the record but mark as deleted)
         tenant.deleted_at = deletion_time
-        tenant.deleted_by_admin = session.get('master_username', 'super_admin')
+        tenant.deleted_by_admin = master_username
         tenant.deletion_expires_at = deletion_expires_at
         tenant.status = 'deleted'
 

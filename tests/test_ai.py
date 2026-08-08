@@ -1307,6 +1307,7 @@ def master_client(api_app, master_account):
     if response.status_code != 200:
         raise RuntimeError(f"Master login failed: {response.status_code} - {response.data}")
 
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = response.headers.get('X-CSRF-Token', '')
     return client
 
 
@@ -1362,6 +1363,7 @@ def user_client(api_app, api_test_user):
     if response.status_code != 200:
         raise RuntimeError(f"User login failed: {response.status_code} - {response.data}")
 
+    client.environ_base['HTTP_X_CSRF_TOKEN'] = response.headers.get('X-CSRF-Token', '')
     return client
 
 
@@ -1548,6 +1550,7 @@ class TestTenantAdminAISettingsAPI:
         if response.status_code != 200:
             raise RuntimeError(f"Admin login failed: {response.status_code} - {response.data}")
 
+        client.environ_base['HTTP_X_CSRF_TOKEN'] = response.headers.get('X-CSRF-Token', '')
         return client
 
     def test_get_tenant_ai_config_requires_auth(self, api_client):
