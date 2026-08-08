@@ -721,15 +721,26 @@ def gather_contract_statuses(
     marketing_repo_root = REPO_ROOT / config.marketing_website.local_path if config.marketing_website.local_path else None
 
     release_tags = list_release_tags(public_repo_root, pattern=config.community_release.tag_pattern or RELEASE_TAG_PATTERN)
-    enterprise_runs = list_successful_workflow_runs(
-        config.enterprise_app.repo,
-        config.enterprise_app.workflow or "",
-        github_token,
+    needs_enterprise_runs = any(contract.artifacts.enterprise_app == "required" for contract in contracts)
+    needs_marketing_runs = any(contract.artifacts.marketing_website == "required" for contract in contracts)
+
+    enterprise_runs = (
+        list_successful_workflow_runs(
+            config.enterprise_app.repo,
+            config.enterprise_app.workflow or "",
+            github_token,
+        )
+        if needs_enterprise_runs
+        else []
     )
-    marketing_runs = list_successful_workflow_runs(
-        config.marketing_website.repo,
-        config.marketing_website.workflow or "",
-        github_token,
+    marketing_runs = (
+        list_successful_workflow_runs(
+            config.marketing_website.repo,
+            config.marketing_website.workflow or "",
+            github_token,
+        )
+        if needs_marketing_runs
+        else []
     )
 
     statuses: list[ContractStatus] = []
