@@ -57,6 +57,7 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Never edit a detached `ee` HEAD. If `ee` is detached, create or switch to a named private branch before making or keeping changes, for example `git -C ee switch -c infra/<topic>`.
 - Never edit a detached `ee/marketing` HEAD. If `ee/marketing` is detached, create or switch to a named private branch before making or keeping changes there.
 - Commit order is strict when nested repos change: commit inside `ee/marketing` first, then commit the `marketing` pointer inside `ee`, then update the public `ee` submodule pointer. Do not commit a parent pointer that refers to dirty child work.
+- Merge strategy is strict when a repo is the child side of a submodule pointer. For `ee/marketing` and `ee`, use a commit-preserving merge method so the parent repo can point at a durable child `main` SHA. Do not squash-merge PRs whose commits are meant to be referenced by a parent submodule pointer.
 - Keep production infra, snapshots, deployment resource names, and commercial module code in `ee/`; the public parent should contain only generic docs, CE code, stubs, and the submodule pointer.
 - Do not stage generated or local-only files such as `ee/infra/aca/main.json`, `ee/frontend/node_modules`, local databases, `.env*`, or Azure credential files.
 - Do not use destructive Git commands such as `git reset --hard`, `git checkout -- <path>`, or submodule deinit/reinit to clean up without explicit user approval.

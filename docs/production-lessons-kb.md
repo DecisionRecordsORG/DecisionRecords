@@ -57,6 +57,7 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Do not stage `ee/` changes into the public repo by accident; only the submodule pointer should change there.
 - Do not mix unrelated private infra or marketing changes into an application/MCP commit.
 - Commit order for nested repo work is strict: `ee/marketing` first, then `ee`, then the public repo. A parent pointer update must never reference dirty child work.
+- Merge order and merge strategy are also strict: merge `ee/marketing` before `ee`, then `ee` before the public repo, and use a commit-preserving merge method on `marketing` and `ee`. Squash-merging child repos breaks durable parent submodule pointers because the gitlink SHA no longer lands on child `main`.
 - Nested Git checks launched from hooks must clear inherited `GIT_*` environment variables before inspecting child repositories, or staged parent commits can be misread as dirty nested submodules.
 - Run the CE/EE boundary check before public commits.
 - Run commit QA before committing: `uv run python scripts/qa_check.py --mode commit`.

@@ -74,6 +74,68 @@ jobs:
       - name: Check Community/Enterprise boundary
         run: python scripts/check_ce_boundary.py
 
+  private-submodule-lineage:
+    name: Private Submodule Lineage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Fetch PR base branch
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+
+      - name: Decide whether private lineage validation is required
+        id: lineage
+        shell: bash
+        run: |
+          run_check=true
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if git diff --quiet "refs/remotes/origin/${{ github.base_ref }}...HEAD" -- ee; then
+              run_check=false
+            fi
+          fi
+          echo "run_check=$run_check" >> "$GITHUB_OUTPUT"
+
+      - name: Skip lineage validation when ee is unchanged
+        if: steps.lineage.outputs.run_check != 'true'
+        run: echo "ee pointer unchanged; skipping private submodule lineage validation."
+
+      - name: Require EE_REPO_TOKEN when lineage validation is in scope
+        if: steps.lineage.outputs.run_check == 'true'
+        env:
+          EE_REPO_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+        run: |
+          if [ -z "$EE_REPO_TOKEN" ]; then
+            echo "EE_REPO_TOKEN is required to validate ee/marketing lineage when the ee pointer is in scope."
+            exit 1
+          fi
+
+      - name: Checkout private submodules
+        if: steps.lineage.outputs.run_check == 'true'
+        env:
+          EE_REPO_TOKEN: ${{ secrets.EE_REPO_TOKEN }}
+        run: |
+          git submodule sync --recursive
+          git -c "url.https://x-access-token:${EE_REPO_TOKEN}@github.com/DecisionRecordsORG/.insteadOf=https://github.com/DecisionRecordsORG/" \
+            submodule update --init --recursive
+
+      - name: Set up Python
+        if: steps.lineage.outputs.run_check == 'true'
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check private submodule lineage
+        if: steps.lineage.outputs.run_check == 'true'
+        run: |
+          python scripts/check_submodule_lineage.py --repo public --fetch
+          python scripts/check_submodule_lineage.py --repo ee --fetch
+
   # Python Syntax
   python-syntax:
     name: Python Syntax
@@ -101,6 +163,7 @@ jobs:
             scripts/check_public_artifacts.py \
             scripts/check_ce_boundary.py \
             scripts/check_release_metadata.py \
+            scripts/check_submodule_lineage.py \
             scripts/qa_check.py
 
   # Backend Tests
@@ -216,7 +279,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [release-metadata, public-artifact-check, boundary-check, python-syntax, test-backend, build-frontend, build-docker]
+    needs: [release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, build-frontend, build-docker]
     if: always()
 
     steps:
@@ -225,6 +288,7 @@ jobs:
           if [ "${{ needs.release-metadata.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.boundary-check.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.public-artifact-check.result }}" != "success" ]; then exit 1; fi
+          if [ "${{ needs.private-submodule-lineage.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.python-syntax.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.test-backend.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.build-frontend.result }}" != "success" ]; then exit 1; fi

@@ -56,6 +56,13 @@ Recommended branch pattern:
 - Cross-repo integration: short-lived paired branches with matching names in both repositories.
 - Release stabilization: tag the public repository and pin the `ee` submodule SHA used by the Enterprise deployment.
 
+For repositories that are referenced by a parent submodule pointer:
+
+- Merge the child PR first.
+- Use a commit-preserving merge method on the child repository (`rebase` or `merge commit`).
+- Only merge the parent pointer PR after the child commit is reachable from the child repository `main`.
+- Do not use squash merge for `ee/marketing` or `ee` PRs whose commits will be referenced by a parent gitlink.
+
 ## Security Notes
 
 - Do not store secrets in either repository.
