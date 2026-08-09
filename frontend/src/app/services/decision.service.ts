@@ -1,7 +1,18 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, Subject } from 'rxjs';
-import { Decision, DecisionHistory } from '../models/decision.model';
+import {
+  Decision,
+  DecisionHistory,
+  DecisionReference,
+  DecisionRelationshipCatalog,
+} from '../models/decision.model';
+
+export interface DecisionRelationshipInput {
+  target_decision_id: number;
+  relationship_type: string;
+  notes?: string;
+}
 
 export interface CreateDecisionRequest {
   title: string;
@@ -11,6 +22,10 @@ export interface CreateDecisionRequest {
   consequences: string;
   infrastructure_ids?: number[];
   space_ids?: number[];
+  owner_id?: number | null;
+  owner_email?: string;
+  supersedes_decision_id?: number;
+  relationships?: DecisionRelationshipInput[];
 }
 
 export interface UpdateDecisionRequest extends Partial<CreateDecisionRequest> {
@@ -42,6 +57,14 @@ export class DecisionService {
 
   getDecision(id: number): Observable<Decision> {
     return this.http.get<Decision>(`${this.apiUrl}/${id}`);
+  }
+
+  getDecisionRelationshipCatalog(): Observable<DecisionRelationshipCatalog> {
+    return this.http.get<DecisionRelationshipCatalog>('/api/decision-relationships/catalog');
+  }
+
+  getDecisionReferences(): Observable<DecisionReference[]> {
+    return this.http.get<DecisionReference[]>(this.apiUrl);
   }
 
   createDecision(decision: CreateDecisionRequest): Observable<Decision> {

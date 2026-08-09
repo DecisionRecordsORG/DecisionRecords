@@ -636,7 +636,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
 
     .status-badge-proposed { background: #fff3e0; color: #e65100; }
     .status-badge-accepted { background: #e8f5e9; color: #2e7d32; }
-    .status-badge-deprecated { background: #ffebee; color: #c62828; }
+    .status-badge-archived { background: #eceff1; color: #546e7a; }
     .status-badge-superseded { background: #e3f2fd; color: #1565c0; }
 
     mat-card-title {

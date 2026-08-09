@@ -89,6 +89,73 @@ export interface DecisionSpace {
   added_by_id: number | null;
 }
 
+export interface DecisionReference {
+  id: number;
+  display_id?: string;
+  decision_number?: number;
+  title: string;
+  status: DecisionStatus;
+}
+
+export interface DecisionRelationship {
+  id: number;
+  direction: 'outgoing' | 'incoming';
+  relationship_type: string;
+  label: string;
+  inverse_label?: string;
+  description?: string;
+  notes?: string | null;
+  has_status_effect?: boolean;
+  counterpart: DecisionReference | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DecisionRelationshipType {
+  key: string;
+  label: string;
+  inverse_label: string;
+  description: string;
+  builtin: boolean;
+  directional: boolean;
+  has_status_effect: boolean;
+  pack_ids: string[];
+}
+
+export interface DecisionRelationshipPack {
+  id: string;
+  label: string;
+  description: string;
+  relationship_types: string[];
+  default_selected?: boolean;
+}
+
+export interface DecisionRelationshipCatalog {
+  packs: DecisionRelationshipPack[];
+  types: DecisionRelationshipType[];
+  default_selected_pack_ids?: string[];
+}
+
+export interface CustomDecisionRelationshipType {
+  key: string;
+  label: string;
+  inverse_label: string;
+  description: string;
+}
+
+export interface DecisionRelationshipSettings {
+  selected_pack_ids: string[];
+  enabled_relationship_types: string[];
+  custom_relationship_types: CustomDecisionRelationshipType[];
+}
+
+export interface DecisionRelationshipSettingsResponse {
+  message?: string;
+  config: DecisionRelationshipSettings;
+  effective_catalog: DecisionRelationshipCatalog;
+  available_catalog: DecisionRelationshipCatalog;
+}
+
 export interface Decision {
   id: number;
   display_id?: string;  // e.g., "GYH-034"
@@ -114,6 +181,8 @@ export interface Decision {
   owner_id?: number;
   owner_email?: string;
   owner?: User;
+  outgoing_relationships?: DecisionRelationship[];
+  incoming_relationships?: DecisionRelationship[];
 }
 
 export interface DecisionHistory {
@@ -129,7 +198,7 @@ export interface DecisionHistory {
   change_reason?: string;
 }
 
-export type DecisionStatus = 'proposed' | 'accepted' | 'deprecated' | 'superseded';
+export type DecisionStatus = 'proposed' | 'accepted' | 'archived' | 'superseded';
 
 export interface SSOConfig {
   id: number;

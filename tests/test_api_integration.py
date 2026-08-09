@@ -54,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
     GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus,
-    SystemConfig, DEFAULT_MASTER_PASSWORD
+    SystemConfig, DEFAULT_MASTER_PASSWORD, DecisionRelationship
 )
 from tests.app_test_utils import load_test_app
 
@@ -1286,3 +1286,105 @@ class TestSuperadminSecurityCoverage:
         db.session.expire_all()
         deleted_tenant = db.session.get(Tenant, test_tenant.id)
         assert deleted_tenant.deleted_by_admin == master_account.username
+
+
+class TestDecisionRelationshipAPI:
+    """Test decision relationship endpoints and relationship-aware decision flows."""
+
+    def test_catalog_endpoint_returns_packs_and_types(self, admin_client):
+        response = admin_client.get('/api/decision-relationships/catalog')
+        assert response.status_code == 200
+
+        body = response.get_json()
+        assert 'packs' in body
+        assert 'types' in body
+        assert any(pack['id'] == 'core' for pack in body['packs'])
+        assert any(relationship_type['key'] == 'supersedes' for relationship_type in body['types'])
+
+    def test_create_decision_can_supersede_existing(self, admin_client, admin_user, test_tenant):
+        target = ArchitectureDecision(
+            title='Legacy decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=test_tenant.domain,
+            tenant_id=test_tenant.id,
+            created_by_id=admin_user.id,
+            decision_number=1
+        )
+        db.session.add(target)
+        db.session.commit()
+
+        response = admin_client.post('/api/decisions', json={
+            'title': 'Replacement decision',
+            'context': 'Context',
+            'decision': 'Decision',
+            'status': 'accepted',
+            'consequences': 'Consequences',
+            'supersedes_decision_id': target.id
+        })
+
+        assert response.status_code == 201
+        body = response.get_json()
+        assert len(body['outgoing_relationships']) == 1
+        assert body['outgoing_relationships'][0]['relationship_type'] == 'supersedes'
+
+        db.session.refresh(target)
+        assert target.status == 'superseded'
+
+    def test_update_decision_can_add_generic_relationship(self, admin_client, admin_user, test_tenant):
+        source = ArchitectureDecision(
+            title='Source decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=test_tenant.domain,
+            tenant_id=test_tenant.id,
+            created_by_id=admin_user.id,
+            decision_number=10
+        )
+        target = ArchitectureDecision(
+            title='Target decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=test_tenant.domain,
+            tenant_id=test_tenant.id,
+            created_by_id=admin_user.id,
+            decision_number=11
+        )
+        db.session.add_all([source, target])
+        db.session.commit()
+
+        response = admin_client.put(f'/api/decisions/{source.id}', json={
+            'relationships': [{
+                'relationship_type': 'related_to',
+                'target_decision_id': target.id
+            }]
+        })
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert len(body['outgoing_relationships']) == 1
+        assert body['outgoing_relationships'][0]['relationship_type'] == 'related_to'
+        assert body['outgoing_relationships'][0]['counterpart']['id'] == target.id
+
+    def test_tenant_relationship_settings_can_be_updated(self, admin_client):
+        response = admin_client.put('/api/tenant/decision-relationships/config', json={
+            'selected_pack_ids': ['core', 'security'],
+            'enabled_relationship_types': ['supersedes', 'related_to', 'mitigates', 'requires_signoff'],
+            'custom_relationship_types': [{
+                'key': 'requires_signoff',
+                'label': 'Requires signoff from',
+                'inverse_label': 'Signs off on',
+                'description': 'Used when a decision needs explicit signoff from another decision owner'
+            }]
+        })
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['config']['selected_pack_ids'] == ['core', 'security']
+        assert any(relationship_type['key'] == 'requires_signoff' for relationship_type in body['effective_catalog']['types'])

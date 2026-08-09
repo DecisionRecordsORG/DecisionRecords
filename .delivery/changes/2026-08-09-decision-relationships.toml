@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-08-09-decision-relationships"
+title = "Add configurable decision relationships"
+summary = "Adds supersede and relationship management across the shared core, tenant settings, frontend editors, and MCP so both enterprise deployments and a future Community release track the change."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "minor"
+marketing_website = "none"

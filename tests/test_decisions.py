@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import (
     db, User, Tenant, TenantMembership, ArchitectureDecision,
-    DecisionHistory, DecisionComment, GlobalRole, MaturityState, AuditLog
+    DecisionHistory, DecisionComment, DecisionRelationship, GlobalRole, MaturityState, AuditLog,
+    sync_decision_relationships
 )
 
 
@@ -425,3 +426,165 @@ class TestDecisionModel:
         assert 'accepted' in ArchitectureDecision.VALID_STATUSES
         assert 'archived' in ArchitectureDecision.VALID_STATUSES
         assert 'superseded' in ArchitectureDecision.VALID_STATUSES
+
+    def test_to_dict_with_history_includes_relationships(self, session, sample_tenant, sample_user, admin_user):
+        """Decision detail serialization includes incoming and outgoing relationships."""
+        source = ArchitectureDecision(
+            title='New decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=1
+        )
+        target = ArchitectureDecision(
+            title='Old decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=2
+        )
+        session.add_all([source, target])
+        session.commit()
+
+        sync_decision_relationships(source, [{
+            'relationship_type': 'supersedes',
+            'target_decision_id': target.id
+        }], actor=admin_user)
+        session.commit()
+
+        data = source.to_dict_with_history()
+        assert len(data['outgoing_relationships']) == 1
+        assert data['outgoing_relationships'][0]['relationship_type'] == 'supersedes'
+        assert data['outgoing_relationships'][0]['counterpart']['id'] == target.id
+
+
+class TestDecisionRelationships:
+    """Test decision relationship behavior."""
+
+    def test_supersedes_updates_target_status(self, session, sample_tenant, sample_user, admin_user):
+        source = ArchitectureDecision(
+            title='Replacement decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=10
+        )
+        target = ArchitectureDecision(
+            title='Existing decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=11
+        )
+        session.add_all([source, target])
+        session.commit()
+
+        sync_decision_relationships(source, [{
+            'relationship_type': 'supersedes',
+            'target_decision_id': target.id
+        }], actor=admin_user)
+        session.commit()
+
+        session.refresh(target)
+        relationship = DecisionRelationship.query.filter_by(
+            source_decision_id=source.id,
+            target_decision_id=target.id,
+            relationship_type='supersedes',
+            deleted_at=None
+        ).first()
+
+        assert relationship is not None
+        assert relationship.target_previous_status == 'accepted'
+        assert target.status == 'superseded'
+
+    def test_removing_supersedes_restores_target_status(self, session, sample_tenant, sample_user, admin_user):
+        source = ArchitectureDecision(
+            title='Replacement decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=20
+        )
+        target = ArchitectureDecision(
+            title='Existing decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=21
+        )
+        session.add_all([source, target])
+        session.commit()
+
+        sync_decision_relationships(source, [{
+            'relationship_type': 'supersedes',
+            'target_decision_id': target.id
+        }], actor=admin_user)
+        session.commit()
+
+        sync_decision_relationships(source, [], actor=admin_user)
+        session.commit()
+
+        session.refresh(target)
+        assert target.status == 'accepted'
+
+    def test_supersedes_cycles_are_rejected(self, session, sample_tenant, sample_user, admin_user):
+        first = ArchitectureDecision(
+            title='First decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=30
+        )
+        second = ArchitectureDecision(
+            title='Second decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=sample_tenant.domain,
+            tenant_id=sample_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=31
+        )
+        session.add_all([first, second])
+        session.commit()
+
+        sync_decision_relationships(first, [{
+            'relationship_type': 'supersedes',
+            'target_decision_id': second.id
+        }], actor=admin_user)
+        session.commit()
+
+        with pytest.raises(ValueError, match='cannot form a cycle'):
+            sync_decision_relationships(second, [{
+                'relationship_type': 'supersedes',
+                'target_decision_id': first.id
+            }], actor=admin_user)

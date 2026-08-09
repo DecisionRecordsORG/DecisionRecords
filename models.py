@@ -1,10 +1,17 @@
 import os
 import enum
+import json
 import logging
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash, check_password_hash
+from decision_relationships import (
+    build_relationship_settings_payload,
+    get_effective_relationship_catalog,
+    get_relationship_type_config,
+    normalize_relationship_settings,
+)
 
 db = SQLAlchemy()
 logger = logging.getLogger(__name__)
@@ -564,6 +571,11 @@ class TenantSettings(db.Model):
     # Display settings
     tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # For decision IDs
 
+    # Decision relationship settings
+    decision_relationship_pack_ids = db.Column(db.Text, nullable=True)
+    decision_relationship_enabled_types = db.Column(db.Text, nullable=True)
+    decision_relationship_custom_types = db.Column(db.Text, nullable=True)
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -573,7 +585,7 @@ class TenantSettings(db.Model):
     # NOTE: No 'delete tenant' setting - that's Super Admin only
 
     def to_dict(self):
-        return {
+        result = {
             'id': self.id,
             'tenant_id': self.tenant_id,
             'auth_method': self.auth_method,
@@ -589,6 +601,35 @@ class TenantSettings(db.Model):
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
+        result['decision_relationship_settings'] = self.get_decision_relationship_config()
+        return result
+
+    @staticmethod
+    def _load_json_value(raw_value, default_value):
+        if not raw_value:
+            return default_value
+        try:
+            return json.loads(raw_value)
+        except (TypeError, ValueError):
+            logger.warning("Invalid tenant settings JSON, using defaults")
+            return default_value
+
+    def get_decision_relationship_config(self):
+        return normalize_relationship_settings({
+            'selected_pack_ids': self._load_json_value(self.decision_relationship_pack_ids, None),
+            'enabled_relationship_types': self._load_json_value(self.decision_relationship_enabled_types, None),
+            'custom_relationship_types': self._load_json_value(self.decision_relationship_custom_types, None),
+        })
+
+    def set_decision_relationship_config(self, config):
+        normalized = normalize_relationship_settings(config)
+        self.decision_relationship_pack_ids = json.dumps(normalized['selected_pack_ids'])
+        self.decision_relationship_enabled_types = json.dumps(normalized['enabled_relationship_types'])
+        self.decision_relationship_custom_types = json.dumps(normalized['custom_relationship_types'])
+        return normalized
+
+    def get_decision_relationship_settings_payload(self):
+        return build_relationship_settings_payload(self.get_decision_relationship_config())
 
 
 class Space(db.Model):
@@ -1299,6 +1340,18 @@ class ArchitectureDecision(db.Model):
     # v1.5 relationships
     tenant = db.relationship('Tenant', backref=db.backref('decisions', lazy='dynamic'))
     space_links = db.relationship('DecisionSpace', backref='decision', lazy='dynamic', cascade='all, delete-orphan')
+    outgoing_relationship_links = db.relationship(
+        'DecisionRelationship',
+        foreign_keys='DecisionRelationship.source_decision_id',
+        back_populates='source_decision',
+        lazy='selectin'
+    )
+    incoming_relationship_links = db.relationship(
+        'DecisionRelationship',
+        foreign_keys='DecisionRelationship.target_decision_id',
+        back_populates='target_decision',
+        lazy='selectin'
+    )
 
     # Valid status values
     VALID_STATUSES = ['proposed', 'accepted', 'archived', 'superseded']
@@ -1307,6 +1360,20 @@ class ArchitectureDecision(db.Model):
     def spaces(self):
         """Get all spaces this decision belongs to."""
         return [link.space for link in self.space_links]
+
+    @property
+    def active_outgoing_relationships(self):
+        return sorted(
+            [link for link in self.outgoing_relationship_links if link.deleted_at is None],
+            key=lambda link: (link.relationship_type, link.target_decision_id, link.id or 0)
+        )
+
+    @property
+    def active_incoming_relationships(self):
+        return sorted(
+            [link for link in self.incoming_relationship_links if link.deleted_at is None],
+            key=lambda link: (link.relationship_type, link.source_decision_id, link.id or 0)
+        )
 
     def get_display_id(self):
         """Get the display ID in format PREFIX-NNN (e.g., GYH-034)."""
@@ -1325,7 +1392,16 @@ class ArchitectureDecision(db.Model):
             return 0
         return self.comments.filter(DecisionComment.deleted_at == None).count()
 
-    def to_dict(self, include_spaces=False):
+    def to_reference_dict(self):
+        return {
+            'id': self.id,
+            'display_id': self.get_display_id(),
+            'decision_number': self.decision_number,
+            'title': self.title,
+            'status': self.status,
+        }
+
+    def to_dict(self, include_spaces=False, include_relationships=False):
         result = {
             'id': self.id,
             'display_id': self.get_display_id(),
@@ -1349,10 +1425,32 @@ class ArchitectureDecision(db.Model):
         }
         if include_spaces:
             result['spaces'] = [s.to_dict() for s in self.spaces]
+        if include_relationships:
+            relationship_config = get_tenant_relationship_config(self.tenant_id)
+            result['outgoing_relationships'] = [
+                relationship.to_dict(
+                    direction='outgoing',
+                    relationship_type_config=get_relationship_type_config(
+                        relationship.relationship_type,
+                        config=relationship_config
+                    )
+                )
+                for relationship in self.active_outgoing_relationships
+            ]
+            result['incoming_relationships'] = [
+                relationship.to_dict(
+                    direction='incoming',
+                    relationship_type_config=get_relationship_type_config(
+                        relationship.relationship_type,
+                        config=relationship_config
+                    )
+                )
+                for relationship in self.active_incoming_relationships
+            ]
         return result
 
     def to_dict_with_history(self):
-        data = self.to_dict()
+        data = self.to_dict(include_spaces=True, include_relationships=True)
         data['history'] = [h.to_dict() for h in self.history]
         data['comments'] = [
             c.to_dict() for c in self.comments.filter(
@@ -1360,6 +1458,325 @@ class ArchitectureDecision(db.Model):
             ).order_by(DecisionComment.created_at.asc()).all()
         ]
         return data
+
+
+class DecisionRelationship(db.Model):
+    __tablename__ = 'decision_relationships'
+
+    id = db.Column(db.Integer, primary_key=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False, index=True)
+    source_decision_id = db.Column(db.Integer, db.ForeignKey('architecture_decisions.id'), nullable=False, index=True)
+    target_decision_id = db.Column(db.Integer, db.ForeignKey('architecture_decisions.id'), nullable=False, index=True)
+    relationship_type = db.Column(db.String(64), nullable=False, index=True)
+    notes = db.Column(db.Text, nullable=True)
+    target_previous_status = db.Column(db.String(50), nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    deleted_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    deleted_at = db.Column(db.DateTime, nullable=True)
+
+    tenant = db.relationship('Tenant', backref=db.backref('decision_relationships', lazy='dynamic'))
+    source_decision = db.relationship(
+        'ArchitectureDecision',
+        foreign_keys=[source_decision_id],
+        back_populates='outgoing_relationship_links'
+    )
+    target_decision = db.relationship(
+        'ArchitectureDecision',
+        foreign_keys=[target_decision_id],
+        back_populates='incoming_relationship_links'
+    )
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    updated_by = db.relationship('User', foreign_keys=[updated_by_id])
+    deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
+
+    __table_args__ = (
+        db.Index('idx_decision_relationships_source_type', 'source_decision_id', 'relationship_type'),
+        db.Index('idx_decision_relationships_target_type', 'target_decision_id', 'relationship_type'),
+    )
+
+    def to_dict(self, direction='outgoing', relationship_type_config=None):
+        relationship_type_config = relationship_type_config or {}
+        counterpart = self.target_decision if direction == 'outgoing' else self.source_decision
+        label = relationship_type_config.get('label', self.relationship_type)
+        if direction == 'incoming':
+            label = relationship_type_config.get('inverse_label', label)
+
+        return {
+            'id': self.id,
+            'direction': direction,
+            'relationship_type': self.relationship_type,
+            'label': label,
+            'inverse_label': relationship_type_config.get('inverse_label'),
+            'description': relationship_type_config.get('description', ''),
+            'notes': self.notes,
+            'has_status_effect': bool(relationship_type_config.get('has_status_effect')),
+            'counterpart': counterpart.to_reference_dict() if counterpart else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+def get_tenant_relationship_config(tenant_id=None):
+    if not tenant_id:
+        return normalize_relationship_settings(None)
+
+    settings = TenantSettings.query.filter_by(tenant_id=tenant_id).first()
+    if not settings:
+        return normalize_relationship_settings(None)
+    return settings.get_decision_relationship_config()
+
+
+def get_tenant_relationship_catalog(tenant_id=None):
+    catalog = get_effective_relationship_catalog(get_tenant_relationship_config(tenant_id))
+    return {
+        'packs': catalog['packs'],
+        'types': catalog['types'],
+        'default_selected_pack_ids': catalog.get('default_selected_pack_ids', []),
+    }
+
+
+def normalize_decision_relationships(requested_relationships, tenant_id=None, source_decision_id=None):
+    if requested_relationships is None:
+        return []
+
+    if not isinstance(requested_relationships, list):
+        raise ValueError("relationships must be a list")
+
+    relationship_config = get_tenant_relationship_config(tenant_id)
+    normalized = []
+    seen_relationships = set()
+
+    for index, raw_relationship in enumerate(requested_relationships):
+        if not isinstance(raw_relationship, dict):
+            raise ValueError(f"relationships[{index}] must be an object")
+
+        relationship_type = str(raw_relationship.get('relationship_type') or '').strip()
+        if not relationship_type:
+            raise ValueError(f"relationships[{index}].relationship_type is required")
+        if not get_relationship_type_config(relationship_type, config=relationship_config):
+            raise ValueError(f"Unknown relationship type: {relationship_type}")
+
+        raw_target_id = raw_relationship.get('target_decision_id')
+        try:
+            target_decision_id = int(raw_target_id)
+        except (TypeError, ValueError):
+            raise ValueError(f"relationships[{index}].target_decision_id must be an integer")
+
+        if target_decision_id <= 0:
+            raise ValueError(f"relationships[{index}].target_decision_id must be a positive integer")
+
+        if source_decision_id and target_decision_id == source_decision_id:
+            raise ValueError("A decision cannot be related to itself")
+
+        notes = str(raw_relationship.get('notes') or '').strip()
+        if len(notes) > 2000:
+            raise ValueError("Relationship notes must be 2000 characters or fewer")
+
+        relationship_key = (target_decision_id, relationship_type)
+        if relationship_key in seen_relationships:
+            raise ValueError(
+                f"Duplicate relationship for target decision {target_decision_id} and type {relationship_type}"
+            )
+
+        seen_relationships.add(relationship_key)
+        normalized.append({
+            'target_decision_id': target_decision_id,
+            'relationship_type': relationship_type,
+            'notes': notes or None,
+        })
+
+    return sorted(
+        normalized,
+        key=lambda relationship: (
+            relationship['relationship_type'],
+            relationship['target_decision_id'],
+            relationship['notes'] or '',
+        )
+    )
+
+
+def decision_relationships_changed(decision, requested_relationships):
+    normalized_requested = normalize_decision_relationships(
+        requested_relationships,
+        tenant_id=decision.tenant_id,
+        source_decision_id=decision.id
+    )
+    normalized_existing = sorted(
+        [
+            {
+                'target_decision_id': relationship.target_decision_id,
+                'relationship_type': relationship.relationship_type,
+                'notes': (relationship.notes or None),
+            }
+            for relationship in decision.active_outgoing_relationships
+        ],
+        key=lambda relationship: (
+            relationship['relationship_type'],
+            relationship['target_decision_id'],
+            relationship['notes'] or '',
+        )
+    )
+    return normalized_existing != normalized_requested
+
+
+def _find_relationship_target(source_decision, target_decision_id):
+    query = ArchitectureDecision.query.filter(
+        ArchitectureDecision.id == target_decision_id,
+        ArchitectureDecision.deleted_at == None
+    )
+    if source_decision.tenant_id:
+        query = query.filter(ArchitectureDecision.tenant_id == source_decision.tenant_id)
+    else:
+        query = query.filter(ArchitectureDecision.domain == source_decision.domain)
+    return query.first()
+
+
+def _would_create_supersedes_cycle(source_decision, target_decision):
+    if not source_decision.id or not target_decision.id:
+        return False
+    if source_decision.id == target_decision.id:
+        return True
+
+    pending_ids = [target_decision.id]
+    visited_ids = set()
+
+    while pending_ids:
+        current_id = pending_ids.pop()
+        if current_id in visited_ids:
+            continue
+        visited_ids.add(current_id)
+
+        if current_id == source_decision.id:
+            return True
+
+        query = DecisionRelationship.query.filter(
+            DecisionRelationship.source_decision_id == current_id,
+            DecisionRelationship.relationship_type == 'supersedes',
+            DecisionRelationship.deleted_at == None
+        )
+        if source_decision.tenant_id:
+            query = query.filter(DecisionRelationship.tenant_id == source_decision.tenant_id)
+
+        pending_ids.extend(link.target_decision_id for link in query.all())
+
+    return False
+
+
+def _build_supersedes_reason(source_decision):
+    display_id = source_decision.get_display_id() or (
+        f"ADR-{source_decision.decision_number}" if source_decision.decision_number else f"ADR-{source_decision.id}"
+    )
+    return f"Superseded by {display_id}"
+
+
+def _restore_superseded_target_status(relationship, actor=None):
+    target_decision = relationship.target_decision
+    if not target_decision or target_decision.deleted_at is not None:
+        return
+
+    other_supersedes = DecisionRelationship.query.filter(
+        DecisionRelationship.target_decision_id == target_decision.id,
+        DecisionRelationship.relationship_type == 'supersedes',
+        DecisionRelationship.deleted_at == None,
+        DecisionRelationship.id != relationship.id
+    )
+    if relationship.tenant_id:
+        other_supersedes = other_supersedes.filter(DecisionRelationship.tenant_id == relationship.tenant_id)
+    if other_supersedes.count() > 0:
+        return
+
+    if target_decision.status != 'superseded':
+        return
+
+    restored_status = relationship.target_previous_status or 'accepted'
+    if restored_status not in ArchitectureDecision.VALID_STATUSES or restored_status == 'superseded':
+        restored_status = 'accepted'
+
+    save_history(
+        target_decision,
+        f"Restored after removing superseding relationship from {relationship.source_decision.get_display_id() or f'ADR-{relationship.source_decision_id}'}",
+        actor
+    )
+    target_decision.status = restored_status
+    if actor:
+        target_decision.updated_by_id = actor.id
+
+
+def sync_decision_relationships(decision, requested_relationships, actor=None):
+    normalized_requested = normalize_decision_relationships(
+        requested_relationships,
+        tenant_id=decision.tenant_id,
+        source_decision_id=decision.id
+    )
+    requested_by_key = {
+        (relationship['target_decision_id'], relationship['relationship_type']): relationship
+        for relationship in normalized_requested
+    }
+    existing_by_key = {
+        (relationship.target_decision_id, relationship.relationship_type): relationship
+        for relationship in decision.active_outgoing_relationships
+    }
+    now = datetime.now(timezone.utc)
+
+    for relationship_key, existing_relationship in existing_by_key.items():
+        if relationship_key in requested_by_key:
+            updated_notes = requested_by_key[relationship_key].get('notes')
+            if (existing_relationship.notes or None) != updated_notes:
+                existing_relationship.notes = updated_notes
+                existing_relationship.updated_by_id = actor.id if actor else existing_relationship.updated_by_id
+            continue
+
+        if existing_relationship.relationship_type == 'supersedes':
+            _restore_superseded_target_status(existing_relationship, actor)
+
+        existing_relationship.deleted_at = now
+        existing_relationship.deleted_by_id = actor.id if actor else None
+        existing_relationship.updated_by_id = actor.id if actor else existing_relationship.updated_by_id
+
+    for relationship_key, requested_relationship in requested_by_key.items():
+        if relationship_key in existing_by_key:
+            continue
+
+        target_decision = _find_relationship_target(decision, requested_relationship['target_decision_id'])
+        if not target_decision:
+            raise ValueError(f"Target decision not found: {requested_relationship['target_decision_id']}")
+
+        target_previous_status = None
+        if requested_relationship['relationship_type'] == 'supersedes':
+            if _would_create_supersedes_cycle(decision, target_decision):
+                raise ValueError("Supersedes relationships cannot form a cycle")
+
+            existing_supersedes = DecisionRelationship.query.filter(
+                DecisionRelationship.target_decision_id == target_decision.id,
+                DecisionRelationship.relationship_type == 'supersedes',
+                DecisionRelationship.deleted_at == None
+            )
+            if decision.tenant_id:
+                existing_supersedes = existing_supersedes.filter(DecisionRelationship.tenant_id == decision.tenant_id)
+            if existing_supersedes.count() > 0:
+                raise ValueError("That decision is already superseded by another active decision")
+
+            target_previous_status = target_decision.status
+            if target_decision.status != 'superseded':
+                save_history(target_decision, _build_supersedes_reason(decision), actor)
+                target_decision.status = 'superseded'
+                if actor:
+                    target_decision.updated_by_id = actor.id
+
+        new_relationship = DecisionRelationship(
+            tenant_id=decision.tenant_id,
+            source_decision_id=decision.id,
+            target_decision_id=target_decision.id,
+            relationship_type=requested_relationship['relationship_type'],
+            notes=requested_relationship.get('notes'),
+            target_previous_status=target_previous_status,
+            created_by_id=actor.id if actor else None,
+            updated_by_id=actor.id if actor else None,
+        )
+        db.session.add(new_relationship)
 
 
 class DecisionHistory(db.Model):

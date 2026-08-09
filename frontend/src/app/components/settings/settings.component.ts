@@ -15,11 +15,12 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialogModule, MatDialog } from '@angular/material/dialog';
 import { MatChipsModule } from '@angular/material/chips';
-import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel, TeamsSettings, TeamsChannel, AISettings, AISettingsUpdate } from '../../services/admin.service';
+import { MatCheckboxModule } from '@angular/material/checkbox';
+import { AdminService, CreateSSOConfigRequest, EmailConfigRequest, AuthConfigRequest, SlackSettings, SlackChannel, TeamsSettings, TeamsChannel, AISettings, AISettingsUpdate, DecisionRelationshipSettingsUpdate } from '../../services/admin.service';
 import { ActivatedRoute } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest } from '../../models/decision.model';
+import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, GlobalRole, Space, RoleRequest, DecisionRelationshipCatalog, DecisionRelationshipPack, DecisionRelationshipSettings, DecisionRelationshipSettingsResponse, DecisionRelationshipType, CustomDecisionRelationshipType } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { SetupLinkDialogComponent } from '../shared/setup-link-dialog.component';
 import { MatSelectModule } from '@angular/material/select';
@@ -47,6 +48,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     MatSnackBarModule,
     MatDialogModule,
     MatChipsModule,
+    MatCheckboxModule,
     MatSelectModule,
     MatRadioModule,
     MatTooltipModule,
@@ -1452,6 +1454,176 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
           </div>
         </mat-tab>
         }
+
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="Decision Relationships">
+          <div class="tab-content">
+            <mat-card class="info-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>account_tree</mat-icon>
+                  Decision Relationship Classes
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p>Control how decisions can supersede, amend, depend on, or otherwise relate to one another in your organisation.</p>
+                <ul>
+                  <li><strong>Industry packs:</strong> enable built-in relationship classes that fit your work</li>
+                  <li><strong>Custom classes:</strong> define tenant-specific relationship labels when the built-ins are not enough</li>
+                  <li><strong>Supersedes:</strong> automatically moves the older decision into superseded status</li>
+                </ul>
+              </mat-card-content>
+            </mat-card>
+
+            @if (loadingDecisionRelationshipSettings) {
+              <div class="loading-spinner">
+                <mat-spinner diameter="40"></mat-spinner>
+              </div>
+            } @else if (decisionRelationshipSettingsResponse && decisionRelationshipConfig) {
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>widgets</mat-icon>
+                    Industry Packs
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <div class="relationship-pack-grid">
+                    @for (pack of decisionRelationshipSettingsResponse.available_catalog.packs; track pack.id) {
+                      <label class="relationship-pack-card">
+                        <mat-checkbox
+                          [checked]="isRelationshipPackSelected(pack.id)"
+                          (change)="onDecisionRelationshipPackToggle(pack.id, $event.checked)">
+                          {{ pack.label }}
+                        </mat-checkbox>
+                        <p>{{ pack.description }}</p>
+                      </label>
+                    }
+                  </div>
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>tune</mat-icon>
+                    Enabled Relationship Classes
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  @if (getAvailableRelationshipTypes().length === 0) {
+                    <p class="empty-message">Select at least one pack or add a custom class to enable decision relationships.</p>
+                  } @else {
+                    <div class="relationship-type-list">
+                      @for (type of getAvailableRelationshipTypes(); track type.key) {
+                        <div class="relationship-type-row">
+                          <mat-checkbox
+                            [checked]="isRelationshipTypeEnabled(type.key)"
+                            (change)="onDecisionRelationshipTypeToggle(type.key, $event.checked)">
+                            <span class="relationship-type-label">{{ type.label }}</span>
+                          </mat-checkbox>
+                          <div class="relationship-type-meta">
+                            <p>{{ type.description }}</p>
+                            <div class="relationship-type-badges">
+                              @for (packId of type.pack_ids; track packId) {
+                                <mat-chip>{{ getRelationshipPackLabel(packId) }}</mat-chip>
+                              }
+                              @if (type.has_status_effect) {
+                                <mat-chip>Changes status</mat-chip>
+                              }
+                            </div>
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  }
+                </mat-card-content>
+              </mat-card>
+
+              <mat-card class="form-card">
+                <mat-card-header>
+                  <mat-card-title>
+                    <mat-icon>add_link</mat-icon>
+                    Custom Relationship Classes
+                  </mat-card-title>
+                </mat-card-header>
+                <mat-card-content>
+                  <p class="option-hint">Use lowercase keys with underscores, for example <code>requires_regulatory_signoff</code>.</p>
+
+                  @if (decisionRelationshipConfig.custom_relationship_types.length === 0) {
+                    <p class="empty-message">No custom relationship classes yet.</p>
+                  } @else {
+                    <div class="custom-relationship-list">
+                      @for (relationshipType of decisionRelationshipConfig.custom_relationship_types; track $index; let i = $index) {
+                        <div class="custom-relationship-row">
+                          <div class="form-row">
+                            <mat-form-field appearance="outline">
+                              <mat-label>Key</mat-label>
+                              <input
+                                matInput
+                                [(ngModel)]="relationshipType.key"
+                                [ngModelOptions]="{standalone: true}"
+                                (ngModelChange)="onCustomRelationshipKeyChange(i, $event)"
+                                placeholder="requires_signoff">
+                            </mat-form-field>
+
+                            <mat-form-field appearance="outline">
+                              <mat-label>Label</mat-label>
+                              <input
+                                matInput
+                                [(ngModel)]="relationshipType.label"
+                                [ngModelOptions]="{standalone: true}"
+                                (ngModelChange)="onDecisionRelationshipConfigChange()"
+                                placeholder="Requires signoff from">
+                            </mat-form-field>
+
+                            <button mat-icon-button color="warn" (click)="removeCustomRelationshipType(i)" matTooltip="Remove custom relationship class">
+                              <mat-icon>delete</mat-icon>
+                            </button>
+                          </div>
+
+                          <div class="form-row">
+                            <mat-form-field appearance="outline">
+                              <mat-label>Inverse Label</mat-label>
+                              <input
+                                matInput
+                                [(ngModel)]="relationshipType.inverse_label"
+                                [ngModelOptions]="{standalone: true}"
+                                (ngModelChange)="onDecisionRelationshipConfigChange()"
+                                placeholder="Approves">
+                            </mat-form-field>
+
+                            <mat-form-field appearance="outline" class="full-width">
+                              <mat-label>Description</mat-label>
+                              <input
+                                matInput
+                                [(ngModel)]="relationshipType.description"
+                                [ngModelOptions]="{standalone: true}"
+                                (ngModelChange)="onDecisionRelationshipConfigChange()"
+                                placeholder="Describe when this relationship should be used">
+                            </mat-form-field>
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  }
+                </mat-card-content>
+                <mat-card-actions>
+                  <button mat-stroked-button (click)="addCustomRelationshipType()">
+                    <mat-icon>add</mat-icon>
+                    Add Custom Class
+                  </button>
+                  <button mat-flat-button color="primary" (click)="saveDecisionRelationshipSettings()" [disabled]="savingDecisionRelationshipSettings">
+                    <mat-spinner diameter="20" *ngIf="savingDecisionRelationshipSettings"></mat-spinner>
+                    <mat-icon *ngIf="!savingDecisionRelationshipSettings">save</mat-icon>
+                    <span *ngIf="!savingDecisionRelationshipSettings">Save Settings</span>
+                  </button>
+                </mat-card-actions>
+              </mat-card>
+            }
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -2564,6 +2736,91 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       }
     }
 
+    /* Decision Relationship Settings */
+    .relationship-pack-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }
+
+    .relationship-pack-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 16px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+
+    .relationship-pack-card p {
+      margin: 0;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .relationship-type-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .relationship-type-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 260px) 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 12px 0;
+      border-bottom: 1px solid #eeeeee;
+    }
+
+    .relationship-type-row:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .relationship-type-label {
+      font-weight: 500;
+      color: #1a1a1a;
+    }
+
+    .relationship-type-meta p {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .relationship-type-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .custom-relationship-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .custom-relationship-row {
+      padding: 16px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+
+    .custom-relationship-row .form-row {
+      align-items: center;
+    }
+
+    @media (max-width: 900px) {
+      .relationship-type-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* AI Settings Styles */
     .settings-form {
       padding: 8px 0;
@@ -2722,10 +2979,17 @@ export class SettingsComponent implements OnInit {
   savingAiSettings = false;
   aiSettingsChanged = false;
 
+  // Decision relationship settings
+  decisionRelationshipSettingsResponse: DecisionRelationshipSettingsResponse | null = null;
+  decisionRelationshipConfig: DecisionRelationshipSettings | null = null;
+  loadingDecisionRelationshipSettings = false;
+  savingDecisionRelationshipSettings = false;
+  decisionRelationshipSettingsChanged = false;
+
   // Tab index for navigation
   selectedTabIndex = 0;
   // Tab map matches actual tab order in template:
-  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*, 8: Teams*, 9: AI*
+  // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*, 8: Teams*, 9: AI*, 10: Decision Relationships*
   // (*) = conditional tabs for non-master accounts
   private tabMap: { [key: string]: number } = {
     'sso': 0,
@@ -2737,7 +3001,8 @@ export class SettingsComponent implements OnInit {
     'role-requests': 6,
     'slack': 7,
     'teams': 8,
-    'ai': 9
+    'ai': 9,
+    'decision-relationships': 10
   };
 
   /**
@@ -2858,6 +3123,7 @@ export class SettingsComponent implements OnInit {
       this.loadSlackSettings();
       this.loadTeamsSettings();
       this.loadAiSettings();
+      this.loadDecisionRelationshipSettings();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -3887,6 +4153,186 @@ export class SettingsComponent implements OnInit {
       error: (err) => {
         this.snackBar.open(err.error?.error || 'Failed to save AI settings', 'Close', { duration: 5000 });
         this.savingAiSettings = false;
+      }
+    });
+  }
+
+  loadDecisionRelationshipSettings(): void {
+    this.loadingDecisionRelationshipSettings = true;
+    this.adminService.getDecisionRelationshipSettings().subscribe({
+      next: (response) => {
+        this.decisionRelationshipSettingsResponse = response;
+        this.decisionRelationshipConfig = {
+          selected_pack_ids: [...response.config.selected_pack_ids],
+          enabled_relationship_types: [...response.config.enabled_relationship_types],
+          custom_relationship_types: response.config.custom_relationship_types.map((type) => ({ ...type }))
+        };
+        this.decisionRelationshipSettingsChanged = false;
+        this.loadingDecisionRelationshipSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to load decision relationship settings', 'Close', { duration: 5000 });
+        this.loadingDecisionRelationshipSettings = false;
+      }
+    });
+  }
+
+  onDecisionRelationshipConfigChange(): void {
+    this.decisionRelationshipSettingsChanged = true;
+  }
+
+  isRelationshipPackSelected(packId: string): boolean {
+    return this.decisionRelationshipConfig?.selected_pack_ids.includes(packId) ?? false;
+  }
+
+  isRelationshipTypeEnabled(typeKey: string): boolean {
+    return this.decisionRelationshipConfig?.enabled_relationship_types.includes(typeKey) ?? false;
+  }
+
+  getRelationshipPackLabel(packId: string): string {
+    const pack = this.decisionRelationshipSettingsResponse?.available_catalog.packs.find((item) => item.id === packId);
+    return pack?.label || packId;
+  }
+
+  getAvailableRelationshipTypes(): DecisionRelationshipType[] {
+    if (!this.decisionRelationshipSettingsResponse || !this.decisionRelationshipConfig) {
+      return [];
+    }
+
+    const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
+    const builtinTypes = this.decisionRelationshipSettingsResponse.available_catalog.types.filter(
+      (type) => type.builtin && type.pack_ids.some((packId) => selectedPackIds.has(packId))
+    );
+    const customTypes = this.decisionRelationshipConfig.custom_relationship_types.map((type) => ({
+      key: type.key,
+      label: type.label,
+      inverse_label: type.inverse_label || type.label,
+      description: type.description || '',
+      builtin: false,
+      directional: (type.inverse_label || type.label) !== type.label,
+      has_status_effect: false,
+      pack_ids: ['custom']
+    }));
+    return [...builtinTypes, ...customTypes];
+  }
+
+  onDecisionRelationshipPackToggle(packId: string, checked: boolean): void {
+    if (!this.decisionRelationshipConfig || !this.decisionRelationshipSettingsResponse) return;
+
+    const selected = new Set(this.decisionRelationshipConfig.selected_pack_ids);
+    if (checked) {
+      selected.add(packId);
+    } else {
+      selected.delete(packId);
+    }
+
+    this.decisionRelationshipConfig.selected_pack_ids = this.decisionRelationshipSettingsResponse.available_catalog.packs
+      .map((pack) => pack.id)
+      .filter((id) => selected.has(id));
+
+    const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
+    const availableBuiltinTypeKeys = this.decisionRelationshipSettingsResponse.available_catalog.types
+      .filter((type) => type.builtin && type.pack_ids.some((candidatePackId) => selectedPackIds.has(candidatePackId)))
+      .map((type) => type.key);
+    const customTypeKeys = this.decisionRelationshipConfig.custom_relationship_types.map((type) => type.key);
+    const enabledKeys = new Set(
+      this.decisionRelationshipConfig.enabled_relationship_types.filter(
+        (typeKey) => availableBuiltinTypeKeys.includes(typeKey) || customTypeKeys.includes(typeKey)
+      )
+    );
+
+    if (checked) {
+      for (const type of this.decisionRelationshipSettingsResponse.available_catalog.types) {
+        if (type.pack_ids.includes(packId)) {
+          enabledKeys.add(type.key);
+        }
+      }
+    }
+
+    this.decisionRelationshipConfig.enabled_relationship_types = [
+      ...availableBuiltinTypeKeys.filter((typeKey) => enabledKeys.has(typeKey)),
+      ...customTypeKeys.filter((typeKey) => enabledKeys.has(typeKey))
+    ];
+    this.onDecisionRelationshipConfigChange();
+  }
+
+  onDecisionRelationshipTypeToggle(typeKey: string, checked: boolean): void {
+    if (!this.decisionRelationshipConfig) return;
+
+    const enabled = new Set(this.decisionRelationshipConfig.enabled_relationship_types);
+    if (checked) {
+      enabled.add(typeKey);
+    } else {
+      enabled.delete(typeKey);
+    }
+
+    this.decisionRelationshipConfig.enabled_relationship_types = this.getAvailableRelationshipTypes()
+      .map((type) => type.key)
+      .filter((key) => enabled.has(key));
+    this.onDecisionRelationshipConfigChange();
+  }
+
+  addCustomRelationshipType(): void {
+    if (!this.decisionRelationshipConfig) return;
+
+    this.decisionRelationshipConfig.custom_relationship_types.push({
+      key: '',
+      label: '',
+      inverse_label: '',
+      description: ''
+    });
+    this.onDecisionRelationshipConfigChange();
+  }
+
+  removeCustomRelationshipType(index: number): void {
+    if (!this.decisionRelationshipConfig) return;
+
+    const [removed] = this.decisionRelationshipConfig.custom_relationship_types.splice(index, 1);
+    if (removed?.key) {
+      this.decisionRelationshipConfig.enabled_relationship_types =
+        this.decisionRelationshipConfig.enabled_relationship_types.filter((typeKey) => typeKey !== removed.key);
+    }
+    this.onDecisionRelationshipConfigChange();
+  }
+
+  onCustomRelationshipKeyChange(index: number, rawValue: string): void {
+    if (!this.decisionRelationshipConfig) return;
+
+    const normalized = rawValue.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+    this.decisionRelationshipConfig.custom_relationship_types[index].key = normalized;
+    this.onDecisionRelationshipConfigChange();
+  }
+
+  saveDecisionRelationshipSettings(): void {
+    if (!this.decisionRelationshipConfig) return;
+
+    this.savingDecisionRelationshipSettings = true;
+    const update: DecisionRelationshipSettingsUpdate = {
+      selected_pack_ids: [...this.decisionRelationshipConfig.selected_pack_ids],
+      enabled_relationship_types: [...this.decisionRelationshipConfig.enabled_relationship_types],
+      custom_relationship_types: this.decisionRelationshipConfig.custom_relationship_types.map((type) => ({
+        key: type.key,
+        label: type.label,
+        inverse_label: type.inverse_label || type.label,
+        description: type.description || ''
+      }))
+    };
+
+    this.adminService.updateDecisionRelationshipSettings(update).subscribe({
+      next: (response) => {
+        this.snackBar.open('Decision relationship settings saved successfully', 'Close', { duration: 3000 });
+        this.decisionRelationshipSettingsResponse = response;
+        this.decisionRelationshipConfig = {
+          selected_pack_ids: [...response.config.selected_pack_ids],
+          enabled_relationship_types: [...response.config.enabled_relationship_types],
+          custom_relationship_types: response.config.custom_relationship_types.map((type) => ({ ...type }))
+        };
+        this.decisionRelationshipSettingsChanged = false;
+        this.savingDecisionRelationshipSettings = false;
+      },
+      error: (err) => {
+        this.snackBar.open(err.error?.error || 'Failed to save decision relationship settings', 'Close', { duration: 5000 });
+        this.savingDecisionRelationshipSettings = false;
       }
     });
   }
