@@ -60,9 +60,9 @@ class TestGetTools:
         assert isinstance(tools, list)
 
     def test_get_tools_returns_correct_number(self, app, session):
-        """get_tools returns all 7 tools."""
+        """get_tools returns all relationship-aware MCP tools."""
         tools = get_tools()
-        assert len(tools) == 7
+        assert len(tools) == 11
 
     def test_get_tools_returns_expected_tool_names(self, app, session):
         """get_tools returns tools with expected names."""
@@ -75,7 +75,11 @@ class TestGetTools:
             'create_decision',
             'get_decision_history',
             'list_decision_comments',
-            'add_decision_comment'
+            'add_decision_comment',
+            'get_relationship_catalog',
+            'list_decision_relationships',
+            'link_decisions',
+            'supersede_decision',
         ]
         assert tool_names == expected_names
 
@@ -298,6 +302,17 @@ class TestValidateToolInput:
         assert error is not None
         assert 'must be one of' in error
 
+    def test_validate_create_decision_accepts_supersedes_id(self, app, session):
+        """create_decision accepts a supersedes_id helper argument."""
+        error = validate_tool_input('create_decision', {
+            'title': 'Test',
+            'context': 'Context',
+            'decision': 'Decision',
+            'consequences': 'Consequences',
+            'supersedes_id': 'ADR-42'
+        })
+        assert error is None
+
     def test_validate_get_decision_history_valid(self, app, session):
         """validate_tool_input returns None for valid get_decision_history input."""
         error = validate_tool_input('get_decision_history', {'id': 'ADR-42'})
@@ -359,6 +374,29 @@ class TestValidateToolInput:
         error = validate_tool_input('search_decisions', {
             'query': 'test',
             'extra_field': 'ignored'
+        })
+        assert error is None
+
+    def test_validate_get_relationship_catalog_valid(self, app, session):
+        error = validate_tool_input('get_relationship_catalog', {})
+        assert error is None
+
+    def test_validate_list_decision_relationships_requires_id(self, app, session):
+        error = validate_tool_input('list_decision_relationships', {})
+        assert error == 'Missing required field: id'
+
+    def test_validate_link_decisions_requires_fields(self, app, session):
+        error = validate_tool_input('link_decisions', {
+            'source_decision_id': 'ADR-1',
+            'target_decision_id': 'ADR-2',
+            'relationship_type': 'related_to'
+        })
+        assert error is None
+
+    def test_validate_supersede_decision_requires_fields(self, app, session):
+        error = validate_tool_input('supersede_decision', {
+            'source_decision_id': 'ADR-10',
+            'target_decision_id': 'ADR-2'
         })
         assert error is None
 
@@ -620,6 +658,116 @@ class TestMCPToolHandlerExecuteTool:
         assert result['comment']['body'] == 'This should be discussed with platform owners.'
         assert DecisionComment.query.filter_by(decision_id=sample_decision.id).count() == 1
 
+    def test_execute_get_relationship_catalog(self, app, session, handler_read_only):
+        success, result = handler_read_only.execute_tool('get_relationship_catalog', {})
+        assert success is True
+        assert any(pack['id'] == 'core' for pack in result['packs'])
+        assert any(relationship_type['key'] == 'supersedes' for relationship_type in result['types'])
+
+    def test_execute_create_decision_with_supersedes(self, app, session, handler_with_write, ai_enabled_tenant, sample_user):
+        target = ArchitectureDecision(
+            title='Legacy decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=ai_enabled_tenant.domain,
+            tenant_id=ai_enabled_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=1
+        )
+        session.add(target)
+        session.commit()
+
+        success, result = handler_with_write.execute_tool('create_decision', {
+            'title': 'Replacement decision',
+            'context': 'Context',
+            'decision': 'Decision',
+            'consequences': 'Consequences',
+            'status': 'accepted',
+            'supersedes_id': str(target.id)
+        })
+
+        assert success is True
+        session.refresh(target)
+        assert target.status == 'superseded'
+        assert result['decision']['outgoing_relationships'][0]['relationship_type'] == 'supersedes'
+
+    def test_execute_list_decision_relationships(self, app, session, handler_with_write, ai_enabled_tenant, sample_user):
+        source = ArchitectureDecision(
+            title='Source decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=ai_enabled_tenant.domain,
+            tenant_id=ai_enabled_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=10
+        )
+        target = ArchitectureDecision(
+            title='Target decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=ai_enabled_tenant.domain,
+            tenant_id=ai_enabled_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=11
+        )
+        session.add_all([source, target])
+        session.commit()
+
+        success, link_result = handler_with_write.execute_tool('link_decisions', {
+            'source_decision_id': str(source.id),
+            'target_decision_id': str(target.id),
+            'relationship_type': 'related_to'
+        })
+        assert success is True
+
+        success, result = handler_with_write.execute_tool('list_decision_relationships', {
+            'id': str(source.id)
+        })
+        assert success is True
+        assert len(result['outgoing_relationships']) == 1
+        assert result['outgoing_relationships'][0]['relationship_type'] == 'related_to'
+
+    def test_execute_supersede_decision(self, app, session, handler_with_write, ai_enabled_tenant, sample_user):
+        source = ArchitectureDecision(
+            title='Replacement decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=ai_enabled_tenant.domain,
+            tenant_id=ai_enabled_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=20
+        )
+        target = ArchitectureDecision(
+            title='Legacy decision',
+            context='Context',
+            decision='Decision',
+            status='accepted',
+            consequences='Consequences',
+            domain=ai_enabled_tenant.domain,
+            tenant_id=ai_enabled_tenant.id,
+            created_by_id=sample_user.id,
+            decision_number=21
+        )
+        session.add_all([source, target])
+        session.commit()
+
+        success, result = handler_with_write.execute_tool('supersede_decision', {
+            'source_decision_id': str(source.id),
+            'target_decision_id': str(target.id)
+        })
+        assert success is True
+        session.refresh(target)
+        assert target.status == 'superseded'
+        assert result['decision']['outgoing_relationships'][0]['relationship_type'] == 'supersedes'
+
 
 class TestAuthenticateMCPRequest:
     """Test authenticate_mcp_request() function."""
@@ -752,7 +900,7 @@ class TestHandleMCPRequest:
         assert response['id'] == 1
         assert 'result' in response
         assert 'tools' in response['result']
-        assert len(response['result']['tools']) == 7
+        assert len(response['result']['tools']) == 11
 
     def test_handle_request_server_discover(
         self, app, session, enable_mcp, valid_api_key
@@ -1070,7 +1218,7 @@ class TestMCPAPIEndpoint:
         data = response.get_json()
         assert 'result' in data
         assert 'tools' in data['result']
-        assert len(data['result']['tools']) == 7
+        assert len(data['result']['tools']) == 11
         assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
 
     def test_initialize_legacy_protocol_returns_session_header(self, mcp_client, mcp_tenant_and_key):
@@ -1251,6 +1399,122 @@ class TestMCPAPIEndpoint:
         content = json.loads(data['result']['content'][0]['text'])
         assert 'decision' in content
         assert content['decision']['title'] == 'New Decision via MCP'
+
+    def test_tools_call_get_relationship_catalog(self, mcp_client, mcp_tenant_and_key):
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'get_relationship_catalog',
+                    'arguments': {}
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        content = json.loads(data['result']['content'][0]['text'])
+        assert any(pack['id'] == 'core' for pack in content['packs'])
+
+    def test_tools_call_list_decision_relationships(self, mcp_client, mcp_tenant_and_key):
+        _, _, api_key = mcp_tenant_and_key
+        with mcp_client.application.app_context():
+            tenant = Tenant.query.filter_by(domain='test.com').first()
+            user = User.query.filter_by(email='test@test.com').first()
+            target = ArchitectureDecision(
+                title='Target Decision',
+                context='Context',
+                decision='Decision',
+                consequences='Consequences',
+                status='accepted',
+                domain=tenant.domain,
+                tenant_id=tenant.id,
+                created_by_id=user.id,
+                decision_number=2
+            )
+            db.session.add(target)
+            db.session.commit()
+
+        link_response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'link_decisions',
+                    'arguments': {
+                        'source_decision_id': '1',
+                        'target_decision_id': '2',
+                        'relationship_type': 'related_to'
+                    }
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert link_response.status_code == 200
+
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 2,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'list_decision_relationships',
+                    'arguments': {'id': '1'}
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        content = json.loads(data['result']['content'][0]['text'])
+        assert len(content['outgoing_relationships']) == 1
+
+    def test_tools_call_supersede_decision(self, mcp_client, mcp_tenant_and_key):
+        _, _, api_key = mcp_tenant_and_key
+        with mcp_client.application.app_context():
+            tenant = Tenant.query.filter_by(domain='test.com').first()
+            user = User.query.filter_by(email='test@test.com').first()
+            target = ArchitectureDecision(
+                title='Legacy Decision',
+                context='Context',
+                decision='Decision',
+                consequences='Consequences',
+                status='accepted',
+                domain=tenant.domain,
+                tenant_id=tenant.id,
+                created_by_id=user.id,
+                decision_number=2
+            )
+            db.session.add(target)
+            db.session.commit()
+
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'tools/call',
+                'params': {
+                    'name': 'supersede_decision',
+                    'arguments': {
+                        'source_decision_id': '1',
+                        'target_decision_id': '2'
+                    }
+                }
+            },
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        assert response.status_code == 200
+        data = response.get_json()
+        content = json.loads(data['result']['content'][0]['text'])
+        assert content['decision']['outgoing_relationships'][0]['relationship_type'] == 'supersedes'
 
     def test_tools_call_get_decision_history(self, mcp_client, mcp_tenant_and_key):
         """Successfully calls get_decision_history tool."""

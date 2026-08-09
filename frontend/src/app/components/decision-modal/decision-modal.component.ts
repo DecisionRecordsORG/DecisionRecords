@@ -14,7 +14,7 @@ import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { AdminService } from '../../services/admin.service';
-import { Decision, Space } from '../../models/decision.model';
+import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -244,6 +244,97 @@ export interface DecisionModalResult {
                            [disabled]="authService.isMasterAccount">
                   </mat-form-field>
                   <p class="field-hint">The person who made this decision (may differ from who logged it)</p>
+                }
+              </div>
+            </div>
+
+            <div class="meta-card">
+              <div class="meta-card-header">
+                <mat-icon>account_tree</mat-icon>
+                <span>Decision Relationships</span>
+              </div>
+              <div class="meta-card-content">
+                @if (mode === 'view') {
+                  @if (hasRelationshipSummary()) {
+                    @if (getOutgoingRelationships().length > 0) {
+                      <div class="relationship-summary-group">
+                        <div class="relationship-summary-title">Outgoing</div>
+                        <div class="relationship-summary-list">
+                          @for (relationship of getOutgoingRelationships(); track relationship.id) {
+                            <div class="relationship-summary-item">
+                              <div class="relationship-summary-label">{{ relationship.label }}</div>
+                              <div class="relationship-summary-target">
+                                {{ relationship.counterpart?.display_id || ('ADR-' + relationship.counterpart?.id) }} · {{ relationship.counterpart?.title }}
+                              </div>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    }
+
+                    @if (getIncomingRelationships().length > 0) {
+                      <div class="relationship-summary-group">
+                        <div class="relationship-summary-title">Incoming</div>
+                        <div class="relationship-summary-list">
+                          @for (relationship of getIncomingRelationships(); track relationship.id) {
+                            <div class="relationship-summary-item">
+                              <div class="relationship-summary-label">{{ relationship.label }}</div>
+                              <div class="relationship-summary-target">
+                                {{ relationship.counterpart?.display_id || ('ADR-' + relationship.counterpart?.id) }} · {{ relationship.counterpart?.title }}
+                              </div>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                    }
+                  } @else {
+                    <span class="no-owner">No relationships recorded</span>
+                  }
+                } @else {
+                  @if (getRelationshipTypeOptions().length === 0) {
+                    <p class="field-hint">No relationship classes are enabled for this tenant yet.</p>
+                  } @else {
+                    <div class="relationship-editor-list">
+                      @for (relationship of editableRelationships; track $index; let i = $index) {
+                        <div class="relationship-editor-row">
+                          <mat-form-field appearance="outline" class="full-width compact-field">
+                            <mat-label>Relationship</mat-label>
+                            <mat-select [(ngModel)]="relationship.relationship_type" [ngModelOptions]="{standalone: true}">
+                              @for (relationshipType of getRelationshipTypeOptions(); track relationshipType.key) {
+                                <mat-option [value]="relationshipType.key">{{ relationshipType.label }}</mat-option>
+                              }
+                            </mat-select>
+                          </mat-form-field>
+
+                          <mat-form-field appearance="outline" class="full-width compact-field">
+                            <mat-label>Decision</mat-label>
+                            <mat-select [(ngModel)]="relationship.target_decision_id" [ngModelOptions]="{standalone: true}">
+                              @for (reference of getRelationshipDecisionOptions(); track reference.id) {
+                                <mat-option [value]="reference.id">
+                                  {{ reference.display_id || ('ADR-' + reference.id) }} · {{ reference.title }}
+                                </mat-option>
+                              }
+                            </mat-select>
+                          </mat-form-field>
+
+                          <mat-form-field appearance="outline" class="full-width compact-field">
+                            <mat-label>Notes (optional)</mat-label>
+                            <input matInput [(ngModel)]="relationship.notes" [ngModelOptions]="{standalone: true}">
+                          </mat-form-field>
+
+                          <button mat-icon-button color="warn" (click)="removeRelationship(i)" matTooltip="Remove relationship">
+                            <mat-icon>delete</mat-icon>
+                          </button>
+                        </div>
+                      }
+                    </div>
+
+                    <button mat-stroked-button type="button" (click)="addRelationship()" [disabled]="authService.isMasterAccount">
+                      <mat-icon>add_link</mat-icon>
+                      Add Relationship
+                    </button>
+                    <p class="field-hint">Use <strong>Supersedes</strong> to replace an older decision and move it into superseded status.</p>
+                  }
                 }
               </div>
             </div>
@@ -943,6 +1034,54 @@ export interface DecisionModalResult {
       font-style: italic;
     }
 
+    .relationship-editor-list,
+    .relationship-summary-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .relationship-editor-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+
+    .relationship-summary-group + .relationship-summary-group {
+      margin-top: 16px;
+    }
+
+    .relationship-summary-title {
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+    }
+
+    .relationship-summary-item {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #f8f9fa;
+    }
+
+    .relationship-summary-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #1565c0;
+      margin-bottom: 4px;
+    }
+
+    .relationship-summary-target {
+      font-size: 13px;
+      color: #333;
+      line-height: 1.4;
+    }
+
     .owner-display {
       display: flex;
       align-items: center;
@@ -1021,6 +1160,11 @@ export class DecisionModalComponent implements OnInit {
   selectedOwnerId: number | null = null;
   ownerEmail: string = '';
 
+  // Decision relationships
+  relationshipCatalog: DecisionRelationshipCatalog | null = null;
+  decisionReferences: DecisionReference[] = [];
+  editableRelationships: Array<{ target_decision_id: number | null; relationship_type: string; notes: string }> = [];
+
   // Computed properties
   get isCreate(): boolean { return this.mode === 'create'; }
   get isView(): boolean { return this.mode === 'view'; }
@@ -1069,11 +1213,17 @@ export class DecisionModalComponent implements OnInit {
     forkJoin({
       spaces: this.spaceService.getSpaces(),
       // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([])))
+      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
+        catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
+      ),
+      decisionReferences: this.decisionService.getDecisionReferences().pipe(catchError(() => of([])))
     }).subscribe({
-      next: ({ spaces, members }) => {
+      next: ({ spaces, members, relationshipCatalog, decisionReferences }) => {
         this.spaces = spaces;
         this.tenantMembers = members;
+        this.relationshipCatalog = relationshipCatalog;
+        this.decisionReferences = decisionReferences;
 
         // For new decisions, pre-select the default space
         if (this.isCreate) {
@@ -1096,12 +1246,18 @@ export class DecisionModalComponent implements OnInit {
       decision: this.decisionService.getDecision(id),
       spaces: this.spaceService.getSpaces(),
       // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([])))
+      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
+        catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
+      ),
+      decisionReferences: this.decisionService.getDecisionReferences().pipe(catchError(() => of([])))
     }).subscribe({
-      next: ({ decision, spaces, members }) => {
+      next: ({ decision, spaces, members, relationshipCatalog, decisionReferences }) => {
         this.decision = decision;
         this.spaces = spaces;
         this.tenantMembers = members;
+        this.relationshipCatalog = relationshipCatalog;
+        this.decisionReferences = decisionReferences;
 
         this.form.patchValue({
           title: decision.title,
@@ -1119,6 +1275,11 @@ export class DecisionModalComponent implements OnInit {
         // Load decision's owner
         this.selectedOwnerId = decision.owner_id || null;
         this.ownerEmail = decision.owner_email || '';
+        this.editableRelationships = (decision.outgoing_relationships || []).map((relationship) => ({
+          target_decision_id: relationship.counterpart?.id ?? null,
+          relationship_type: relationship.relationship_type,
+          notes: relationship.notes || ''
+        }));
 
         if (this.isView || this.authService.isMasterAccount) {
           this.form.disable();
@@ -1178,8 +1339,77 @@ export class DecisionModalComponent implements OnInit {
     this.expandedHistoryIndex = this.expandedHistoryIndex === index ? null : index;
   }
 
+  getRelationshipTypeOptions() {
+    return this.relationshipCatalog?.types || [];
+  }
+
+  getRelationshipDecisionOptions(): DecisionReference[] {
+    return this.decisionReferences.filter((reference) => reference.id !== this.decision?.id);
+  }
+
+  getOutgoingRelationships(): DecisionRelationship[] {
+    return this.decision?.outgoing_relationships || [];
+  }
+
+  getIncomingRelationships(): DecisionRelationship[] {
+    return this.decision?.incoming_relationships || [];
+  }
+
+  hasRelationshipSummary(): boolean {
+    return this.getOutgoingRelationships().length > 0 || this.getIncomingRelationships().length > 0;
+  }
+
+  addRelationship(): void {
+    this.editableRelationships.push({
+      target_decision_id: null,
+      relationship_type: this.getRelationshipTypeOptions()[0]?.key || '',
+      notes: ''
+    });
+  }
+
+  removeRelationship(index: number): void {
+    this.editableRelationships.splice(index, 1);
+  }
+
+  buildRelationshipPayload() {
+    return this.editableRelationships
+      .filter((relationship) => relationship.relationship_type || relationship.target_decision_id || relationship.notes)
+      .map((relationship) => ({
+        target_decision_id: relationship.target_decision_id,
+        relationship_type: relationship.relationship_type,
+        notes: relationship.notes || undefined
+      }));
+  }
+
+  validateEditableRelationships(): string | null {
+    const seen = new Set<string>();
+
+    for (const relationship of this.editableRelationships) {
+      if (!relationship.relationship_type && !relationship.target_decision_id && !relationship.notes) {
+        continue;
+      }
+      if (!relationship.relationship_type || !relationship.target_decision_id) {
+        return 'Each relationship needs both a relationship type and a target decision.';
+      }
+
+      const key = `${relationship.relationship_type}:${relationship.target_decision_id}`;
+      if (seen.has(key)) {
+        return 'Duplicate decision relationships are not allowed.';
+      }
+      seen.add(key);
+    }
+
+    return null;
+  }
+
   onSubmit(): void {
     if (this.form.invalid || this.authService.isMasterAccount) return;
+
+    const relationshipValidationError = this.validateEditableRelationships();
+    if (relationshipValidationError) {
+      this.snackBar.open(relationshipValidationError, 'Close', { duration: 4000 });
+      return;
+    }
 
     this.isSaving = true;
     const formValue = this.form.value;
@@ -1192,7 +1422,8 @@ export class DecisionModalComponent implements OnInit {
       consequences: formValue.consequences,
       space_ids: this.selectedSpaceIds,
       owner_id: this.selectedOwnerId,
-      owner_email: this.ownerEmail || undefined
+      owner_email: this.ownerEmail || undefined,
+      relationships: this.buildRelationshipPayload()
     };
 
     if (this.isEdit && formValue.change_reason) {

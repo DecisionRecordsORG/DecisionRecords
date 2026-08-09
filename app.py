@@ -16,7 +16,7 @@ except ImportError:
 from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
 
 # EE:START - EE Model Imports
 # Enterprise Edition models (Slack, Teams, AI integration)
@@ -2582,6 +2582,150 @@ if not SERVE_ANGULAR:
 
 # ==================== API Routes - Decisions ====================
 
+
+def extract_decision_relationships_payload(data):
+    relationships = []
+
+    if 'relationships' in data:
+        raw_relationships = data.get('relationships') or []
+        if not isinstance(raw_relationships, list):
+            raise ValueError("relationships must be a list")
+        relationships.extend(raw_relationships)
+
+    supersedes_decision_id = data.get('supersedes_decision_id')
+    if supersedes_decision_id:
+        relationships.append({
+            'relationship_type': 'supersedes',
+            'target_decision_id': supersedes_decision_id,
+        })
+
+    supersedes_decision_ids = data.get('supersedes_decision_ids') or []
+    if supersedes_decision_ids:
+        if not isinstance(supersedes_decision_ids, list):
+            raise ValueError("supersedes_decision_ids must be a list")
+        for target_decision_id in supersedes_decision_ids:
+            relationships.append({
+                'relationship_type': 'supersedes',
+                'target_decision_id': target_decision_id,
+            })
+
+    return relationships
+
+
+def request_includes_relationship_updates(data):
+    return any(
+        key in data
+        for key in ('relationships', 'supersedes_decision_id', 'supersedes_decision_ids')
+    )
+
+
+def get_or_create_tenant_settings(tenant, persist=False):
+    settings = tenant.settings
+    if settings:
+        return settings
+
+    settings = TenantSettings(tenant_id=tenant.id)
+    if persist:
+        db.session.add(settings)
+        db.session.flush()
+    return settings
+
+
+def apply_decision_space_links(decision, space_ids, tenant_id, actor_user_id):
+    if space_ids is None:
+        return
+    if not isinstance(space_ids, list):
+        raise ValueError("space_ids must be a list")
+
+    valid_spaces = Space.query.filter(
+        Space.id.in_(space_ids),
+        Space.tenant_id == tenant_id
+    ).all() if space_ids else []
+    valid_ids = {space.id for space in valid_spaces}
+    invalid_ids = set(space_ids) - valid_ids
+    if invalid_ids:
+        raise ValueError(f"Invalid space IDs: {sorted(invalid_ids)}")
+
+    DecisionSpace.query.filter_by(decision_id=decision.id).delete()
+    for space_id in space_ids:
+        db.session.add(DecisionSpace(
+            decision_id=decision.id,
+            space_id=space_id,
+            added_by_id=actor_user_id
+        ))
+
+
+@app.route('/api/decision-relationships/catalog', methods=['GET'])
+@login_required
+def api_get_decision_relationship_catalog():
+    """Return the effective relationship catalog for the active tenant."""
+    if is_master_account():
+        return jsonify(get_tenant_relationship_catalog(None))
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    return jsonify(get_tenant_relationship_catalog(tenant.id))
+
+
+@app.route('/api/tenant/decision-relationships/config', methods=['GET'])
+@login_required
+def api_get_tenant_decision_relationship_config():
+    """Return tenant relationship settings for tenant admins and stewards."""
+    if is_master_account():
+        return jsonify({'error': 'Super admin accounts cannot access tenant relationship settings'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    settings = get_or_create_tenant_settings(tenant)
+    return jsonify(settings.get_decision_relationship_settings_payload())
+
+
+@app.route('/api/tenant/decision-relationships/config', methods=['PUT'])
+@login_required
+def api_update_tenant_decision_relationship_config():
+    """Update tenant relationship settings for tenant admins and stewards."""
+    if is_master_account():
+        return jsonify({'error': 'Super admin accounts cannot modify tenant relationship settings'}), 403
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    settings = get_or_create_tenant_settings(tenant, persist=True)
+    data = request.get_json() or {}
+
+    try:
+        normalized_config = settings.set_decision_relationship_config(data)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=g.current_user.id,
+        action_type='update_decision_relationship_settings',
+        target_entity='tenant_settings',
+        target_id=settings.id,
+        details={'config': normalized_config}
+    )
+    db.session.commit()
+
+    payload = settings.get_decision_relationship_settings_payload()
+    payload['message'] = 'Decision relationship settings updated'
+    return jsonify(payload)
+
 @app.route('/api/decisions', methods=['GET'])
 @login_required
 @track_endpoint('api_decisions_list')
@@ -2612,6 +2756,18 @@ def api_create_decision():
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    try:
+        normalized_relationships = normalize_decision_relationships(
+            extract_decision_relationships_payload(data),
+            tenant_id=tenant.id
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
     # Sanitize and validate input - only title is required
     sanitized, errors = sanitize_request_data(data, {
@@ -2667,6 +2823,7 @@ def api_create_decision():
         consequences=sanitized.get('consequences', ''),
         decision_number=next_number,
         domain=domain,  # SECURITY: Always use authenticated user's domain
+        tenant_id=tenant.id,
         created_by_id=g.current_user.id,
         updated_by_id=g.current_user.id,
         owner_id=validated_owner_id,
@@ -2683,7 +2840,16 @@ def api_create_decision():
         decision.infrastructure = infrastructure_items
 
     db.session.add(decision)
-    db.session.commit()
+    try:
+        db.session.flush()
+        if 'space_ids' in data:
+            apply_decision_space_links(decision, data.get('space_ids'), tenant.id, g.current_user.id)
+        if normalized_relationships:
+            sync_decision_relationships(decision, normalized_relationships, actor=g.current_user)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
 
     # Send notifications - try domain-specific config first, fall back to system config
     email_config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain, enabled=True).first()
@@ -2717,7 +2883,7 @@ def api_create_decision():
         except Exception as e:
             logger.warning(f"Failed to send Slack notification for new decision: {e}")
 
-    return jsonify(decision.to_dict()), 201
+    return jsonify(decision.to_dict(include_spaces=True, include_relationships=True)), 201
 
 
 @app.route('/api/decisions/<int:decision_id>', methods=['GET'])
@@ -2754,6 +2920,18 @@ def api_update_decision(decision_id):
 
     if not data:
         return jsonify({'error': 'No data provided'}), 400
+
+    relationship_changes_requested = request_includes_relationship_updates(data)
+    normalized_relationships = None
+    if relationship_changes_requested:
+        try:
+            normalized_relationships = normalize_decision_relationships(
+                extract_decision_relationships_payload(data),
+                tenant_id=decision.tenant_id,
+                source_decision_id=decision.id
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
 
     # Sanitize input data to prevent XSS attacks
     sanitized, errors = sanitize_request_data(data, {
@@ -2800,6 +2978,9 @@ def api_update_decision(decision_id):
         has_changes = True
         owner_changed = True
 
+    if relationship_changes_requested and decision_relationships_changed(decision, normalized_relationships):
+        has_changes = True
+
     if not has_changes:
         return jsonify(decision.to_dict_with_history())
 
@@ -2843,9 +3024,23 @@ def api_update_decision(decision_id):
         else:
             decision.infrastructure = []
 
+    if 'space_ids' in data:
+        try:
+            tenant = get_current_tenant()
+            apply_decision_space_links(decision, data.get('space_ids'), tenant.id, g.current_user.id)
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({'error': str(exc)}), 400
+
     decision.updated_by_id = g.current_user.id
 
-    db.session.commit()
+    try:
+        if relationship_changes_requested:
+            sync_decision_relationships(decision, normalized_relationships, actor=g.current_user)
+        db.session.commit()
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
 
     # Send notifications - try domain-specific config first, fall back to system config
     email_config = EmailConfig.query.filter_by(domain=g.current_user.sso_domain, enabled=True).first()

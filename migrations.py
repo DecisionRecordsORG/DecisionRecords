@@ -171,6 +171,11 @@ MIGRATIONS = [
         "description": "Add decision comments table",
         "migrate": lambda db: migrate_1_15_0(db)
     },
+    {
+        "version": "1.16.0",
+        "description": "Add decision relationships and tenant relationship settings",
+        "migrate": lambda db: migrate_1_16_0(db)
+    },
 ]
 
 
@@ -330,6 +335,86 @@ def migrate_1_15_0(db):
             "ON decision_comments(tenant_id)"
         ))
         conn.commit()
+
+    return changes
+
+
+def migrate_1_16_0(db):
+    """Migration for v1.16.0 - decision relationships and tenant configuration."""
+    db_type = get_db_type(db)
+    changes = 0
+
+    if not table_exists(db, 'decision_relationships'):
+        if db_type == 'sqlite':
+            create_sql = """
+                CREATE TABLE decision_relationships (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    source_decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    target_decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    relationship_type VARCHAR(64) NOT NULL,
+                    notes TEXT,
+                    target_previous_status VARCHAR(50),
+                    created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    updated_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP
+                )
+            """
+        else:
+            create_sql = """
+                CREATE TABLE decision_relationships (
+                    id SERIAL PRIMARY KEY,
+                    tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                    source_decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    target_decision_id INTEGER NOT NULL REFERENCES architecture_decisions(id) ON DELETE CASCADE,
+                    relationship_type VARCHAR(64) NOT NULL,
+                    notes TEXT,
+                    target_previous_status VARCHAR(50),
+                    created_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    updated_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    deleted_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    deleted_at TIMESTAMP
+                )
+            """
+
+        with db.engine.connect() as conn:
+            conn.execute(db.text(create_sql))
+            conn.commit()
+
+        logger.info("Created decision_relationships table")
+        changes += 1
+
+    if table_exists(db, 'decision_relationships'):
+        with db.engine.connect() as conn:
+            conn.execute(db.text(
+                "CREATE INDEX IF NOT EXISTS idx_decision_relationships_tenant_id "
+                "ON decision_relationships(tenant_id)"
+            ))
+            conn.execute(db.text(
+                "CREATE INDEX IF NOT EXISTS idx_decision_relationships_source_type "
+                "ON decision_relationships(source_decision_id, relationship_type)"
+            ))
+            conn.execute(db.text(
+                "CREATE INDEX IF NOT EXISTS idx_decision_relationships_target_type "
+                "ON decision_relationships(target_decision_id, relationship_type)"
+            ))
+            conn.commit()
+
+    if table_exists(db, 'tenant_settings'):
+        if not column_exists(db, 'tenant_settings', 'decision_relationship_pack_ids'):
+            add_column(db, 'tenant_settings', 'decision_relationship_pack_ids', 'TEXT')
+            changes += 1
+        if not column_exists(db, 'tenant_settings', 'decision_relationship_enabled_types'):
+            add_column(db, 'tenant_settings', 'decision_relationship_enabled_types', 'TEXT')
+            changes += 1
+        if not column_exists(db, 'tenant_settings', 'decision_relationship_custom_types'):
+            add_column(db, 'tenant_settings', 'decision_relationship_custom_types', 'TEXT')
+            changes += 1
 
     return changes
 

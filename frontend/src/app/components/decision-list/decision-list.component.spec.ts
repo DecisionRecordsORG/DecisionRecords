@@ -41,7 +41,7 @@ describe('DecisionListComponent', () => {
       title: 'Deprecated API',
       context: 'Old API needs replacement',
       decision: 'Deprecate v1 API',
-      status: 'deprecated',
+      status: 'archived',
       consequences: 'Clients need migration',
       created_at: '2024-01-04T00:00:00Z',
       updated_at: '2024-01-05T00:00:00Z',

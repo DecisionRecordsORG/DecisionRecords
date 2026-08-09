@@ -1,7 +1,16 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { SSOConfig, EmailConfig, User, AuthConfig, AccessRequest, RoleRequest } from '../models/decision.model';
+import {
+  SSOConfig,
+  EmailConfig,
+  User,
+  AuthConfig,
+  AccessRequest,
+  RoleRequest,
+  DecisionRelationshipSettings,
+  DecisionRelationshipSettingsResponse,
+} from '../models/decision.model';
 
 export interface CreateSSOConfigRequest {
   domain: string;
@@ -43,6 +52,8 @@ export interface AuthConfigRequest {
   allow_google_oauth?: boolean;  // Allow "Sign in with Google" option
   allow_microsoft_oauth?: boolean;  // Allow "Sign in with Microsoft" option
 }
+
+export interface DecisionRelationshipSettingsUpdate extends DecisionRelationshipSettings {}
 
 @Injectable({
   providedIn: 'root'
@@ -209,6 +220,16 @@ export class AdminService {
 
   getAIStats(): Observable<AIStats> {
     return this.http.get<AIStats>('/api/tenant/ai/stats');
+  }
+
+  getDecisionRelationshipSettings(): Observable<DecisionRelationshipSettingsResponse> {
+    return this.http.get<DecisionRelationshipSettingsResponse>('/api/tenant/decision-relationships/config');
+  }
+
+  updateDecisionRelationshipSettings(
+    settings: DecisionRelationshipSettingsUpdate
+  ): Observable<DecisionRelationshipSettingsResponse> {
+    return this.http.put<DecisionRelationshipSettingsResponse>('/api/tenant/decision-relationships/config', settings);
   }
 }
 

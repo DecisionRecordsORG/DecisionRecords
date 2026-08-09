@@ -33,6 +33,7 @@ SHARED_CORE_PATTERNS = (
     "app.py",
     "auth.py",
     "crypto.py",
+    "decision_relationships.py",
     "feature_flags.py",
     "governance.py",
     "migrations.py",
@@ -456,9 +457,9 @@ def validate_current_contract_against_paths(contract: DeliveryContract, classifi
             + "\n".join(f"  - {path}" for path in classification.shared_core)
         )
 
-    if classification.private_boundary and not ({"enterprise_only", "marketing_only"} & surfaces):
+    if classification.private_boundary and not ({"shared_core", "enterprise_only", "marketing_only"} & surfaces):
         errors.append(
-            f"{contract_relpath(contract.path)} must declare enterprise_only or marketing_only because these private-boundary paths changed:\n"
+            f"{contract_relpath(contract.path)} must declare shared_core, enterprise_only, or marketing_only because these private-boundary paths changed:\n"
             + "\n".join(f"  - {path}" for path in classification.private_boundary)
         )
 
