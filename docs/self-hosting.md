@@ -248,7 +248,7 @@ Database migrations run automatically on startup.
 If you pin explicit release tags instead of `latest`, pull the target version from GitHub Container Registry before restarting:
 
 ```bash
-docker pull ghcr.io/decisionrecordsorg/decisionrecords:v2.0.28
+docker pull ghcr.io/decisionrecordsorg/decisionrecords:v2.1.0
 ```
 
 ## Health Check
@@ -354,7 +354,7 @@ Or using docker-compose:
 
 #### 4. Existing installations
 
-If upgrading from a version before `v2.0.28`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
+If upgrading from a version before `v2.1.0`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
 
 ## Support
 

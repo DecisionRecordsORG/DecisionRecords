@@ -14,10 +14,10 @@ import json
 from datetime import datetime
 
 # Application version - automatically updated by git pre-commit hook
-__version__ = "2.0.28"
+__version__ = "2.1.0"
 
 # Build metadata
-__build_date__ = "2026-03-06"
+__build_date__ = "2026-08-09"
 __git_commit__ = None  # Populated at runtime
 
 
