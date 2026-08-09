@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-09
+
+### Added
+- Configurable decision relationship packs in Community Edition, including default relationship classes for engineering, product, operations, security, and governance workflows
+- ADR supersede flows that let authors mark an existing decision as overridden directly from the create and edit UI
+- Relationship-aware decision detail and list views so linked, superseded, and superseding ADRs are visible without leaving the record
+- MCP decision relationship tools for listing, linking, and superseding decisions programmatically
+
+### Changed
+- Shared-core decision APIs now persist relationship metadata and update decision status consistently when a supersede link is created
+- Tenant settings can now store relationship pack selection and custom relationship classes for organization-specific workflows
+
 ## [2.0.28] - 2026-03-03
 
 ### Added
@@ -82,7 +94,8 @@ Security-related changes and fixes
 
 ---
 
-[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.28...HEAD
+[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.28...v2.1.0
 [2.0.28]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.27...v2.0.28
 [2.0.27]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v1.15.0...v2.0.27
 [1.15.0]: https://github.com/DecisionRecordsORG/DecisionRecords/releases/tag/v1.15.0
