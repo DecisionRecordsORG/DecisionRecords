@@ -54,7 +54,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
     GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus,
-    SystemConfig, DEFAULT_MASTER_PASSWORD, DecisionRelationship
+    SystemConfig, DEFAULT_MASTER_PASSWORD, DecisionRelationship, AuthConfig
 )
 from tests.app_test_utils import load_test_app
 
@@ -412,6 +412,81 @@ class TestTenantMaturityAPI:
         assert response.status_code == 404
         data = json.loads(response.data)
         assert 'error' in data
+
+
+class TestTenantAuthConfigAPI:
+    """Integration tests for the public tenant auth config contract."""
+
+    def test_public_tenant_auth_config_defaults_include_provider_flags(self, api_client):
+        response = api_client.get('/api/tenant/rulemesh/auth-config')
+
+        assert response.status_code == 200
+        data = response.get_json()
+
+        assert data['domain'] == 'rulemesh'
+        assert data['allow_password'] is True
+        assert data['allow_passkey'] is True
+        assert data['allow_slack_oidc'] is True
+        assert data['allow_google_oauth'] is True
+        assert data['allow_microsoft_oauth'] is True
+        assert data['has_sso'] is False
+        assert data['sso_id'] is None
+
+    def test_public_tenant_auth_config_returns_provider_flags(self, api_client, test_tenant):
+        auth_config = AuthConfig(
+            domain=test_tenant.domain,
+            auth_method='local',
+            allow_password=True,
+            allow_passkey=True,
+            allow_slack_oidc=False,
+            allow_google_oauth=True,
+            allow_microsoft_oauth=False,
+            allow_registration=True,
+            require_approval=True,
+            rp_name='Decision Records'
+        )
+        db.session.add(auth_config)
+        db.session.commit()
+
+        response = api_client.get(f'/api/tenant/{test_tenant.domain}/auth-config')
+
+        assert response.status_code == 200
+        data = response.get_json()
+
+        assert data['domain'] == test_tenant.domain
+        assert data['allow_slack_oidc'] is False
+        assert data['allow_google_oauth'] is True
+        assert data['allow_microsoft_oauth'] is False
+
+    def test_admin_can_update_microsoft_oauth_flag(self, admin_client, admin_user, test_tenant):
+        admin_user.is_admin = True
+        db.session.commit()
+
+        auth_config = AuthConfig(
+            domain=test_tenant.domain,
+            auth_method='local',
+            allow_password=True,
+            allow_passkey=True,
+            allow_slack_oidc=True,
+            allow_google_oauth=True,
+            allow_microsoft_oauth=True,
+            allow_registration=True,
+            require_approval=True,
+            rp_name='Decision Records'
+        )
+        db.session.add(auth_config)
+        db.session.commit()
+
+        response = admin_client.put('/api/tenant/auth-config', json={
+            'allow_microsoft_oauth': False
+        })
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['config']['allow_microsoft_oauth'] is False
+
+        db.session.refresh(auth_config)
+        assert auth_config.allow_microsoft_oauth is False
 
 
 # ==================== Test: Tenant Delete API ====================

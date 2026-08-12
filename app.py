@@ -8718,9 +8718,13 @@ def api_get_tenant_auth_config(domain):
             'auth_method': 'local',
             'allow_password': True,
             'allow_passkey': True,
+            'allow_slack_oidc': True,
+            'allow_google_oauth': True,
+            'allow_microsoft_oauth': True,
             'allow_registration': True,
             'has_sso': False,
-            'sso_provider': None
+            'sso_provider': None,
+            'sso_id': None
         })
 
     # Check if tenant has SSO configured
@@ -8731,6 +8735,9 @@ def api_get_tenant_auth_config(domain):
         'auth_method': auth_config.auth_method,
         'allow_password': auth_config.allow_password,
         'allow_passkey': auth_config.allow_passkey,
+        'allow_slack_oidc': auth_config.allow_slack_oidc,
+        'allow_google_oauth': auth_config.allow_google_oauth,
+        'allow_microsoft_oauth': auth_config.allow_microsoft_oauth,
         'allow_registration': auth_config.allow_registration,
         'has_sso': sso_config is not None,
         'sso_provider': sso_config.provider_name if sso_config else None,
@@ -8772,6 +8779,9 @@ def api_update_tenant_auth_config():
 
     if 'allow_google_oauth' in data:
         auth_config.allow_google_oauth = bool(data['allow_google_oauth'])
+
+    if 'allow_microsoft_oauth' in data:
+        auth_config.allow_microsoft_oauth = bool(data['allow_microsoft_oauth'])
 
     if 'allow_registration' in data:
         auth_config.allow_registration = bool(data['allow_registration'])
