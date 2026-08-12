@@ -612,6 +612,7 @@ export class LoginComponent implements OnInit {
           domain,
           auth_method: 'webauthn',
           allow_registration: true,
+          require_approval: false,
           rp_name: 'Architecture Decisions'
         };
         this.currentView = 'webauthn';
@@ -695,7 +696,7 @@ export class LoginComponent implements OnInit {
               } else {
                 // User is logged in, go to their tenant
                 const domain = email.split('@')[1];
-                this.router.navigate(['/' + domain + '/decisions']);
+                this.router.navigate(['/' + domain]);
               }
             },
             error: (err) => {
@@ -771,7 +772,7 @@ export class LoginComponent implements OnInit {
       next: (response) => {
         this.authService.loadCurrentUser();
         const domain = this.currentEmail.split('@')[1];
-        this.router.navigate(['/' + domain + '/decisions']);
+        this.router.navigate(['/' + domain]);
       },
       error: (err) => {
         this.isLoading = false;

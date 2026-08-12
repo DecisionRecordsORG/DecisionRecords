@@ -1211,7 +1211,7 @@ export class DecisionModalComponent implements OnInit {
 
   loadSpacesAndMembers(): void {
     forkJoin({
-      spaces: this.spaceService.getSpaces(),
+      spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
       // Admin users endpoint returns 403 for non-admins, gracefully handle it
       members: this.adminService.getUsers().pipe(catchError(() => of([]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
@@ -1244,7 +1244,7 @@ export class DecisionModalComponent implements OnInit {
 
     forkJoin({
       decision: this.decisionService.getDecision(id),
-      spaces: this.spaceService.getSpaces(),
+      spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
       // Admin users endpoint returns 403 for non-admins, gracefully handle it
       members: this.adminService.getUsers().pipe(catchError(() => of([]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
@@ -1254,7 +1254,7 @@ export class DecisionModalComponent implements OnInit {
     }).subscribe({
       next: ({ decision, spaces, members, relationshipCatalog, decisionReferences }) => {
         this.decision = decision;
-        this.spaces = spaces;
+        this.spaces = spaces.length > 0 ? spaces : (decision.spaces || []);
         this.tenantMembers = members;
         this.relationshipCatalog = relationshipCatalog;
         this.decisionReferences = decisionReferences;

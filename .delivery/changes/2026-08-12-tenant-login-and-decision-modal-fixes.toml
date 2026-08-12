@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-08-12-tenant-login-and-decision-modal-fixes"
+title = "Fix tenant login provider parity and decision modal loading"
+summary = "Restores provider-based sign-in options on bookmarked tenant login pages, fixes stale tenant post-login redirects, and makes decision detail modals tolerate ancillary space-load failures without closing."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

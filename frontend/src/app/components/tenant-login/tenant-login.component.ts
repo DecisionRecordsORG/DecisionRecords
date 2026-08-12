@@ -942,7 +942,7 @@ export class TenantLoginComponent implements OnInit {
 
   signInWithSlack(): void {
     // Include return URL to redirect back to tenant after login
-    const returnUrl = `/${this.tenant}/decisions`;
+    const returnUrl = `/${this.tenant}`;
     window.location.href = `/auth/slack/oidc?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
@@ -959,7 +959,7 @@ export class TenantLoginComponent implements OnInit {
 
   signInWithGoogle(): void {
     // Include return URL to redirect back to tenant after login
-    const returnUrl = `/${this.tenant}/decisions`;
+    const returnUrl = `/${this.tenant}`;
     window.location.href = `/auth/google?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
@@ -976,14 +976,25 @@ export class TenantLoginComponent implements OnInit {
 
   signInWithMicrosoft(): void {
     // Include return URL to redirect back to tenant after login
-    const returnUrl = `/${this.tenant}/decisions`;
+    const returnUrl = `/${this.tenant}`;
     window.location.href = `/auth/microsoft?return_url=${encodeURIComponent(returnUrl)}`;
   }
 
   loadAuthConfig(): void {
     this.http.get<TenantAuthConfig>(`/api/tenant/${this.tenant}/auth-config`).subscribe({
       next: (config) => {
-        this.authConfig = config;
+        this.authConfig = {
+          ...config,
+          allow_password: config.allow_password !== false,
+          allow_passkey: config.allow_passkey !== false,
+          allow_slack_oidc: config.allow_slack_oidc !== false,
+          allow_google_oauth: config.allow_google_oauth !== false,
+          allow_microsoft_oauth: config.allow_microsoft_oauth !== false,
+          allow_registration: config.allow_registration !== false,
+          has_sso: !!config.has_sso,
+          sso_provider: config.sso_provider ?? null,
+          sso_id: config.sso_id ?? null
+        };
       },
       error: () => {
         // Use defaults
