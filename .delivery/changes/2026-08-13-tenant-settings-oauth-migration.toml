@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-08-13-tenant-settings-oauth-migration"
+title = "Backfill legacy tenant OAuth flag columns"
+summary = "Adds a startup schema migration and regression coverage so legacy upgraded databases receive missing OAuth provider columns on tenant settings and auth configs before runtime queries hit them."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"
