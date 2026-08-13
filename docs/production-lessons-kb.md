@@ -55,6 +55,12 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Release metadata checks must cover the public version surface, not only `version.py`. Pinned version examples in release-facing docs should match the current Community version.
 - A successful enterprise deploy does not imply that self-hosted Community users received the same shared-core fix. Shared-core changes need an explicit Community release decision, and shared-core security fixes should stay tracked as required Community patch releases until the release tag exists.
 
+## Schema Migrations
+
+- Startup migrations must cover real upgrade paths from deployed databases, not only fresh `db.create_all()` schemas.
+- When a model adds columns to long-lived tables such as `tenant_settings` or `auth_configs`, add or update the startup migration in `migrations.py`; do not rely on one-off EE scripts to carry production schema forward.
+- Migration regression tests should start from a legacy on-disk schema with prior `schema_migrations` entries already recorded, then call `init_database()`. Fresh in-memory schemas hide exactly the class of drift that caused the missing `tenant_settings.allow_microsoft_oauth` production error.
+
 ## Git And Repository Safety
 
 - Treat the public repo and `ee/` as separate Git repositories.

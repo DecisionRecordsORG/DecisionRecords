@@ -176,6 +176,11 @@ MIGRATIONS = [
         "description": "Add decision relationships and tenant relationship settings",
         "migrate": lambda db: migrate_1_16_0(db)
     },
+    {
+        "version": "1.16.1",
+        "description": "Backfill tenant and auth OAuth provider columns",
+        "migrate": lambda db: migrate_1_16_1(db)
+    },
 ]
 
 
@@ -414,6 +419,28 @@ def migrate_1_16_0(db):
             changes += 1
         if not column_exists(db, 'tenant_settings', 'decision_relationship_custom_types'):
             add_column(db, 'tenant_settings', 'decision_relationship_custom_types', 'TEXT')
+            changes += 1
+
+    return changes
+
+
+def migrate_1_16_1(db):
+    """Migration for v1.16.1 - ensure legacy databases have OAuth provider flags."""
+    changes = 0
+    oauth_columns = (
+        ('allow_slack_oidc', 'BOOLEAN', True),
+        ('allow_google_oauth', 'BOOLEAN', True),
+        ('allow_microsoft_oauth', 'BOOLEAN', True),
+    )
+
+    for table_name in ('tenant_settings', 'auth_configs'):
+        if not table_exists(db, table_name):
+            continue
+
+        for column_name, column_type, default in oauth_columns:
+            if column_exists(db, table_name, column_name):
+                continue
+            add_column(db, table_name, column_name, column_type, default=default)
             changes += 1
 
     return changes
