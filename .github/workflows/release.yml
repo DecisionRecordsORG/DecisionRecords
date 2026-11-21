@@ -55,6 +55,9 @@ jobs:
       - name: Check Community/Enterprise boundary
         run: python scripts/check_ce_boundary.py
 
+      - name: Check Community image ships every imported module
+        run: python scripts/check_ce_image_modules.py
+
       - name: Run backend tests
         env:
           DECISION_RECORDS_EDITION: community
@@ -88,6 +91,28 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # Gate: build the image for the runner architecture, start it and require
+      # it to serve /api/health before any registry login or push happens.
+      # Nothing below this step runs if the image cannot boot.
+      - name: Build image for smoke test
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.community
+          push: false
+          load: true
+          tags: decision-records:release-candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Smoke test release candidate image
+        env:
+          SMOKE_EXPECT_VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          SMOKE_EXPECT_VERSION="${SMOKE_EXPECT_VERSION_TAG#v}" \
+            scripts/smoke_test_ce_image.sh decision-records:release-candidate
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
