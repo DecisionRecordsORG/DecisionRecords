@@ -357,10 +357,14 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             <div class="request-sent-section">
               <mat-icon class="success-icon">check_circle</mat-icon>
               <h3>Request Submitted</h3>
-              <p>
-                Your access request has been submitted for <strong>{{ tenant }}</strong>.
-                You'll receive an email once your request is approved.
-              </p>
+              @if (requestSentMessage) {
+                <p data-testid="request-sent-message">{{ requestSentMessage }}</p>
+              } @else {
+                <p data-testid="request-sent-default">
+                  Your access request has been submitted for <strong>{{ tenant }}</strong>.
+                  You'll receive an email once your request is approved.
+                </p>
+              }
               <button mat-raised-button color="primary" routerLink="/">
                 <mat-icon>home</mat-icon>
                 Back to Home
@@ -846,6 +850,8 @@ export class TenantLoginComponent implements OnInit {
   // Whether approval is effectively required (tenant wants approval AND has admins who can approve)
   // If false, users will be auto-approved, so show "Join" UI instead of "Request Access"
   effectiveRequireApproval = true;
+  // Server explanation shown after an access request that is waiting for an administrator
+  requestSentMessage = '';
 
   constructor(
     private fb: FormBuilder,
@@ -1137,7 +1143,7 @@ export class TenantLoginComponent implements OnInit {
 
     const { email, first_name, last_name, reason } = this.requestForm.value;
 
-    this.http.post<{message: string; auto_approved?: boolean; email?: string; domain?: string; setup_url?: string}>('/api/auth/access-request', {
+    this.http.post<{message: string; auto_approved?: boolean; email_sent?: boolean; email?: string; domain?: string}>('/api/auth/access-request', {
       email,
       first_name,
       last_name,
@@ -1146,15 +1152,16 @@ export class TenantLoginComponent implements OnInit {
     }).subscribe({
       next: (response) => {
         this.isLoading = false;
-        // Check if auto-approved (account created immediately)
+        // Auto-approved: the account exists and the setup link was emailed.
+        // The link is never part of this response.
         if (response.auto_approved) {
-          // If setup_url is provided (email not configured), redirect directly
-          if (response.setup_url) {
-            window.location.href = response.setup_url;
-          } else {
-            this.currentView = 'auto-approved';
-          }
+          this.requestSentMessage = '';
+          this.currentView = 'auto-approved';
         } else {
+          // Waiting for an administrator. When no email was sent the server says
+          // how the requester will get their setup link, so show that instead of
+          // promising an email.
+          this.requestSentMessage = response.email_sent === false ? (response.message || '') : '';
           this.currentView = 'request-sent';
         }
       },

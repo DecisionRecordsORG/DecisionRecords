@@ -5069,6 +5069,11 @@ def get_tenant_user_count(domain):
     return User.query.filter_by(sso_domain=domain).count()
 
 
+def system_email_configured():
+    """The enabled system email configuration used for account emails, or None."""
+    return EmailConfig.query.filter_by(domain='system', enabled=True).first()
+
+
 def can_tenant_accept_users(domain, count=1):
     """Check if a tenant can accept more users.
 
@@ -5273,9 +5278,14 @@ def _api_get_tenant_status_impl(domain):
             ).count()
             can_process_access_requests = approving_admin_count > 0
 
-    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false
+    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false.
+    # Joining without approval is only possible when the setup link can be emailed to the
+    # requester; without email every request waits for an administrator (see access-request).
     require_approval_setting = auth_config.require_approval if auth_config else True
-    effective_require_approval = require_approval_setting and can_process_access_requests
+    effective_require_approval = (
+        (require_approval_setting and can_process_access_requests)
+        or not system_email_configured()
+    )
 
     return jsonify({
         'domain': domain,
@@ -6109,13 +6119,28 @@ def api_submit_access_request():
                 TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
             ).count()
             if full_admin_count == 0:
-                # No full admins or stewards - provisional admin only tenant
-                # Auto-approve since no one can approve access requests
+                # No full admins or stewards yet - provisional admin only tenant.
+                # Admit by emailed setup link where email is configured; without
+                # email the provisional admin approves the request (see below).
                 require_approval = False
-                logger.info(f"Auto-approving access request for {domain} - tenant has only provisional admin")
+                logger.info(f"Access request for {domain} does not need full-admin approval - tenant has only provisional admin")
 
-    if not require_approval:
-        # Auto-approval enabled: create user immediately and send setup email
+    # The setup link is only ever delivered to the requester's mailbox (which
+    # proves they control the address) or shown to an administrator who approves
+    # the request. It is never returned in this response: the caller is anonymous.
+    email_config = system_email_configured()
+    pending_message = 'Access request submitted successfully'
+
+    if not require_approval and not email_config:
+        # No way to deliver the link to the requester: an administrator admits them
+        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
+        pending_message = (
+            'Your request has been submitted. An administrator of your organization '
+            'will approve it and give you a link to set up your sign-in.'
+        )
+
+    elif not require_approval:
+        # Auto-approval enabled: create the account and email the setup link
         from models import SetupToken
         from notifications import send_account_setup_email
 
@@ -6143,49 +6168,47 @@ def api_submit_access_request():
 
         # Generate setup token for the new user
         setup_token = SetupToken.create_for_user(new_user)
-        setup_token_str = setup_token._token_string
-        setup_url = f"{request.host_url.rstrip('/')}/{domain}/setup?token={setup_token_str}"
+        setup_url = f"{request.host_url.rstrip('/')}/{domain}/setup?token={setup_token._token_string}"
 
         db.session.commit()
 
-        # Send setup email to user (if email is configured)
-        email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
         email_sent = False
-        if email_config:
-            try:
-                send_account_setup_email(
-                    email_config,
-                    name,
-                    email,
-                    setup_url,
-                    SetupToken.TOKEN_VALIDITY_HOURS,
-                    tenant_name=domain
-                )
-                email_sent = True
-                app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
-            except Exception as e:
-                app.logger.warning(f"Failed to send setup email to {email}: {e}")
-        else:
-            app.logger.warning(f"Auto-approved user {email} for tenant {domain}, but no email config")
-
-        # Build response based on whether email was sent
-        response_data = {
-            'auto_approved': True,
-            'email': email,
-            'domain': domain
-        }
+        try:
+            email_sent = bool(send_account_setup_email(
+                email_config,
+                name,
+                email,
+                setup_url,
+                SetupToken.TOKEN_VALIDITY_HOURS,
+                tenant_name=domain
+            ))
+        except Exception as e:
+            app.logger.warning(f"Failed to send setup email to {email}: {e}")
 
         if email_sent:
-            response_data['message'] = 'Your account has been created! Check your email for a link to set up your login credentials.'
-        else:
-            # Email not configured/sent - provide setup URL directly for Community Edition
-            # This allows users to complete setup without requiring email
-            response_data['message'] = 'Your account has been created! Click the button below to set up your login credentials.'
-            response_data['setup_url'] = setup_url  # Include setup URL when email fails
+            app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
+            return jsonify({
+                'auto_approved': True,
+                'email': email,
+                'domain': domain,
+                'message': 'Your account has been created! Check your email for a link to set up your login credentials.'
+            })
 
-        return jsonify(response_data)
+        # The link did not reach the mailbox, so nobody has proven control of the
+        # address. Withdraw the account and its unused link and leave a request
+        # an administrator can approve instead.
+        app.logger.warning(
+            f"Setup email for {email} could not be sent - access request for {domain} held for administrator approval")
+        db.session.delete(setup_token)
+        db.session.delete(new_user)
+        db.session.commit()
+        pending_message = (
+            'Your request was received, but the setup email could not be sent. '
+            'An administrator of your organization can approve your request and give you '
+            'a setup link. Please contact them.'
+        )
 
-    # require_approval=True: Create access request for admin review
+    # Create access request for admin review
     access_request = AccessRequest(
         email=email,
         name=name,
@@ -6199,7 +6222,9 @@ def api_submit_access_request():
     # notify_admins_access_request(domain, access_request)
 
     return jsonify({
-        'message': 'Access request submitted successfully',
+        'message': pending_message,
+        'auto_approved': False,
+        'email_sent': False,
         'request': access_request.to_dict()
     })
 
