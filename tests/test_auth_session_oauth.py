@@ -888,6 +888,19 @@ WEBSITE_FORM_ENDPOINTS = [
 ]
 
 
+CSRF_REJECTION = {'error': 'CSRF token missing or invalid'}
+
+
+def is_csrf_rejection(response):
+    """True only for the CSRF check's own refusal.
+
+    An endpoint may answer 403 for its own reasons once the request is let
+    through (direct sign-up does when email verification is required), so the
+    status code alone does not say whether the CSRF check passed.
+    """
+    return response.status_code == 403 and response.get_json(silent=True) == CSRF_REJECTION
+
+
 class TestCsrfContractForWebsiteForms:
     """A visitor with a live app session must send a CSRF token with website forms.
 
@@ -913,8 +926,7 @@ class TestCsrfContractForWebsiteForms:
 
         response = client.post(endpoint, json={}, base_url=SITE)
 
-        assert response.status_code == 403
-        assert response.get_json() == {'error': 'CSRF token missing or invalid'}
+        assert is_csrf_rejection(response), (response.status_code, response.get_json())
 
     @pytest.mark.parametrize('endpoint', WEBSITE_FORM_ENDPOINTS)
     def test_signed_in_visitor_with_header_token_reaches_the_endpoint(self, signed_in, endpoint):
@@ -923,7 +935,7 @@ class TestCsrfContractForWebsiteForms:
 
         response = client.post(endpoint, json={}, base_url=SITE, headers={'X-CSRF-Token': token})
 
-        assert response.status_code != 403, response.get_json()
+        assert not is_csrf_rejection(response), response.get_json()
 
     def test_token_is_also_accepted_as_json_body_field(self, signed_in):
         _, client = signed_in
@@ -932,7 +944,7 @@ class TestCsrfContractForWebsiteForms:
         response = client.post('/api/auth/send-verification', base_url=SITE,
                                json={'csrf_token': token})
 
-        assert response.status_code != 403
+        assert not is_csrf_rejection(response), response.get_json()
 
     def test_wrong_token_is_rejected(self, signed_in):
         _, client = signed_in
@@ -940,7 +952,7 @@ class TestCsrfContractForWebsiteForms:
         response = client.post('/api/auth/send-verification', json={}, base_url=SITE,
                                headers={'X-CSRF-Token': 'not-the-token'})
 
-        assert response.status_code == 403
+        assert is_csrf_rejection(response), (response.status_code, response.get_json())
 
     @pytest.mark.parametrize('endpoint', WEBSITE_FORM_ENDPOINTS)
     def test_anonymous_visitor_needs_no_token(self, handoff_env, endpoint):
@@ -948,7 +960,7 @@ class TestCsrfContractForWebsiteForms:
 
         response = test_app.test_client().post(endpoint, json={}, base_url=SITE)
 
-        assert response.status_code != 403
+        assert not is_csrf_rejection(response), response.get_json()
 
     def test_token_endpoint_serves_signed_in_visitors_on_either_host(self, signed_in):
         _, client = signed_in
@@ -992,7 +1004,7 @@ class TestCsrfContractForWebsiteForms:
         stale = client.post('/api/auth/send-verification', json={}, base_url=SITE,
                             headers={'X-CSRF-Token': token})
 
-        assert stale.status_code == 403
+        assert is_csrf_rejection(stale), (stale.status_code, stale.get_json())
 
     def test_cross_origin_calls_from_the_website_are_allowed_with_credentials(self, handoff_env):
         """If the website calls the app host directly instead of through the worker."""
