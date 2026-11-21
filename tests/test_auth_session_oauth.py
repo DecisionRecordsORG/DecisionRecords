@@ -29,7 +29,7 @@ from models import (
     db, User, Tenant, TenantMembership, AuthConfig, SSOConfig, GlobalRole,
     MaturityState, SetupToken, WebAuthnCredential
 )
-from tests.app_test_utils import load_test_app
+from tests.app_test_utils import load_test_app, parse_set_cookie, website_handoff_app
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STRONG_PASSWORD = 'Str0ngPassword'
@@ -706,3 +706,168 @@ class TestPasskeySignInGate:
 
         assert response.status_code == 200
         assert len(response.get_json().get('allowCredentials') or []) == 1
+
+
+# ==================== Website-to-app handoff ====================
+
+SITE = 'https://decisionrecords.test'            # marketing website; OAuth callbacks land here
+APP_HOST = 'https://app.decisionrecords.test'    # the app
+COOKIE_DOMAIN = 'decisionrecords.test'
+OTHER_SITE = 'https://unrelated.test'
+
+
+@pytest.fixture
+def handoff_env(monkeypatch):
+    """Real app configured like production: callback on the website, app on a subdomain."""
+    with website_handoff_app(
+        secret_key='test-secret-key-website-handoff',
+        cookie_domain=COOKIE_DOMAIN,
+        oauth_base_url=SITE,
+        app_base_url=APP_HOST,
+    ) as (app_module, test_app):
+        yield test_app, lambda name: PROVIDER_FACTORIES[name]().install(monkeypatch)
+
+
+class TestWebsiteToAppHandoff:
+    """Sign in on the website host, arrive signed in on the app host."""
+
+    def test_app_reads_handoff_settings_from_environment(self, handoff_env):
+        test_app, _ = handoff_env
+
+        assert test_app.config['SESSION_COOKIE_DOMAIN'] == COOKIE_DOMAIN
+        assert test_app.config['SESSION_COOKIE_SECURE'] is True
+
+    @pytest.mark.parametrize('provider_name', SOCIAL_PROVIDERS)
+    def test_sign_in_on_website_lands_signed_in_on_app(self, handoff_env, provider_name):
+        test_app, install = handoff_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+        callback_uri = f'{SITE}{provider.callback}'
+
+        # 1. The website's sign-in button hits the initiate route on the website host.
+        initiate, state = start_sign_in(client, provider, base_url=SITE)
+        authorize = urlparse(initiate.headers['Location'])
+        assert authorize.netloc not in ('decisionrecords.test', 'app.decisionrecords.test')
+        assert parse_qs(authorize.query)['redirect_uri'] == [callback_uri]
+
+        # 2. The provider sends the browser back to the website host.
+        callback = finish_sign_in(client, provider, 'pat@acme.test', state, base_url=SITE)
+        assert callback.status_code == 302
+        assert callback.headers['Location'] == provider.default_destination('acme.test').replace(
+            APP_BASE, APP_HOST)
+        # The code is exchanged with the same redirect_uri that was authorised.
+        assert callback.token_request.call_args.kwargs['data']['redirect_uri'] == callback_uri
+
+        # 3. The session cookie is scoped to the parent domain, as configured.
+        cookie = parse_set_cookie(callback)
+        assert cookie is not None, callback.headers.getlist('Set-Cookie')
+        assert cookie['domain'] == COOKIE_DOMAIN
+        assert cookie['path'] == '/'
+        assert cookie['secure'] is True
+        assert cookie['httponly'] is True
+        assert cookie['samesite'] == 'Lax'
+        assert 'expires' in cookie  # permanent session, not a browser-session cookie
+
+        # 4. The app host receives that cookie and recognises the user.
+        me = client.get('/api/user/me', base_url=APP_HOST)
+        assert me.status_code == 200, me.get_json()
+        assert me.get_json()['email'] == 'pat@acme.test'
+
+        # ...and so does a browser that is handed only the Set-Cookie value.
+        fresh = test_app.test_client(use_cookies=False)
+        replayed = fresh.get('/api/user/me', base_url=APP_HOST,
+                             headers={'Cookie': f"session={cookie['value']}"})
+        assert replayed.status_code == 200
+
+        # The cookie jar does scope by domain: another site gets nothing.
+        assert client.get('/api/user/me', base_url=OTHER_SITE).status_code == 401
+
+    def test_new_visitor_signing_up_on_website_lands_on_new_tenant(self, handoff_env):
+        test_app, install = handoff_env
+        provider = install('google')
+        client = test_app.test_client()
+
+        _, state = start_sign_in(client, provider, base_url=SITE)
+        callback = finish_sign_in(client, provider, 'founder@newco.test', state, base_url=SITE)
+
+        assert callback.status_code == 302
+        assert callback.headers['Location'] == f'{APP_HOST}/newco.test'
+        me = client.get('/api/user/me', base_url=APP_HOST)
+        assert me.status_code == 200
+        assert me.get_json()['email'] == 'founder@newco.test'
+
+    def test_return_url_is_resolved_on_the_app_host(self, handoff_env):
+        test_app, install = handoff_env
+        provider = install('google')
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        _, state = start_sign_in(client, provider, return_url='/acme.test/decisions/7', base_url=SITE)
+        callback = finish_sign_in(client, provider, 'pat@acme.test', state, base_url=SITE)
+
+        assert callback.headers['Location'] == f'{APP_HOST}/acme.test/decisions/7'
+
+    @pytest.mark.parametrize('failure', ['missing_code', 'invalid_state', 'provider_error'])
+    def test_failed_callback_sets_no_signed_in_session(self, handoff_env, failure):
+        test_app, install = handoff_env
+        provider = install('google')
+        client = test_app.test_client()
+        _, state = start_sign_in(client, provider, base_url=SITE)
+        query = {
+            'missing_code': {'state': state},
+            'invalid_state': {'code': 'auth-code', 'state': 'forged'},
+            'provider_error': {'error': 'access_denied', 'state': state},
+        }[failure]
+
+        callback = client.get(provider.callback, query_string=query, base_url=SITE)
+
+        assert callback.status_code == 302
+        assert callback.headers['Location'].startswith('/?error=')
+        assert client.get('/api/user/me', base_url=APP_HOST).status_code == 401
+
+    def test_logout_on_app_host_clears_the_shared_cookie(self, handoff_env):
+        test_app, install = handoff_env
+        provider = install('google')
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+        _, state = start_sign_in(client, provider, base_url=SITE)
+        finish_sign_in(client, provider, 'pat@acme.test', state, base_url=SITE)
+        assert client.get('/api/user/me', base_url=APP_HOST).status_code == 200
+
+        logout = client.post('/api/auth/logout', base_url=APP_HOST)
+
+        assert logout.status_code == 200
+        assert logout.get_json()['redirect_url'] == SITE
+        assert any(
+            header.startswith('session=;') and f'Domain={COOKIE_DOMAIN}' in header
+            for header in logout.headers.getlist('Set-Cookie')
+        ), logout.headers.getlist('Set-Cookie')
+        assert client.get('/api/user/me', base_url=APP_HOST).status_code == 401
+        assert client.get('/api/user/me', base_url=SITE).status_code == 401
+
+
+class TestHandoffNeedsSharedCookieDomain:
+    """Documents why SESSION_COOKIE_DOMAIN must be set when the hosts differ."""
+
+    def test_without_cookie_domain_the_app_host_is_not_signed_in(self, monkeypatch):
+        with website_handoff_app(
+            secret_key='test-secret-key-website-handoff',
+            cookie_domain=None,
+            oauth_base_url=SITE,
+            app_base_url=APP_HOST,
+        ) as (_, test_app):
+            provider = PROVIDER_FACTORIES['google']().install(monkeypatch)
+            make_user('pat@acme.test', password=STRONG_PASSWORD)
+            client = test_app.test_client()
+
+            _, state = start_sign_in(client, provider, base_url=SITE)
+            callback = finish_sign_in(client, provider, 'pat@acme.test', state, base_url=SITE)
+
+            cookie = parse_set_cookie(callback)
+            assert cookie is not None
+            assert 'domain' not in cookie
+            assert callback.headers['Location'] == f'{APP_HOST}/acme.test'
+            # Host-only cookie: valid on the website host, absent on the app host.
+            assert client.get('/api/user/me', base_url=SITE).status_code == 200
+            assert client.get('/api/user/me', base_url=APP_HOST).status_code == 401

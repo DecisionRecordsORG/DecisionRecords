@@ -662,3 +662,130 @@ class TestGoogleOAuthUserCreation:
             reloaded = AuthConfig.query.filter_by(domain=domain).first()
             assert reloaded is not None
             assert reloaded.allow_google_oauth is True
+
+
+# ==================== Website-to-app handoff (real provider module) ====================
+
+class TestGoogleWebsiteToAppHandoff:
+    """Sign in with Google on the website host and arrive signed in on the app host.
+
+    tests/test_auth_session_oauth.py covers the same flow in Community Edition
+    with a stand-in provider module. This class runs it against the real
+    ee.backend.oauth_providers.google_oauth module (credential lookup and
+    encrypted state), so it only executes in an Enterprise checkout.
+    """
+
+    SITE = 'https://decisionrecords.test'
+    APP_HOST = 'https://app.decisionrecords.test'
+    COOKIE_DOMAIN = 'decisionrecords.test'
+
+    @pytest.fixture
+    def handoff_app(self):
+        from tests.app_test_utils import website_handoff_app
+
+        credentials = {
+            'GOOGLE_CLIENT_ID': 'test-google-client-id',
+            'GOOGLE_CLIENT_SECRET': 'test-google-client-secret',
+        }
+        with patch.dict(os.environ, credentials):
+            clear_credential_cache()
+            try:
+                with website_handoff_app(
+                    secret_key='test-secret-key-google-handoff',
+                    cookie_domain=self.COOKIE_DOMAIN,
+                    oauth_base_url=self.SITE,
+                    app_base_url=self.APP_HOST,
+                ) as (_, test_app):
+                    yield test_app
+            finally:
+                clear_credential_cache()
+
+    @staticmethod
+    def _google_responses(email):
+        token = Mock(ok=True, status_code=200)
+        token.json.return_value = {'access_token': 'google-access-token'}
+        userinfo = Mock(ok=True, status_code=200)
+        userinfo.json.return_value = {'email': email, 'name': 'Pat Example', 'sub': 'google-sub-1'}
+        return token, userinfo
+
+    def _sign_in(self, client, email, return_url=None):
+        from urllib.parse import parse_qs, urlparse
+
+        query = {} if return_url is None else {'return_url': return_url}
+        initiate = client.get('/auth/google', query_string=query, base_url=self.SITE)
+        assert initiate.status_code == 302, initiate.get_data(as_text=True)
+        authorize = parse_qs(urlparse(initiate.headers['Location']).query)
+
+        token, userinfo = self._google_responses(email)
+        with patch('requests.post', return_value=token) as token_request, \
+                patch('requests.get', return_value=userinfo):
+            callback = client.get(
+                '/auth/google/callback',
+                query_string={'code': 'auth-code', 'state': authorize['state'][0]},
+                base_url=self.SITE,
+            )
+        return authorize, callback, token_request
+
+    def test_sign_in_on_website_lands_signed_in_on_app(self, handoff_app):
+        from tests.app_test_utils import parse_set_cookie
+
+        tenant = Tenant(domain='acme.test', name='Acme', status='active',
+                        maturity_state=MaturityState.BOOTSTRAP)
+        db.session.add(tenant)
+        db.session.flush()
+        user = User(email='pat@acme.test', sso_domain='acme.test', auth_type='local',
+                    email_verified=True)
+        user.set_password('Str0ngPassword')
+        db.session.add(user)
+        db.session.flush()
+        db.session.add(TenantMembership(user_id=user.id, tenant_id=tenant.id,
+                                        global_role=GlobalRole.USER))
+        db.session.commit()
+        client = handoff_app.test_client()
+        callback_uri = f'{self.SITE}/auth/google/callback'
+
+        authorize, callback, token_request = self._sign_in(client, 'pat@acme.test')
+
+        # redirect_uri uses OAUTH_BASE_URL, at authorisation and at code exchange
+        assert authorize['redirect_uri'] == [callback_uri]
+        assert authorize['client_id'] == ['test-google-client-id']
+        assert token_request.call_args.kwargs['data']['redirect_uri'] == callback_uri
+
+        # the browser is sent to the app host
+        assert callback.status_code == 302
+        assert callback.headers['Location'] == f'{self.APP_HOST}/acme.test'
+
+        # the session cookie is scoped to the parent domain, as configured
+        cookie = parse_set_cookie(callback)
+        assert cookie is not None, callback.headers.getlist('Set-Cookie')
+        assert cookie['domain'] == self.COOKIE_DOMAIN
+        assert cookie['secure'] is True
+        assert cookie['httponly'] is True
+        assert cookie['samesite'] == 'Lax'
+
+        # the app host accepts that cookie
+        me = client.get('/api/user/me', base_url=self.APP_HOST)
+        assert me.status_code == 200, me.get_json()
+        assert me.get_json()['email'] == 'pat@acme.test'
+
+        # a user with a password keeps their auth_type after social sign-in
+        db.session.expire_all()
+        assert User.query.filter_by(email='pat@acme.test').first().auth_type == 'local'
+
+    def test_off_site_return_url_survives_real_state_but_is_not_followed(self, handoff_app):
+        client = handoff_app.test_client()
+
+        _, callback, _ = self._sign_in(client, 'founder@newco.test',
+                                       return_url='https://evil.example/phish')
+
+        assert callback.status_code == 302
+        assert callback.headers['Location'] == f'{self.APP_HOST}/newco.test'
+
+    def test_same_site_return_url_round_trips_through_real_state(self, handoff_app):
+        client = handoff_app.test_client()
+
+        _, callback, _ = self._sign_in(client, 'founder@newco.test',
+                                       return_url='/newco.test/decisions/7')
+
+        assert callback.status_code == 302
+        assert callback.headers['Location'] == f'{self.APP_HOST}/newco.test/decisions/7'
