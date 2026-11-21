@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-deploy-safety-postgres-checks"
+title = "Gate builds and the Enterprise deploy on PostgreSQL start-up, pin every dependency, roll back failed deploys"
+summary = "Follow-up to the 2026-11-21 outage. requirements.txt now pins every installed package exactly (gunicorn included). CI and the release workflow start the built Community image against PostgreSQL before anything is published, and CI runs the fixture-based backend tests on PostgreSQL. The Enterprise deploy boots the new image against PostgreSQL before it publishes anything, verifies the database health route after the restart and puts the previous image back when the new one is unhealthy. The start-up connection check now goes through the SQLAlchemy engine instead of a separate psycopg2 connection that forced sslmode=require, which made the documented self-hosted PostgreSQL setup (a server without TLS) fail to initialise; that fix is why a Community patch release is required."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
