@@ -37,7 +37,7 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
       <mat-card class="login-card">
         <mat-card-header>
           <mat-card-title>
-            <mat-icon>architecture</mat-icon>
+            <mat-icon>description</mat-icon>
             Decision Records
           </mat-card-title>
           <mat-card-subtitle>

@@ -16,6 +16,7 @@ import { SpaceService } from '../../services/space.service';
 import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
+import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
 import { forkJoin, of } from 'rxjs';
 import { catchError, filter } from 'rxjs/operators';
 
@@ -95,7 +96,10 @@ export interface DecisionModalResult {
                   <mat-label>Title</mat-label>
                   <input matInput formControlName="title"
                          [readonly]="mode === 'view'"
-                         placeholder="Short, descriptive title">
+                         [placeholder]="copy.title.placeholder">
+                  @if (mode !== 'view') {
+                    <mat-hint>{{ copy.title.hint }}</mat-hint>
+                  }
                   @if (form.get('title')?.hasError('required') && form.get('title')?.touched) {
                     <mat-error>Title is required</mat-error>
                   }
@@ -125,7 +129,10 @@ export interface DecisionModalResult {
                 <mat-label>Context</mat-label>
                 <textarea matInput formControlName="context" rows="5"
                           [readonly]="mode === 'view'"
-                          placeholder="Describe the issue and context that motivates this decision..."></textarea>
+                          [placeholder]="copy.context.placeholder"></textarea>
+                @if (mode !== 'view') {
+                  <mat-hint>{{ copy.context.hint }}</mat-hint>
+                }
               </mat-form-field>
 
               <!-- Decision -->
@@ -133,7 +140,10 @@ export interface DecisionModalResult {
                 <mat-label>Decision</mat-label>
                 <textarea matInput formControlName="decision" rows="5"
                           [readonly]="mode === 'view'"
-                          placeholder="Describe the change or solution being implemented..."></textarea>
+                          [placeholder]="copy.decision.placeholder"></textarea>
+                @if (mode !== 'view') {
+                  <mat-hint>{{ copy.decision.hint }}</mat-hint>
+                }
               </mat-form-field>
 
               <!-- Consequences -->
@@ -141,7 +151,10 @@ export interface DecisionModalResult {
                 <mat-label>Consequences</mat-label>
                 <textarea matInput formControlName="consequences" rows="5"
                           [readonly]="mode === 'view'"
-                          placeholder="Describe the resulting context and tradeoffs..."></textarea>
+                          [placeholder]="copy.consequences.placeholder"></textarea>
+                @if (mode !== 'view') {
+                  <mat-hint>{{ copy.consequences.hint }}</mat-hint>
+                }
               </mat-form-field>
 
               <!-- Change Reason (edit mode only) -->
@@ -1144,6 +1157,7 @@ export interface DecisionModalResult {
   `]
 })
 export class DecisionModalComponent implements OnInit {
+  readonly copy = DECISION_FORM_COPY;
   mode: DecisionModalMode;
   decision: Decision | null = null;
   form: FormGroup;

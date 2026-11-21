@@ -21,6 +21,7 @@ import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatal
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { HasUnsavedChanges } from '../../guards/unsaved-changes.guard';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
+import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
 import { Observable, of } from 'rxjs';
 import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operators';
 
@@ -75,7 +76,8 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                   <div class="form-row">
                     <mat-form-field appearance="outline" class="title-field">
                       <mat-label>Title</mat-label>
-                      <input matInput formControlName="title" placeholder="Short, descriptive title">
+                      <input matInput formControlName="title" [placeholder]="copy.title.placeholder">
+                      <mat-hint>{{ copy.title.hint }}</mat-hint>
                       @if (form.get('title')?.hasError('required')) {
                         <mat-error>Title is required</mat-error>
                       }
@@ -104,7 +106,8 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Context</mat-label>
                   <textarea matInput formControlName="context" rows="6"
-                            placeholder="Describe the issue and context that motivates this decision..."></textarea>
+                            [placeholder]="copy.context.placeholder"></textarea>
+                  <mat-hint>{{ copy.context.hint }}</mat-hint>
                   @if (form.get('context')?.hasError('required')) {
                     <mat-error>Context is required</mat-error>
                   }
@@ -113,7 +116,8 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Decision</mat-label>
                   <textarea matInput formControlName="decision" rows="6"
-                            placeholder="Describe the change or solution being implemented..."></textarea>
+                            [placeholder]="copy.decision.placeholder"></textarea>
+                  <mat-hint>{{ copy.decision.hint }}</mat-hint>
                   @if (form.get('decision')?.hasError('required')) {
                     <mat-error>Decision is required</mat-error>
                   }
@@ -122,7 +126,8 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Consequences</mat-label>
                   <textarea matInput formControlName="consequences" rows="6"
-                            placeholder="Describe the resulting context and tradeoffs..."></textarea>
+                            [placeholder]="copy.consequences.placeholder"></textarea>
+                  <mat-hint>{{ copy.consequences.hint }}</mat-hint>
                   @if (form.get('consequences')?.hasError('required')) {
                     <mat-error>Consequences is required</mat-error>
                   }
@@ -965,6 +970,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
   `]
 })
 export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
+  readonly copy = DECISION_FORM_COPY;
   decision: Decision | null = null;
   form: FormGroup;
   isNew = false;

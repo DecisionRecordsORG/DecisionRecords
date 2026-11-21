@@ -15,8 +15,8 @@ export interface SeoRouteData {
 }
 
 const SITE_URL = 'https://decisionrecords.org';
-const DEFAULT_TITLE = 'Decision Records - Open Source Architecture Decision Records';
-const DEFAULT_DESCRIPTION = 'Decision Records is an open source platform for capturing and preserving the reasoning behind important architecture decisions.';
+const DEFAULT_TITLE = 'Decision Records - Open source decision records for teams';
+const DEFAULT_DESCRIPTION = 'Decision Records is an open source platform where teams record the decisions they make, why they made them and what follows from them.';
 const DEFAULT_IMAGE = `${SITE_URL}/assets/og-image-default.png`;
 
 @Injectable({
