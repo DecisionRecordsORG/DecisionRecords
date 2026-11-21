@@ -238,3 +238,249 @@ def test_new_rows_default_to_decision_records(tmp_path: Path) -> None:
             db.session.remove()
             db.drop_all()
             app_module._db_initialized = False
+
+
+# ==================== Inquiries and team profile (2.3.0) ====================
+
+TEAM_PROFILE_COLUMNS = {
+    "team_focus", "team_size", "team_profile_answered_at", "team_profile_answered_by_id",
+}
+
+
+def _sqlite_columns(db_path: Path, table: str) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    finally:
+        conn.close()
+
+
+def _sqlite_tables(db_path: Path) -> set[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    finally:
+        conn.close()
+
+
+def test_startup_adds_inquiries_and_team_profile_to_an_existing_database(tmp_path: Path) -> None:
+    from models import Inquiry, Tenant
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    assert "inquiries" not in _sqlite_tables(db_path)
+    assert not TEAM_PROFILE_COLUMNS & _sqlite_columns(db_path, "tenants")
+
+    app_module, test_app = load_test_app(
+        secret_key="migration-inquiries", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert TEAM_PROFILE_COLUMNS <= _sqlite_columns(db_path, "tenants")
+        assert {column.name for column in Inquiry.__table__.columns} <= _sqlite_columns(db_path, "inquiries")
+
+        # The existing tenant is untouched and has no answers yet. (The legacy
+        # fixture's tenants table is a minimal one, so it is read through the
+        # new columns only, not the whole model.)
+        team_profile = db.session.query(
+            Tenant.domain, Tenant.name, Tenant.team_focus, Tenant.team_size,
+            Tenant.team_profile_answered_at, Tenant.team_profile_answered_by_id,
+        ).filter(Tenant.id == 1).one()
+        assert tuple(team_profile) == ("example.com", "Example Corp", None, None, None, None)
+
+        # Both are usable through the models straight away
+        Tenant.query.filter(Tenant.id == 1).update(
+            {"team_focus": "Hiring", "team_size": "6-25"}, synchronize_session=False
+        )
+        db.session.add(Inquiry(source="contact", name="Ada", email="ada@example.org", message="Hello"))
+        db.session.commit()
+        db.session.expire_all()
+        assert db.session.query(Tenant.team_size).filter(Tenant.id == 1).scalar() == "6-25"
+        stored = Inquiry.query.one()
+        assert stored.email_sent is False and stored.handled is False and stored.created_at is not None
+
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.3.0" in versions
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_starting_twice_changes_nothing_the_second_time(tmp_path: Path) -> None:
+    from migrations import migrate_2_3_0, run_migrations
+    from models import Inquiry
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    app_module, test_app = load_test_app(
+        secret_key="migration-inquiries-twice", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+        db.session.add(Inquiry(source="feedback", email="ada@example.org", message="Kept"))
+        db.session.commit()
+        columns_before = _sqlite_columns(db_path, "tenants")
+
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert run_migrations(db) == 0
+        assert migrate_2_3_0(db) == 0
+        assert _sqlite_columns(db_path, "tenants") == columns_before
+        assert Inquiry.query.one().message == "Kept"
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_migration_creates_the_inquiries_table_itself_when_it_is_missing(tmp_path: Path) -> None:
+    """Without db.create_all(): the migration's own SQL must match the model."""
+    from migrations import migrate_2_3_0
+    from models import Inquiry
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email VARCHAR(255) NOT NULL)")
+    conn.commit()
+    conn.close()
+
+    app_module, test_app = load_test_app(
+        secret_key="migration-inquiries-raw", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        assert "inquiries" not in _sqlite_tables(db_path)
+
+        # 1 table + 4 tenant columns
+        assert migrate_2_3_0(db) == 5
+
+        model_columns = {column.name for column in Inquiry.__table__.columns}
+        assert _sqlite_columns(db_path, "inquiries") == model_columns
+        assert TEAM_PROFILE_COLUMNS <= _sqlite_columns(db_path, "tenants")
+
+        conn = sqlite3.connect(db_path)
+        indexes = {row[1] for row in conn.execute("PRAGMA index_list(inquiries)").fetchall()}
+        conn.execute(
+            "INSERT INTO inquiries (source, email) VALUES ('contact', 'ada@example.org')"
+        )
+        conn.commit()
+        row = conn.execute("SELECT email_sent, handled, created_at FROM inquiries").fetchone()
+        conn.close()
+        assert {f"ix_inquiries_{name}" for name in ("source", "email", "user_id", "created_at", "handled")} <= indexes
+        # Defaults come from the table itself, not only from the model
+        assert row[0] in (0, False) and row[1] in (0, False) and row[2] is not None
+
+        assert migrate_2_3_0(db) == 0
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_fresh_database_initialises_with_inquiries_and_team_profile(tmp_path: Path) -> None:
+    from migrations import migrate_2_3_0
+    from models import Inquiry, Tenant
+
+    db_path = tmp_path / "fresh.db"
+    app_module, test_app = load_test_app(
+        secret_key="migration-inquiries-fresh", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert "inquiries" in _sqlite_tables(db_path)
+        assert TEAM_PROFILE_COLUMNS <= _sqlite_columns(db_path, "tenants")
+        assert migrate_2_3_0(db) == 0
+
+        db.session.add(Tenant(domain="fresh.test", name="Fresh", team_focus="Hiring", team_size="1-5"))
+        db.session.add(Inquiry(source="sponsorship", organisation="Fresh", email="a@fresh.test"))
+        db.session.commit()
+        assert Tenant.query.filter_by(domain="fresh.test").one().team_size == "1-5"
+
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.3.0" in versions
+
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+
+
+class _RecordingConnection:
+    """Stands in for a PostgreSQL connection: records SQL, answers the existence checks."""
+
+    def __init__(self, statements):
+        self.statements = statements
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        self.statements.append(sql)
+        params = params or {}
+
+        class Result:
+            def __init__(self, row):
+                self._row = row
+
+            def fetchone(self):
+                return self._row
+
+            def fetchall(self):
+                return [self._row] if self._row else []
+
+        if "information_schema.tables" in sql:
+            created = any("CREATE TABLE inquiries" in s for s in self.statements)
+            exists = params.get("name") in ("tenants", "users") or (params.get("name") == "inquiries" and created)
+            return Result(("x",) if exists else None)
+        if "information_schema.columns" in sql:
+            return Result(None)  # no column exists yet
+        return Result(None)
+
+    def commit(self):
+        pass
+
+
+def test_migration_sql_for_postgresql_uses_no_sqlite_only_syntax() -> None:
+    """No PostgreSQL server here: check the statements the migration would send to one."""
+    from types import SimpleNamespace
+
+    import migrations
+    from migrations import migrate_2_3_0
+
+    statements: list[str] = []
+    fake_db = SimpleNamespace(
+        engine=SimpleNamespace(
+            dialect=SimpleNamespace(name="postgresql"),
+            connect=lambda: _RecordingConnection(statements),
+        ),
+        text=lambda sql: sql,
+    )
+
+    changes = migrate_2_3_0(fake_db)
+
+    assert changes == 5
+    ddl = "\n".join(s for s in statements if "information_schema" not in s)
+    assert "CREATE TABLE inquiries" in ddl
+    assert "id SERIAL PRIMARY KEY" in ddl
+    for sqlite_only in ("AUTOINCREMENT", "PRAGMA", "sqlite_master", "DATETIME"):
+        assert sqlite_only not in ddl
+    for column in sorted(TEAM_PROFILE_COLUMNS):
+        assert f"ALTER TABLE tenants ADD COLUMN {column} " in ddl
+    assert "team_profile_answered_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL" in ddl
+    assert migrations.get_db_type(fake_db) == "postgresql"

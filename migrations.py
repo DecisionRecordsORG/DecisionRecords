@@ -186,6 +186,11 @@ MIGRATIONS = [
         "description": "Rename stored default display names to Decision Records",
         "migrate": lambda db: migrate_2_2_0(db)
     },
+    {
+        "version": "2.3.0",
+        "description": "Add inquiries table and tenant team profile columns",
+        "migrate": lambda db: migrate_2_3_0(db)
+    },
 ]
 
 
@@ -486,6 +491,73 @@ def migrate_2_2_0(db):
         if result.rowcount and result.rowcount > 0:
             logger.info(f"Renamed {result.rowcount} default value(s) in {table_name}.{column_name}")
             changes += result.rowcount
+
+    return changes
+
+
+def migrate_2_3_0(db):
+    """Migration for v2.3.0 - inquiries table and tenant team profile columns.
+
+    On a fresh database db.create_all() has already created everything and
+    this changes nothing. On an existing database it creates the inquiries
+    table and adds the four team profile columns to tenants. Safe to repeat.
+    """
+    changes = 0
+    db_type = get_db_type(db)
+
+    if not table_exists(db, 'inquiries'):
+        id_column = (
+            "id INTEGER PRIMARY KEY AUTOINCREMENT" if db_type == 'sqlite'
+            else "id SERIAL PRIMARY KEY"
+        )
+        create_sql = f"""
+            CREATE TABLE inquiries (
+                {id_column},
+                source VARCHAR(20) NOT NULL,
+                name VARCHAR(100),
+                email VARCHAR(255),
+                organisation VARCHAR(200),
+                area_of_interest VARCHAR(100),
+                message TEXT,
+                team_focus VARCHAR(200),
+                team_size VARCHAR(20),
+                contact_consent BOOLEAN,
+                user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                tenant_domain VARCHAR(255),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                email_sent BOOLEAN NOT NULL DEFAULT FALSE,
+                handled BOOLEAN NOT NULL DEFAULT FALSE,
+                handled_at TIMESTAMP,
+                handled_by VARCHAR(255),
+                redacted_at TIMESTAMP
+            )
+        """
+        with db.engine.connect() as conn:
+            conn.execute(db.text(create_sql))
+            conn.commit()
+
+        logger.info("Created inquiries table")
+        changes += 1
+
+    if table_exists(db, 'inquiries'):
+        with db.engine.connect() as conn:
+            for column_name in ('source', 'email', 'user_id', 'created_at', 'handled'):
+                conn.execute(db.text(
+                    f"CREATE INDEX IF NOT EXISTS ix_inquiries_{column_name} "
+                    f"ON inquiries({column_name})"
+                ))
+            conn.commit()
+
+    if table_exists(db, 'tenants'):
+        team_profile_columns = (
+            ('team_focus', 'VARCHAR(200)'),
+            ('team_size', 'VARCHAR(20)'),
+            ('team_profile_answered_at', 'TIMESTAMP'),
+            ('team_profile_answered_by_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'),
+        )
+        for column_name, column_type in team_profile_columns:
+            if add_column(db, 'tenants', column_name, column_type):
+                changes += 1
 
     return changes
 
