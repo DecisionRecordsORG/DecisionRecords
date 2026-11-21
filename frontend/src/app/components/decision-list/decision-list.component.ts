@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, TemplateRef, ViewChild } from '@angular/core';
-import { Subscription } from 'rxjs';
+import { Subscription, take } from 'rxjs';
 import { CommonModule, TitleCasePipe } from '@angular/common';
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -20,6 +20,13 @@ import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { Decision, User, Space } from '../../models/decision.model';
 import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/decision-modal.component';
+import {
+  TEAM_FOCUS_MAX_LENGTH,
+  TEAM_FOCUS_PLACEHOLDER,
+  TEAM_FOCUS_QUESTION,
+  TEAM_SIZE_OPTIONS,
+  teamProfileBody
+} from '../shared/team-profile';
 
 @Component({
   selector: 'app-decision-list',
@@ -289,6 +296,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
       <!-- Admin Onboarding Modal -->
       <ng-template #adminOnboardingDialog>
         <div class="onboarding-dialog">
+          <div class="onboarding-body">
           <div class="onboarding-header">
             <mat-icon class="onboarding-icon">admin_panel_settings</mat-icon>
             <h2>You're a Provisional Admin</h2>
@@ -327,8 +335,36 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
             </ul>
           </div>
 
+          @if (showTeamProfileQuestion) {
+            <div class="onboarding-team-profile" data-testid="onboarding-team-profile">
+              <h3>Two optional questions</h3>
+              <p class="onboarding-team-profile-why">
+                It helps us build for teams like yours. You can skip this and answer later in organisation settings.
+              </p>
+              <mat-form-field appearance="outline" class="onboarding-field" subscriptSizing="dynamic">
+                <mat-label>{{ teamFocusQuestion }}</mat-label>
+                <input
+                  matInput
+                  data-testid="onboarding-team-focus"
+                  [(ngModel)]="onboardingTeamFocus"
+                  [attr.maxlength]="teamFocusMaxLength"
+                  [placeholder]="teamFocusPlaceholder">
+              </mat-form-field>
+              <mat-form-field appearance="outline" class="onboarding-field" subscriptSizing="dynamic">
+                <mat-label>Team size</mat-label>
+                <mat-select data-testid="onboarding-team-size" [(ngModel)]="onboardingTeamSize">
+                  <mat-option [value]="null">Prefer not to say</mat-option>
+                  @for (option of teamSizeOptions; track option.code) {
+                    <mat-option [value]="option.code">{{ option.label }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+            </div>
+          }
+          </div>
+
           <div class="onboarding-actions">
-            <button mat-stroked-button (click)="dismissOnboarding()">
+            <button mat-stroked-button data-testid="onboarding-dismiss" (click)="dismissOnboarding()">
               Got it
             </button>
             <button mat-raised-button color="primary" [routerLink]="['/' + userDomain + '/admin']" (click)="dismissOnboarding()">
@@ -853,9 +889,20 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
     }
 
     /* Admin Onboarding Modal */
+    /* The text scrolls and the buttons stay in view, so the dialog can always
+       be dismissed, whatever the height of the window. */
     .onboarding-dialog {
-      padding: 32px;
-      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      max-height: 90vh;
+      box-sizing: border-box;
+    }
+
+    .onboarding-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 32px 32px 0;
     }
 
     .onboarding-header {
@@ -954,12 +1001,41 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
       font-size: 0.9rem;
     }
 
-    .onboarding-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 12px;
+    .onboarding-team-profile {
+      margin: 0 0 20px;
       padding-top: 16px;
       border-top: 1px solid #e2e8f0;
+    }
+
+    .onboarding-team-profile h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #374151;
+      margin: 0 0 4px;
+    }
+
+    .onboarding-team-profile-why {
+      margin: 0 0 14px;
+      font-size: 0.9rem;
+      color: #475569;
+      line-height: 1.5;
+    }
+
+    .onboarding-field {
+      display: block;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+
+    .onboarding-actions {
+      display: flex;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 12px;
+      padding: 16px 32px 24px;
+      border-top: 1px solid #e2e8f0;
+      background: #fff;
     }
 
     /* Responsive adjustments */
@@ -1013,6 +1089,20 @@ export class DecisionListComponent implements OnInit, OnDestroy {
   slackWelcomeDialogRef: MatDialogRef<any> | null = null;
   private refreshSubscription: Subscription | null = null;
 
+  // Optional team profile questions in the onboarding dialog
+  readonly teamSizeOptions = TEAM_SIZE_OPTIONS;
+  readonly teamFocusMaxLength = TEAM_FOCUS_MAX_LENGTH;
+  readonly teamFocusQuestion = TEAM_FOCUS_QUESTION;
+  readonly teamFocusPlaceholder = TEAM_FOCUS_PLACEHOLDER;
+  onboardingTeamFocus = '';
+  onboardingTeamSize: string | null = null;
+  showTeamProfileQuestion = true;
+
+  // The onboarding dialog waits until no other dialog is open
+  private onboardingTimer: ReturnType<typeof setTimeout> | null = null;
+  private onboardingWaitSubscription: Subscription | null = null;
+  private destroyed = false;
+
   constructor(
     private decisionService: DecisionService,
     public authService: AuthService,
@@ -1055,9 +1145,16 @@ export class DecisionListComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.destroyed = true;
     if (this.refreshSubscription) {
       this.refreshSubscription.unsubscribe();
     }
+    if (this.onboardingTimer) {
+      clearTimeout(this.onboardingTimer);
+      this.onboardingTimer = null;
+    }
+    this.onboardingWaitSubscription?.unsubscribe();
+    this.onboardingWaitSubscription = null;
   }
 
   loadSpaces(): void {
@@ -1077,11 +1174,41 @@ export class DecisionListComponent implements OnInit, OnDestroy {
 
     const user = currentUser.user as User;
     if (user && user.is_admin && !user.has_seen_admin_onboarding) {
+      // Ask the team profile questions only while the team has not answered them
+      this.showTeamProfileQuestion = !user.tenant_info?.team_profile_answered;
       // Small delay to ensure the view is ready
-      setTimeout(() => {
-        this.showAdminOnboarding();
+      this.onboardingTimer = setTimeout(() => {
+        this.onboardingTimer = null;
+        this.showAdminOnboardingWhenIdle();
       }, 500);
     }
+  }
+
+  /**
+   * Open the onboarding dialog only when no other dialog is open.
+   *
+   * The dialog used to open half a second after the list loaded, whatever was
+   * on screen. Someone who had already started a new decision got it on top of
+   * the decision dialog, and it took the keyboard focus away from what they
+   * were typing. If any dialog is open it now waits until all are closed.
+   */
+  private showAdminOnboardingWhenIdle(): void {
+    if (this.destroyed || this.onboardingDialogRef) return;
+
+    if (this.dialog.openDialogs.length === 0) {
+      this.showAdminOnboarding();
+      return;
+    }
+
+    this.onboardingWaitSubscription?.unsubscribe();
+    this.onboardingWaitSubscription = this.dialog.afterAllClosed.pipe(take(1)).subscribe(() => {
+      this.onboardingWaitSubscription = null;
+      // Let the closing dialog hand focus back before another one opens
+      this.onboardingTimer = setTimeout(() => {
+        this.onboardingTimer = null;
+        this.showAdminOnboardingWhenIdle();
+      }, 300);
+    });
   }
 
   showSlackWelcome(): void {
@@ -1103,11 +1230,46 @@ export class DecisionListComponent implements OnInit, OnDestroy {
     this.onboardingDialogRef = this.dialog.open(this.adminOnboardingDialog, {
       width: '520px',
       disableClose: false,
-      panelClass: 'admin-onboarding-dialog'
+      panelClass: 'admin-onboarding-dialog',
+      maxWidth: '95vw',
+      maxHeight: '90vh',
+      // Focus the dialog itself, not its first field: the questions are optional
+      autoFocus: 'dialog'
+    });
+    this.onboardingDialogRef.afterClosed().subscribe(() => {
+      this.onboardingDialogRef = null;
+    });
+  }
+
+  /**
+   * Save the optional team profile answers, if any were given. Never blocks
+   * dismissing: a failure is logged and the questions stay available in
+   * organisation settings.
+   */
+  private saveOnboardingTeamProfile(): void {
+    if (!this.showTeamProfileQuestion) return;
+    const body = teamProfileBody(this.onboardingTeamFocus, this.onboardingTeamSize);
+    if (!body) return;
+
+    this.http.put('/api/tenant/team-profile', body).subscribe({
+      next: () => {
+        const currentUser = this.authService.currentUser;
+        if (currentUser && !currentUser.isMaster) {
+          const user = currentUser.user as User;
+          if (user?.tenant_info) {
+            user.tenant_info.team_profile_answered = true;
+          }
+        }
+      },
+      error: (err) => {
+        console.error('Failed to save team profile:', err);
+      }
     });
   }
 
   dismissOnboarding(): void {
+    this.saveOnboardingTeamProfile();
+
     // Call API to mark onboarding as seen
     this.http.post('/api/user/dismiss-admin-onboarding', {}).subscribe({
       next: (response: any) => {

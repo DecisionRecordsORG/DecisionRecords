@@ -5,12 +5,14 @@ import logging
 import sys
 import traceback
 import threading
+import mimetypes
 from sqlalchemy.pool import StaticPool
 
-from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
+from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory, make_response
+from werkzeug.exceptions import HTTPException
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, Inquiry, TEAM_SIZE_OPTIONS, TEAM_SIZE_CODES, TEAM_FOCUS_MAX_LENGTH, team_size_label, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
 
 # EE:START - EE Model Imports
 # Enterprise Edition models (Slack, Teams, AI integration)
@@ -87,6 +89,12 @@ logger = logging.getLogger(__name__)
 # Determine if we're serving Angular frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist', 'frontend', 'browser')
 SERVE_ANGULAR = os.path.exists(FRONTEND_DIR)
+
+# The icon set is served from the built frontend by file name. Name the types
+# here so they do not depend on the mime.types file of the host or image.
+mimetypes.add_type('application/manifest+json', '.webmanifest')
+mimetypes.add_type('image/x-icon', '.ico')
+mimetypes.add_type('image/svg+xml', '.svg')
 
 app = Flask(__name__, static_folder=FRONTEND_DIR if SERVE_ANGULAR else 'static')
 
@@ -359,6 +367,59 @@ def get_app_base_url():
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
+
+# Client-facing text for HTTP errors raised by Flask, Werkzeug or the rate
+# limiter. Anything not listed falls back to the status name ("Gone").
+HTTP_ERROR_MESSAGES = {
+    405: 'Method not allowed',
+    413: 'Request is too large',
+    415: 'Unsupported media type',
+    429: 'Too many requests. Please wait a minute and try again.',
+}
+RATE_LIMIT_DEFAULT_RETRY_AFTER = 60  # seconds
+
+
+def _rate_limit_retry_after(e):
+    """Seconds a rate-limited client should wait, from the limit that was hit."""
+    try:
+        return max(1, int(e.limit.limit.get_expiry()))
+    except Exception:
+        return RATE_LIMIT_DEFAULT_RETRY_AFTER
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Keep the status of HTTP errors (405, 429, ...) instead of reporting them as 500.
+
+    Without this the catch-all handler below received every HTTPException that
+    has no handler of its own, so a rate-limited request or a wrong method was
+    answered with "An internal server error occurred". The statuses with their
+    own handlers (400, 401, 403, 404, 500) are not affected.
+    """
+    if e.response is not None:
+        return e.response
+
+    status = e.code or 500
+    message = HTTP_ERROR_MESSAGES.get(status) or e.name or 'Request failed'
+    wants_json = request.path.startswith('/api/') or (
+        request.path.startswith('/auth/') and request.is_json
+    )
+    if wants_json:
+        response = jsonify({'error': message})
+    else:
+        response = make_response(message)
+        response.mimetype = 'text/plain'
+    response.status_code = status
+
+    # Headers the exception carries, for example Allow on a 405
+    for header, value in e.get_headers():
+        if header.lower() not in ('content-type', 'content-length'):
+            response.headers[header] = value
+
+    if status == 429 and 'Retry-After' not in response.headers:
+        response.headers['Retry-After'] = str(_rate_limit_retry_after(e))
+    return response
+
 
 @app.errorhandler(Exception)
 def handle_exception(e):
@@ -723,24 +784,136 @@ def get_features():
 
 
 # ==================== Feedback, Contact & Sponsorship ====================
+#
+# All three forms work the same way: validate, store the message as an Inquiry,
+# then try to email it to the team. Storing comes first so a message is never
+# lost because email is not configured or the send failed; the super admin
+# reads stored messages under Super Admin > Inquiries.
+
+def _form_text(data, key):
+    """A submitted text value, trimmed. Missing, null and non-text values count as empty."""
+    value = data.get(key)
+    return value.strip() if isinstance(value, str) else ''
+
+
+def _stored_text(value):
+    """Sanitised text as it is kept in the database.
+
+    The sanitisers escape "&" for use in HTML emails. Stored text is shown as
+    plain text, so "R&amp;D" is turned back into "R&D". Only the ampersand is
+    restored: "<" and ">" stay escaped or stripped.
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.replace('&amp;', '&').strip()
+    return value or None
+
+
+def _form_team_fields(data):
+    """Optional team answers a form may carry: (team_focus, team_size).
+
+    team_focus is free text, trimmed, stripped of markup and cut to
+    TEAM_FOCUS_MAX_LENGTH. team_size is kept only when it is a known code.
+    Anything else is ignored rather than rejected: the fields are optional and
+    must never cost a visitor their message.
+    """
+    team_focus = sanitize_title(_form_text(data, 'team_focus'), max_length=TEAM_FOCUS_MAX_LENGTH) or None
+    team_size = _form_text(data, 'team_size')
+    return team_focus, (team_size if team_size in TEAM_SIZE_CODES else None)
+
+
+def _inquiry_sender():
+    """(user_id, tenant_domain) of the signed-in sender, or (None, None)."""
+    try:
+        if is_master_account():
+            return None, None
+        user = get_current_user()
+    except Exception:
+        return None, None
+    if not user:
+        return None, None
+    return user.id, user.sso_domain
+
+
+def _store_inquiry(source, **fields):
+    """Store an inbound message. Returns the Inquiry, or None when storing failed.
+
+    No IP address or user agent is recorded.
+    """
+    user_id, tenant_domain = _inquiry_sender()
+    try:
+        inquiry = Inquiry(
+            source=source,
+            user_id=user_id,
+            tenant_domain=tenant_domain,
+            email_sent=False,
+            handled=False,
+            **fields
+        )
+        db.session.add(inquiry)
+        db.session.commit()
+        return inquiry
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to store {source} inquiry: {e}")
+        capture_exception(e, endpoint_name=f'api_{source}_store')
+        return None
+
+
+def _deliver_inquiry(inquiry, source, send, success_message, failure_message):
+    """Try the notification email for a stored message and build the response.
+
+    The visitor gets 200 once the message is stored, whether or not the email
+    went out: their message was received, and whether the team is notified by
+    email is our concern, shown to the super admin as "not emailed". An error
+    is returned only when the message was neither stored nor emailed.
+    """
+    email_config = EmailConfig.query.filter_by(enabled=True).first()
+    sent = False
+    if email_config:
+        try:
+            sent = bool(send(email_config))
+        except Exception as e:
+            logger.error(f"Sending the {source} notification email raised: {e}")
+            capture_exception(e, endpoint_name=f'api_{source}_email')
+    else:
+        logger.warning(f"{source} message received but no email config available")
+
+    if inquiry is not None and sent:
+        try:
+            inquiry.email_sent = True
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to mark {source} inquiry as emailed: {e}")
+
+    if inquiry is None and not sent:
+        if not email_config:
+            return jsonify({'error': 'Email service temporarily unavailable'}), 503
+        return jsonify({'error': failure_message}), 500
+
+    if inquiry is not None and not sent:
+        logger.warning(f"{source} inquiry {inquiry.id} stored but not emailed")
+    return jsonify({'message': success_message})
+
 
 def _api_submit_feedback_impl():
     """Submit feedback from users.
 
     Rate limited to 5 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
+    The feedback is stored first, then emailed to the support address.
     """
     from notifications import send_feedback_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field
 
-    data = request.get_json()
-    if not data:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
     # Validate required fields
-    name = data.get('name', '').strip()
-    email = data.get('email', '').strip()
-    feedback = data.get('feedback', '').strip()
+    name = _form_text(data, 'name')
+    email = _form_text(data, 'email')
+    feedback = _form_text(data, 'feedback')
     contact_consent = data.get('contact_consent', data.get('contactConsent', False))
 
     if not name or not email or not feedback:
@@ -751,18 +924,27 @@ def _api_submit_feedback_impl():
     email = sanitize_email(email)
     feedback = sanitize_text_field(feedback, max_length=5000)
     contact_consent = bool(contact_consent)
+    team_focus, team_size = _form_team_fields(data)
 
     if not email:
         return jsonify({'error': 'Invalid email address'}), 400
 
+    # Sanitizing can strip a value down to nothing (for example a name made only of markup)
+    if not name:
+        return jsonify({'error': 'Name, email, and feedback are required'}), 400
+
     if len(feedback) < 10:
         return jsonify({'error': 'Feedback must be at least 10 characters'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Feedback received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_FEEDBACK,
+        name=_stored_text(name),
+        email=email,
+        message=_stored_text(feedback),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
+        contact_consent=contact_consent,
+    )
 
     # Get support email from SystemConfig (fallback to default)
     support_email = SystemConfig.get(
@@ -770,15 +952,16 @@ def _api_submit_feedback_impl():
         SystemConfig.DEFAULT_SUPPORT_EMAIL
     )
 
-    # Send the feedback email
-    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent, recipient_email=support_email)
-
-    if success:
-        logger.info(f"Feedback submitted successfully from {email}")
-        return jsonify({'message': 'Thank you for your feedback! We will review it shortly.'})
-    else:
-        logger.error(f"Failed to send feedback email from {email}")
-        return jsonify({'error': 'Failed to submit feedback. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_FEEDBACK,
+        lambda email_config: send_feedback_email(
+            email_config, name, email, feedback,
+            contact_consent=contact_consent, recipient_email=support_email
+        ),
+        success_message='Thank you for your feedback! We will review it shortly.',
+        failure_message='Failed to submit feedback. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (5 requests/minute to prevent spam)
@@ -798,26 +981,21 @@ def _api_submit_contact_impl():
     Public endpoint (no login). Rate limited to 5 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
 
-    The message is emailed to the super admin "Contact Form Email" setting
-    (SystemConfig support_email). Nothing is stored, so when no email
-    configuration is enabled the request fails with 503 instead of pretending
-    the message was delivered.
+    The message is stored, then emailed to the super admin "Contact Form Email"
+    setting (SystemConfig support_email). When no email configuration is
+    enabled or the send fails, the stored message is still there for the super
+    admin and the visitor is told it was received.
     """
     from notifications import send_contact_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field
 
     data = request.get_json(silent=True)
     if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
-    def _text(key):
-        value = data.get(key)
-        return value.strip() if isinstance(value, str) else ''
-
     # Validate required fields
-    name = _text('name')
-    email = _text('email')
-    message = _text('message')
+    name = _form_text(data, 'name')
+    email = _form_text(data, 'email')
+    message = _form_text(data, 'message')
 
     if not name or not email or not message:
         return jsonify({'error': 'Name, email, and message are required'}), 400
@@ -826,6 +1004,7 @@ def _api_submit_contact_impl():
     name = sanitize_name(name, max_length=100)
     email = sanitize_email(email)
     message = sanitize_text_field(message, max_length=5000)
+    team_focus, team_size = _form_team_fields(data)
 
     if not email:
         return jsonify({'error': 'Invalid email address'}), 400
@@ -834,11 +1013,14 @@ def _api_submit_contact_impl():
     if not name or not message:
         return jsonify({'error': 'Name, email, and message are required'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Contact message received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_CONTACT,
+        name=_stored_text(name),
+        email=email,
+        message=_stored_text(message),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
+    )
 
     # Contact Form Email from super admin settings (fallback to default)
     support_email = SystemConfig.get(
@@ -846,14 +1028,16 @@ def _api_submit_contact_impl():
         SystemConfig.DEFAULT_SUPPORT_EMAIL
     )
 
-    success = send_contact_email(email_config, name, email, message, recipient_email=support_email)
-
-    if success:
-        logger.info(f"Contact message submitted successfully from {email}")
-        return jsonify({'message': 'Thank you for your message! We will get back to you soon.'})
-    else:
-        logger.error(f"Failed to send contact message email from {email}")
-        return jsonify({'error': 'Failed to send your message. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_CONTACT,
+        lambda email_config: send_contact_email(
+            email_config, name, email, message,
+            recipient_email=support_email, team_focus=team_focus
+        ),
+        success_message='Thank you for your message! We will get back to you soon.',
+        failure_message='Failed to send your message. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (5 requests/minute to prevent spam)
@@ -868,63 +1052,72 @@ else:
 
 
 def _api_submit_sponsorship_impl():
-    """Submit sponsorship inquiry.
+    """Submit sponsorship inquiry (the "Get in touch" dialog).
 
     Rate limited to 3 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
+    The inquiry is stored first, then emailed.
     """
     from notifications import send_sponsorship_inquiry_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field, sanitize_title
 
-    data = request.get_json()
-    if not data:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
     # Validate required fields
-    org_name = data.get('organisation_name', '').strip()
-    contact_email = data.get('contact_email', '').strip()
+    org_name = _form_text(data, 'organisation_name')
+    contact_email = _form_text(data, 'contact_email')
 
     if not org_name or not contact_email:
         return jsonify({'error': 'Organisation name and contact email are required'}), 400
 
-    # Get optional fields
-    contact_name = data.get('contact_name', '').strip() or None
-    area_of_interest = data.get('area_of_interest', '').strip() or None
-    message = data.get('message', '').strip() or None
+    # Optional fields: missing, null and non-text values are treated as not given
+    contact_name = _form_text(data, 'contact_name') or None
+    area_of_interest = _form_text(data, 'area_of_interest') or None
+    message = _form_text(data, 'message') or None
 
     # Sanitize all inputs
     org_name = sanitize_title(org_name, max_length=200)
     contact_email = sanitize_email(contact_email)
     if contact_name:
-        contact_name = sanitize_name(contact_name, max_length=100)
+        contact_name = sanitize_name(contact_name, max_length=100) or None
     if area_of_interest:
-        area_of_interest = sanitize_title(area_of_interest, max_length=100)
+        area_of_interest = sanitize_title(area_of_interest, max_length=100) or None
     if message:
-        message = sanitize_text_field(message, max_length=2000)
+        message = sanitize_text_field(message, max_length=2000) or None
+    team_focus, team_size = _form_team_fields(data)
 
     if not contact_email:
         return jsonify({'error': 'Invalid email address'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Sponsorship inquiry received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    # Sanitizing can strip a value down to nothing (for example a name made only of markup)
+    if not org_name:
+        return jsonify({'error': 'Organisation name and contact email are required'}), 400
 
-    # Send the sponsorship inquiry email
-    success = send_sponsorship_inquiry_email(
-        email_config, org_name, contact_email,
-        contact_name=contact_name,
-        area_of_interest=area_of_interest,
-        message=message
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_SPONSORSHIP,
+        name=_stored_text(contact_name),
+        email=contact_email,
+        organisation=_stored_text(org_name),
+        area_of_interest=_stored_text(area_of_interest),
+        message=_stored_text(message),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
     )
 
-    if success:
-        logger.info(f"Sponsorship inquiry submitted from {org_name} ({contact_email})")
-        return jsonify({'message': 'Thank you for reaching out! We will be in touch shortly.'})
-    else:
-        logger.error(f"Failed to send sponsorship inquiry email from {contact_email}")
-        return jsonify({'error': 'Failed to submit inquiry. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_SPONSORSHIP,
+        lambda email_config: send_sponsorship_inquiry_email(
+            email_config, org_name, contact_email,
+            contact_name=contact_name,
+            area_of_interest=area_of_interest,
+            message=message,
+            team_focus=team_focus
+        ),
+        success_message='Thank you for reaching out! We will be in touch shortly.',
+        failure_message='Failed to submit inquiry. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (3 requests/minute to prevent spam)
@@ -3453,7 +3646,9 @@ def api_get_current_user():
                 'steward_count': TenantMembership.query.filter_by(
                     tenant_id=tenant.id,
                     global_role=GlobalRole.STEWARD
-                ).count()
+                ).count(),
+                # Lets the onboarding dialog skip a question the team already answered
+                'team_profile_answered': tenant.has_team_profile()
             }
 
     return jsonify(user_dict)
@@ -3523,6 +3718,115 @@ def api_dismiss_admin_onboarding():
     return jsonify({'message': 'Admin onboarding dismissed', 'user': user.to_dict()})
 
 
+# ==================== API Routes - Team profile ====================
+# Two optional answers a tenant admin gives about the team: what it makes
+# decisions about and how big it is. Asked once in the first-admin onboarding
+# dialog and editable in organisation settings.
+
+def _team_profile_access():
+    """(tenant, None) for a tenant admin, steward or provisional admin, else (None, error response)."""
+    if is_master_account():
+        return None, (jsonify({'error': 'Super admin accounts cannot access a team profile'}), 403)
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return None, (jsonify({'error': 'Tenant not found'}), 404)
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return None, (jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403)
+
+    return tenant, None
+
+
+def _team_profile_payload(tenant):
+    payload = tenant.team_profile_dict()
+    answered_by = None
+    if tenant.team_profile_answered_by_id:
+        user = db.session.get(User, tenant.team_profile_answered_by_id)
+        if user and not user.is_anonymized:
+            answered_by = user.get_full_name() or None
+    payload['answered_by'] = answered_by
+    payload['team_focus_max_length'] = TEAM_FOCUS_MAX_LENGTH
+    payload['team_size_options'] = [
+        {'code': code, 'label': label} for code, label in TEAM_SIZE_OPTIONS
+    ]
+    return payload
+
+
+@app.route('/api/tenant/team-profile', methods=['GET'])
+@login_required
+def api_get_team_profile():
+    """Return the tenant's team profile answers (tenant admins and stewards)."""
+    tenant, error = _team_profile_access()
+    if error:
+        return error
+    return jsonify(_team_profile_payload(tenant))
+
+
+@app.route('/api/tenant/team-profile', methods=['PUT'])
+@login_required
+def api_update_team_profile():
+    """Save the tenant's team profile answers (tenant admins and stewards).
+
+    Body: {"team_focus": text or null, "team_size": code or null}. Both are
+    optional; a field that is left out keeps its value, and null or an empty
+    string clears it.
+    """
+    tenant, error = _team_profile_access()
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate everything before changing anything
+    team_focus = tenant.team_focus
+    team_size = tenant.team_size
+
+    if 'team_focus' in data:
+        raw = data['team_focus']
+        if raw is not None and not isinstance(raw, str):
+            return jsonify({'error': 'Team focus must be text'}), 400
+        if raw is not None and len(raw.strip()) > TEAM_FOCUS_MAX_LENGTH:
+            return jsonify({'error': f'Team focus must be {TEAM_FOCUS_MAX_LENGTH} characters or fewer'}), 400
+        team_focus = _stored_text(sanitize_title(raw or '', max_length=TEAM_FOCUS_MAX_LENGTH))
+
+    if 'team_size' in data:
+        raw = data['team_size']
+        if raw is not None and not isinstance(raw, str):
+            return jsonify({'error': 'Team size is not one of the listed ranges'}), 400
+        team_size = (raw or '').strip() or None
+        if team_size is not None and team_size not in TEAM_SIZE_CODES:
+            return jsonify({'error': 'Team size is not one of the listed ranges'}), 400
+
+    changed = team_focus != tenant.team_focus or team_size != tenant.team_size
+    if changed:
+        tenant.team_focus = team_focus
+        tenant.team_size = team_size
+        if tenant.has_team_profile():
+            tenant.team_profile_answered_at = datetime.now(timezone.utc)
+            tenant.team_profile_answered_by_id = g.current_user.id
+        else:
+            # Both answers cleared: nothing is left to attribute
+            tenant.team_profile_answered_at = None
+            tenant.team_profile_answered_by_id = None
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=g.current_user.id,
+            action_type='update_team_profile',
+            target_entity='tenant',
+            target_id=tenant.id,
+            details={'team_size': tenant.team_size, 'has_team_focus': bool(tenant.team_focus)}
+        )
+        db.session.commit()
+
+    payload = _team_profile_payload(tenant)
+    payload['message'] = 'Team profile saved'
+    return jsonify(payload)
+
+
 # ==================== API Routes - GDPR (Art. 17, 20) ====================
 
 def anonymize_user(user_id):
@@ -3572,6 +3876,19 @@ def anonymize_user(user_id):
         entry.ip_address = None
         entry.user_agent = None
 
+    # Remove the personal fields from messages this person sent through the
+    # contact, sponsorship and feedback forms: those sent while signed in and
+    # those that carry the account's email address.
+    for inquiry in Inquiry.query.filter(
+        db.or_(Inquiry.user_id == user.id, db.func.lower(Inquiry.email) == original_email.lower())
+    ).all():
+        inquiry.redact()
+
+    # A team profile answer stays with the tenant, without the link to this person
+    Tenant.query.filter_by(team_profile_answered_by_id=user.id).update(
+        {'team_profile_answered_by_id': None}, synchronize_session=False
+    )
+
     # Redact AuditLog details containing user email
     audit_entries = AuditLog.query.filter(
         AuditLog.details.isnot(None)
@@ -3585,6 +3902,20 @@ def anonymize_user(user_id):
 
     db.session.commit()
     return True
+
+
+def purge_old_inquiries(now=None):
+    """Delete inquiries older than Inquiry.RETENTION_DAYS (24 months). Returns how many.
+
+    Called by the scheduled GDPR task (/api/admin/execute-gdpr-tasks).
+    """
+    now = now or datetime.now(timezone.utc)
+    # created_at is stored without a timezone, in UTC
+    cutoff = now.replace(tzinfo=None) - timedelta(days=Inquiry.RETENTION_DAYS)
+    purged = Inquiry.query.filter(Inquiry.created_at < cutoff).delete(synchronize_session=False)
+    if purged:
+        db.session.commit()
+    return purged
 
 
 @app.route('/api/user/delete-request', methods=['POST'])
@@ -3708,6 +4039,7 @@ def api_export_user_data():
         'memberships': [],
         'audit_trail': [],
         'login_history': [],
+        'inquiries': [],
     }
 
     # Decisions authored
@@ -3749,6 +4081,22 @@ def api_export_user_data():
             'success': entry.success,
             'ip_address': entry.ip_address,
             'created_at': entry.created_at.isoformat() if entry.created_at else None,
+        })
+
+    # Messages sent through the contact, sponsorship and feedback forms while signed in
+    sent_inquiries = Inquiry.query.filter_by(user_id=user.id).order_by(Inquiry.created_at.desc()).limit(500).all()
+    for inquiry in sent_inquiries:
+        export['inquiries'].append({
+            'source': inquiry.source,
+            'name': inquiry.name,
+            'email': inquiry.email,
+            'organisation': inquiry.organisation,
+            'area_of_interest': inquiry.area_of_interest,
+            'message': inquiry.message,
+            'team_focus': inquiry.team_focus,
+            'team_size': inquiry.team_size,
+            'contact_consent': inquiry.contact_consent,
+            'created_at': inquiry.created_at.isoformat() if inquiry.created_at else None,
         })
 
     # Log the export action
@@ -3873,7 +4221,8 @@ def api_execute_gdpr_tasks():
             return jsonify({'error': 'Authentication required'}), 403
 
     now = datetime.now(timezone.utc)
-    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0}
+    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0,
+               'purged_inquiries': 0}
 
     # 1. Anonymize users past their scheduled deletion date
     users_to_delete = User.query.filter(
@@ -3885,6 +4234,10 @@ def api_execute_gdpr_tasks():
     for user in users_to_delete:
         if anonymize_user(user.id):
             results['anonymized_users'] += 1
+
+    # Delete contact, sponsorship and feedback messages older than 24 months.
+    # Runs before the hard-deletes below so a failure there cannot hold it up.
+    results['purged_inquiries'] = purge_old_inquiries(now)
 
     # 2. Hard-delete decisions past 30-day soft-delete retention
     expired_decisions = ArchitectureDecision.query.filter(
@@ -8442,6 +8795,191 @@ def api_login_history_stats():
     })
 
 
+# ============================================================================
+# Superadmin Inquiries (messages from the contact, sponsorship and feedback forms)
+# ============================================================================
+
+def _query_int(name, default, minimum, maximum):
+    """A bounded integer query parameter, or None when it is not a whole number."""
+    raw = request.args.get(name)
+    if raw is None or raw == '':
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(minimum, min(value, maximum))
+
+
+def _query_bool(name):
+    """(given, value) for a true/false query parameter. value is None when it is neither."""
+    raw = request.args.get(name)
+    if raw is None or raw == '':
+        return False, None
+    lowered = raw.strip().lower()
+    if lowered in ('true', '1'):
+        return True, True
+    if lowered in ('false', '0'):
+        return True, False
+    return True, None
+
+
+@app.route('/api/superadmin/inquiries', methods=['GET'])
+@master_required
+def api_list_inquiries():
+    """List stored inquiries, newest first (super admin only).
+
+    Query params:
+    - limit: Number of records to return (default 50, max 200)
+    - offset: Number of records to skip (default 0)
+    - source: 'contact', 'sponsorship' or 'feedback'
+    - handled: 'true' or 'false'
+    """
+    limit = _query_int('limit', 50, 1, 200)
+    offset = _query_int('offset', 0, 0, 10 ** 9)
+    if limit is None or offset is None:
+        return jsonify({'error': 'limit and offset must be whole numbers'}), 400
+
+    source = request.args.get('source') or None
+    if source is not None and source not in Inquiry.SOURCES:
+        return jsonify({'error': f"source must be one of: {', '.join(Inquiry.SOURCES)}"}), 400
+
+    handled_given, handled = _query_bool('handled')
+    if handled_given and handled is None:
+        return jsonify({'error': 'handled must be true or false'}), 400
+
+    query = Inquiry.query
+    if source:
+        query = query.filter(Inquiry.source == source)
+    if handled_given:
+        query = query.filter(Inquiry.handled.is_(handled))
+
+    total = query.count()
+    items = query.order_by(Inquiry.created_at.desc(), Inquiry.id.desc()).offset(offset).limit(limit).all()
+
+    return jsonify({
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'unhandled_total': Inquiry.query.filter(Inquiry.handled.is_(False)).count(),
+        'items': [item.to_dict() for item in items]
+    })
+
+
+@app.route('/api/superadmin/inquiries/summary', methods=['GET'])
+@master_required
+def api_inquiries_summary():
+    """Interest summary (super admin only): who is interested and what kind of team they are.
+
+    Plain counts and the distinct team focus answers as they were typed.
+    No analysis of the free text.
+    """
+    def by_team_size(rows):
+        counts = {code: 0 for code in TEAM_SIZE_CODES}
+        not_given = 0
+        for code, count in rows:
+            if code in counts:
+                counts[code] += count
+            else:
+                not_given += count
+        result = [
+            {'code': code, 'label': label, 'count': counts[code]}
+            for code, label in TEAM_SIZE_OPTIONS
+        ]
+        result.append({'code': None, 'label': 'Not answered', 'count': not_given})
+        return result
+
+    active_tenants = Tenant.query.filter(Tenant.deleted_at.is_(None))
+    tenant_sizes = db.session.query(Tenant.team_size, db.func.count(Tenant.id)).filter(
+        Tenant.deleted_at.is_(None)
+    ).group_by(Tenant.team_size).all()
+    inquiry_sizes = db.session.query(Inquiry.team_size, db.func.count(Inquiry.id)).group_by(
+        Inquiry.team_size
+    ).all()
+    source_counts = dict(db.session.query(Inquiry.source, db.func.count(Inquiry.id)).group_by(
+        Inquiry.source
+    ).all())
+
+    # Distinct answers, compared without regard to case or surrounding spaces
+    answers = {}
+
+    def add_answer(text, origin):
+        if not text or not text.strip():
+            return
+        key = text.strip().lower()
+        entry = answers.setdefault(key, {'text': text.strip(), 'tenants': 0, 'inquiries': 0})
+        entry[origin] += 1
+
+    for (text,) in db.session.query(Tenant.team_focus).filter(
+        Tenant.deleted_at.is_(None), Tenant.team_focus.isnot(None)
+    ).all():
+        add_answer(text, 'tenants')
+    for (text,) in db.session.query(Inquiry.team_focus).filter(Inquiry.team_focus.isnot(None)).all():
+        add_answer(text, 'inquiries')
+
+    return jsonify({
+        'tenants': {
+            'total': active_tenants.count(),
+            'with_team_focus': active_tenants.filter(
+                Tenant.team_focus.isnot(None), Tenant.team_focus != ''
+            ).count(),
+            'by_team_size': by_team_size(tenant_sizes),
+        },
+        'inquiries': {
+            'total': Inquiry.query.count(),
+            'unhandled': Inquiry.query.filter(Inquiry.handled.is_(False)).count(),
+            'not_emailed': Inquiry.query.filter(Inquiry.email_sent.is_(False)).count(),
+            'by_source': [
+                {'source': source, 'count': source_counts.get(source, 0)}
+                for source in Inquiry.SOURCES
+            ],
+            'by_team_size': by_team_size(inquiry_sizes),
+        },
+        'team_focus_answers': sorted(answers.values(), key=lambda entry: entry['text'].lower()),
+    })
+
+
+@app.route('/api/superadmin/inquiries/<int:inquiry_id>/handled', methods=['PUT'])
+@master_required
+def api_set_inquiry_handled(inquiry_id):
+    """Mark an inquiry handled or unhandled (super admin only). Body: {"handled": true|false}."""
+    inquiry = db.session.get(Inquiry, inquiry_id)
+    if not inquiry:
+        return jsonify({'error': 'Inquiry not found'}), 404
+
+    data = request.get_json(silent=True)
+    handled = data.get('handled') if isinstance(data, dict) else None
+    if not isinstance(handled, bool):
+        return jsonify({'error': 'handled must be true or false'}), 400
+
+    inquiry.handled = handled
+    if handled:
+        inquiry.handled_at = datetime.now(timezone.utc)
+        inquiry.handled_by = getattr(g.current_user, 'username', None) or 'super_admin'
+    else:
+        inquiry.handled_at = None
+        inquiry.handled_by = None
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Inquiry marked as handled' if handled else 'Inquiry marked as not handled',
+        'inquiry': inquiry.to_dict()
+    })
+
+
+@app.route('/api/superadmin/inquiries/<int:inquiry_id>', methods=['DELETE'])
+@master_required
+def api_delete_inquiry(inquiry_id):
+    """Permanently delete an inquiry (super admin only)."""
+    inquiry = db.session.get(Inquiry, inquiry_id)
+    if not inquiry:
+        return jsonify({'error': 'Inquiry not found'}), 404
+
+    db.session.delete(inquiry)
+    db.session.commit()
+    return jsonify({'message': 'Inquiry deleted'})
+
+
 @app.route('/api/tenants', methods=['GET'])
 @master_required
 def api_list_tenants():
@@ -8530,6 +9068,18 @@ def api_list_tenants():
             tenants[tenant.domain]['steward_count'] = steward_count
             tenants[tenant.domain]['user_count'] = member_count
             tenants[tenant.domain]['age_days'] = age_days
+            profile = tenant.team_profile_dict()
+            tenants[tenant.domain].update({
+                'team_focus': profile['team_focus'],
+                'team_size': profile['team_size'],
+                'team_size_label': profile['team_size_label'],
+                'team_profile_answered_at': profile['answered_at'],
+            })
+
+    # Every row carries the team profile keys, answered or not
+    for entry in tenants.values():
+        for key in ('team_focus', 'team_size', 'team_size_label', 'team_profile_answered_at'):
+            entry.setdefault(key, None)
 
     # Check SSO config for all domains
     for domain in tenants:

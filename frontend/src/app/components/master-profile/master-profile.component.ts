@@ -177,6 +177,18 @@ import { MasterAccount } from '../../models/decision.model';
                   <span>Session timeouts, security settings</span>
                 </div>
               </a>
+              <a routerLink="/superadmin/inquiries" class="nav-link" data-testid="nav-inquiries">
+                <mat-icon>inbox</mat-icon>
+                <div>
+                  <strong>
+                    Inquiries
+                    @if (unhandledInquiries > 0) {
+                      <em class="nav-count" data-testid="nav-inquiries-count">{{ unhandledInquiries }} not handled</em>
+                    }
+                  </strong>
+                  <span>Messages from the contact, get in touch and feedback forms, and what teams tell us about themselves</span>
+                </div>
+              </a>
             </div>
           </mat-card-content>
         </mat-card>
@@ -350,6 +362,18 @@ import { MasterAccount } from '../../models/decision.model';
       color: #666;
     }
 
+    .nav-link .nav-count {
+      font-style: normal;
+      font-size: 12px;
+      font-weight: 500;
+      background: #fff3e0;
+      color: #e65100;
+      border-radius: 12px;
+      padding: 2px 10px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
     .system-settings-card {
       margin-bottom: 24px;
     }
@@ -410,6 +434,8 @@ export class MasterProfileComponent implements OnInit {
   emailVerificationMessage = '';
   emailVerificationSuccess = false;
 
+  unhandledInquiries = 0;
+
   constructor(
     private fb: FormBuilder,
     public authService: AuthService,
@@ -428,6 +454,19 @@ export class MasterProfileComponent implements OnInit {
       this.master = this.authService.currentUser.user as MasterAccount;
     }
     this.loadEmailVerificationSetting();
+    this.loadUnhandledInquiries();
+  }
+
+  /** Count of inquiries nobody has handled yet, shown next to the Inquiries link. */
+  loadUnhandledInquiries(): void {
+    this.http.get<{ unhandled_total: number }>('/api/superadmin/inquiries?limit=1').subscribe({
+      next: (response) => {
+        this.unhandledInquiries = response.unhandled_total || 0;
+      },
+      error: () => {
+        this.unhandledInquiries = 0;
+      }
+    });
   }
 
   loadEmailVerificationSetting(): void {

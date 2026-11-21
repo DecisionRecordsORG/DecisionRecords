@@ -337,6 +337,24 @@ class MasterAccount(db.Model):
 # v1.5 GOVERNANCE MODELS
 # ============================================================================
 
+# Team size ranges offered wherever a team is asked how big it is.
+# Stored as the short code; the label is what people see.
+TEAM_SIZE_OPTIONS = (
+    ('1-5', '1 to 5 people'),
+    ('6-25', '6 to 25 people'),
+    ('26-100', '26 to 100 people'),
+    ('101-500', '101 to 500 people'),
+    ('501+', 'More than 500 people'),
+)
+TEAM_SIZE_CODES = tuple(code for code, _label in TEAM_SIZE_OPTIONS)
+TEAM_FOCUS_MAX_LENGTH = 200
+
+
+def team_size_label(code):
+    """Label for a team size code, or None for a missing or unknown code."""
+    return dict(TEAM_SIZE_OPTIONS).get(code)
+
+
 class Tenant(db.Model):
     """
     Tenant represents an organization/domain in the multi-tenant system.
@@ -372,6 +390,15 @@ class Tenant(db.Model):
     ai_external_access_enabled = db.Column(db.Boolean, default=False)  # Allow external AI API access
     ai_require_anonymization = db.Column(db.Boolean, default=True)  # Require PII anonymization before LLM
     ai_log_interactions = db.Column(db.Boolean, default=True)  # Log all AI interactions for audit
+
+    # Team profile: two optional answers a tenant admin gives about the team.
+    # They describe the tenant, not a person, and are removed with the tenant row.
+    team_focus = db.Column(db.String(200), nullable=True)  # "What does your team make decisions about?"
+    team_size = db.Column(db.String(20), nullable=True)  # One of TEAM_SIZE_CODES
+    team_profile_answered_at = db.Column(db.DateTime, nullable=True)
+    team_profile_answered_by_id = db.Column(
+        db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True
+    )
 
     # Relationships (defined after related models exist)
     # memberships - backref from TenantMembership
@@ -436,6 +463,19 @@ class Tenant(db.Model):
         """Check if tenant has reached maturity."""
         return self.maturity_state == MaturityState.MATURE
 
+    def has_team_profile(self):
+        """True when at least one team profile question has an answer."""
+        return bool(self.team_focus or self.team_size)
+
+    def team_profile_dict(self):
+        """The team profile answers, in the shape the API returns."""
+        return {
+            'team_focus': self.team_focus,
+            'team_size': self.team_size,
+            'team_size_label': team_size_label(self.team_size),
+            'answered_at': self.team_profile_answered_at.isoformat() if self.team_profile_answered_at else None,
+        }
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -449,6 +489,8 @@ class Tenant(db.Model):
             'admin_count': self.get_admin_count(),
             'steward_count': self.get_steward_count(),
             'member_count': self.get_member_count(),
+            'team_focus': self.team_focus,
+            'team_size': self.team_size,
         }
 
 
@@ -838,6 +880,85 @@ def log_login_attempt(email, login_method, success, user_id=None, tenant_domain=
     db.session.add(entry)
     db.session.commit()
     return entry
+
+
+class Inquiry(db.Model):
+    """
+    A message someone sent us through one of the three forms: the website
+    contact form, the "Get in touch" (sponsorship) dialog or the in-app
+    feedback dialog.
+
+    The message is stored before the notification email is attempted, so it is
+    kept when email is not configured or the send fails. Holds personal data:
+    no IP address or user agent is recorded, the personal fields are removed
+    when the sender's account is deleted, and rows are purged after
+    RETENTION_DAYS by the scheduled GDPR task.
+    """
+    __tablename__ = 'inquiries'
+
+    SOURCE_CONTACT = 'contact'
+    SOURCE_SPONSORSHIP = 'sponsorship'
+    SOURCE_FEEDBACK = 'feedback'
+    SOURCES = (SOURCE_CONTACT, SOURCE_SPONSORSHIP, SOURCE_FEEDBACK)
+
+    RETENTION_DAYS = 730  # 24 months
+
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(20), nullable=False, index=True)
+    name = db.Column(db.String(100), nullable=True)
+    email = db.Column(db.String(255), nullable=True, index=True)
+    organisation = db.Column(db.String(200), nullable=True)
+    area_of_interest = db.Column(db.String(100), nullable=True)
+    message = db.Column(db.Text, nullable=True)
+    team_focus = db.Column(db.String(200), nullable=True)
+    team_size = db.Column(db.String(20), nullable=True)  # One of TEAM_SIZE_CODES
+    contact_consent = db.Column(db.Boolean, nullable=True)  # Feedback only: may we reply?
+
+    # The signed-in sender, when there was one
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True, index=True)
+    tenant_domain = db.Column(db.String(255), nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
+    email_sent = db.Column(db.Boolean, nullable=False, default=False)  # Was the notification email sent?
+
+    handled = db.Column(db.Boolean, nullable=False, default=False, index=True)
+    handled_at = db.Column(db.DateTime, nullable=True)
+    handled_by = db.Column(db.String(255), nullable=True)  # Super admin username
+
+    # Set when the personal fields were removed because the sender's account was deleted
+    redacted_at = db.Column(db.DateTime, nullable=True)
+
+    def redact(self):
+        """Remove the personal fields, keeping what kind of team wrote and when."""
+        self.name = None
+        self.email = None
+        self.message = None
+        self.user_id = None
+        self.redacted_at = datetime.now(timezone.utc)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'source': self.source,
+            'name': self.name,
+            'email': self.email,
+            'organisation': self.organisation,
+            'area_of_interest': self.area_of_interest,
+            'message': self.message,
+            'team_focus': self.team_focus,
+            'team_size': self.team_size,
+            'team_size_label': team_size_label(self.team_size),
+            'contact_consent': self.contact_consent,
+            'user_id': self.user_id,
+            'tenant_domain': self.tenant_domain,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'email_sent': bool(self.email_sent),
+            'handled': bool(self.handled),
+            'handled_at': self.handled_at.isoformat() if self.handled_at else None,
+            'handled_by': self.handled_by,
+            'redacted': self.redacted_at is not None,
+            'redacted_at': self.redacted_at.isoformat() if self.redacted_at else None,
+        }
 
 
 class User(db.Model):

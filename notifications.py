@@ -555,15 +555,31 @@ This feedback was submitted through the {app_name} website.
     return send_email(email_config, target_email, subject, html_content, text_content)
 
 
-def send_contact_email(email_config, sender_name, sender_email, message, app_name="Decision Records", recipient_email=None):
+def _team_focus_email_parts(team_focus, label_width=None):
+    """(html table row, text line) for the optional "What does your team make
+    decisions about?" answer. Both are empty when there is no answer."""
+    if not team_focus:
+        return '', ''
+    width = f" width: {label_width}px;" if label_width else ''
+    html_row = f"""
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;{width}">Team decides about:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{team_focus}</td>
+                </tr>"""
+    return html_row, f"Team decides about: {team_focus}\n"
+
+
+def send_contact_email(email_config, sender_name, sender_email, message, app_name="Decision Records", recipient_email=None, team_focus=None):
     """Send a "Contact Us" form message to the contact inbox.
 
     Args:
         recipient_email: The configured contact form address. If None, uses the default.
+        team_focus: Optional answer to "What does your team make decisions about?".
     """
     from models import SystemConfig
 
     subject = f"[{app_name}] Contact form message from {sender_name}"
+    team_focus_row, team_focus_line = _team_focus_email_parts(team_focus)
 
     html_content = f"""
     <html>
@@ -579,7 +595,7 @@ def send_contact_email(email_config, sender_name, sender_email, message, app_nam
                 <tr>
                     <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Email:</td>
                     <td style="padding: 10px; border-bottom: 1px solid #eee;"><a href="mailto:{sender_email}">{sender_email}</a></td>
-                </tr>
+                </tr>{team_focus_row}
             </table>
 
             <h3 style="color: #555;">Message:</h3>
@@ -602,7 +618,7 @@ New Contact Form Message - {app_name}
 
 From: {sender_name}
 Email: {sender_email}
-
+{team_focus_line}
 Message:
 {message}
 
@@ -615,9 +631,11 @@ This message was submitted through the {app_name} website contact form.
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
-                                    area_of_interest=None, message=None, app_name="Decision Records"):
+                                    area_of_interest=None, message=None, app_name="Decision Records",
+                                    team_focus=None):
     """Send sponsorship inquiry to the sponsorship inbox."""
     subject = f"[{app_name}] Sponsorship Inquiry from {org_name}"
+    team_focus_row, team_focus_line = _team_focus_email_parts(team_focus)
 
     contact_display = contact_name if contact_name else "Not provided"
     area_display = area_of_interest if area_of_interest else "Not specified"
@@ -645,7 +663,7 @@ def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contac
                 <tr>
                     <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Area of Interest:</td>
                     <td style="padding: 10px; border-bottom: 1px solid #eee;">{area_display}</td>
-                </tr>
+                </tr>{team_focus_row}
             </table>
 
             <h3 style="color: #555;">Message:</h3>
@@ -670,7 +688,7 @@ Organisation: {org_name}
 Contact Email: {contact_email}
 Contact Person: {contact_display}
 Area of Interest: {area_display}
-
+{team_focus_line}
 Message:
 {message_display}
 

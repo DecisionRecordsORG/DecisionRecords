@@ -1,5 +1,5 @@
 import { test, expect, request } from '@playwright/test';
-import { loginAsUser, loginAsSuperAdmin, logout } from '../fixtures/auth';
+import { fillFormUntilReady, loginAsUser, loginAsSuperAdmin, logout } from '../fixtures/auth';
 
 const API_URL = 'http://localhost:5001';
 
@@ -8,14 +8,17 @@ test.describe('Authentication', () => {
     // Route is /superadmin (not /superadmin/login)
     await page.goto('/superadmin');
 
-    // Fill username using data-testid
-    await page.locator('[data-testid="username-input"]').fill('admin');
-
-    // Fill password (default master password is 'changeme')
-    await page.locator('[data-testid="password-input"]').fill('changeme');
+    // Fill username and password (default master password is 'changeme').
+    // The form is in the server-rendered page before the app runs, so fill
+    // until the app has taken the values and enabled the button.
+    const loginButton = page.locator('[data-testid="login-button"]');
+    await fillFormUntilReady([
+      [page.locator('[data-testid="username-input"]'), 'admin'],
+      [page.locator('[data-testid="password-input"]'), 'changeme'],
+    ], loginButton);
 
     // Click login
-    await page.locator('[data-testid="login-button"]').click();
+    await loginButton.click();
 
     // Should redirect to superadmin dashboard
     await expect(page).toHaveURL(/.*superadmin\/dashboard.*/, { timeout: 15000 });

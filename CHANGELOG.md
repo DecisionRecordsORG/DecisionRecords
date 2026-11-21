@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Relationship packs for non-technical teams: People & Policy, Finance & Procurement and Product & Customer, with new relationship classes (exception to, sets precedent for, funds, approves, constrains, responds to, takes priority over). They are offered in organization settings and stay off until an administrator selects them
 - Helper text under the Title, Context, Decision and Consequences fields of both decision forms
+- The app has a complete icon set: `favicon.ico`, an SVG icon, an Apple touch icon, 192 and 512 pixel icons and a web manifest. It had only an SVG icon, which is hard to see on dark browser tabs
+- Messages from the website contact form, the "Get in touch" dialog and the in-app feedback dialog are stored before the notification email is sent, so a message is no longer lost when email is not set up or the send fails. No IP address or user agent is stored
+- `/api/contact`, `/api/sponsorship` and `/api/feedback` accept an optional `team_focus` ("What does your team make decisions about?", up to 200 characters) and an optional `team_size` code, store them with the message and include the team focus in the contact and "Get in touch" notification emails
+- Super admins have an Inquiries page listing stored messages newest first, with filters by form and status, a detail view, mark as handled, and delete with confirmation. Messages that were never emailed are marked "Not emailed". The dashboard shows how many inquiries are not handled
+- Team profile: the first-admin onboarding dialog asks two optional questions, "What does your team make decisions about?" and team size, and says why ("It helps us build for teams like yours"). They can be skipped, and tenant admins can answer or change them later under Organization Settings > Team profile
+- Super admins see a tenant's team profile in the tenant details, and an Interest summary at the top of the Inquiries page: tenants and inquiries by team size, inquiries by form, and the distinct team focus answers as they were typed
 
 ### Changed
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
@@ -24,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI and the release workflow now also start the built Community image against a PostgreSQL container with a `postgresql://` `DATABASE_URL`, and require `/health` to report a connected database, before the release workflow publishes anything
 - CI runs the fixture-based backend tests against PostgreSQL as well as SQLite (`TEST_DATABASE_URL`)
 - The Enterprise deploy workflow starts the new image against PostgreSQL before it publishes or deploys anything, verifies the database health route after the restart, and restores the previous image automatically when the new one is not healthy
+- Startup migration `2.3.0` creates the `inquiries` table and adds four team profile columns to `tenants` (`team_focus`, `team_size`, `team_profile_answered_at`, `team_profile_answered_by_id`) on existing SQLite and PostgreSQL databases. It runs by itself when the new version starts; no manual step is needed
+- `/api/contact`, `/api/sponsorship` and `/api/feedback` answer 200 with the usual thank-you message once the message is stored, also when email is not configured or the send fails. They used to answer 503 or 500 and drop the message. They still answer 503 or 500 when the message could be neither stored nor emailed
+- Personal data export includes the messages a user sent through the contact, "Get in touch" and feedback forms while signed in. Deleting an account removes the name, email address and message from that person's stored inquiries
+- The scheduled GDPR task (`/api/admin/execute-gdpr-tasks`) deletes inquiries older than 24 months and reports them as `purged_inquiries`. Installations that do not schedule the task keep inquiries until a super admin deletes them
 
 ### Fixed
 - The user limit is now enforced when an account is created by Slack, Google, Microsoft or Teams sign-in, by a tenant's own SSO provider, by the Teams tab sign-in and by an emailed sign-up link. A full tenant refuses the new account with the "User limit reached" error; existing members can still sign in and the first account of a new organization is never refused
@@ -31,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The email telling someone they were made a decision owner was never sent, because it failed while building the message
 - Loading relationship settings no longer fails for a tenant whose custom relationship class uses the same key as a built-in class added later; the tenant's own class is used
 - Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
+- A rate-limited request was answered with 500 "An internal server error occurred" instead of 429, and a request with the wrong HTTP method with 500 instead of 405. HTTP errors now keep their status. API paths answer `{ "error": ... }`, and a 429 says "Too many requests. Please wait a minute and try again." with a `Retry-After` header, which is what the sign-in pages and the contact and feedback forms now show
+- `/api/sponsorship` answered 500 when an optional field was sent as JSON `null`, and `/api/feedback` answered 500 for `null` fields and for a body that was not JSON. All three form endpoints now treat missing, `null` and wrong-typed optional fields as not given and answer 400 for an invalid body
+- End-to-end tests: the sign-in helpers typed into the server-rendered form before the app was running, lost the text when it started, and timed out on a disabled button. They now fill the form until the app has taken the values
+- The first-admin onboarding dialog no longer opens on top of another dialog, such as a decision someone has started writing, and no longer takes the keyboard focus from it. It waits until that dialog is closed. Its buttons stay in view on short windows
 
 ## [2.1.1] - 2026-11-21
 

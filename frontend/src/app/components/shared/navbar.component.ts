@@ -116,6 +116,10 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
               <mat-icon>settings</mat-icon>
               System Settings
             </a>
+            <a mat-menu-item routerLink="/superadmin/inquiries" data-testid="menu-inquiries">
+              <mat-icon>inbox</mat-icon>
+              Inquiries
+            </a>
           } @else {
             <a mat-menu-item [routerLink]="profileLink">
               <mat-icon>person</mat-icon>
