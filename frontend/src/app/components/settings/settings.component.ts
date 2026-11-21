@@ -3572,7 +3572,12 @@ export class SettingsComponent implements OnInit {
             }
           },
           error: (err) => {
-            this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            if (err.error?.error === 'User limit reached') {
+              // Say what the limit is and leave the message up long enough to read
+              this.snackBar.open(err.error?.message || err.error.error, 'Close', { duration: 8000 });
+            } else {
+              this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            }
             this.processingRequest = null;
           }
         });

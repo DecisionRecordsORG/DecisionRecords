@@ -1585,7 +1585,7 @@ export class SuperadminSettingsComponent implements OnInit {
     user_session_timeout_hours: 8
   };
   licensingDefaults = {
-    max_users_per_tenant: 5
+    max_users_per_tenant: 25
   };
 
   // Analytics settings
@@ -1677,7 +1677,7 @@ export class SuperadminSettingsComponent implements OnInit {
       user_session_timeout_hours: [8, [Validators.required, Validators.min(1), Validators.max(168)]]
     });
     this.licensingForm = this.fb.group({
-      max_users_per_tenant: [5, [Validators.required, Validators.min(0), Validators.max(10000)]]
+      max_users_per_tenant: [25, [Validators.required, Validators.min(0), Validators.max(10000)]]
     });
     this.supportForm = this.fb.group({
       support_email: ['', [Validators.required, Validators.email]]

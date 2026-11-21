@@ -143,7 +143,7 @@ class SystemConfig(db.Model):
     # Default values
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
     DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
-    DEFAULT_MAX_USERS_PER_TENANT = 5   # Free tier limit (0 = unlimited)
+    DEFAULT_MAX_USERS_PER_TENANT = 25  # Free tier limit (0 = unlimited)
     DEFAULT_SUPPORT_EMAIL = 'admin@decisionrecords.org'  # Default support email
 
     # Analytics defaults

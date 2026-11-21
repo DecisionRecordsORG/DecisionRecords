@@ -932,6 +932,8 @@ export class TenantLoginComponent implements OnInit {
       this.error = 'Microsoft authentication failed. Please try again.';
     } else if (errorParam === 'public_email') {
       this.error = this.route.snapshot.queryParamMap.get('message') || 'Please use your work email address.';
+    } else if (errorParam === 'user_limit') {
+      this.error = 'This organization has reached its user limit, so a new account could not be created. Please contact your organization administrator.';
     }
   }
 
@@ -1167,7 +1169,9 @@ export class TenantLoginComponent implements OnInit {
       },
       error: (err) => {
         this.isLoading = false;
-        this.error = err.error?.error || 'Failed to submit request. Please try again.';
+        // The user limit error carries a fuller explanation in `message`
+        this.error = (err.error?.error === 'User limit reached' && err.error?.message)
+          || err.error?.error || 'Failed to submit request. Please try again.';
       }
     });
   }
