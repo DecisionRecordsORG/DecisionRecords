@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
+
 ### Changed
 - Terms of Service and Service Level Agreement pages describe a free plan for teams of up to 25 users in place of the limited preview
+- `requirements.txt` pins every installed package to an exact version, including packages that are only installed as dependencies and the `gunicorn` server; the Community image no longer installs anything outside that file
+- CI and the release workflow now also start the built Community image against a PostgreSQL container with a `postgresql://` `DATABASE_URL`, and require `/health` to report a connected database, before the release workflow publishes anything
+- CI runs the fixture-based backend tests against PostgreSQL as well as SQLite (`TEST_DATABASE_URL`)
+- The Enterprise deploy workflow starts the new image against PostgreSQL before it publishes or deploys anything, verifies the database health route after the restart, and restores the previous image automatically when the new one is not healthy
 
 ## [2.1.1] - 2026-11-21
 
