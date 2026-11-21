@@ -352,6 +352,13 @@ Or using docker-compose:
 | Account anonymisation | Hourly | Completes deletion for accounts past the 7-day grace period |
 | History cleanup | Hourly | Removes login history entries older than 90 days |
 | Record purge | Hourly | Permanently deletes soft-deleted decisions/tenants older than 30 days |
+| Inquiry purge | Hourly | Deletes messages from the contact, "Get in touch" and feedback forms that are older than 24 months |
+
+Without this cron job nothing deletes old inquiries: the 24 month limit is only applied when the task runs. A super admin can delete single inquiries at any time under Super Admin > Inquiries.
+
+### Messages from the contact and feedback forms
+
+Messages sent through `/api/contact`, `/api/sponsorship` and `/api/feedback` are stored in the database before the notification email is attempted, so they are kept when SMTP is not configured or a send fails. A super admin reads them under Super Admin > Inquiries, where messages that were never emailed are marked "Not emailed". The stored record holds what the sender typed (name, email address, organisation, message and the optional "What does your team make decisions about?" answer) and, for a signed-in sender, their account and tenant domain. No IP address or user agent is stored. Deleting an account removes the name, email address and message from that person's inquiries.
 
 #### 4. Existing installations
 

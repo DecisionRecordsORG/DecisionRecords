@@ -3876,6 +3876,19 @@ def anonymize_user(user_id):
         entry.ip_address = None
         entry.user_agent = None
 
+    # Remove the personal fields from messages this person sent through the
+    # contact, sponsorship and feedback forms: those sent while signed in and
+    # those that carry the account's email address.
+    for inquiry in Inquiry.query.filter(
+        db.or_(Inquiry.user_id == user.id, db.func.lower(Inquiry.email) == original_email.lower())
+    ).all():
+        inquiry.redact()
+
+    # A team profile answer stays with the tenant, without the link to this person
+    Tenant.query.filter_by(team_profile_answered_by_id=user.id).update(
+        {'team_profile_answered_by_id': None}, synchronize_session=False
+    )
+
     # Redact AuditLog details containing user email
     audit_entries = AuditLog.query.filter(
         AuditLog.details.isnot(None)
@@ -3889,6 +3902,20 @@ def anonymize_user(user_id):
 
     db.session.commit()
     return True
+
+
+def purge_old_inquiries(now=None):
+    """Delete inquiries older than Inquiry.RETENTION_DAYS (24 months). Returns how many.
+
+    Called by the scheduled GDPR task (/api/admin/execute-gdpr-tasks).
+    """
+    now = now or datetime.now(timezone.utc)
+    # created_at is stored without a timezone, in UTC
+    cutoff = now.replace(tzinfo=None) - timedelta(days=Inquiry.RETENTION_DAYS)
+    purged = Inquiry.query.filter(Inquiry.created_at < cutoff).delete(synchronize_session=False)
+    if purged:
+        db.session.commit()
+    return purged
 
 
 @app.route('/api/user/delete-request', methods=['POST'])
@@ -4012,6 +4039,7 @@ def api_export_user_data():
         'memberships': [],
         'audit_trail': [],
         'login_history': [],
+        'inquiries': [],
     }
 
     # Decisions authored
@@ -4053,6 +4081,22 @@ def api_export_user_data():
             'success': entry.success,
             'ip_address': entry.ip_address,
             'created_at': entry.created_at.isoformat() if entry.created_at else None,
+        })
+
+    # Messages sent through the contact, sponsorship and feedback forms while signed in
+    sent_inquiries = Inquiry.query.filter_by(user_id=user.id).order_by(Inquiry.created_at.desc()).limit(500).all()
+    for inquiry in sent_inquiries:
+        export['inquiries'].append({
+            'source': inquiry.source,
+            'name': inquiry.name,
+            'email': inquiry.email,
+            'organisation': inquiry.organisation,
+            'area_of_interest': inquiry.area_of_interest,
+            'message': inquiry.message,
+            'team_focus': inquiry.team_focus,
+            'team_size': inquiry.team_size,
+            'contact_consent': inquiry.contact_consent,
+            'created_at': inquiry.created_at.isoformat() if inquiry.created_at else None,
         })
 
     # Log the export action
@@ -4177,7 +4221,8 @@ def api_execute_gdpr_tasks():
             return jsonify({'error': 'Authentication required'}), 403
 
     now = datetime.now(timezone.utc)
-    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0}
+    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0,
+               'purged_inquiries': 0}
 
     # 1. Anonymize users past their scheduled deletion date
     users_to_delete = User.query.filter(
@@ -4189,6 +4234,10 @@ def api_execute_gdpr_tasks():
     for user in users_to_delete:
         if anonymize_user(user.id):
             results['anonymized_users'] += 1
+
+    # Delete contact, sponsorship and feedback messages older than 24 months.
+    # Runs before the hard-deletes below so a failure there cannot hold it up.
+    results['purged_inquiries'] = purge_old_inquiries(now)
 
     # 2. Hard-delete decisions past 30-day soft-delete retention
     expired_decisions = ArchitectureDecision.query.filter(
