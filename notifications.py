@@ -545,6 +545,65 @@ This feedback was submitted through the {app_name} website.
     return send_email(email_config, target_email, subject, html_content, text_content)
 
 
+def send_contact_email(email_config, sender_name, sender_email, message, app_name="Architecture Decisions", recipient_email=None):
+    """Send a "Contact Us" form message to the contact inbox.
+
+    Args:
+        recipient_email: The configured contact form address. If None, uses the default.
+    """
+    from models import SystemConfig
+
+    subject = f"[{app_name}] Contact form message from {sender_name}"
+
+    html_content = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #3f51b5;">New Contact Form Message</h2>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold; width: 140px;">From:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;">{sender_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee; font-weight: bold;">Email:</td>
+                    <td style="padding: 10px; border-bottom: 1px solid #eee;"><a href="mailto:{sender_email}">{sender_email}</a></td>
+                </tr>
+            </table>
+
+            <h3 style="color: #555;">Message:</h3>
+            <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; border-left: 4px solid #3f51b5;">
+                <p style="white-space: pre-wrap; margin: 0;">{message}</p>
+            </div>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+
+            <p style="color: #999; font-size: 12px;">
+                This message was submitted through the {app_name} website contact form.
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+
+    text_content = f"""
+New Contact Form Message - {app_name}
+
+From: {sender_name}
+Email: {sender_email}
+
+Message:
+{message}
+
+---
+This message was submitted through the {app_name} website contact form.
+    """
+
+    target_email = recipient_email or SystemConfig.DEFAULT_SUPPORT_EMAIL
+    return send_email(email_config, target_email, subject, html_content, text_content)
+
+
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
                                     area_of_interest=None, message=None, app_name="Architecture Decisions"):
     """Send sponsorship inquiry to the sponsorship inbox."""

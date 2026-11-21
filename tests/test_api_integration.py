@@ -45,6 +45,7 @@ Related Files:
 """
 import pytest
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from flask import json
 import sys
 import os
@@ -54,7 +55,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import (
     db, User, Tenant, TenantMembership, TenantSettings, ArchitectureDecision,
     GlobalRole, MaturityState, MasterAccount, RoleRequest, RequestedRole, RequestStatus,
-    SystemConfig, DEFAULT_MASTER_PASSWORD, DecisionRelationship, AuthConfig
+    SystemConfig, DEFAULT_MASTER_PASSWORD, DecisionRelationship, AuthConfig, EmailConfig
 )
 from tests.app_test_utils import load_test_app
 
@@ -1392,6 +1393,231 @@ class TestSuperadminSecurityCoverage:
         db.session.expire_all()
         deleted_tenant = db.session.get(Tenant, test_tenant.id)
         assert deleted_tenant.deleted_by_admin == master_account.username
+
+
+class TestContactAPI:
+    """POST /api/contact receives the public "Contact Us" form.
+
+    The message is emailed to the super admin Contact Form Email setting.
+    Nothing is stored, so every failure must be reported as a failure.
+    """
+
+    VALID = {
+        'name': 'Ada Lovelace',
+        'email': 'ada@example.org',
+        'message': 'Hello, I would like to know more.'
+    }
+
+    @staticmethod
+    def _enable_email(enabled=True):
+        config = EmailConfig(
+            domain='system',
+            smtp_server='smtp.example.org',
+            smtp_port=587,
+            smtp_username='mailer',
+            smtp_password='not-a-real-password',
+            from_email='noreply@example.org',
+            from_name='Decision Records',
+            enabled=enabled
+        )
+        db.session.add(config)
+        db.session.commit()
+        return config
+
+    def test_valid_message_is_emailed_to_default_contact_address(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert 'message' in body
+        assert 'error' not in body
+
+        send_email.assert_called_once()
+        _config, to_email, subject, html_content, text_content = send_email.call_args.args
+        assert to_email == SystemConfig.DEFAULT_SUPPORT_EMAIL
+        assert 'Ada Lovelace' in subject
+        for content in (html_content, text_content):
+            assert 'Ada Lovelace' in content
+            assert 'ada@example.org' in content
+            assert 'Hello, I would like to know more.' in content
+
+    def test_no_login_is_required(self, api_client):
+        """The form is public: an anonymous visitor is not asked to authenticate."""
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True):
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code not in (401, 403)
+
+    def test_configured_contact_form_email_is_honoured(self, api_client):
+        self._enable_email()
+        SystemConfig.set(SystemConfig.KEY_SUPPORT_EMAIL, 'hello@selfhosted.example')
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 200
+        assert send_email.call_args.args[1] == 'hello@selfhosted.example'
+
+    def test_returns_503_and_sends_nothing_when_email_is_not_configured(self, api_client):
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 503
+        assert response.get_json() == {'error': 'Email service temporarily unavailable'}
+        send_email.assert_not_called()
+
+    def test_returns_503_when_the_only_email_config_is_disabled(self, api_client):
+        self._enable_email(enabled=False)
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 503
+        send_email.assert_not_called()
+
+    def test_returns_500_when_the_email_cannot_be_sent(self, api_client):
+        """A delivery failure is an error, never a silent success."""
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=False):
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 500
+        body = response.get_json()
+        assert 'error' in body
+        assert 'message' not in body
+
+    @pytest.mark.parametrize('missing', ['name', 'email', 'message'])
+    def test_each_field_is_required(self, api_client, missing):
+        self._enable_email()
+        payload = {key: value for key, value in self.VALID.items() if key != missing}
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json=payload)
+
+        assert response.status_code == 400
+        assert response.get_json() == {'error': 'Name, email, and message are required'}
+        send_email.assert_not_called()
+
+    @pytest.mark.parametrize('bad_value', ['', '   ', None, 42, ['x'], {'a': 1}])
+    def test_blank_or_non_text_values_are_rejected(self, api_client, bad_value):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json={**self.VALID, 'message': bad_value})
+
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+        send_email.assert_not_called()
+
+    @pytest.mark.parametrize('bad_email', ['not-an-email', 'a@b', '@example.org', 'a b@example.org'])
+    def test_invalid_email_is_rejected(self, api_client, bad_email):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json={**self.VALID, 'email': bad_email})
+
+        assert response.status_code == 400
+        assert response.get_json() == {'error': 'Invalid email address'}
+        send_email.assert_not_called()
+
+    def test_missing_or_non_object_body_is_rejected(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            empty = api_client.post('/api/contact', json={})
+            a_list = api_client.post('/api/contact', json=['name', 'email', 'message'])
+            not_json = api_client.post('/api/contact', data='name=Ada', content_type='text/plain')
+            broken = api_client.post('/api/contact', data='{"name": ', content_type='application/json')
+
+        for response in (empty, a_list, not_json, broken):
+            assert response.status_code == 400
+            assert response.get_json() == {'error': 'No data provided'}
+        send_email.assert_not_called()
+
+    def test_markup_is_sanitised_before_it_reaches_the_email(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json={
+                'name': 'Ada <script>alert(1)</script>Lovelace',
+                'email': '  ADA@Example.org ',
+                'message': 'Hi <script>alert(2)</script><img src=x onerror=alert(3)> there'
+            })
+
+        assert response.status_code == 200
+        _config, _to, subject, html_content, text_content = send_email.call_args.args
+        for content in (subject, html_content, text_content):
+            assert '<script' not in content
+            assert 'onerror' not in content
+        assert 'ada@example.org' in text_content
+
+    def test_name_that_is_only_markup_is_rejected(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json={**self.VALID, 'name': '<b></b>'})
+
+        assert response.status_code == 400
+        send_email.assert_not_called()
+
+    def test_overlong_input_is_truncated(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.post('/api/contact', json={
+                'name': 'N' * 500,
+                'email': 'ada@example.org',
+                'message': 'M' * 20000
+            })
+
+        assert response.status_code == 200
+        text_content = send_email.call_args.args[4]
+        assert 'N' * 100 in text_content
+        assert 'N' * 101 not in text_content
+        assert 'M' * 5000 in text_content
+        assert 'M' * 5001 not in text_content
+
+    def test_get_is_rejected_and_sends_nothing(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = api_client.get('/api/contact')
+
+        # The app's catch-all error handler currently reports a 405 as a 500,
+        # so only assert that the request fails and nothing is sent.
+        assert response.status_code >= 400
+        send_email.assert_not_called()
+
+    def test_marketing_origin_may_call_it_cross_origin(self, api_client):
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True):
+            allowed = api_client.post(
+                '/api/contact', json=self.VALID, headers={'Origin': 'https://decisionrecords.org'}
+            )
+            other = api_client.post(
+                '/api/contact', json=self.VALID, headers={'Origin': 'https://evil.example'}
+            )
+
+        assert allowed.status_code == 200
+        assert allowed.headers.get('Access-Control-Allow-Origin') == 'https://decisionrecords.org'
+        assert other.headers.get('Access-Control-Allow-Origin') is None
+
+    def test_signed_in_user_can_send_a_message(self, user_client):
+        """A signed-in session sends its CSRF token like any other POST."""
+        self._enable_email()
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = user_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 200
+        send_email.assert_called_once()
 
 
 class TestTenantMembersAPI:

@@ -10,6 +10,23 @@ import { MatInputModule } from '@angular/material/input';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { HttpClient } from '@angular/common/http';
 
+export const CONTACT_FALLBACK_ERROR =
+  'We could not send your message. Please try again in a few minutes.';
+
+/**
+ * Message for a failed contact submission. Uses the backend's own explanation
+ * for a rejected message (400: validation, 429: rate limit) and a generic
+ * fallback for everything else, so server internals are never shown.
+ */
+export function contactErrorMessage(err: unknown): string {
+  const response = err as { status?: number; error?: { error?: unknown } } | null;
+  const detail = response?.error?.error;
+  if ((response?.status === 400 || response?.status === 429) && typeof detail === 'string' && detail.trim()) {
+    return detail.trim();
+  }
+  return CONTACT_FALLBACK_ERROR;
+}
+
 @Component({
   selector: 'app-site-footer',
   standalone: true,
@@ -98,6 +115,10 @@ import { HttpClient } from '@angular/common/http';
               <mat-label>Message</mat-label>
               <textarea matInput formControlName="message" rows="4" placeholder="How can we help?"></textarea>
             </mat-form-field>
+
+            @if (contactError) {
+              <p class="contact-error" role="alert" data-testid="contact-error">{{ contactError }}</p>
+            }
 
             <button mat-raised-button type="submit" class="submit-button"
                     [disabled]="!contactForm.valid || contactSubmitting">
@@ -280,6 +301,17 @@ import { HttpClient } from '@angular/common/http';
       font-weight: 500 !important;
     }
 
+    .contact-error {
+      margin: 0;
+      padding: 12px 16px;
+      background-color: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
     .contact-success {
       text-align: center;
       padding: 24px 0;
@@ -352,6 +384,7 @@ export class SiteFooterComponent {
   contactForm: FormGroup;
   contactSubmitting = false;
   contactSubmitted = false;
+  contactError = '';
 
   constructor(
     private dialog: MatDialog,
@@ -367,6 +400,7 @@ export class SiteFooterComponent {
 
   openContactDialog(): void {
     this.contactSubmitted = false;
+    this.contactError = '';
     this.contactForm.reset();
     this.contactDialogRef = this.dialog.open(this.contactDialogTemplate, {
       panelClass: 'contact-dialog-panel',
@@ -379,19 +413,22 @@ export class SiteFooterComponent {
   }
 
   submitContact(): void {
-    if (!this.contactForm.valid) return;
+    if (!this.contactForm.valid || this.contactSubmitting) return;
 
     this.contactSubmitting = true;
-    const formData = this.contactForm.value;
+    this.contactError = '';
+    const { name, email, message } = this.contactForm.value;
 
-    this.http.post('/api/contact', formData).subscribe({
+    this.http.post<{ message?: string }>('/api/contact', { name, email, message }).subscribe({
       next: () => {
         this.contactSubmitting = false;
         this.contactSubmitted = true;
       },
-      error: () => {
+      error: (err) => {
+        // Keep what the visitor typed so they can try again or copy it.
         this.contactSubmitting = false;
-        this.contactSubmitted = true; // Still show success to user
+        this.contactSubmitted = false;
+        this.contactError = contactErrorMessage(err);
       }
     });
   }

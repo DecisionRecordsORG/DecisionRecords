@@ -754,7 +754,7 @@ def get_features():
 # EE:END - Blog API
 
 
-# ==================== Feedback & Sponsorship ====================
+# ==================== Feedback, Contact & Sponsorship ====================
 
 def _api_submit_feedback_impl():
     """Submit feedback from users.
@@ -821,6 +821,81 @@ if RATE_LIMITING_ENABLED:
 else:
     api_submit_feedback = app.route('/api/feedback', methods=['POST'])(
         _api_submit_feedback_impl
+    )
+
+
+def _api_submit_contact_impl():
+    """Submit a message from the public "Contact Us" form.
+
+    Public endpoint (no login). Rate limited to 5 requests per minute to prevent spam.
+    All inputs are sanitized to prevent XSS and injection attacks.
+
+    The message is emailed to the super admin "Contact Form Email" setting
+    (SystemConfig support_email). Nothing is stored, so when no email
+    configuration is enabled the request fails with 503 instead of pretending
+    the message was delivered.
+    """
+    from notifications import send_contact_email
+    from security import sanitize_name, sanitize_email, sanitize_text_field
+
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+
+    def _text(key):
+        value = data.get(key)
+        return value.strip() if isinstance(value, str) else ''
+
+    # Validate required fields
+    name = _text('name')
+    email = _text('email')
+    message = _text('message')
+
+    if not name or not email or not message:
+        return jsonify({'error': 'Name, email, and message are required'}), 400
+
+    # Sanitize inputs
+    name = sanitize_name(name, max_length=100)
+    email = sanitize_email(email)
+    message = sanitize_text_field(message, max_length=5000)
+
+    if not email:
+        return jsonify({'error': 'Invalid email address'}), 400
+
+    # Sanitizing can strip a value down to nothing (for example a name made only of markup)
+    if not name or not message:
+        return jsonify({'error': 'Name, email, and message are required'}), 400
+
+    # Get email config (use any enabled config)
+    email_config = EmailConfig.query.filter_by(enabled=True).first()
+    if not email_config:
+        logger.warning("Contact message received but no email config available")
+        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+
+    # Contact Form Email from super admin settings (fallback to default)
+    support_email = SystemConfig.get(
+        SystemConfig.KEY_SUPPORT_EMAIL,
+        SystemConfig.DEFAULT_SUPPORT_EMAIL
+    )
+
+    success = send_contact_email(email_config, name, email, message, recipient_email=support_email)
+
+    if success:
+        logger.info(f"Contact message submitted successfully from {email}")
+        return jsonify({'message': 'Thank you for your message! We will get back to you soon.'})
+    else:
+        logger.error(f"Failed to send contact message email from {email}")
+        return jsonify({'error': 'Failed to send your message. Please try again later.'}), 500
+
+
+# Apply rate limiting if available (5 requests/minute to prevent spam)
+if RATE_LIMITING_ENABLED:
+    api_submit_contact = app.route('/api/contact', methods=['POST'])(
+        limiter.limit("5 per minute")(_api_submit_contact_impl)
+    )
+else:
+    api_submit_contact = app.route('/api/contact', methods=['POST'])(
+        _api_submit_contact_impl
     )
 
 
