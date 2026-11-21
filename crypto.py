@@ -23,21 +23,32 @@ ENCRYPTED_PREFIX = 'encrypted:'
 # Key Vault secret name for the encryption key
 ENCRYPTION_KEY_SECRET_NAME = 'smtp-encryption-key'
 
+# Environment variable fallback (the only source in Community Edition)
+ENCRYPTION_KEY_ENV_VAR = 'SMTP_ENCRYPTION_KEY'
+
 
 def _get_encryption_key():
     """
     Get the encryption key from Key Vault or environment.
 
+    Enterprise Edition reads the key from Azure Key Vault and falls back to the
+    SMTP_ENCRYPTION_KEY environment variable. Community Edition does not ship
+    the ee package, so it reads SMTP_ENCRYPTION_KEY directly.
+
     Returns:
         bytes: The Fernet encryption key, or None if unavailable
     """
-    from ee.backend.azure.keyvault_client import keyvault_client
-
-    # Try Key Vault first
-    key = keyvault_client.get_secret(
-        ENCRYPTION_KEY_SECRET_NAME,
-        fallback_env_var='SMTP_ENCRYPTION_KEY'
-    )
+    try:
+        from ee.backend.azure.keyvault_client import keyvault_client
+    except ImportError:
+        # Community Edition: no Key Vault client, environment variable only.
+        key = os.environ.get(ENCRYPTION_KEY_ENV_VAR)
+    else:
+        # Try Key Vault first
+        key = keyvault_client.get_secret(
+            ENCRYPTION_KEY_SECRET_NAME,
+            fallback_env_var=ENCRYPTION_KEY_ENV_VAR
+        )
 
     if key:
         # Ensure it's properly encoded as bytes
