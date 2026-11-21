@@ -93,8 +93,9 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # Gate: build the image for the runner architecture, start it and require
-      # it to serve /api/health before any registry login or push happens.
-      # Nothing below this step runs if the image cannot boot.
+      # it to serve /api/health before any registry login or push happens. It is
+      # started on SQLite and again against PostgreSQL with a postgresql:// URL.
+      # Nothing below these steps runs if the image cannot boot on either.
       - name: Build image for smoke test
         uses: docker/build-push-action@v5
         with:
@@ -110,6 +111,14 @@ jobs:
       - name: Smoke test release candidate image
         env:
           SMOKE_EXPECT_VERSION_TAG: ${{ github.ref_name }}
+        run: |
+          SMOKE_EXPECT_VERSION="${SMOKE_EXPECT_VERSION_TAG#v}" \
+            scripts/smoke_test_ce_image.sh decision-records:release-candidate
+
+      - name: Smoke test release candidate image against PostgreSQL
+        env:
+          SMOKE_EXPECT_VERSION_TAG: ${{ github.ref_name }}
+          SMOKE_DATABASE: postgres
         run: |
           SMOKE_EXPECT_VERSION="${SMOKE_EXPECT_VERSION_TAG#v}" \
             scripts/smoke_test_ce_image.sh decision-records:release-candidate
