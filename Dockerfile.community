@@ -60,9 +60,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies (core only - no ee/requirements.txt)
+# Install Python dependencies (core only - no ee/requirements.txt).
+# requirements.txt pins every package exactly, gunicorn included. Do not name
+# packages on this line: anything installed here without a pin can change
+# between two builds of the same commit.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ==============================================================================
 # Copy core application files

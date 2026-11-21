@@ -7,12 +7,6 @@ import traceback
 import threading
 from sqlalchemy.pool import StaticPool
 
-# psycopg2 is only needed for PostgreSQL - make import optional for SQLite local dev
-try:
-    import psycopg2
-except ImportError:
-    psycopg2 = None
-
 from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
@@ -488,42 +482,16 @@ def init_database():
         try:
             logger.info("Attempting to initialize database...")
             with app.app_context():
-                # Test database connection first using psycopg2 directly
-                database_url = app.config['SQLALCHEMY_DATABASE_URI']
-                logger.info(f"Testing database connection...")
-                
-                # Parse the DATABASE_URL to extract connection parameters
-                # Format: postgresql://user:password@host:port/dbname?sslmode=require
-                if database_url.startswith('postgresql://') and psycopg2 is not None:
-                    url_parts = database_url.replace('postgresql://', '').split('/')
-                    auth_host = url_parts[0]
-                    db_name = url_parts[1].split('?')[0] if '?' in url_parts[1] else url_parts[1]
+                # Test the connection through the SQLAlchemy engine: the same driver
+                # and the same URL options (sslmode included) every later query uses.
+                # A separate hand-built psycopg2 connection used to force
+                # sslmode=require here, so a PostgreSQL server without TLS (the
+                # self-hosting compose example) could never initialise.
+                logger.info("Testing database connection...")
+                with db.engine.connect() as connection:
+                    connection.execute(db.text("SELECT 1"))
+                logger.info(f"Database connection successful ({db.engine.dialect.name}/{db.engine.driver})")
 
-                    user_pass, host_port = auth_host.split('@')
-                    user, password = user_pass.split(':')
-                    host = host_port.split(':')[0] if ':' in host_port else host_port
-                    port = int(host_port.split(':')[1]) if ':' in host_port else 5432
-
-                    # Use psycopg2 connection as per Azure documentation
-                    conn = psycopg2.connect(
-                        user=user,
-                        password=password,
-                        host=host,
-                        port=port,
-                        database=db_name,
-                        sslmode='require'
-                    )
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT 1")
-                    cursor.close()
-                    conn.close()
-                    logger.info("Database connection successful using psycopg2")
-                else:
-                    # Fallback to SQLAlchemy for SQLite or when psycopg2 not available
-                    with db.engine.connect() as connection:
-                        connection.execute(db.text("SELECT 1"))
-                    logger.info("Database connection successful using SQLAlchemy")
-                
                 # Create tables
                 logger.info("Creating database tables...")
                 db.create_all()

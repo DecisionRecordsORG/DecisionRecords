@@ -239,6 +239,57 @@ jobs:
         run: |
           python -m pytest tests/ -q --tb=short
 
+  # Backend Tests on PostgreSQL
+  # The SQLite job above never loads the PostgreSQL driver and does not enforce
+  # foreign keys or column types. This job runs the same suite with the shared
+  # test fixtures on a real PostgreSQL server, on the interpreter the Community
+  # image uses. Tests that load the real app module still use in-memory SQLite;
+  # the image smoke test covers the app's own start-up against PostgreSQL.
+  test-backend-postgres:
+    name: Backend Tests (PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: decisions
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: decisions_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U decisions -d decisions_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests against PostgreSQL
+        env:
+          DECISION_RECORDS_EDITION: community
+          DATABASE_URL: sqlite:///test.db
+          TEST_DATABASE_URL: postgresql://decisions:ci-test-password@127.0.0.1:5432/decisions_test
+          SECRET_KEY: test-secret-key
+          FLASK_ENV: testing
+        run: |
+          python -m pytest tests/ -q --tb=short
+
   # Frontend Build
   build-frontend:
     name: Build Frontend
@@ -275,7 +326,9 @@ jobs:
   # Docker Build (Community Edition)
   # Building is not enough: the image is started and must answer /api/health.
   # A build never imports the app, so a module missing from the image only
-  # shows up when the container runs.
+  # shows up when the container runs. It is started twice: on SQLite (the image
+  # default) and against a PostgreSQL container with a postgresql:// URL, so a
+  # dependency change that breaks the PostgreSQL driver fails here.
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-24.04
@@ -300,6 +353,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Smoke test Community image
+        run: scripts/smoke_test_ce_image.sh decision-records:community
+
+      - name: Smoke test Community image against PostgreSQL
+        env:
+          SMOKE_DATABASE: postgres
         run: scripts/smoke_test_ce_image.sh decision-records:community
 
   # Style lint is advisory until the existing Python style debt is cleaned up.
@@ -329,7 +387,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [delivery-contract, release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, build-frontend, build-docker]
+    needs: [delivery-contract, release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, test-backend-postgres, build-frontend, build-docker]
     if: always()
 
     steps:
@@ -342,5 +400,6 @@ jobs:
           if [ "${{ needs.private-submodule-lineage.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.python-syntax.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.test-backend.result }}" != "success" ]; then exit 1; fi
+          if [ "${{ needs.test-backend-postgres.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.build-frontend.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.build-docker.result }}" != "success" ]; then exit 1; fi

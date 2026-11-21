@@ -43,6 +43,8 @@ Output:
 - Community Docker image published to GitHub Container Registry.
 - GitHub Release notes for the tag.
 
+Before the registry login, the workflow builds the image and starts it twice with `scripts/smoke_test_ce_image.sh`: on its default SQLite database and, with `SMOKE_DATABASE=postgres`, against a PostgreSQL container using a `postgresql://` `DATABASE_URL`. Nothing is published if either run fails.
+
 ## Enterprise App
 
 The existing workflow remains the Enterprise path:
@@ -71,12 +73,44 @@ Required `production-private` environment variables:
 Optional `production-private` environment variables:
 
 - `AZURE_ENTERPRISE_IMAGE_NAME`
-- `ENTERPRISE_HEALTH_URL`
+- `ENTERPRISE_HEALTH_URL` (liveness route shown in the deployment summary; default `https://app.decisionrecords.org/api/health`)
+- `ENTERPRISE_DB_HEALTH_URL` (route that reports the database and decides whether a deploy is good; default `https://app.decisionrecords.org/health`)
 - `CLOUDFLARE_ZONE_ID`
 
-This workflow checks out the private `ee` submodule, runs Enterprise preflight QA, builds the Enterprise Dockerfile, pushes to Azure Container Registry, updates the Azure VM service, and checks `https://app.decisionrecords.org/api/health`.
+The preflight job checks out the private `ee` submodule, installs public and private Python requirements, runs the open-source artifact guard, compiles public gateway files and private EE Python modules, then runs the backend suite with `DECISION_RECORDS_EDITION=enterprise`.
 
-The preflight installs public and private Python requirements, runs the open-source artifact guard, compiles public gateway files and private EE Python modules, then runs the backend suite with `DECISION_RECORDS_EDITION=enterprise`.
+The deploy job then runs in this order. Nothing is pushed and the VM is not touched before step 3 has passed.
+
+1. Build the Enterprise image, tagged with the commit SHA only.
+2. Import check (always runs): run `python -c "import app"` in the image with a `postgresql://` URL. Creating the engine imports the PostgreSQL driver; no database server is needed.
+3. Boot check: `SMOKE_PROFILE=enterprise SMOKE_DATABASE=postgres scripts/smoke_test_ce_image.sh <image>` starts a PostgreSQL container on the runner, starts the image against it with Key Vault and the Cloudflare origin check switched off, and requires `/health` to report a connected database, the schema to exist in PostgreSQL, and the image `HEALTHCHECK` to turn healthy.
+4. Log in to Azure and the registry.
+5. `scripts/deploy_enterprise_image.sh`:
+   1. checks that production reports healthy at `ENTERPRISE_DB_HEALTH_URL` (otherwise stops; nothing changed);
+   2. pulls `latest` and records its digest as the rollback target (otherwise stops; nothing changed);
+   3. pushes the commit tag (on failure stops; `latest` not moved);
+   4. moves `latest` to the new image and restarts the service on the VM;
+   5. waits for `ENTERPRISE_DB_HEALTH_URL` to report `"status": "healthy"` and `"database": "connected"`;
+   6. on any failure in 4 or 5, pushes the recorded image back as `latest`, restarts the VM again and checks health again.
+
+The job fails unless the new image is serving. After a rollback the error annotation and the job summary say one of:
+
+- `ROLLBACK RESTORED SERVICE`: production is back on the previous image. Diagnose the failed image, which is still in the registry under its commit tag.
+- `ROLLBACK DID NOT RESTORE SERVICE`: production is down on the previous image too. Read the service journal on the VM.
+- `ROLLBACK FAILED`: `latest` could not be moved back. Re-point it by hand to the digest in the message and restart the service.
+
+Do not cancel the deploy job once step 5 has started; a cancelled run cannot roll back.
+
+Deliberate bypasses, both inputs of the manual run and both off by default:
+
+- `skip_postgres_preflight`: skips step 3 only, for the case where the check itself is broken (for example the PostgreSQL image cannot be pulled). Step 2 and the rollback still run.
+- `deploy_when_unhealthy`: lets step 5 proceed although production is not healthy beforehand, for the case where the deploy is the fix. A rollback then returns to the unhealthy image.
+
+Limits to know about:
+
+- The VM's systemd unit pulls and runs the `latest` tag, so the deploy and the rollback both work by moving `latest`. Deploying a specific commit tag needs a unit that reads the tag from its environment file.
+- The rollback re-pushes the previous image from the runner with the registry push permission the deploy identity already has. It restores the same image content; it does not undo a schema migration applied by the failed image.
+- The boot check starts gunicorn directly instead of the image's start script, because that script calls the Azure instance metadata service first. A defect in the start script itself is caught by the rollback, not by the pre-flight.
 
 ## When To Deploy What
 
@@ -105,6 +139,9 @@ Run locally before releasing Community artifacts or deploying Enterprise:
 ```bash
 uv run python scripts/check_ce_boundary.py
 uv run pytest tests/ -q --tb=short
+# Optional: the fixture-based tests against a local PostgreSQL. The database
+# name must contain "test"; every table in it is dropped.
+TEST_DATABASE_URL=postgresql://user:password@localhost:5432/decisions_test uv run pytest tests/ -q --tb=short
 cd frontend
 npx tsc -p tsconfig.app.ce.json --noEmit
 npm run build -- --configuration=community --progress=false

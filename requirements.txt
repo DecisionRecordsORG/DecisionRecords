@@ -1,5 +1,23 @@
 # Decision Records - Core Requirements (Community Edition)
 # These packages are required for the Community Edition
+#
+# Every line is an exact pin, including the packages that are only installed
+# because another package needs them. An unpinned SQLAlchemy (pulled in by
+# Flask-SQLAlchemy) is what broke production on 2026-11-21: a fresh image build
+# resolved a new major line with a different PostgreSQL driver.
+#
+# Updating pins (do it deliberately, one pull request at a time):
+#   1. Change the version on the line you want to move. If the new version needs
+#      a newer or additional dependency, pip fails the install and names it;
+#      change or add that line in the "Installed by the packages above" section.
+#   2. In a clean Python 3.11 virtualenv (the image interpreter):
+#        pip install -r requirements.txt pytest pytest-cov && pip check
+#        pip freeze    # every package listed must have a line in this file
+#      (pytest, pytest-cov and their own dependencies are the only exceptions).
+#   3. Run the test suite: python -m pytest tests/ -q --tb=short
+#   4. Open a pull request. CI builds the image from this file and boots it
+#      against both SQLite and PostgreSQL before anything can be published.
+# tests/test_requirements_pins.py fails when a line is not an exact pin.
 
 # Flask web framework
 Flask==3.0.0
@@ -9,18 +27,22 @@ Flask-Talisman==1.1.0
 Flask-Cors==4.0.0
 Werkzeug==3.0.1
 
+# Production WSGI server (the command both Docker images run)
+gunicorn==27.0.1
+
 # Authentication
 Authlib==1.3.0
 webauthn==2.0.0
 cbor2==5.6.5
-cryptography>=41.0.0
+cryptography==50.0.2
 
 # HTTP client
 requests==2.31.0
 
 # Database
-# Pinned: SQLAlchemy 2.1 makes psycopg (v3) the default driver for postgresql:// URLs,
-# and plain `psycopg` ships no libpq. Unpinned, a fresh image build cannot reach PostgreSQL.
+# SQLAlchemy must stay on the 2.0 line until the driver change is planned:
+# SQLAlchemy 2.1 makes psycopg (v3) the default driver for postgresql:// URLs,
+# and plain `psycopg` ships no libpq, so the app cannot reach PostgreSQL.
 SQLAlchemy==2.0.52
 psycopg2-binary==2.9.12
 psycopg==3.3.4
@@ -31,5 +53,34 @@ bleach==6.1.0
 # Email domain validation
 free-email-domains==1.0.1
 disposable-email-domains==0.0.92
+
+# Installed by the packages above (not imported by the application directly).
+# Resolved on Python 3.11 for Linux on 2026-11-21 from the pins above.
+asn1crypto==1.5.1
+blinker==1.9.0
+certifi==2026.11.20
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.1
+Deprecated==1.3.1
+greenlet==3.5.6
+idna==3.20
+itsdangerous==2.2.0
+Jinja2==3.1.6
+limits==5.8.0
+markdown-it-py==4.3.0
+MarkupSafe==3.0.4
+mdurl==0.1.2
+ordered-set==4.1.0
+packaging==26.3
+pycparser==3.12
+Pygments==2.21.0
+pyOpenSSL==26.4.0
+rich==13.9.4
+six==1.17.0
+typing_extensions==4.16.0
+urllib3==2.8.0
+webencodings==0.6.1
+wrapt==2.5.2
 
 # For Enterprise Edition features, see ee/requirements.txt

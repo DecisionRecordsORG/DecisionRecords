@@ -27,7 +27,9 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Run Angular dev server from `frontend/` with `npm start -- --configuration=community` (plain `npm start` needs the private `ee/` checkout).
 - Check the CE/EE boundary locally with `uv run python scripts/check_ce_boundary.py`.
 - Check that `Dockerfile.community` ships every module `app.py` imports with `uv run python scripts/check_ce_image_modules.py`.
-- With Docker available, boot a locally built Community image with `scripts/smoke_test_ce_image.sh <image>`; CI and the release workflow run the same script.
+- With Docker available, boot a locally built Community image with `scripts/smoke_test_ce_image.sh <image>`, and again with `SMOKE_DATABASE=postgres` to start it against a PostgreSQL container; CI and the release workflow run both.
+- Run the fixture-based backend tests against PostgreSQL with `TEST_DATABASE_URL=postgresql://user:password@localhost:5432/decisions_test uv run pytest tests/ -q --tb=short`. The database name must contain "test"; every table in it is dropped.
+- `requirements.txt` is a complete list of exact pins. Change a version deliberately, following the note at the top of the file.
 - Check the open-source artifact boundary with `uv run python scripts/check_public_artifacts.py --mode staged`.
 - Validate the staged delivery contract with `uv run python scripts/check_delivery_contract.py --mode staged`.
 - List currently open delivery obligations with `uv run python scripts/list_open_obligations.py --format markdown`.
