@@ -59,6 +59,7 @@ PRIVATE_BOUNDARY_PATTERNS = (
 
 OPS_DOC_PATTERNS = (
     ".delivery/**",
+    ".env.example",
     ".github/**",
     ".githooks/**",
     "AGENTS.md",
