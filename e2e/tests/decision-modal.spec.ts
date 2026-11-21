@@ -455,6 +455,18 @@ test.describe('Decision Modal', () => {
     await page.waitForLoadState('networkidle');
     await page.waitForSelector('h1', { timeout: 10000 });
 
+    // The admin onboarding dialog opens a moment after the page loads and would
+    // cover the form; close it for good before going on.
+    const gotItButton = page.locator('button:has-text("Got it")');
+    const onboardingShown = await gotItButton
+      .waitFor({ state: 'visible', timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    if (onboardingShown) {
+      await gotItButton.click();
+      await expect(gotItButton).toBeHidden({ timeout: 3000 });
+    }
+
     await dismissOverlays(page);
 
     // Create a decision first
@@ -492,15 +504,15 @@ test.describe('Decision Modal', () => {
     const viewModal = page.locator('mat-dialog-container').first();
     await expect(viewModal).toBeVisible({ timeout: 5000 });
 
-    // Switch to edit mode
+    // Switch to edit mode (wait for the view to finish loading; isVisible() does not wait)
     const editButton = viewModal.locator('button[mattooltip="Edit Decision"]');
-    if (await editButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+    if (await editButton.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false)) {
       await editButton.click();
     }
 
     // Click delete button
     const deleteButton = viewModal.locator('button:has-text("Delete")');
-    if (!(await deleteButton.isVisible({ timeout: 3000 }).catch(() => false))) {
+    if (!(await deleteButton.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false))) {
       // Close and skip
       const closeButton = viewModal.locator('button[mattooltip="Close"]');
       await closeButton.click();
