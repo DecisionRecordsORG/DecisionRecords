@@ -5,9 +5,11 @@ import logging
 import sys
 import traceback
 import threading
+import mimetypes
 from sqlalchemy.pool import StaticPool
 
-from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory
+from flask import Flask, Response, render_template, request, jsonify, session, redirect, url_for, g, send_from_directory, make_response
+from werkzeug.exceptions import HTTPException
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
 from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
@@ -87,6 +89,12 @@ logger = logging.getLogger(__name__)
 # Determine if we're serving Angular frontend
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist', 'frontend', 'browser')
 SERVE_ANGULAR = os.path.exists(FRONTEND_DIR)
+
+# The icon set is served from the built frontend by file name. Name the types
+# here so they do not depend on the mime.types file of the host or image.
+mimetypes.add_type('application/manifest+json', '.webmanifest')
+mimetypes.add_type('image/x-icon', '.ico')
+mimetypes.add_type('image/svg+xml', '.svg')
 
 app = Flask(__name__, static_folder=FRONTEND_DIR if SERVE_ANGULAR else 'static')
 
@@ -359,6 +367,59 @@ def get_app_base_url():
 # ==================== Global Error Handlers ====================
 # SECURITY: Prevent stack traces and sensitive information from leaking to clients
 # All errors are logged server-side but only generic messages are returned to clients
+
+# Client-facing text for HTTP errors raised by Flask, Werkzeug or the rate
+# limiter. Anything not listed falls back to the status name ("Gone").
+HTTP_ERROR_MESSAGES = {
+    405: 'Method not allowed',
+    413: 'Request is too large',
+    415: 'Unsupported media type',
+    429: 'Too many requests. Please wait a minute and try again.',
+}
+RATE_LIMIT_DEFAULT_RETRY_AFTER = 60  # seconds
+
+
+def _rate_limit_retry_after(e):
+    """Seconds a rate-limited client should wait, from the limit that was hit."""
+    try:
+        return max(1, int(e.limit.limit.get_expiry()))
+    except Exception:
+        return RATE_LIMIT_DEFAULT_RETRY_AFTER
+
+
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Keep the status of HTTP errors (405, 429, ...) instead of reporting them as 500.
+
+    Without this the catch-all handler below received every HTTPException that
+    has no handler of its own, so a rate-limited request or a wrong method was
+    answered with "An internal server error occurred". The statuses with their
+    own handlers (400, 401, 403, 404, 500) are not affected.
+    """
+    if e.response is not None:
+        return e.response
+
+    status = e.code or 500
+    message = HTTP_ERROR_MESSAGES.get(status) or e.name or 'Request failed'
+    wants_json = request.path.startswith('/api/') or (
+        request.path.startswith('/auth/') and request.is_json
+    )
+    if wants_json:
+        response = jsonify({'error': message})
+    else:
+        response = make_response(message)
+        response.mimetype = 'text/plain'
+    response.status_code = status
+
+    # Headers the exception carries, for example Allow on a 405
+    for header, value in e.get_headers():
+        if header.lower() not in ('content-type', 'content-length'):
+            response.headers[header] = value
+
+    if status == 429 and 'Retry-After' not in response.headers:
+        response.headers['Retry-After'] = str(_rate_limit_retry_after(e))
+    return response
+
 
 @app.errorhandler(Exception)
 def handle_exception(e):

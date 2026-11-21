@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Relationship packs for non-technical teams: People & Policy, Finance & Procurement and Product & Customer, with new relationship classes (exception to, sets precedent for, funds, approves, constrains, responds to, takes priority over). They are offered in organization settings and stay off until an administrator selects them
 - Helper text under the Title, Context, Decision and Consequences fields of both decision forms
+- The app has a complete icon set: `favicon.ico`, an SVG icon, an Apple touch icon, 192 and 512 pixel icons and a web manifest. It had only an SVG icon, which is hard to see on dark browser tabs
 
 ### Changed
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The email telling someone they were made a decision owner was never sent, because it failed while building the message
 - Loading relationship settings no longer fails for a tenant whose custom relationship class uses the same key as a built-in class added later; the tenant's own class is used
 - Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
+- A rate-limited request was answered with 500 "An internal server error occurred" instead of 429, and a request with the wrong HTTP method with 500 instead of 405. HTTP errors now keep their status. API paths answer `{ "error": ... }`, and a 429 says "Too many requests. Please wait a minute and try again." with a `Retry-After` header, which is what the sign-in pages and the contact and feedback forms now show
 
 ## [2.1.1] - 2026-11-21
 

@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-interest-capture"
+title = "Interest capture: stored inquiries, a super admin inbox and an optional team profile"
+summary = "Stores messages from the contact, sponsorship and feedback forms in a new inquiries table before the notification email is attempted, so a message is kept when email is not configured or the send fails, and accepts an optional team_focus with each. Adds super admin endpoints and a page to list, handle and delete inquiries with an interest summary. Adds two optional team profile answers (team focus and team size) to tenants, asked in the first-admin onboarding dialog, editable in organisation settings and visible to the super admin. Startup migration 2.3.0 creates the table and columns on existing SQLite and PostgreSQL databases. Inquiries are included in data export, redacted on account deletion and purged after 24 months by the scheduled GDPR task. Also fixes rate-limited and wrong-method requests being answered with 500, null optional fields crashing the sponsorship and feedback endpoints, and completes the app icon set."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"

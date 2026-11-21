@@ -1589,9 +1589,10 @@ class TestContactAPI:
         with patch('notifications.send_email', return_value=True) as send_email:
             response = api_client.get('/api/contact')
 
-        # The app's catch-all error handler currently reports a 405 as a 500,
-        # so only assert that the request fails and nothing is sent.
-        assert response.status_code >= 400
+        # 405 from the route itself; 404 when the built frontend is present,
+        # because its catch-all GET route answers unknown /api/ GETs. Never 500.
+        assert response.status_code in (404, 405)
+        assert 'error' in response.get_json()
         send_email.assert_not_called()
 
     def test_marketing_origin_may_call_it_cross_origin(self, api_client):
