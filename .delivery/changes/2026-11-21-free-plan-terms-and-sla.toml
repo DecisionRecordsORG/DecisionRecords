@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-free-plan-terms-and-sla"
+title = "Describe the free plan in the Terms of Service and SLA pages"
+summary = "Replaces the limited preview wording in the in-app Terms of Service and Service Level Agreement pages with the free plan wording: up to 25 users per tenant, provided as-is without an SLA, with notice before any change affects a tenant already on the free plan. Text only."
+change_type = "docs"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

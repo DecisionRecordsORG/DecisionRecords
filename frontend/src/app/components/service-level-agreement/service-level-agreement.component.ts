@@ -37,7 +37,7 @@ import { MatIconModule } from '@angular/material/icon';
 
             <div class="notice-box">
               <mat-icon>info</mat-icon>
-              <p>Free and Limited Preview usage is provided without SLA.</p>
+              <p>The free plan is provided without SLA.</p>
             </div>
 
             <hr class="divider">
@@ -135,7 +135,7 @@ import { MatIconModule } from '@angular/material/icon';
             <div class="info-box">
               <h3>Current Status</h3>
               <p>
-                The platform is currently in Limited Preview. During this phase, the service is provided without formal SLA commitments. As we introduce paid plans, this page will be updated with specific availability and support targets.
+                The hosted service is currently offered on a free plan, which is provided without formal SLA commitments. The commitments described on this page apply to paid plans when they are introduced. As we introduce paid plans, this page will be updated with specific availability and support targets.
               </p>
             </div>
 
