@@ -666,7 +666,8 @@ test.describe('Decision form wording', () => {
     for (const [field, wording] of Object.entries(FIELD_WORDING)) {
       const input = modal.locator(`[formcontrolname="${field}"]`);
       await expect(input).toHaveAttribute('placeholder', wording.placeholder);
-      await expect(modal.locator('mat-form-field', { has: input }).locator('mat-hint')).toHaveText(wording.hint);
+      const formField = modal.locator('mat-form-field', { has: page.locator(`[formcontrolname="${field}"]`) });
+      await expect(formField.locator('mat-hint')).toHaveText(wording.hint);
     }
     for (const label of ['Context', 'Decision', 'Consequences']) {
       await expect(modal.locator('mat-label', { hasText: new RegExp(`^${label}$`) })).toBeVisible();
@@ -686,7 +687,8 @@ test.describe('Decision form wording', () => {
     for (const [field, wording] of Object.entries(FIELD_WORDING)) {
       const input = form.locator(`[formcontrolname="${field}"]`);
       await expect(input).toHaveAttribute('placeholder', wording.placeholder);
-      await expect(form.locator('mat-form-field', { has: input }).locator('mat-hint')).toHaveText(wording.hint);
+      const formField = form.locator('mat-form-field', { has: page.locator(`[formcontrolname="${field}"]`) });
+      await expect(formField.locator('mat-hint')).toHaveText(wording.hint);
     }
   });
 });

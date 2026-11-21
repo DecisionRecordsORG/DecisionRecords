@@ -36,7 +36,7 @@ test.describe('Decision relationship packs', () => {
     await expect(packCard(page, 'Finance & Procurement')).toContainText(
       'Useful for budget, spending, supplier, and contract decisions.'
     );
-    await expect(page.locator('.relationship-pack-grid')).not.toContainText(/architecture/i);
+    await expect(packCard(page, 'Core')).not.toContainText(/architecture/i);
   });
 
   test('packs-not-auto-enabled: New packs are off until an administrator selects them', async ({ page }) => {
