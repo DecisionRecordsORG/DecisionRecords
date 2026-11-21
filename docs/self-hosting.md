@@ -128,6 +128,7 @@ docker run -d \
 |----------|-------------|---------|
 | `SMTP_USERNAME` | SMTP authentication username | - |
 | `SMTP_PASSWORD` | SMTP authentication password | - |
+| `SMTP_ENCRYPTION_KEY` | Fernet key that encrypts SMTP passwords saved in the admin UI. If unset, those passwords are stored unencrypted. Keep it stable: changing it makes saved passwords unreadable. | - |
 
 Email can also be configured through the admin UI after setup.
 

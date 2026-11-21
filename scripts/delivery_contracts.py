@@ -45,6 +45,7 @@ SHARED_CORE_PATTERNS = (
     "version.py",
     "webauthn_auth.py",
     "Dockerfile.community",
+    "Dockerfile.community.dockerignore",
     "docker-compose.yml",
     "frontend/**",
     "static/**",
@@ -58,6 +59,7 @@ PRIVATE_BOUNDARY_PATTERNS = (
 
 OPS_DOC_PATTERNS = (
     ".delivery/**",
+    ".env.example",
     ".github/**",
     ".githooks/**",
     "AGENTS.md",

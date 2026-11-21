@@ -1463,3 +1463,70 @@ class TestDecisionRelationshipAPI:
         body = response.get_json()
         assert body['config']['selected_pack_ids'] == ['core', 'security']
         assert any(relationship_type['key'] == 'requires_signoff' for relationship_type in body['effective_catalog']['types'])
+
+
+# ==================== Email Configuration API Tests ====================
+
+class TestEmailConfigAPIWithoutEnterpriseModules:
+    """Saving SMTP settings must work when the private ee package is absent.
+
+    Community Edition has no Key Vault client. crypto.py used to import it
+    unguarded, so POST /api/admin/email returned 500 for self-hosted installs.
+    """
+
+    EMAIL_PAYLOAD = {
+        'smtp_server': 'smtp.example.com',
+        'smtp_port': 587,
+        'smtp_username': 'mailer@example.com',
+        'smtp_password': 'smtp-secret-value',
+        'from_email': 'decisions@example.com',
+        'from_name': 'Decision Records',
+    }
+
+    @pytest.fixture
+    def without_enterprise_modules(self, monkeypatch):
+        for name in ('ee.backend.azure', 'ee.backend.azure.keyvault_client'):
+            monkeypatch.setitem(sys.modules, name, None)
+
+    @pytest.fixture(autouse=True)
+    def legacy_admin_flag(self, admin_user):
+        # @admin_required still reads the legacy users.is_admin column.
+        admin_user.is_admin = True
+        db.session.commit()
+
+    def test_save_email_config_without_encryption_key_succeeds(
+        self, admin_client, without_enterprise_modules, monkeypatch
+    ):
+        monkeypatch.delenv('SMTP_ENCRYPTION_KEY', raising=False)
+
+        response = admin_client.post('/api/admin/email', json=self.EMAIL_PAYLOAD)
+
+        assert response.status_code == 200, response.data
+        data = json.loads(response.data)
+        assert data['smtp_server'] == 'smtp.example.com'
+        assert 'smtp-secret-value' not in response.get_data(as_text=True)
+
+    def test_save_email_config_encrypts_password_with_environment_key(
+        self, admin_client, without_enterprise_modules, monkeypatch
+    ):
+        from cryptography.fernet import Fernet
+        from models import EmailConfig
+
+        monkeypatch.setenv('SMTP_ENCRYPTION_KEY', Fernet.generate_key().decode('utf-8'))
+
+        response = admin_client.post('/api/admin/email', json=self.EMAIL_PAYLOAD)
+
+        assert response.status_code == 200, response.data
+        stored = EmailConfig.query.filter_by(domain='testdomain.com').first()
+        assert stored.smtp_password.startswith('encrypted:')
+        assert 'smtp-secret-value' not in stored.smtp_password
+
+    def test_save_email_config_missing_required_field_returns_400(
+        self, admin_client, without_enterprise_modules
+    ):
+        payload = {key: value for key, value in self.EMAIL_PAYLOAD.items() if key != 'smtp_server'}
+
+        response = admin_client.post('/api/admin/email', json=payload)
+
+        assert response.status_code == 400
+        assert json.loads(response.data) == {'error': 'Missing required field: smtp_server'}

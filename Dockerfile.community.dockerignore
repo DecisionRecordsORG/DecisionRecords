@@ -1,0 +1,47 @@
+# Build context for Dockerfile.community (Community Edition image).
+#
+# BuildKit uses this file instead of the root .dockerignore when building with
+# `-f Dockerfile.community`. It is an allowlist: nothing enters the build
+# context unless it is re-included below. That keeps the private ee/ tree,
+# tests, local databases, .env files and virtualenvs out of the image even
+# though the Dockerfile copies root Python modules with a glob.
+#
+# scripts/check_ce_image_modules.py reads this file together with
+# Dockerfile.community and fails when a module the app imports is not shipped,
+# or when a file listed as forbidden there would be shipped.
+
+# Exclude everything by default
+*
+
+# Python dependencies
+!requirements.txt
+
+# Root Python modules. New modules are picked up automatically.
+!*.py
+
+# Root Python files that are not part of the runtime
+run_local.py
+local_secrets.py
+conftest.py
+
+# Server-rendered templates and static assets
+!templates
+!static
+
+# Angular sources for the frontend build stage
+!frontend
+frontend/node_modules
+frontend/dist
+frontend/.angular
+frontend/.sass-cache
+frontend/test-results
+
+# Never ship these, wherever they appear inside a re-included directory
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.db
+**/*.sqlite
+**/*.sqlite3

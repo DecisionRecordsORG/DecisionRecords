@@ -56,6 +56,7 @@ Email can be configured via environment variables or through the Admin UI.
 |----------|-------------|
 | `SMTP_USERNAME` | SMTP server username |
 | `SMTP_PASSWORD` | SMTP server password |
+| `SMTP_ENCRYPTION_KEY` | Fernet key used to encrypt SMTP passwords saved in the Admin UI. Without it, passwords saved in the UI are stored unencrypted. Generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 
 Additional email settings (server, port, from address) are configured in the Admin UI under Settings > Email.
 

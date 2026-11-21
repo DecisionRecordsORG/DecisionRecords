@@ -108,6 +108,10 @@ def check_ce_boundary() -> None:
     run(["uv", "run", "python", "scripts/check_ce_boundary.py"])
 
 
+def check_ce_image_modules() -> None:
+    run(["uv", "run", "python", "scripts/check_ce_image_modules.py"])
+
+
 def check_public_artifacts() -> None:
     run(["uv", "run", "python", "scripts/check_public_artifacts.py", "--mode", "staged"])
 
@@ -163,6 +167,7 @@ def run_commit_checks() -> None:
     check_delivery_contract()
     check_staged_whitespace()
     check_ce_boundary()
+    check_ce_image_modules()
     check_python_compile(files)
     check_frontend_typecheck(files)
 

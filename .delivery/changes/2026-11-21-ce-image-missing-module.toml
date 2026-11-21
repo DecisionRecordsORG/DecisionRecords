@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-ce-image-missing-module"
+title = "Ship every imported module in the Community image and smoke test it before release"
+summary = "The published Community 2.1.0 image omits decision_relationships.py and cannot start. Dockerfile.community now copies all root modules behind a build-context allowlist, a static guard and an image smoke test gate CI and the release workflow before anything is pushed, and Community-only crashes in SMTP settings and run_local.py are fixed. A Community patch release (2.1.1) is required to replace the broken 2.1.0 and latest tags."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
