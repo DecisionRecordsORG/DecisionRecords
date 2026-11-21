@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-pin-database-driver-deps"
+title = "Pin SQLAlchemy and the PostgreSQL drivers"
+summary = "Pins SQLAlchemy to the 2.0 line and pins psycopg2-binary and psycopg to the versions in the last working image. Unpinned, a fresh image build resolved SQLAlchemy 2.1, which selects the psycopg 3 driver for postgresql:// URLs; the image has no libpq for it, so the application could not start against PostgreSQL."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"

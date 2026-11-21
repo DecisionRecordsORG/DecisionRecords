@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sign-in with Slack, Google, Microsoft and Teams only redirects to same-site paths afterwards
 
 ### Fixed
+- A freshly built image could not connect to PostgreSQL (`ImportError: no pq wrapper available`): unpinned SQLAlchemy resolved to 2.1, which selects the psycopg 3 driver for `postgresql://` URLs. SQLAlchemy and the PostgreSQL drivers are now pinned
 - Sessions created by Teams sign-in, by setting a password from a setup link and by registering a first passkey from a setup link were cleared on the next request
 - Signing in once with Slack, Google or Microsoft no longer disables passkey sign-in for an account that has a password or passkey
 - First-time Teams sign-in for a new account returned a 500 error

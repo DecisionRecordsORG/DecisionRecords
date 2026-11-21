@@ -19,8 +19,11 @@ cryptography>=41.0.0
 requests==2.31.0
 
 # Database
-psycopg2-binary
-psycopg
+# Pinned: SQLAlchemy 2.1 makes psycopg (v3) the default driver for postgresql:// URLs,
+# and plain `psycopg` ships no libpq. Unpinned, a fresh image build cannot reach PostgreSQL.
+SQLAlchemy==2.0.52
+psycopg2-binary==2.9.12
+psycopg==3.3.4
 
 # Security
 bleach==6.1.0

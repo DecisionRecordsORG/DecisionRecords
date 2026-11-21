@@ -92,6 +92,12 @@ Before building, deploying, or validating anything, identify which artifact is b
 - The website-to-app sign-in depends on environment variables (`SESSION_COOKIE_DOMAIN`, `OAUTH_BASE_URL`, `APP_BASE_URL`, `USE_HTTPS`) that no workflow sets. Keep the committed environment template in the private infrastructure repo in step with the running configuration.
 - Test fixes on a path that is actually registered. A defect reported in a module that is never imported or routed is not live; confirm the route exists in the running app's URL map first.
 
+## Dependency Drift
+
+- Pin every runtime dependency that selects behaviour. On 2026-11-21 an Enterprise deploy took production down: `requirements.txt` pinned Flask-SQLAlchemy but not SQLAlchemy, a fresh build resolved SQLAlchemy 2.1, and 2.1 uses psycopg 3 for `postgresql://` URLs. The image had psycopg 3 without its binary package and no system libpq, so every worker failed at import with "no pq wrapper available". The previous image, built three months earlier from the same file, had SQLAlchemy 2.0 and used psycopg2.
+- A green build is not a tested runtime. CI and the image smoke test run on SQLite; nothing exercised PostgreSQL before the deploy. The Enterprise deploy replaces the running container before its health check, so a bad image means an outage, not a failed deploy.
+- When a deploy fails its health check, read the service journal for the worker traceback first, and compare `pip list` inside the previous and new images before suspecting the code change.
+
 ## Deployment Rule
 
 Normal production deployments go through GitHub Actions and GitHub Environments. Local Azure CLI deploys are break-glass only and must be documented in the deployment notes for that incident.
