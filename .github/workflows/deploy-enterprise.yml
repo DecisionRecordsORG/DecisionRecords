@@ -1,7 +1,27 @@
 name: Deploy Enterprise Edition
 
+# Order of the deploy job (do not reorder without reading docs/deployment.md):
+#   1. build the image, tagged with the commit SHA only
+#   2. pre-flight: import and boot that exact image against PostgreSQL on the runner
+#   3. only then log in to Azure, publish, restart the VM and verify
+#   4. if production is not healthy afterwards, put the previous image back
+# Nothing is pushed and the VM is not touched before the pre-flight has passed.
+
 on:
   workflow_dispatch:
+    inputs:
+      skip_postgres_preflight:
+        description: >-
+          Break-glass: skip booting the new image against PostgreSQL before publishing.
+          The driver import check and the automatic rollback still run.
+        type: boolean
+        default: false
+      deploy_when_unhealthy:
+        description: >-
+          Deploy although production does not report healthy beforehand
+          (use when this deploy is the fix for an outage).
+        type: boolean
+        default: false
 
 concurrency:
   group: production-private-app
@@ -102,6 +122,9 @@ jobs:
       RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
       VM_NAME: ${{ vars.AZURE_VM_NAME }}
       HEALTH_URL: ${{ vars.ENTERPRISE_HEALTH_URL || 'https://app.decisionrecords.org/api/health' }}
+      # /api/health is a liveness route that answers without a database.
+      # /health reports the database, so it is what a deploy is verified with.
+      DB_HEALTH_URL: ${{ vars.ENTERPRISE_DB_HEALTH_URL || 'https://app.decisionrecords.org/health' }}
 
     steps:
       - name: Checkout public repository
@@ -134,6 +157,44 @@ jobs:
           test -n "$RESOURCE_GROUP"
           test -n "$VM_NAME"
 
+      # ------------------------------------------------------------------
+      # Build and pre-flight. No registry or Azure credentials exist yet in
+      # this job, so nothing below can publish or deploy until it has passed.
+      # ------------------------------------------------------------------
+      - name: Build Enterprise image (commit tag only)
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 \
+            -f ee/deployment/Dockerfile.production \
+            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:$GITHUB_SHA" \
+            .
+
+      # Needs no database server: creating the engine imports the PostgreSQL
+      # driver, which is exactly what failed on 2026-11-21. Always runs.
+      - name: Pre-flight - import the app with a PostgreSQL URL
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -e DATABASE_URL=postgresql://preflight:preflight@127.0.0.1:5432/preflight \
+            -e SECRET_KEY=preflight-secret-key-0123456789abcdef \
+            -e AZURE_KEYVAULT_URL= \
+            "$ACR_LOGIN_SERVER/$IMAGE_NAME:$GITHUB_SHA" \
+            python -c "import app; ctx = app.app.app_context(); ctx.push(); print('database driver:', app.db.engine.dialect.name + '/' + app.db.engine.driver)"
+
+      - name: Pre-flight - boot the image against PostgreSQL
+        if: ${{ !inputs.skip_postgres_preflight }}
+        env:
+          SMOKE_PROFILE: enterprise
+          SMOKE_DATABASE: postgres
+        run: scripts/smoke_test_ce_image.sh "$ACR_LOGIN_SERVER/$IMAGE_NAME:$GITHUB_SHA"
+
+      - name: Warn that the PostgreSQL pre-flight was skipped
+        if: ${{ inputs.skip_postgres_preflight }}
+        run: echo "::warning title=Pre-flight skipped::skip_postgres_preflight was set. This image was not started against PostgreSQL before being deployed."
+
+      # ------------------------------------------------------------------
+      # Publish and deploy.
+      # ------------------------------------------------------------------
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -144,40 +205,18 @@ jobs:
       - name: Login to Azure Container Registry
         run: az acr login --name "$ACR_NAME"
 
-      - name: Build and push Docker image
+      # One script, so the rollback cannot be skipped by a failed step:
+      # records the image `latest` points to, pushes the commit tag, moves
+      # `latest`, restarts the VM, verifies the database health route, and on
+      # any failure after `latest` moved re-points it to the recorded image and
+      # restarts again. It exits non-zero unless the new image is serving.
+      - name: Publish, deploy to VM and verify (rolls back on failure)
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          DEPLOY_WHEN_UNHEALTHY: ${{ inputs.deploy_when_unhealthy }}
         run: |
-          docker build --platform linux/amd64 \
-            -f ee/deployment/Dockerfile.production \
-            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest" \
-            -t "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}" \
-            .
-          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:latest"
-          docker push "$ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}"
-
-      - name: Deploy to VM
-        run: |
-          az vm run-command invoke \
-            --resource-group "$RESOURCE_GROUP" \
-            --name "$VM_NAME" \
-            --command-id RunShellScript \
-            --scripts "docker pull $ACR_LOGIN_SERVER/$IMAGE_NAME:latest && systemctl restart adr-app"
-
-      - name: Wait for health check
-        run: |
-          echo "Waiting for application to be healthy..."
-          # Check the public endpoint directly instead of via VM command
-          for i in {1..30}; do
-            RESULT=$(curl -sf "$HEALTH_URL" 2>/dev/null || echo "")
-            if [[ "$RESULT" == *"ok"* ]] || [[ "$RESULT" == *"healthy"* ]]; then
-              echo "Health check response: $RESULT"
-              echo "Application is healthy!"
-              exit 0
-            fi
-            echo "Attempt $i/30: Waiting... (response: $RESULT)"
-            sleep 10
-          done
-          echo "Health check failed after 30 attempts"
-          exit 1
+          set -euo pipefail
+          IMAGE_REPO="$ACR_LOGIN_SERVER/$IMAGE_NAME" scripts/deploy_enterprise_image.sh
 
       - name: Purge Cloudflare cache
         if: always()
@@ -200,9 +239,10 @@ jobs:
         if: always()
         run: |
           echo "====================================="
-          echo "Deployment complete!"
+          echo "Deploy job status: ${{ job.status }}"
           echo "====================================="
           echo "URL: $HEALTH_URL"
+          echo "Database health: $DB_HEALTH_URL"
           echo "Image: $ACR_LOGIN_SERVER/$IMAGE_NAME:${{ github.sha }}"
           echo ""
           echo "To view logs, run:"
