@@ -70,6 +70,10 @@ interface Tenant {
   maturity_state: 'bootstrap' | 'mature' | null;
   age_days: number | null;
   maturity_thresholds?: MaturityThresholds;
+  team_focus?: string | null;
+  team_size?: string | null;
+  team_size_label?: string | null;
+  team_profile_answered_at?: string | null;
 }
 
 interface SlackLinkedUser {
@@ -1501,6 +1505,30 @@ interface TenantDetailsDialogData {
         </div>
       </div>
 
+      <div class="details-section" data-testid="tenant-team-profile">
+        <h3>Team profile</h3>
+        @if (data.tenant.team_focus || data.tenant.team_size) {
+          <div class="team-profile">
+            <div class="stat">
+              <label>Makes decisions about</label>
+              <span class="team-profile-text" data-testid="tenant-team-focus">{{ data.tenant.team_focus || 'Not answered' }}</span>
+            </div>
+            <div class="stat">
+              <label>Team size</label>
+              <span class="team-profile-text" data-testid="tenant-team-size">{{ data.tenant.team_size_label || 'Not answered' }}</span>
+            </div>
+            @if (data.tenant.team_profile_answered_at) {
+              <div class="stat">
+                <label>Answered</label>
+                <span class="team-profile-text">{{ data.tenant.team_profile_answered_at | date:'mediumDate' }}</span>
+              </div>
+            }
+          </div>
+        } @else {
+          <p class="team-profile-empty" data-testid="tenant-team-profile-empty">This team has not answered the team profile questions.</p>
+        }
+      </div>
+
       <div class="details-section">
         <h3>Maturity Thresholds</h3>
         <div class="thresholds-grid">
@@ -1603,6 +1631,23 @@ interface TenantDetailsDialogData {
     .stat span {
       font-size: 20px;
       font-weight: 600;
+    }
+
+    .team-profile {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .stat span.team-profile-text {
+      font-size: 15px;
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
+
+    .team-profile-empty {
+      margin: 0;
+      color: #666;
     }
 
     .thresholds-grid {

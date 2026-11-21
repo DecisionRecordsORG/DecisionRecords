@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Messages from the website contact form, the "Get in touch" dialog and the in-app feedback dialog are stored before the notification email is sent, so a message is no longer lost when email is not set up or the send fails. No IP address or user agent is stored
 - `/api/contact`, `/api/sponsorship` and `/api/feedback` accept an optional `team_focus` ("What does your team make decisions about?", up to 200 characters) and an optional `team_size` code, store them with the message and include the team focus in the contact and "Get in touch" notification emails
 - Super admins have an Inquiries page listing stored messages newest first, with filters by form and status, a detail view, mark as handled, and delete with confirmation. Messages that were never emailed are marked "Not emailed". The dashboard shows how many inquiries are not handled
+- Team profile: the first-admin onboarding dialog asks two optional questions, "What does your team make decisions about?" and team size, and says why ("It helps us build for teams like yours"). They can be skipped, and tenant admins can answer or change them later under Organization Settings > Team profile
+- Super admins see a tenant's team profile in the tenant details, and an Interest summary at the top of the Inquiries page: tenants and inquiries by team size, inquiries by form, and the distinct team focus answers as they were typed
 
 ### Changed
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
@@ -40,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A rate-limited request was answered with 500 "An internal server error occurred" instead of 429, and a request with the wrong HTTP method with 500 instead of 405. HTTP errors now keep their status. API paths answer `{ "error": ... }`, and a 429 says "Too many requests. Please wait a minute and try again." with a `Retry-After` header, which is what the sign-in pages and the contact and feedback forms now show
 - `/api/sponsorship` answered 500 when an optional field was sent as JSON `null`, and `/api/feedback` answered 500 for `null` fields and for a body that was not JSON. All three form endpoints now treat missing, `null` and wrong-typed optional fields as not given and answer 400 for an invalid body
 - End-to-end tests: the sign-in helpers typed into the server-rendered form before the app was running, lost the text when it started, and timed out on a disabled button. They now fill the form until the app has taken the values
+- The first-admin onboarding dialog no longer opens on top of another dialog, such as a decision someone has started writing, and no longer takes the keyboard focus from it. It waits until that dialog is closed. Its buttons stay in view on short windows
 
 ## [2.1.1] - 2026-11-21
 

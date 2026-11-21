@@ -3646,7 +3646,9 @@ def api_get_current_user():
                 'steward_count': TenantMembership.query.filter_by(
                     tenant_id=tenant.id,
                     global_role=GlobalRole.STEWARD
-                ).count()
+                ).count(),
+                # Lets the onboarding dialog skip a question the team already answered
+                'team_profile_answered': tenant.has_team_profile()
             }
 
     return jsonify(user_dict)
@@ -3714,6 +3716,115 @@ def api_dismiss_admin_onboarding():
     db.session.commit()
 
     return jsonify({'message': 'Admin onboarding dismissed', 'user': user.to_dict()})
+
+
+# ==================== API Routes - Team profile ====================
+# Two optional answers a tenant admin gives about the team: what it makes
+# decisions about and how big it is. Asked once in the first-admin onboarding
+# dialog and editable in organisation settings.
+
+def _team_profile_access():
+    """(tenant, None) for a tenant admin, steward or provisional admin, else (None, error response)."""
+    if is_master_account():
+        return None, (jsonify({'error': 'Super admin accounts cannot access a team profile'}), 403)
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return None, (jsonify({'error': 'Tenant not found'}), 404)
+
+    membership = get_current_membership()
+    if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
+        return None, (jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403)
+
+    return tenant, None
+
+
+def _team_profile_payload(tenant):
+    payload = tenant.team_profile_dict()
+    answered_by = None
+    if tenant.team_profile_answered_by_id:
+        user = db.session.get(User, tenant.team_profile_answered_by_id)
+        if user and not user.is_anonymized:
+            answered_by = user.get_full_name() or None
+    payload['answered_by'] = answered_by
+    payload['team_focus_max_length'] = TEAM_FOCUS_MAX_LENGTH
+    payload['team_size_options'] = [
+        {'code': code, 'label': label} for code, label in TEAM_SIZE_OPTIONS
+    ]
+    return payload
+
+
+@app.route('/api/tenant/team-profile', methods=['GET'])
+@login_required
+def api_get_team_profile():
+    """Return the tenant's team profile answers (tenant admins and stewards)."""
+    tenant, error = _team_profile_access()
+    if error:
+        return error
+    return jsonify(_team_profile_payload(tenant))
+
+
+@app.route('/api/tenant/team-profile', methods=['PUT'])
+@login_required
+def api_update_team_profile():
+    """Save the tenant's team profile answers (tenant admins and stewards).
+
+    Body: {"team_focus": text or null, "team_size": code or null}. Both are
+    optional; a field that is left out keeps its value, and null or an empty
+    string clears it.
+    """
+    tenant, error = _team_profile_access()
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate everything before changing anything
+    team_focus = tenant.team_focus
+    team_size = tenant.team_size
+
+    if 'team_focus' in data:
+        raw = data['team_focus']
+        if raw is not None and not isinstance(raw, str):
+            return jsonify({'error': 'Team focus must be text'}), 400
+        if raw is not None and len(raw.strip()) > TEAM_FOCUS_MAX_LENGTH:
+            return jsonify({'error': f'Team focus must be {TEAM_FOCUS_MAX_LENGTH} characters or fewer'}), 400
+        team_focus = _stored_text(sanitize_title(raw or '', max_length=TEAM_FOCUS_MAX_LENGTH))
+
+    if 'team_size' in data:
+        raw = data['team_size']
+        if raw is not None and not isinstance(raw, str):
+            return jsonify({'error': 'Team size is not one of the listed ranges'}), 400
+        team_size = (raw or '').strip() or None
+        if team_size is not None and team_size not in TEAM_SIZE_CODES:
+            return jsonify({'error': 'Team size is not one of the listed ranges'}), 400
+
+    changed = team_focus != tenant.team_focus or team_size != tenant.team_size
+    if changed:
+        tenant.team_focus = team_focus
+        tenant.team_size = team_size
+        if tenant.has_team_profile():
+            tenant.team_profile_answered_at = datetime.now(timezone.utc)
+            tenant.team_profile_answered_by_id = g.current_user.id
+        else:
+            # Both answers cleared: nothing is left to attribute
+            tenant.team_profile_answered_at = None
+            tenant.team_profile_answered_by_id = None
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=g.current_user.id,
+            action_type='update_team_profile',
+            target_entity='tenant',
+            target_id=tenant.id,
+            details={'team_size': tenant.team_size, 'has_team_focus': bool(tenant.team_focus)}
+        )
+        db.session.commit()
+
+    payload = _team_profile_payload(tenant)
+    payload['message'] = 'Team profile saved'
+    return jsonify(payload)
 
 
 # ==================== API Routes - GDPR (Art. 17, 20) ====================
@@ -8908,6 +9019,18 @@ def api_list_tenants():
             tenants[tenant.domain]['steward_count'] = steward_count
             tenants[tenant.domain]['user_count'] = member_count
             tenants[tenant.domain]['age_days'] = age_days
+            profile = tenant.team_profile_dict()
+            tenants[tenant.domain].update({
+                'team_focus': profile['team_focus'],
+                'team_size': profile['team_size'],
+                'team_size_label': profile['team_size_label'],
+                'team_profile_answered_at': profile['answered_at'],
+            })
+
+    # Every row carries the team profile keys, answered or not
+    for entry in tenants.values():
+        for key in ('team_focus', 'team_size', 'team_size_label', 'team_profile_answered_at'):
+            entry.setdefault(key, None)
 
     # Check SSO config for all domains
     for domain in tenants:

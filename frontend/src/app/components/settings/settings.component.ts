@@ -1624,6 +1624,72 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
           </div>
         </mat-tab>
         }
+
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="Team profile">
+          <div class="tab-content">
+            <mat-card class="config-card" data-testid="team-profile-card">
+              <mat-card-header>
+                <mat-card-title>
+                  <mat-icon>groups</mat-icon>
+                  About your team
+                </mat-card-title>
+              </mat-card-header>
+              <mat-card-content>
+                <p class="team-profile-intro">
+                  Two optional questions. It helps us build for teams like yours. You can leave either one blank.
+                </p>
+
+                @if (loadingTeamProfile) {
+                  <div class="loading-container">
+                    <mat-spinner diameter="40"></mat-spinner>
+                  </div>
+                } @else {
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>What does your team make decisions about?</mat-label>
+                    <input
+                      matInput
+                      data-testid="team-profile-focus"
+                      [(ngModel)]="teamProfile.team_focus"
+                      [ngModelOptions]="{standalone: true}"
+                      [attr.maxlength]="teamFocusMaxLength"
+                      placeholder="For example: hiring, supplier contracts, product pricing">
+                    <mat-hint align="end">{{ (teamProfile.team_focus || '').length }} / {{ teamFocusMaxLength }}</mat-hint>
+                  </mat-form-field>
+
+                  <mat-form-field appearance="outline" class="team-size-field">
+                    <mat-label>Team size</mat-label>
+                    <mat-select
+                      data-testid="team-profile-size"
+                      [(ngModel)]="teamProfile.team_size"
+                      [ngModelOptions]="{standalone: true}">
+                      <mat-option [value]="null">Prefer not to say</mat-option>
+                      @for (option of teamSizeOptions; track option.code) {
+                        <mat-option [value]="option.code">{{ option.label }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+
+                  @if (teamProfileAnsweredAt) {
+                    <p class="team-profile-answered" data-testid="team-profile-answered">
+                      Last answered{{ teamProfileAnsweredBy ? ' by ' + teamProfileAnsweredBy : '' }}
+                      on {{ teamProfileAnsweredAt | date:'mediumDate' }}.
+                    </p>
+                  }
+                }
+              </mat-card-content>
+              <mat-card-actions>
+                <button mat-flat-button color="primary" data-testid="team-profile-save"
+                        (click)="saveTeamProfile()" [disabled]="savingTeamProfile || loadingTeamProfile">
+                  <mat-spinner diameter="20" *ngIf="savingTeamProfile"></mat-spinner>
+                  <mat-icon *ngIf="!savingTeamProfile">save</mat-icon>
+                  <span *ngIf="!savingTeamProfile">Save team profile</span>
+                </button>
+              </mat-card-actions>
+            </mat-card>
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -1967,6 +2033,23 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
       text-align: center;
       color: #888;
       padding: 24px;
+    }
+
+    .team-profile-intro {
+      color: #475569;
+      margin: 8px 0 20px;
+    }
+
+    .team-size-field {
+      display: block;
+      max-width: 320px;
+      margin-top: 8px;
+    }
+
+    .team-profile-answered {
+      color: #64748b;
+      font-size: 13px;
+      margin: 4px 0 0;
     }
 
     table {
@@ -2986,6 +3069,15 @@ export class SettingsComponent implements OnInit {
   savingDecisionRelationshipSettings = false;
   decisionRelationshipSettingsChanged = false;
 
+  // Team profile (optional answers about the team, also asked in the first-admin onboarding dialog)
+  teamProfile: { team_focus: string; team_size: string | null } = { team_focus: '', team_size: null };
+  teamSizeOptions: { code: string; label: string }[] = [];
+  teamFocusMaxLength = 200;
+  teamProfileAnsweredAt: string | null = null;
+  teamProfileAnsweredBy: string | null = null;
+  loadingTeamProfile = false;
+  savingTeamProfile = false;
+
   // Tab index for navigation
   selectedTabIndex = 0;
   // Tab map matches actual tab order in template:
@@ -3124,6 +3216,7 @@ export class SettingsComponent implements OnInit {
       this.loadTeamsSettings();
       this.loadAiSettings();
       this.loadDecisionRelationshipSettings();
+      this.loadTeamProfile();
       // Pre-fill domain for tenant admins
       if (this.authService.currentUser?.user) {
         const user = this.authService.currentUser.user as User;
@@ -4184,6 +4277,54 @@ export class SettingsComponent implements OnInit {
 
   onDecisionRelationshipConfigChange(): void {
     this.decisionRelationshipSettingsChanged = true;
+  }
+
+  private applyTeamProfile(response: any): void {
+    this.teamProfile = {
+      team_focus: response?.team_focus || '',
+      team_size: response?.team_size || null
+    };
+    if (Array.isArray(response?.team_size_options)) {
+      this.teamSizeOptions = response.team_size_options;
+    }
+    if (typeof response?.team_focus_max_length === 'number') {
+      this.teamFocusMaxLength = response.team_focus_max_length;
+    }
+    this.teamProfileAnsweredAt = response?.answered_at || null;
+    this.teamProfileAnsweredBy = response?.answered_by || null;
+  }
+
+  loadTeamProfile(): void {
+    this.loadingTeamProfile = true;
+    this.http.get<any>('/api/tenant/team-profile').subscribe({
+      next: (response) => {
+        this.applyTeamProfile(response);
+        this.loadingTeamProfile = false;
+      },
+      error: () => {
+        // The tab stays usable; saving reports its own errors
+        this.loadingTeamProfile = false;
+      }
+    });
+  }
+
+  saveTeamProfile(): void {
+    this.savingTeamProfile = true;
+    const body = {
+      team_focus: (this.teamProfile.team_focus || '').trim() || null,
+      team_size: this.teamProfile.team_size || null
+    };
+    this.http.put<any>('/api/tenant/team-profile', body).subscribe({
+      next: (response) => {
+        this.applyTeamProfile(response);
+        this.savingTeamProfile = false;
+        this.snackBar.open('Team profile saved', 'Close', { duration: 3000 });
+      },
+      error: (err) => {
+        this.savingTeamProfile = false;
+        this.snackBar.open(err.error?.error || 'Could not save the team profile. Please try again.', 'Close', { duration: 5000 });
+      }
+    });
   }
 
   isRelationshipPackSelected(packId: string): boolean {

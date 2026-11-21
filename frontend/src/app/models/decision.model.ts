@@ -19,6 +19,7 @@ export interface TenantInfo {
   maturity_state: MaturityState;
   admin_count: number;
   steward_count: number;
+  team_profile_answered?: boolean;  // True once the team profile questions have an answer
 }
 
 export interface User {
