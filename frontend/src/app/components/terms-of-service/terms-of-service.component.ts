@@ -31,7 +31,7 @@ import { MatIconModule } from '@angular/material/icon';
       <main class="terms-content">
         <div class="container">
           <article class="prose">
-            <p class="meta">Last updated: December 2024</p>
+            <p class="meta">Last updated: 21 November 2026</p>
 
             <p class="lead">
               These Terms of Service govern your access to and use of the Decision Records platform, including the hosted cloud service, related websites, and documentation. By creating an account or using the service, you agree to these terms.
@@ -73,15 +73,18 @@ import { MatIconModule } from '@angular/material/icon';
             </section>
 
             <section class="terms-section">
-              <h2>4. Limited Preview</h2>
+              <h2>4. Free plan</h2>
               <p>
-                The hosted service is currently offered as a Limited Preview. This allows early users to explore the platform while we stabilise features, validate usage patterns, and refine the long-term hosting model.
+                The hosted service is offered with a free plan. On the free plan, each tenant is limited to a maximum of 25 users.
               </p>
               <p>
-                During this preview period, each tenant is limited to a maximum of five users. The service is provided without formal uptime guarantees or support service levels. Limits and features may change as the platform matures.
+                The free plan is provided on an "as-is" basis, without formal uptime guarantees or support service levels. Limits and features may change as the platform matures.
               </p>
               <p>
-                If your organisation would like to explore broader usage, higher limits, or specific requirements, you are encouraged to contact us. We are actively learning from early adopters.
+                We may introduce paid plans in the future. We will give notice before any such change affects a tenant that is already on the free plan.
+              </p>
+              <p>
+                If your organisation would like to explore broader usage, higher limits, or specific requirements, you are encouraged to contact us.
               </p>
             </section>
 
@@ -124,7 +127,7 @@ import { MatIconModule } from '@angular/material/icon';
             <section class="terms-section">
               <h2>8. Availability and support</h2>
               <p>
-                During the Limited Preview phase, the service is provided on an "as-is" basis without guarantees of availability or formal support commitments.
+                On the free plan, the service is provided on an "as-is" basis without guarantees of availability or formal support commitments.
               </p>
               <p>
                 For future paid plans, availability targets and support commitments will be described in a separate Service Level Agreement.
@@ -160,7 +163,7 @@ import { MatIconModule } from '@angular/material/icon';
             <section class="terms-section">
               <h2>11. Disclaimer</h2>
               <p>
-                The service is provided without warranties of any kind, to the extent permitted by law. In particular, we do not guarantee uninterrupted availability or error-free operation, especially during the Limited Preview phase.
+                The service is provided without warranties of any kind, to the extent permitted by law. In particular, we do not guarantee uninterrupted availability or error-free operation, especially on the free plan.
               </p>
             </section>
 

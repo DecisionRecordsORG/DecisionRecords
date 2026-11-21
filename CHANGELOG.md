@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Terms of Service and Service Level Agreement pages describe a free plan for teams of up to 25 users in place of the limited preview
+
 ## [2.1.1] - 2026-11-21
 
 ### Security
