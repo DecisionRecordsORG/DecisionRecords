@@ -6,6 +6,7 @@ import {
   DecisionHistory,
   DecisionReference,
   DecisionRelationshipCatalog,
+  TenantMember,
 } from '../models/decision.model';
 
 export interface DecisionRelationshipInput {
@@ -65,6 +66,11 @@ export class DecisionService {
 
   getDecisionReferences(): Observable<DecisionReference[]> {
     return this.http.get<DecisionReference[]>(this.apiUrl);
+  }
+
+  /** Members of the caller's own tenant (id and display name) for the owner picker. */
+  getTenantMembers(): Observable<TenantMember[]> {
+    return this.http.get<TenantMember[]>('/api/tenant/members');
   }
 
   createDecision(decision: CreateDecisionRequest): Observable<Decision> {

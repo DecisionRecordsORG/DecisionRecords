@@ -236,6 +236,63 @@ test.describe('Decision Modal', () => {
     await expect(modal).toBeHidden({ timeout: 5000 });
   });
 
+  test('owner-picker-for-regular-user: Non-admin can pick a team member as decision owner', async ({ page }) => {
+    // The members list must come from an endpoint a regular user is allowed to call
+    const membersResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/tenant/members') && response.request().method() === 'GET',
+      { timeout: 30000 }
+    );
+
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+
+    await page.waitForLoadState('networkidle');
+    await page.waitForSelector('h1', { timeout: 10000 });
+
+    await dismissOverlays(page);
+
+    const createButton = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
+
+    if (!(await createButton.isVisible({ timeout: 5000 }).catch(() => false))) {
+      test.skip(true, 'Create button not visible');
+      return;
+    }
+
+    await createButton.click();
+
+    const modal = page.locator('mat-dialog-container').first();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    const response = await membersResponse;
+    expect(response.status()).toBe(200);
+    const members: Array<Record<string, unknown>> = await response.json();
+    expect(members.length).toBeGreaterThanOrEqual(3);
+    for (const member of members) {
+      expect(Object.keys(member).sort()).toEqual(['id', 'name']);
+    }
+
+    // Open the owner picker: colleagues are listed by name, without email addresses
+    await modal.locator('mat-form-field:has-text("Team member") mat-select').click();
+    const stewardOption = page.locator('mat-option:has-text("Test Steward")');
+    await expect(stewardOption).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('mat-option:has-text("Test Admin")')).toBeVisible();
+    await expect(page.locator('mat-option:has-text("@")')).toHaveCount(0);
+    await stewardOption.click();
+
+    const uniqueTitle = 'Owner Picker Decision ' + Date.now();
+    await modal.locator('input[formcontrolname="title"]').fill(uniqueTitle);
+    await modal.locator('button:has-text("Create Decision")').click();
+    await expect(modal).toBeHidden({ timeout: 10000 });
+
+    // The saved decision shows the chosen owner
+    const newDecisionCard = page.locator(`.decision-card:has-text("${uniqueTitle}")`);
+    await expect(newDecisionCard).toBeVisible({ timeout: 5000 });
+    await newDecisionCard.click();
+
+    const viewModal = page.locator('mat-dialog-container').first();
+    await expect(viewModal).toBeVisible({ timeout: 5000 });
+    await expect(viewModal.locator('.owner-display')).toContainText('Test Steward', { timeout: 5000 });
+  });
+
   test('unsaved-changes-warning: Shows warning when closing with changes', async ({ page }) => {
     await loginAsUser(page, 'user@test-org.com', 'TestPass123');
 

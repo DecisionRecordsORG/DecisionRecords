@@ -5126,6 +5126,48 @@ def api_get_tenant_limits(domain):
     })
 
 
+# ==================== API Routes - Tenant Members (Owner Picker) ====================
+
+@app.route('/api/tenant/members', methods=['GET'])
+@login_required
+@track_endpoint('api_tenant_members_list')
+def api_list_tenant_members():
+    """List the members of the caller's own tenant for the decision owner picker.
+
+    Available to every authenticated tenant member (the admin user list is
+    admin-only). Deliberately returns only what the picker needs: id and
+    display name. No email, role or account metadata.
+
+    The tenant is always taken from the session user, never from the request,
+    and the scope matches the owner_id validation in the decision create and
+    update endpoints (same sso_domain).
+    """
+    # SECURITY: Master accounts do not belong to a tenant and must not read tenant data
+    if is_master_account():
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    domain = g.current_user.sso_domain
+    if not domain:
+        return jsonify({'error': 'Tenant not found'}), 404
+
+    members = User.query.filter(
+        User.sso_domain == domain,
+        User.deleted_at.is_(None),
+        User.is_anonymized.isnot(True)
+    ).all()
+
+    result = [
+        {
+            'id': member.id,
+            # Fall back to the local part of the email so every member has a label
+            'name': member.get_full_name().strip() or member.email.split('@')[0]
+        }
+        for member in members
+    ]
+    result.sort(key=lambda member: (member['name'].lower(), member['id']))
+    return jsonify(result)
+
+
 # ==================== API Routes - Admin (Users) ====================
 
 @app.route('/api/admin/users', methods=['GET'])

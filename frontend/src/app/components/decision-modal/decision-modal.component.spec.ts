@@ -8,16 +8,14 @@ import { of, throwError } from 'rxjs';
 import { DecisionModalComponent } from './decision-modal.component';
 import { DecisionService } from '../../services/decision.service';
 import { SpaceService } from '../../services/space.service';
-import { AdminService } from '../../services/admin.service';
 import { AuthService } from '../../services/auth.service';
-import { Decision, DecisionRelationshipCatalog, Space, User } from '../../models/decision.model';
+import { Decision, DecisionRelationshipCatalog, Space, TenantMember } from '../../models/decision.model';
 
 describe('DecisionModalComponent', () => {
   let component: DecisionModalComponent;
   let fixture: ComponentFixture<DecisionModalComponent>;
   let decisionService: jasmine.SpyObj<DecisionService>;
   let spaceService: jasmine.SpyObj<SpaceService>;
-  let adminService: jasmine.SpyObj<AdminService>;
   let dialogRef: jasmine.SpyObj<MatDialogRef<DecisionModalComponent>>;
   let snackBar: jasmine.SpyObj<MatSnackBar>;
 
@@ -57,12 +55,12 @@ describe('DecisionModalComponent', () => {
       'getDecision',
       'getDecisionRelationshipCatalog',
       'getDecisionReferences',
+      'getTenantMembers',
       'createDecision',
       'updateDecision',
       'deleteDecision'
     ]);
     spaceService = jasmine.createSpyObj<SpaceService>('SpaceService', ['getSpaces']);
-    adminService = jasmine.createSpyObj<AdminService>('AdminService', ['getUsers']);
     dialogRef = jasmine.createSpyObj<MatDialogRef<DecisionModalComponent>>('MatDialogRef', ['close']);
     snackBar = jasmine.createSpyObj<MatSnackBar>('MatSnackBar', ['open']);
 
@@ -71,7 +69,6 @@ describe('DecisionModalComponent', () => {
       providers: [
         { provide: DecisionService, useValue: decisionService },
         { provide: SpaceService, useValue: spaceService },
-        { provide: AdminService, useValue: adminService },
         { provide: AuthService, useValue: { isMasterAccount: false, canDeleteDecisions: true } },
         { provide: MatDialogRef, useValue: dialogRef },
         { provide: MatDialog, useValue: jasmine.createSpyObj<MatDialog>('MatDialog', ['open']) },
@@ -95,7 +92,7 @@ describe('DecisionModalComponent', () => {
     decisionService.getDecision.and.returnValue(of(mockDecision));
     decisionService.getDecisionRelationshipCatalog.and.returnValue(of(emptyCatalog));
     decisionService.getDecisionReferences.and.returnValue(of([]));
-    adminService.getUsers.and.returnValue(of([] as User[]));
+    decisionService.getTenantMembers.and.returnValue(of([] as TenantMember[]));
     spaceService.getSpaces.and.returnValue(
       throwError(() => new HttpErrorResponse({ status: 404, statusText: 'Not Found' }))
     );
@@ -109,6 +106,38 @@ describe('DecisionModalComponent', () => {
     expect(component.selectedSpaceIds).toEqual([10]);
     expect(dialogRef.close).not.toHaveBeenCalled();
     expect(snackBar.open).not.toHaveBeenCalledWith('Failed to load decision', 'Close', { duration: 3000 });
+  }));
+
+  it('loads the owner picker from the tenant members endpoint, not the admin user list', fakeAsync(() => {
+    const members: TenantMember[] = [{ id: 7, name: 'Ada Lovelace' }, { id: 8, name: 'Grace Hopper' }];
+    decisionService.getDecision.and.returnValue(of(mockDecision));
+    decisionService.getDecisionRelationshipCatalog.and.returnValue(of(emptyCatalog));
+    decisionService.getDecisionReferences.and.returnValue(of([]));
+    decisionService.getTenantMembers.and.returnValue(of(members));
+    spaceService.getSpaces.and.returnValue(of(mockSpaces));
+
+    fixture.detectChanges();
+    tick();
+
+    expect(decisionService.getTenantMembers).toHaveBeenCalledTimes(1);
+    expect(component.tenantMembers).toEqual(members);
+  }));
+
+  it('still opens the decision when the tenant members request fails', fakeAsync(() => {
+    decisionService.getDecision.and.returnValue(of(mockDecision));
+    decisionService.getDecisionRelationshipCatalog.and.returnValue(of(emptyCatalog));
+    decisionService.getDecisionReferences.and.returnValue(of([]));
+    decisionService.getTenantMembers.and.returnValue(
+      throwError(() => new HttpErrorResponse({ status: 500, statusText: 'Server Error' }))
+    );
+    spaceService.getSpaces.and.returnValue(of(mockSpaces));
+
+    fixture.detectChanges();
+    tick();
+
+    expect(component.decision?.id).toBe(42);
+    expect(component.tenantMembers).toEqual([]);
+    expect(dialogRef.close).not.toHaveBeenCalled();
   }));
 
   it('describes the soft delete truthfully in the delete confirmation', () => {

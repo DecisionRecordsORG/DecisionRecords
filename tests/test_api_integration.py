@@ -1394,6 +1394,163 @@ class TestSuperadminSecurityCoverage:
         assert deleted_tenant.deleted_by_admin == master_account.username
 
 
+class TestTenantMembersAPI:
+    """GET /api/tenant/members feeds the decision owner picker.
+
+    Any authenticated tenant member may call it. It must only ever return
+    members of the caller's own tenant, and only the id and display name.
+    """
+
+    @staticmethod
+    def _add_user(email, domain, first_name=None, last_name=None, **extra):
+        user = User(email=email, sso_domain=domain, auth_type='local', email_verified=True, **extra)
+        if first_name or last_name:
+            user.set_name(first_name=first_name, last_name=last_name)
+        user.set_password(TEST_USER_PASSWORD)
+        db.session.add(user)
+        db.session.commit()
+        return user
+
+    @staticmethod
+    def _add_other_tenant():
+        tenant = Tenant(
+            domain='othercorp.com',
+            name='Other Corp',
+            status='active',
+            maturity_state=MaturityState.BOOTSTRAP
+        )
+        db.session.add(tenant)
+        db.session.commit()
+        return tenant
+
+    def test_unauthenticated_request_is_rejected(self, api_client, test_user):
+        response = api_client.get('/api/tenant/members')
+
+        assert response.status_code == 401
+        assert response.get_json() == {'error': 'Authentication required'}
+
+    def test_regular_user_can_list_members_of_own_tenant(self, user_client, test_user, admin_user):
+        """A non-admin gets the list (the admin user list returns 403 for them)."""
+        assert user_client.get('/api/admin/users').status_code == 403
+
+        response = user_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        assert response.get_json() == [
+            {'id': admin_user.id, 'name': 'Admin User'},
+            {'id': test_user.id, 'name': 'Test User'},
+        ]
+
+    def test_admin_gets_the_same_minimal_shape(self, admin_client, admin_user):
+        response = admin_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        assert response.get_json() == [{'id': admin_user.id, 'name': 'Admin User'}]
+
+    def test_response_exposes_only_id_and_name(self, user_client, test_user, admin_user):
+        response = user_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        for member in response.get_json():
+            assert set(member.keys()) == {'id', 'name'}
+        # No email addresses anywhere in the payload
+        assert '@' not in response.get_data(as_text=True)
+
+    def test_members_of_other_tenants_are_never_returned(self, user_client, test_user):
+        other_tenant = self._add_other_tenant()
+        outsider = self._add_user('eve@othercorp.com', other_tenant.domain, 'Eve', 'Outsider')
+        db.session.add(TenantMembership(
+            user_id=outsider.id, tenant_id=other_tenant.id, global_role=GlobalRole.ADMIN
+        ))
+        db.session.commit()
+
+        response = user_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert [member['id'] for member in body] == [test_user.id]
+        assert 'Outsider' not in response.get_data(as_text=True)
+
+    def test_tenant_cannot_be_chosen_by_the_caller(self, user_client, test_user):
+        """Query parameters and headers naming another tenant are ignored."""
+        other_tenant = self._add_other_tenant()
+        outsider = self._add_user('eve@othercorp.com', other_tenant.domain, 'Eve', 'Outsider')
+
+        response = user_client.get(
+            '/api/tenant/members?domain=othercorp.com&tenant=othercorp.com&sso_domain=othercorp.com'
+            f'&tenant_id={other_tenant.id}',
+            headers={'X-Tenant-Domain': 'othercorp.com'}
+        )
+
+        assert response.status_code == 200
+        ids = [member['id'] for member in response.get_json()]
+        assert ids == [test_user.id]
+        assert outsider.id not in ids
+
+    def test_each_tenant_only_sees_itself(self, api_app, test_user):
+        """A user of the other tenant gets their own colleagues, not ours."""
+        other_tenant = self._add_other_tenant()
+        outsider = self._add_user('eve@othercorp.com', other_tenant.domain, 'Eve', 'Outsider')
+
+        client = api_app.test_client()
+        login = client.post('/api/auth/login', json={
+            'email': outsider.email, 'password': TEST_USER_PASSWORD
+        })
+        assert login.status_code == 200
+
+        response = client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        assert response.get_json() == [{'id': outsider.id, 'name': 'Eve Outsider'}]
+
+    def test_master_account_is_refused(self, master_client, test_user):
+        response = master_client.get('/api/tenant/members')
+
+        assert response.status_code == 403
+        assert 'error' in response.get_json()
+
+    def test_deleted_and_anonymized_users_are_excluded(self, user_client, test_user, test_tenant):
+        self._add_user(
+            'gone@testdomain.com', test_tenant.domain, 'Gone', 'Person',
+            deleted_at=datetime.now(timezone.utc)
+        )
+        self._add_user(
+            'anon@testdomain.com', test_tenant.domain, 'Anon', 'Person',
+            is_anonymized=True
+        )
+
+        response = user_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        assert response.get_json() == [{'id': test_user.id, 'name': 'Test User'}]
+
+    def test_member_without_a_name_gets_a_label_without_the_full_email(self, user_client, test_user, test_tenant):
+        nameless = self._add_user('no.name@testdomain.com', test_tenant.domain)
+
+        response = user_client.get('/api/tenant/members')
+
+        assert response.status_code == 200
+        by_id = {member['id']: member['name'] for member in response.get_json()}
+        assert by_id[nameless.id] == 'no.name'
+
+    def test_listed_member_is_accepted_as_decision_owner(self, user_client, test_user, admin_user):
+        """The picker and the owner_id validation on create use the same scope."""
+        members = user_client.get('/api/tenant/members').get_json()
+        owner_id = next(member['id'] for member in members if member['name'] == 'Admin User')
+
+        response = user_client.post('/api/decisions', json={
+            'title': 'Owned decision',
+            'context': 'Context',
+            'decision': 'Decision',
+            'status': 'proposed',
+            'consequences': 'Consequences',
+            'owner_id': owner_id
+        })
+
+        assert response.status_code == 201
+        assert response.get_json()['owner_id'] == admin_user.id
+
+
 class TestDecisionRelationshipAPI:
     """Test decision relationship endpoints and relationship-aware decision flows."""
 

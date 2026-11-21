@@ -13,8 +13,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
-import { AdminService } from '../../services/admin.service';
-import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space } from '../../models/decision.model';
+import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
 import { forkJoin, of } from 'rxjs';
@@ -228,7 +227,7 @@ export interface DecisionModalResult {
                       <mat-option [value]="null">-- None --</mat-option>
                       @for (member of tenantMembers; track member.id) {
                         <mat-option [value]="member.id">
-                          {{ member.name }} ({{ member.email }})
+                          {{ member.name }}
                         </mat-option>
                       }
                     </mat-select>
@@ -1157,7 +1156,7 @@ export class DecisionModalComponent implements OnInit {
   selectedSpaceIds: number[] = [];
 
   // Decision owner
-  tenantMembers: any[] = [];
+  tenantMembers: TenantMember[] = [];
   selectedOwnerId: number | null = null;
   ownerEmail: string = '';
 
@@ -1178,7 +1177,6 @@ export class DecisionModalComponent implements OnInit {
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
-    private adminService: AdminService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
@@ -1213,8 +1211,8 @@ export class DecisionModalComponent implements OnInit {
   loadSpacesAndMembers(): void {
     forkJoin({
       spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
-      // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      // Available to every tenant member; the owner picker stays empty if it fails
+      members: this.decisionService.getTenantMembers().pipe(catchError(() => of([] as TenantMember[]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
         catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
       ),
@@ -1246,8 +1244,8 @@ export class DecisionModalComponent implements OnInit {
     forkJoin({
       decision: this.decisionService.getDecision(id),
       spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
-      // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      // Available to every tenant member; the owner picker stays empty if it fails
+      members: this.decisionService.getTenantMembers().pipe(catchError(() => of([] as TenantMember[]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
         catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
       ),

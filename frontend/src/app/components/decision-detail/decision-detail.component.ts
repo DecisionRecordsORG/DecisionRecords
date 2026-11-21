@@ -17,8 +17,7 @@ import { MatAutocompleteModule } from '@angular/material/autocomplete';
 import { DecisionService, UpdateDecisionRequest } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
-import { AdminService } from '../../services/admin.service';
-import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatalog, DecisionStatus, Space } from '../../models/decision.model';
+import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatalog, DecisionStatus, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
 import { Observable, of } from 'rxjs';
@@ -158,7 +157,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                         <mat-option [value]="null">-- None --</mat-option>
                         @for (member of tenantMembers; track member.id) {
                           <mat-option [value]="member.id">
-                            {{ member.name }} ({{ member.email }})
+                            {{ member.name }}
                           </mat-option>
                         }
                       </mat-select>
@@ -978,7 +977,7 @@ export class DecisionDetailComponent implements OnInit {
   selectedSpaceIds: number[] = [];
 
   // Decision owner
-  tenantMembers: any[] = [];
+  tenantMembers: TenantMember[] = [];
   selectedOwnerId: number | null = null;
   ownerEmail: string = '';
 
@@ -994,7 +993,6 @@ export class DecisionDetailComponent implements OnInit {
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
-    private adminService: AdminService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
@@ -1034,9 +1032,10 @@ export class DecisionDetailComponent implements OnInit {
   }
 
   loadTenantMembers(): void {
-    this.adminService.getUsers().subscribe({
-      next: (users) => {
-        this.tenantMembers = users;
+    // Available to every tenant member (the admin user list is admin-only)
+    this.decisionService.getTenantMembers().subscribe({
+      next: (members) => {
+        this.tenantMembers = members;
       },
       error: (err) => {
         console.error('Failed to load tenant members', err);

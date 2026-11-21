@@ -89,6 +89,12 @@ export interface DecisionSpace {
   added_by_id: number | null;
 }
 
+/** A member of the caller's tenant, as returned by GET /api/tenant/members. */
+export interface TenantMember {
+  id: number;
+  name: string;
+}
+
 export interface DecisionReference {
   id: number;
   display_id?: string;

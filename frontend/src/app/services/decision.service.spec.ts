@@ -94,6 +94,32 @@ describe('DecisionService', () => {
     });
   });
 
+  describe('getTenantMembers', () => {
+    it('should request the tenant members endpoint, not the admin user list', () => {
+      const members = [{ id: 1, name: 'Ada Lovelace' }];
+
+      service.getTenantMembers().subscribe(result => {
+        expect(result).toEqual(members);
+      });
+
+      const req = httpMock.expectOne('/api/tenant/members');
+      expect(req.request.method).toBe('GET');
+      req.flush(members);
+    });
+
+    it('should surface a 401 when the session has expired', () => {
+      service.getTenantMembers().subscribe({
+        next: () => fail('should have failed'),
+        error: (error) => {
+          expect(error.status).toBe(401);
+        }
+      });
+
+      const req = httpMock.expectOne('/api/tenant/members');
+      req.flush({ error: 'Authentication required' }, { status: 401, statusText: 'Unauthorized' });
+    });
+  });
+
   describe('createDecision', () => {
     it('should create a new decision', () => {
       const newDecision: CreateDecisionRequest = {
