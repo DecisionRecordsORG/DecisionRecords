@@ -121,28 +121,30 @@ test.describe('Deletion Controls', () => {
     await page.waitForSelector('h1', { timeout: 10000 });
     await page.waitForTimeout(2000);
 
-    // Check for decisions
-    const emptyState = page.locator('h2:has-text("No decisions yet")');
-    const decisionCard = page.locator('.decision-card').first();
+    // The admin onboarding dialog opens a moment after the page loads and would
+    // cover the form; close it for good before going on.
+    const gotItButton = page.locator('button:has-text("Got it")');
+    const onboardingShown = await gotItButton
+      .waitFor({ state: 'visible', timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    if (onboardingShown) {
+      await gotItButton.click();
+      await expect(gotItButton).toBeHidden({ timeout: 3000 });
+    }
 
-    if (await emptyState.isVisible({ timeout: 3000 }).catch(() => false)) {
+    // Open the full-page form of an existing decision (cards on the list open the modal)
+    const decisionsResponse = await page.request.get('/api/decisions');
+    const decisions: Array<{ id: number }> = decisionsResponse.ok() ? await decisionsResponse.json() : [];
+    if (decisions.length === 0) {
       test.skip(true, 'No decisions available to test deletion');
       return;
     }
 
-    if (!(await decisionCard.isVisible({ timeout: 5000 }).catch(() => false))) {
-      test.skip(true, 'Decision cards not visible');
-      return;
-    }
-
-    // Dismiss any overlays before clicking
-    await dismissOverlays(page);
-
-    await decisionCard.click();
-
-    // Wait for decision detail page
+    await page.goto(`/test-org.com/decision/${decisions[0].id}`);
     await page.waitForURL(/.*decision\/\d+.*/, { timeout: 10000 });
-    await page.waitForTimeout(1000);
+    await page.waitForSelector('input[formcontrolname="title"]', { timeout: 10000 });
+    await page.waitForLoadState('networkidle');
 
     // Look for delete button
     const deleteButton = page.locator('button:has-text("Delete")');
@@ -165,13 +167,14 @@ test.describe('Deletion Controls', () => {
     const dialogTitle = page.locator('h2:has-text("Delete Decision"), mat-dialog-container h2:has-text("Delete")');
     await expect(dialogTitle).toBeVisible({ timeout: 5000 });
 
-    // Check for warning message about deletion (should mention "cannot be undone" or similar)
+    // The message must describe the soft delete truthfully: hidden now, erased after
+    // the 30-day retention window, and no restore option in the app.
     const dialogMessage = page.locator('mat-dialog-content, .mat-mdc-dialog-content');
-    const messageText = await dialogMessage.textContent();
+    const messageText = (await dialogMessage.textContent()) || '';
 
-    // Assert that the message contains information about deletion
-    expect(messageText).toContain('delete');
-    expect(messageText?.toLowerCase()).toMatch(/cannot be undone|permanent|delete/i);
+    expect(messageText).toContain('permanently erased after 30 days');
+    expect(messageText).toContain('no restore option');
+    expect(messageText.toLowerCase()).not.toContain('cannot be undone');
 
     // Cancel the deletion (don't actually delete)
     const cancelButton = page.locator('button:has-text("Cancel")');

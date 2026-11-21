@@ -171,6 +171,75 @@ test.describe('Decisions', () => {
     }
   });
 
+  test('full-page-form-unsaved-changes: Leaving the full-page form with input asks first', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+
+    const titleInput = page.locator('input[formcontrolname="title"]');
+    const backButton = page.locator('button:has-text("Back to Decisions")');
+    const warningDialog = page.locator('mat-dialog-container:has-text("Unsaved Changes")');
+    const beforeUnloadBlocked = () => page.evaluate(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+
+    // Nothing entered: leaving does not ask, and the browser is not asked to warn either
+    await page.goto('/test-org.com/decision/new');
+    await expect(titleInput).toBeVisible({ timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+    expect(await beforeUnloadBlocked()).toBe(false);
+    await backButton.click();
+    await page.waitForURL((url) => !url.pathname.includes('/decision/new'), { timeout: 10000 });
+    await expect(warningDialog).toHaveCount(0);
+
+    // With input: router navigation asks first
+    await page.goto('/test-org.com/decision/new');
+    await expect(titleInput).toBeVisible({ timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+    await titleInput.fill('Unsaved full-page decision');
+    expect(await beforeUnloadBlocked()).toBe(true);
+
+    await backButton.click();
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await warningDialog.locator('button:has-text("Keep Editing")').click();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+    expect(page.url()).toContain('/decision/new');
+    await expect(titleInput).toHaveValue('Unsaved full-page decision');
+
+    await backButton.click();
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await warningDialog.locator('button:has-text("Discard")').click();
+    await page.waitForURL((url) => !url.pathname.includes('/decision/new'), { timeout: 10000 });
+  });
+
+  test('full-page-form-save-does-not-warn: Creating from the full-page form navigates without asking', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+
+    await page.goto('/test-org.com/decision/new');
+    const titleInput = page.locator('input[formcontrolname="title"]');
+    await expect(titleInput).toBeVisible({ timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+
+    // A regular user can pick a colleague as owner here too
+    await page.locator('mat-form-field:has-text("Team member")').click();
+    await expect(page.locator('mat-option:has-text("Test Admin")')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('mat-option:has-text("@")')).toHaveCount(0);
+    await page.locator('mat-option:has-text("Test Steward")').click();
+
+    await titleInput.fill('Full-page decision ' + Date.now());
+    await page.locator('button:has-text("Create Decision")').click();
+
+    await page.waitForURL(/\/decision\/\d+/, { timeout: 10000 });
+    await expect(page.locator('mat-dialog-container:has-text("Unsaved Changes")')).toHaveCount(0);
+
+    // The saved decision is not "unsaved": leaving it does not ask
+    await expect(page.locator('input[formcontrolname="title"]')).toBeVisible({ timeout: 10000 });
+    await page.waitForLoadState('networkidle');
+    await page.locator('button:has-text("Back to Decisions")').click();
+    await page.waitForURL((url) => !/\/decision\/\d+/.test(url.pathname), { timeout: 10000 });
+    await expect(page.locator('mat-dialog-container:has-text("Unsaved Changes")')).toHaveCount(0);
+  });
+
   test('decision-belongs-to-tenant: Decisions scoped to user tenant', async ({ page }) => {
     await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
 
@@ -288,9 +357,11 @@ test.describe('Decision Form - Space Selector (Modal)', () => {
     // Wait for modal to open
     await page.waitForSelector('mat-dialog-container input[formcontrolname="title"]', { timeout: 15000 });
 
-    const spaceSelector = page.locator('mat-dialog-container .side-panel mat-select, mat-dialog-container mat-form-field:has(mat-label:has-text("Select spaces")) mat-select').first();
+    // The Spaces card is only rendered once the spaces have loaded. Until then the first
+    // select in the side panel is the owner picker, so target the Spaces card and wait for it.
+    const spaceSelector = page.locator('mat-dialog-container .side-panel .meta-card:has-text("Spaces") mat-select').first();
 
-    if (!(await spaceSelector.isVisible({ timeout: 5000 }).catch(() => false))) {
+    if (!(await spaceSelector.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false))) {
       test.skip(true, 'Space selector not visible in modal');
       return;
     }

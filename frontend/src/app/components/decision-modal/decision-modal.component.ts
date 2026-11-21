@@ -1,4 +1,4 @@
-import { Component, Inject, OnInit } from '@angular/core';
+import { Component, HostListener, Inject, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatDialogModule, MAT_DIALOG_DATA, MatDialogRef, MatDialog } from '@angular/material/dialog';
@@ -13,11 +13,11 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
-import { AdminService } from '../../services/admin.service';
-import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space } from '../../models/decision.model';
+import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
 import { forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, filter } from 'rxjs/operators';
 
 // Modal mode types
 export type DecisionModalMode = 'create' | 'view' | 'edit';
@@ -227,7 +227,7 @@ export interface DecisionModalResult {
                       <mat-option [value]="null">-- None --</mat-option>
                       @for (member of tenantMembers; track member.id) {
                         <mat-option [value]="member.id">
-                          {{ member.name }} ({{ member.email }})
+                          {{ member.name }}
                         </mat-option>
                       }
                     </mat-select>
@@ -1156,7 +1156,7 @@ export class DecisionModalComponent implements OnInit {
   selectedSpaceIds: number[] = [];
 
   // Decision owner
-  tenantMembers: any[] = [];
+  tenantMembers: TenantMember[] = [];
   selectedOwnerId: number | null = null;
   ownerEmail: string = '';
 
@@ -1164,6 +1164,10 @@ export class DecisionModalComponent implements OnInit {
   relationshipCatalog: DecisionRelationshipCatalog | null = null;
   decisionReferences: DecisionReference[] = [];
   editableRelationships: Array<{ target_decision_id: number | null; relationship_type: string; notes: string }> = [];
+
+  // Unsaved-changes tracking: snapshot of the input as last loaded or saved (null until loaded)
+  private savedState: string | null = null;
+  private isConfirmingClose = false;
 
   // Computed properties
   get isCreate(): boolean { return this.mode === 'create'; }
@@ -1177,11 +1181,21 @@ export class DecisionModalComponent implements OnInit {
     private decisionService: DecisionService,
     public authService: AuthService,
     private spaceService: SpaceService,
-    private adminService: AdminService,
     private snackBar: MatSnackBar,
     private dialog: MatDialog
   ) {
     this.mode = data.mode;
+    // Esc and backdrop clicks must not close the dialog directly: they go through
+    // close(), like the X and Cancel buttons, so unsaved input is never dropped silently.
+    // Subscribed here rather than in ngOnInit so they work from the first moment.
+    this.dialogRef.disableClose = true;
+    this.dialogRef.backdropClick().subscribe(() => this.close());
+    this.dialogRef.keydownEvents()
+      .pipe(filter((event) => event.key === 'Escape'))
+      .subscribe((event) => {
+        event.preventDefault();
+        this.close();
+      });
     this.form = this.fb.group({
       title: ['', Validators.required],
       status: ['proposed', Validators.required],
@@ -1200,6 +1214,8 @@ export class DecisionModalComponent implements OnInit {
     if (!this.isCreate && this.data.decisionId) {
       this.loadDecision(this.data.decisionId);
     } else {
+      // A new decision starts from the empty form
+      this.markSaved();
       this.loadSpacesAndMembers();
     }
 
@@ -1212,8 +1228,8 @@ export class DecisionModalComponent implements OnInit {
   loadSpacesAndMembers(): void {
     forkJoin({
       spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
-      // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      // Available to every tenant member; the owner picker stays empty if it fails
+      members: this.decisionService.getTenantMembers().pipe(catchError(() => of([] as TenantMember[]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
         catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
       ),
@@ -1229,7 +1245,12 @@ export class DecisionModalComponent implements OnInit {
         if (this.isCreate) {
           const defaultSpace = spaces.find(s => s.is_default);
           if (defaultSpace) {
+            // The preselected default space is not something the user entered
+            const untouched = !this.hasUnsavedChanges();
             this.selectedSpaceIds = [defaultSpace.id];
+            if (untouched) {
+              this.markSaved();
+            }
           }
         }
       },
@@ -1245,8 +1266,8 @@ export class DecisionModalComponent implements OnInit {
     forkJoin({
       decision: this.decisionService.getDecision(id),
       spaces: this.spaceService.getSpaces().pipe(catchError(() => of([] as Space[]))),
-      // Admin users endpoint returns 403 for non-admins, gracefully handle it
-      members: this.adminService.getUsers().pipe(catchError(() => of([]))),
+      // Available to every tenant member; the owner picker stays empty if it fails
+      members: this.decisionService.getTenantMembers().pipe(catchError(() => of([] as TenantMember[]))),
       relationshipCatalog: this.decisionService.getDecisionRelationshipCatalog().pipe(
         catchError(() => of({ packs: [], types: [] } as DecisionRelationshipCatalog))
       ),
@@ -1285,6 +1306,7 @@ export class DecisionModalComponent implements OnInit {
           this.form.disable();
         }
 
+        this.markSaved();
         this.isLoading = false;
       },
       error: (err) => {
@@ -1454,7 +1476,7 @@ export class DecisionModalComponent implements OnInit {
     const dialogRef = this.dialog.open(ConfirmDialogComponent, {
       data: {
         title: 'Delete Decision',
-        message: `Are you sure you want to delete ${this.decision?.display_id || 'ADR-' + this.decision?.id}? This action cannot be undone.`,
+        message: buildDecisionDeleteMessage(this.decision?.display_id || 'ADR-' + this.decision?.id),
         confirmText: 'Delete',
         cancelText: 'Cancel',
         isDanger: true
@@ -1482,26 +1504,83 @@ export class DecisionModalComponent implements OnInit {
     });
   }
 
-  close(): void {
-    // Check for unsaved changes
-    if (this.form.dirty && this.mode !== 'view') {
-      const dialogRef = this.dialog.open(ConfirmDialogComponent, {
-        data: {
-          title: 'Unsaved Changes',
-          message: 'You have unsaved changes. Are you sure you want to close?',
-          confirmText: 'Discard',
-          cancelText: 'Keep Editing',
-          isDanger: true
-        }
-      });
 
-      dialogRef.afterClosed().subscribe(result => {
-        if (result) {
-          this.dialogRef.close({ action: 'cancelled' } as DecisionModalResult);
-        }
-      });
-    } else {
-      this.dialogRef.close({ action: 'cancelled' } as DecisionModalResult);
+  /**
+   * Everything the user can enter on this form, as one comparable value.
+   * Owner, spaces and relationship rows are standalone ngModel fields, so
+   * `form.dirty` alone does not notice changes to them.
+   */
+  private captureState(): string {
+    const value = this.form.getRawValue();
+    return JSON.stringify({
+      title: value.title ?? '',
+      status: value.status ?? '',
+      context: value.context ?? '',
+      decision: value.decision ?? '',
+      consequences: value.consequences ?? '',
+      change_reason: value.change_reason ?? '',
+      space_ids: [...this.selectedSpaceIds].sort((a, b) => a - b),
+      owner_id: this.selectedOwnerId ?? null,
+      owner_email: this.ownerEmail || '',
+      // A row with no target and no notes holds nothing the user would miss
+      relationships: this.editableRelationships
+        .filter((relationship) => relationship.target_decision_id || relationship.notes)
+        .map((relationship) => ({
+          target_decision_id: relationship.target_decision_id ?? null,
+          relationship_type: relationship.relationship_type || '',
+          notes: relationship.notes || ''
+        }))
+    });
+  }
+
+  /** Record the current input as the saved state: nothing would be lost by leaving now. */
+  private markSaved(): void {
+    this.savedState = this.captureState();
+  }
+
+  /** True when closing now would lose something the user entered. */
+  hasUnsavedChanges(): boolean {
+    if (this.isView || this.authService.isMasterAccount || this.savedState === null) {
+      return false;
     }
+    return this.captureState() !== this.savedState;
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (this.hasUnsavedChanges()) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  }
+
+  /** Single way out for the X and Cancel buttons, the Esc key and backdrop clicks. */
+  close(): void {
+    if (this.isConfirmingClose) {
+      return;
+    }
+
+    if (!this.hasUnsavedChanges()) {
+      this.dialogRef.close({ action: 'cancelled' } as DecisionModalResult);
+      return;
+    }
+
+    this.isConfirmingClose = true;
+    const confirmRef = this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes. Are you sure you want to close?',
+        confirmText: 'Discard',
+        cancelText: 'Keep Editing',
+        isDanger: true
+      }
+    });
+
+    confirmRef.afterClosed().subscribe(result => {
+      this.isConfirmingClose = false;
+      if (result) {
+        this.dialogRef.close({ action: 'cancelled' } as DecisionModalResult);
+      }
+    });
   }
 }

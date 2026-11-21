@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sessions created by Teams sign-in, by setting a password from a setup link and by registering a first passkey from a setup link were cleared on the next request
 - Signing in once with Slack, Google or Microsoft no longer disables passkey sign-in for an account that has a password or passkey
 - First-time Teams sign-in for a new account returned a 500 error
+- Decision forms no longer lose unsaved input: Esc, a backdrop click, the X and Cancel buttons all ask before discarding changes (including owner, spaces and relationships), and the full-page form asks before navigating away or unloading the page
+- Any tenant member can now pick a Decision Owner; the picker uses a new tenant-scoped `GET /api/tenant/members` endpoint that returns only member ids and display names
+- The delete confirmation now describes what actually happens: the decision is hidden immediately and permanently erased after 30 days, with no restore option in the app
+- The contact form now sends its message: `POST /api/contact` emails the configured Contact Form Email address, and the footer shows an error and keeps the text when sending fails
 
 ### Changed
 - In organisations that enforce single sign-on, passkey sign-in is refused for every account
