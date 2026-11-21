@@ -871,3 +871,148 @@ class TestHandoffNeedsSharedCookieDomain:
             # Host-only cookie: valid on the website host, absent on the app host.
             assert client.get('/api/user/me', base_url=SITE).status_code == 200
             assert client.get('/api/user/me', base_url=APP_HOST).status_code == 401
+
+
+# ==================== CSRF contract the marketing website relies on ====================
+
+WEBSITE_FORM_ENDPOINTS = [
+    '/api/auth/send-verification',
+    '/api/auth/resend-verification',
+    '/api/auth/direct-signup',
+    '/api/auth/access-request',
+    '/api/auth/request-setup-link',
+    '/api/auth/request-recovery',
+    '/api/auth/login',
+    '/api/feedback',
+    '/api/sponsorship',
+]
+
+
+class TestCsrfContractForWebsiteForms:
+    """A visitor with a live app session must send a CSRF token with website forms.
+
+    The website shares the session cookie with the app, so its pre-sign-in
+    forms are session-bound requests whenever the visitor is already signed in.
+    These tests pin how the token is obtained and sent. Enforcement itself is
+    unchanged.
+    """
+
+    @pytest.fixture
+    def signed_in(self, handoff_env):
+        test_app, _ = handoff_env
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+        login = client.post('/api/auth/login', base_url=APP_HOST,
+                            json={'email': 'pat@acme.test', 'password': STRONG_PASSWORD})
+        assert login.status_code == 200
+        return test_app, client
+
+    @pytest.mark.parametrize('endpoint', WEBSITE_FORM_ENDPOINTS)
+    def test_signed_in_visitor_without_token_is_rejected(self, signed_in, endpoint):
+        _, client = signed_in
+
+        response = client.post(endpoint, json={}, base_url=SITE)
+
+        assert response.status_code == 403
+        assert response.get_json() == {'error': 'CSRF token missing or invalid'}
+
+    @pytest.mark.parametrize('endpoint', WEBSITE_FORM_ENDPOINTS)
+    def test_signed_in_visitor_with_header_token_reaches_the_endpoint(self, signed_in, endpoint):
+        _, client = signed_in
+        token = client.get('/api/auth/csrf-token', base_url=SITE).get_json()['csrf_token']
+
+        response = client.post(endpoint, json={}, base_url=SITE, headers={'X-CSRF-Token': token})
+
+        assert response.status_code != 403, response.get_json()
+
+    def test_token_is_also_accepted_as_json_body_field(self, signed_in):
+        _, client = signed_in
+        token = client.get('/api/auth/csrf-token', base_url=SITE).get_json()['csrf_token']
+
+        response = client.post('/api/auth/send-verification', base_url=SITE,
+                               json={'csrf_token': token})
+
+        assert response.status_code != 403
+
+    def test_wrong_token_is_rejected(self, signed_in):
+        _, client = signed_in
+
+        response = client.post('/api/auth/send-verification', json={}, base_url=SITE,
+                               headers={'X-CSRF-Token': 'not-the-token'})
+
+        assert response.status_code == 403
+
+    @pytest.mark.parametrize('endpoint', WEBSITE_FORM_ENDPOINTS)
+    def test_anonymous_visitor_needs_no_token(self, handoff_env, endpoint):
+        test_app, _ = handoff_env
+
+        response = test_app.test_client().post(endpoint, json={}, base_url=SITE)
+
+        assert response.status_code != 403
+
+    def test_token_endpoint_serves_signed_in_visitors_on_either_host(self, signed_in):
+        _, client = signed_in
+
+        via_site = client.get('/api/auth/csrf-token', base_url=SITE)
+        via_app = client.get('/api/auth/csrf-token', base_url=APP_HOST)
+
+        assert via_site.status_code == 200
+        assert via_site.get_json()['csrf_token']
+        assert via_site.get_json() == via_app.get_json()
+        # Every response to a signed-in visitor also carries the token as a header.
+        me = client.get('/api/user/me', base_url=SITE)
+        assert me.headers['X-CSRF-Token'] == via_site.get_json()['csrf_token']
+
+    def test_token_endpoint_serves_anonymous_visitors_and_sets_the_shared_cookie(self, handoff_env):
+        test_app, _ = handoff_env
+
+        response = test_app.test_client().get('/api/auth/csrf-token', base_url=SITE)
+
+        assert response.status_code == 200
+        assert response.get_json()['csrf_token']
+        cookie = parse_set_cookie(response)
+        assert cookie is not None and cookie['domain'] == COOKIE_DOMAIN
+
+    def test_token_response_must_not_be_cached(self, handoff_env):
+        """The token is per session: a shared cache must never replay it."""
+        test_app, _ = handoff_env
+
+        response = test_app.test_client().get('/api/auth/csrf-token', base_url=SITE)
+
+        assert 'no-store' in response.headers.get('Cache-Control', '')
+
+    def test_token_does_not_survive_logout(self, signed_in):
+        _, client = signed_in
+        token = client.get('/api/auth/csrf-token', base_url=SITE).get_json()['csrf_token']
+        client.post('/api/auth/logout', base_url=APP_HOST)
+        login = client.post('/api/auth/login', base_url=APP_HOST, headers={'X-CSRF-Token': token},
+                            json={'email': 'pat@acme.test', 'password': STRONG_PASSWORD})
+        assert login.status_code == 200  # anonymous again, so no token needed to sign in
+
+        stale = client.post('/api/auth/send-verification', json={}, base_url=SITE,
+                            headers={'X-CSRF-Token': token})
+
+        assert stale.status_code == 403
+
+    def test_cross_origin_calls_from_the_website_are_allowed_with_credentials(self, handoff_env):
+        """If the website calls the app host directly instead of through the worker."""
+        test_app, _ = handoff_env
+        client = test_app.test_client()
+        website_origin = 'https://decisionrecords.org'  # MARKETING_ORIGINS in app.py
+
+        preflight = client.options('/api/auth/send-verification', base_url=APP_HOST, headers={
+            'Origin': website_origin,
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'content-type,x-csrf-token',
+        })
+        token = client.get('/api/auth/csrf-token', base_url=APP_HOST,
+                           headers={'Origin': website_origin})
+        stranger = client.get('/api/auth/csrf-token', base_url=APP_HOST,
+                              headers={'Origin': 'https://evil.example'})
+
+        assert preflight.headers['Access-Control-Allow-Origin'] == website_origin
+        assert preflight.headers['Access-Control-Allow-Credentials'] == 'true'
+        assert 'x-csrf-token' in preflight.headers['Access-Control-Allow-Headers'].lower()
+        assert token.headers['Access-Control-Allow-Origin'] == website_origin
+        assert token.headers['Access-Control-Allow-Credentials'] == 'true'
+        assert 'Access-Control-Allow-Origin' not in stranger.headers

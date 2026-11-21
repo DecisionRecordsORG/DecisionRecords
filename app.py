@@ -1331,7 +1331,10 @@ def api_get_csrf_token():
     in the X-CSRF-Token header for all state-changing requests.
     """
     token = generate_csrf_token()
-    return jsonify({'csrf_token': token})
+    response = jsonify({'csrf_token': token})
+    # The token is bound to one session: never let a proxy or browser cache replay it.
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 # EE:START - Slack OIDC Authentication
