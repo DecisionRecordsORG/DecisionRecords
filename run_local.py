@@ -3,8 +3,9 @@
 Run the Flask app locally for development.
 
 Usage:
-    python run_local.py              # Run Enterprise Edition (all features)
-    python run_local.py --community  # Run Community Edition (core features only)
+    python run_local.py              # Enterprise Edition when ee/ is checked out,
+                                     # otherwise Community Edition
+    python run_local.py --community  # Force Community Edition (core features only)
 """
 import os
 import sys
@@ -13,8 +14,17 @@ from pathlib import Path
 # Get the absolute path to the project root
 project_root = Path(__file__).parent.absolute()
 
-# Check for --community flag
-edition = 'community' if '--community' in sys.argv else 'enterprise'
+# Pick the edition. Enterprise needs the private ee/ submodule; a public
+# checkout does not have it, so fall back to Community instead of crashing on
+# the first ee import.
+ee_available = (project_root / 'ee' / 'backend' / '__init__.py').is_file()
+if '--community' in sys.argv:
+    edition = 'community'
+elif ee_available:
+    edition = 'enterprise'
+else:
+    edition = 'community'
+    print("Enterprise modules not found (ee/ is not checked out) - running Community Edition")
 
 # IMPORTANT: Disable Azure Key Vault for local development
 # This prevents the app from fetching secrets from prod keyvault
