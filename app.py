@@ -23,13 +23,13 @@ from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription
 from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 # EE:END - EE Model Imports
 from datetime import datetime, timedelta, timezone
-from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
     create_registration_options, verify_registration,
     create_authentication_options, verify_authentication,
-    get_user_credentials, delete_credential, get_auth_config
+    get_user_credentials, delete_credential, get_auth_config, domain_requires_sso
 )
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
@@ -1616,9 +1616,8 @@ def slack_oidc_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Slack OIDC login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Slack OIDC; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Slack OIDC login
@@ -1954,9 +1953,8 @@ def google_oauth_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Google OAuth login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Google OAuth; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Google OAuth login
@@ -2293,9 +2291,8 @@ def microsoft_oauth_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Microsoft OAuth login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Microsoft OAuth; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Microsoft OAuth login
@@ -7355,8 +7352,7 @@ def api_webauthn_register_options():
     auth_config = get_auth_config(domain)
 
     # Check if SSO is configured and required for this domain
-    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
-    if sso_config and (not auth_config or auth_config.auth_method == 'sso'):
+    if domain_requires_sso(domain):
         return jsonify({'error': 'This domain requires SSO authentication'}), 400
 
     # Check if user already exists
@@ -7424,9 +7420,13 @@ def api_webauthn_auth_options():
         user = User.query.filter_by(email=email).first()
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        if user.auth_type == 'sso':
+        # Tenant-enforced SSO blocks passkeys. auth_type 'sso' alone does not:
+        # it also marks social sign-in accounts, which may hold passkeys.
+        if domain_requires_sso(user.sso_domain):
             return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
         if not user.webauthn_credentials:
+            if user.auth_type == 'sso':
+                return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
             return jsonify({'error': 'No passkeys registered for this account'}), 400
 
     try:
@@ -7465,6 +7465,21 @@ def api_webauthn_auth_verify():
             failure_reason=error[:255] if error else 'WebAuthn verification failed'
         )
         return jsonify({'error': error}), 400
+
+    # The email-less passkey flow never reaches the options check above,
+    # so tenant-enforced SSO is checked again once the user is known.
+    if domain_requires_sso(user.sso_domain):
+        log_login_attempt(
+            email=user.email,
+            login_method=LoginHistory.METHOD_WEBAUTHN,
+            success=False,
+            user_id=user.id,
+            tenant_domain=user.sso_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='Tenant requires SSO'
+        )
+        return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
 
     # Log successful WebAuthn login
     log_login_attempt(

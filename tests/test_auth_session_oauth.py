@@ -26,8 +26,8 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import (
-    db, User, Tenant, TenantMembership, GlobalRole, MaturityState, SetupToken,
-    WebAuthnCredential
+    db, User, Tenant, TenantMembership, AuthConfig, SSOConfig, GlobalRole,
+    MaturityState, SetupToken, WebAuthnCredential
 )
 from tests.app_test_utils import load_test_app
 
@@ -486,3 +486,223 @@ class TestOAuthReturnUrlIsSameSiteOnly:
         assert response.status_code == 302
         assert urlparse(response.headers['Location']).netloc in ('', 'localhost')
         assert 'evil.example' not in response.headers['Location']
+
+
+# ==================== auth_type, social sign-in and passkeys ====================
+
+def make_sso_tenant(domain='sso-corp.test', *, enabled=True, auth_method='sso', with_auth_config=True):
+    """A tenant with its own OIDC identity provider configured."""
+    if not Tenant.query.filter_by(domain=domain).first():
+        make_tenant(domain)
+    db.session.add(SSOConfig(
+        domain=domain, provider_name='Okta', client_id='client', client_secret='secret',
+        discovery_url='https://idp.example.test/.well-known/openid-configuration', enabled=enabled,
+    ))
+    if with_auth_config:
+        db.session.add(AuthConfig(domain=domain, auth_method=auth_method))
+    db.session.commit()
+
+
+def passkey_options(test_app, email):
+    return test_app.test_client().post('/api/webauthn/authenticate/options', json={'email': email})
+
+
+class TestSocialSignInKeepsLocalCredentials:
+    """Signing in once with Google/Microsoft/Slack must not disable a user's passkey."""
+
+    @pytest.mark.parametrize('provider_name', SOCIAL_PROVIDERS)
+    def test_user_with_password_and_passkey_keeps_auth_type_and_passkey(self, oauth_env, provider_name):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        user = make_user('pat@acme.test', password=STRONG_PASSWORD, passkey=True)
+        user_id = user.id
+
+        response = sign_in(test_app.test_client(), provider, 'pat@acme.test')
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.default_destination('acme.test')
+
+        db.session.expire_all()
+        assert db.session.get(User, user_id).auth_type == 'local'
+
+        options = passkey_options(test_app, 'pat@acme.test')
+        assert options.status_code == 200, options.get_json()
+        assert 'challenge' in options.get_json()
+
+    @pytest.mark.parametrize('provider_name', SOCIAL_PROVIDERS)
+    @pytest.mark.parametrize('auth_type,password,passkey', [
+        ('local', STRONG_PASSWORD, False),
+        ('webauthn', None, True),
+        ('webauthn', STRONG_PASSWORD, True),
+    ])
+    def test_users_with_a_local_credential_keep_their_auth_type(self, oauth_env, provider_name,
+                                                                auth_type, password, passkey):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        user_id = make_user('pat@acme.test', auth_type=auth_type, password=password, passkey=passkey).id
+
+        assert sign_in(test_app.test_client(), provider, 'pat@acme.test').status_code == 302
+
+        db.session.expire_all()
+        assert db.session.get(User, user_id).auth_type == auth_type
+
+    @pytest.mark.parametrize('provider_name', SOCIAL_PROVIDERS)
+    def test_user_without_local_credentials_is_marked_sso_and_can_use_the_app(self, oauth_env,
+                                                                             provider_name):
+        """An approved member with no password or passkey relies on the provider alone."""
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        user_id = make_user('invited@acme.test').id
+        client = test_app.test_client()
+
+        assert sign_in(client, provider, 'invited@acme.test').status_code == 302
+
+        db.session.expire_all()
+        assert db.session.get(User, user_id).auth_type == 'sso'
+        # login_required must not bounce them to credential setup
+        decisions = client.get('/api/decisions')
+        assert decisions.status_code == 200, decisions.get_json()
+
+    @pytest.mark.parametrize('provider_name', SOCIAL_PROVIDERS)
+    def test_new_user_created_by_social_sign_in_is_marked_sso(self, oauth_env, provider_name):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'founder@newco.test')
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.default_destination('newco.test')
+
+        user = User.query.filter_by(email='founder@newco.test').first()
+        assert user is not None
+        assert user.auth_type == 'sso'
+        assert client.get('/api/decisions').status_code == 200
+
+
+class TestPasskeySignInGate:
+    """Passkey sign-in is blocked by tenant SSO enforcement, not by a user's auth_type."""
+
+    def test_user_already_flipped_to_sso_can_use_existing_passkey(self, real_app):
+        """Accounts flipped by the old behaviour recover without a data migration."""
+        _, test_app = real_app
+        make_user('pat@acme.test', auth_type='sso', password=STRONG_PASSWORD, passkey=True)
+
+        response = passkey_options(test_app, 'pat@acme.test')
+
+        assert response.status_code == 200, response.get_json()
+        assert 'challenge' in response.get_json()
+
+    def test_sso_user_without_passkey_is_pointed_at_sso(self, real_app):
+        _, test_app = real_app
+        make_user('pat@acme.test', auth_type='sso')
+
+        response = passkey_options(test_app, 'pat@acme.test')
+
+        assert response.status_code == 400
+        assert 'SSO' in response.get_json()['error']
+
+    def test_local_user_without_passkey_gets_no_passkeys_error(self, real_app):
+        _, test_app = real_app
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+
+        response = passkey_options(test_app, 'pat@acme.test')
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'No passkeys registered for this account'
+
+    def test_unknown_user_returns_404(self, real_app):
+        _, test_app = real_app
+
+        response = passkey_options(test_app, 'nobody@acme.test')
+
+        assert response.status_code == 404
+        assert response.get_json()['error'] == 'User not found'
+
+    def test_options_without_email_still_supported(self, real_app):
+        """Discoverable-credential sign-in sends no email."""
+        _, test_app = real_app
+
+        response = test_app.test_client().post('/api/webauthn/authenticate/options', json={})
+
+        assert response.status_code == 200
+        assert 'challenge' in response.get_json()
+
+    @pytest.mark.parametrize('auth_type', ['local', 'webauthn', 'sso'])
+    def test_tenant_enforcing_sso_blocks_passkey_options(self, real_app, auth_type):
+        _, test_app = real_app
+        make_sso_tenant('sso-corp.test')
+        make_user('pat@sso-corp.test', auth_type=auth_type, passkey=True)
+
+        response = passkey_options(test_app, 'pat@sso-corp.test')
+
+        assert response.status_code == 400
+        assert 'SSO' in response.get_json()['error']
+
+    def test_sso_configured_without_auth_config_counts_as_enforced(self, real_app):
+        """Same rule as passkey registration: SSO config with no auth config means SSO only."""
+        _, test_app = real_app
+        make_sso_tenant('sso-corp.test', with_auth_config=False)
+        make_user('pat@sso-corp.test', passkey=True)
+
+        assert passkey_options(test_app, 'pat@sso-corp.test').status_code == 400
+
+    @pytest.mark.parametrize('kwargs', [
+        {'auth_method': 'local'},                    # SSO offered alongside other methods
+        {'auth_method': 'sso', 'enabled': False},    # SSO config switched off
+    ])
+    def test_tenant_not_enforcing_sso_allows_passkey_options(self, real_app, kwargs):
+        _, test_app = real_app
+        make_sso_tenant('mixed.test', **kwargs)
+        make_user('pat@mixed.test', passkey=True)
+
+        response = passkey_options(test_app, 'pat@mixed.test')
+
+        assert response.status_code == 200, response.get_json()
+
+    def test_tenant_enforcing_sso_blocks_passkey_verification(self, real_app):
+        """The email-less passkey flow skips the options check, so verify enforces it too."""
+        app_module, test_app = real_app
+        make_sso_tenant('sso-corp.test')
+        user = make_user('pat@sso-corp.test', passkey=True)
+        client = test_app.test_client()
+
+        with patch.object(app_module, 'verify_authentication', return_value=(user, None)):
+            response = client.post('/api/webauthn/authenticate/verify', json={'credential': {'id': 'x'}})
+
+        assert response.status_code == 400
+        assert 'SSO' in response.get_json()['error']
+        assert client.get('/api/user/me').status_code == 401
+
+    @pytest.mark.parametrize('auth_type', ['local', 'webauthn', 'sso'])
+    def test_passkey_verification_signs_in_when_sso_not_enforced(self, real_app, auth_type):
+        app_module, test_app = real_app
+        user = make_user('pat@acme.test', auth_type=auth_type, password=STRONG_PASSWORD, passkey=True)
+        client = test_app.test_client()
+
+        with patch.object(app_module, 'verify_authentication', return_value=(user, None)):
+            response = client.post('/api/webauthn/authenticate/verify', json={'credential': {'id': 'x'}})
+
+        assert response.status_code == 200, response.get_json()
+        me = client.get('/api/user/me')
+        assert me.status_code == 200
+        assert me.get_json()['email'] == 'pat@acme.test'
+
+    def test_passkey_registration_still_refused_for_sso_enforced_domain(self, real_app):
+        _, test_app = real_app
+        make_sso_tenant('sso-corp.test')
+
+        response = test_app.test_client().post(
+            '/api/webauthn/register/options',
+            json={'email': 'new@sso-corp.test', 'name': 'New Person'})
+
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'This domain requires SSO authentication'
+
+    def test_options_offer_registered_credentials_whatever_the_auth_type(self, real_app):
+        """A password-first ('local') account's passkeys are listed for non-discoverable keys."""
+        _, test_app = real_app
+        make_user('pat@acme.test', auth_type='local', password=STRONG_PASSWORD, passkey=True)
+
+        response = passkey_options(test_app, 'pat@acme.test')
+
+        assert response.status_code == 200
+        assert len(response.get_json().get('allowCredentials') or []) == 1

@@ -395,6 +395,27 @@ def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, la
     return user
 
 
+def mark_social_sign_in(user):
+    """Record a social sign-in (Slack, Google, Microsoft) on the user's auth_type.
+
+    auth_type 'sso' tells login_required that the account needs no local
+    credential because an external identity provider vouches for it. That is
+    only true for accounts that have no password and no passkey. An account
+    that already has a local credential keeps its auth_type, so signing in
+    with a social provider once never takes password or passkey sign-in away.
+
+    Returns True if auth_type was changed (the caller commits).
+    """
+    if user.auth_type and user.auth_type != 'local':
+        return False
+
+    if user.has_password() or user.webauthn_credentials:
+        return False
+
+    user.auth_type = 'sso'
+    return True
+
+
 def create_oauth_client(sso_config):
     """Create an OAuth2 session for the given SSO configuration."""
     return OAuth2Session(

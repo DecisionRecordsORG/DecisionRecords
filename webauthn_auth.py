@@ -20,7 +20,7 @@ from webauthn.helpers.structs import (
     AuthenticatorTransport,
 )
 
-from models import db, User, WebAuthnCredential, AuthConfig
+from models import db, User, WebAuthnCredential, AuthConfig, SSOConfig
 
 
 def get_rp_id():
@@ -48,6 +48,26 @@ def get_rp_origin():
 def get_auth_config(domain):
     """Get authentication configuration for a domain."""
     return AuthConfig.query.filter_by(domain=domain).first()
+
+
+def domain_requires_sso(domain):
+    """Return True when a tenant enforces its own SSO provider for sign-in.
+
+    A tenant enforces SSO when it has an enabled SSO configuration and has not
+    chosen another primary method in its auth config. This is a property of the
+    tenant, not of User.auth_type: a user may also have signed in with a social
+    provider (which records auth_type 'sso' for accounts with no local
+    credential) without the tenant requiring SSO.
+    """
+    if not domain:
+        return False
+
+    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
+    if not sso_config:
+        return False
+
+    auth_config = get_auth_config(domain)
+    return not auth_config or auth_config.auth_method == 'sso'
 
 
 def create_registration_options(user_email, user_name, domain):
@@ -171,7 +191,9 @@ def create_authentication_options(email=None):
 
     if email:
         # Specific user authentication
-        user = User.query.filter_by(email=email, auth_type='webauthn').first()
+        # Offer the user's registered credentials whatever their auth_type:
+        # password-first and social sign-in accounts can hold passkeys too.
+        user = User.query.filter_by(email=email).first()
         if user and user.webauthn_credentials:
             for cred in user.webauthn_credentials:
                 transports = json.loads(cred.transports) if cred.transports else ['internal', 'hybrid']

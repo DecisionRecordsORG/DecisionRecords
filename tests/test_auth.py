@@ -445,3 +445,59 @@ class TestStartUserSession:
             assert flask_session['user_id'] == sample_user.id
             assert '_expires_at' in flask_session
             assert 'setup_token' not in flask_session
+
+
+class TestMarkSocialSignIn:
+    """auth.mark_social_sign_in only relabels accounts with no local credential."""
+
+    @staticmethod
+    def _user(session, auth_type='local', password=None, passkey=False):
+        user = User(email='social@example.com', sso_domain='example.com', auth_type=auth_type)
+        if password:
+            user.set_password(password)
+        session.add(user)
+        session.flush()
+        if passkey:
+            session.add(WebAuthnCredential(
+                user_id=user.id, credential_id=b'cred-1', public_key=b'key', sign_count=0))
+        session.commit()
+        return user
+
+    def test_marks_credential_less_local_user_as_sso(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session)
+
+        assert mark_social_sign_in(user) is True
+        assert user.auth_type == 'sso'
+
+    def test_marks_user_with_empty_auth_type_as_sso(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session)
+
+        # The column is NOT NULL today; older rows and in-flight objects can still be empty.
+        with session.no_autoflush:
+            user.auth_type = None
+            assert mark_social_sign_in(user) is True
+        assert user.auth_type == 'sso'
+
+    def test_keeps_local_user_with_password(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session, password='Str0ngPassword')
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == 'local'
+
+    def test_keeps_local_user_with_passkey(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session, passkey=True)
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == 'local'
+
+    @pytest.mark.parametrize('auth_type', ['webauthn', 'sso', 'teams'])
+    def test_never_changes_other_auth_types(self, app, session, auth_type):
+        from auth import mark_social_sign_in
+        user = self._user(session, auth_type=auth_type)
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == auth_type
