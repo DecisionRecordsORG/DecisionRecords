@@ -8165,7 +8165,7 @@ def api_setup_initialize():
         default_space = Space(
             tenant_id=tenant.id,
             name='General',
-            description='Default space for all architecture decisions',
+            description='Default space for all decisions',
             is_default=True
         )
         db.session.add(default_space)
@@ -9567,7 +9567,7 @@ def create_test_user():
             default_space = Space(
                 tenant_id=tenant.id,
                 name='General',
-                description='Default space for all architecture decisions',
+                description='Default space for all decisions',
                 is_default=True
             )
             db.session.add(default_space)
@@ -9714,7 +9714,7 @@ def create_incomplete_test_user():
             default_space = Space(
                 tenant_id=tenant.id,
                 name='General',
-                description='Default space for all architecture decisions',
+                description='Default space for all decisions',
                 is_default=True
             )
             db.session.add(default_space)

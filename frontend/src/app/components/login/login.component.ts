@@ -613,7 +613,7 @@ export class LoginComponent implements OnInit {
           auth_method: 'webauthn',
           allow_registration: true,
           require_approval: false,
-          rp_name: 'Architecture Decisions'
+          rp_name: 'Decision Records'
         };
         this.currentView = 'webauthn';
         this.registerForm.patchValue({ email: this.currentEmail });

@@ -275,7 +275,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
                     <mat-form-field appearance="outline">
                       <mat-label>From Name</mat-label>
-                      <input matInput formControlName="from_name" placeholder="Architecture Decisions">
+                      <input matInput formControlName="from_name" placeholder="Decision Records">
                     </mat-form-field>
                   </div>
 
@@ -577,7 +577,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="app-name-section">
                         <mat-form-field appearance="outline" class="full-width">
                           <mat-label>Application Name</mat-label>
-                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions"
+                          <input matInput formControlName="rp_name" placeholder="Decision Records"
                                  [readonly]="isProvisionalAdmin">
                           <mat-hint>Shown to users during passkey setup</mat-hint>
                         </mat-form-field>
@@ -3077,7 +3077,7 @@ export class SettingsComponent implements OnInit {
       smtp_username: ['', Validators.required],
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
-      from_name: ['Architecture Decisions'],
+      from_name: ['Decision Records'],
       use_tls: [true],
       enabled: [true]
     });
@@ -3089,7 +3089,7 @@ export class SettingsComponent implements OnInit {
       allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
       allow_google_oauth: [true],   // Allow Google OAuth sign-in for tenant
       allow_microsoft_oauth: [true],   // Allow Microsoft OAuth sign-in for tenant
-      rp_name: ['Architecture Decisions']
+      rp_name: ['Decision Records']
     });
 
     this.slackForm = this.fb.group({
@@ -3450,7 +3450,7 @@ export class SettingsComponent implements OnInit {
           allow_registration: true,
           allow_google_oauth: true,  // Default true
           allow_microsoft_oauth: true,  // Default true
-          rp_name: 'Architecture Decisions'
+          rp_name: 'Decision Records'
         });
       }
     });

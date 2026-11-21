@@ -147,7 +147,7 @@ def create_registration_options(user_email, user_name, domain, existing_user=Non
 
     # Get RP name from auth config or use default
     auth_config = get_auth_config(domain)
-    rp_name = auth_config.rp_name if auth_config else 'Architecture Decisions'
+    rp_name = auth_config.rp_name if auth_config else 'Decision Records'
 
     # Get existing credentials to exclude
     exclude_credentials = []
