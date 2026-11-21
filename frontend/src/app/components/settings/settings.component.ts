@@ -220,7 +220,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's architecture decisions.</p>
+                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's decisions.</p>
                 <h4>Use Cases</h4>
                 <ul>
                   <li>Decision status changes</li>
@@ -275,7 +275,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 
                     <mat-form-field appearance="outline">
                       <mat-label>From Name</mat-label>
-                      <input matInput formControlName="from_name" placeholder="Architecture Decisions">
+                      <input matInput formControlName="from_name" placeholder="Decision Records">
                     </mat-form-field>
                   </div>
 
@@ -577,7 +577,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                       <div class="app-name-section">
                         <mat-form-field appearance="outline" class="full-width">
                           <mat-label>Application Name</mat-label>
-                          <input matInput formControlName="rp_name" placeholder="Architecture Decisions"
+                          <input matInput formControlName="rp_name" placeholder="Decision Records"
                                  [readonly]="isProvisionalAdmin">
                           <mat-hint>Shown to users during passkey setup</mat-hint>
                         </mat-form-field>
@@ -742,7 +742,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p>Spaces help organize your architecture decisions into logical groups.</p>
+                <p>Spaces help organize your decisions into groups, such as a team, a project or a topic.</p>
                 <ul>
                   <li><strong>Default Space:</strong> New decisions are automatically assigned to this space</li>
                   <li><strong>Multiple Spaces:</strong> Decisions can belong to multiple spaces</li>
@@ -1468,8 +1468,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               <mat-card-content>
                 <p>Control how decisions can supersede, amend, depend on, or otherwise relate to one another in your organisation.</p>
                 <ul>
-                  <li><strong>Industry packs:</strong> enable built-in relationship classes that fit your work</li>
-                  <li><strong>Custom classes:</strong> define tenant-specific relationship labels when the built-ins are not enough</li>
+                  <li><strong>Packs:</strong> turn on built-in relationship classes that fit your team, from software delivery to finance, people and product</li>
+                  <li><strong>Custom classes:</strong> define your own relationship labels when the built-in ones are not enough</li>
                   <li><strong>Supersedes:</strong> automatically moves the older decision into superseded status</li>
                 </ul>
               </mat-card-content>
@@ -1484,7 +1484,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 <mat-card-header>
                   <mat-card-title>
                     <mat-icon>widgets</mat-icon>
-                    Industry Packs
+                    Relationship Packs
                   </mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
@@ -3077,7 +3077,7 @@ export class SettingsComponent implements OnInit {
       smtp_username: ['', Validators.required],
       smtp_password: [''],
       from_email: ['', [Validators.required, Validators.email]],
-      from_name: ['Architecture Decisions'],
+      from_name: ['Decision Records'],
       use_tls: [true],
       enabled: [true]
     });
@@ -3089,7 +3089,7 @@ export class SettingsComponent implements OnInit {
       allow_slack_oidc: [true],     // Allow Slack OIDC sign-in for tenant
       allow_google_oauth: [true],   // Allow Google OAuth sign-in for tenant
       allow_microsoft_oauth: [true],   // Allow Microsoft OAuth sign-in for tenant
-      rp_name: ['Architecture Decisions']
+      rp_name: ['Decision Records']
     });
 
     this.slackForm = this.fb.group({
@@ -3450,7 +3450,7 @@ export class SettingsComponent implements OnInit {
           allow_registration: true,
           allow_google_oauth: true,  // Default true
           allow_microsoft_oauth: true,  // Default true
-          rp_name: 'Architecture Decisions'
+          rp_name: 'Decision Records'
         });
       }
     });
@@ -3572,7 +3572,12 @@ export class SettingsComponent implements OnInit {
             }
           },
           error: (err) => {
-            this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            if (err.error?.error === 'User limit reached') {
+              // Say what the limit is and leave the message up long enough to read
+              this.snackBar.open(err.error?.message || err.error.error, 'Close', { duration: 8000 });
+            } else {
+              this.snackBar.open(err.error?.error || 'Failed to approve request', 'Close', { duration: 3000 });
+            }
             this.processingRequest = null;
           }
         });
@@ -4200,8 +4205,10 @@ export class SettingsComponent implements OnInit {
     }
 
     const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
+    // A custom class replaces a built-in class that has the same key
+    const customKeys = new Set(this.decisionRelationshipConfig.custom_relationship_types.map((type) => type.key));
     const builtinTypes = this.decisionRelationshipSettingsResponse.available_catalog.types.filter(
-      (type) => type.builtin && type.pack_ids.some((packId) => selectedPackIds.has(packId))
+      (type) => type.builtin && !customKeys.has(type.key) && type.pack_ids.some((packId) => selectedPackIds.has(packId))
     );
     const customTypes = this.decisionRelationshipConfig.custom_relationship_types.map((type) => ({
       key: type.key,
@@ -4231,10 +4238,11 @@ export class SettingsComponent implements OnInit {
       .filter((id) => selected.has(id));
 
     const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
-    const availableBuiltinTypeKeys = this.decisionRelationshipSettingsResponse.available_catalog.types
-      .filter((type) => type.builtin && type.pack_ids.some((candidatePackId) => selectedPackIds.has(candidatePackId)))
-      .map((type) => type.key);
     const customTypeKeys = this.decisionRelationshipConfig.custom_relationship_types.map((type) => type.key);
+    const availableBuiltinTypeKeys = this.decisionRelationshipSettingsResponse.available_catalog.types
+      .filter((type) => type.builtin && !customTypeKeys.includes(type.key)
+        && type.pack_ids.some((candidatePackId) => selectedPackIds.has(candidatePackId)))
+      .map((type) => type.key);
     const enabledKeys = new Set(
       this.decisionRelationshipConfig.enabled_relationship_types.filter(
         (typeKey) => availableBuiltinTypeKeys.includes(typeKey) || customTypeKeys.includes(typeKey)

@@ -148,3 +148,25 @@ test.describe('Account Setup Flow', () => {
     await apiContext.dispose();
   });
 });
+
+test.describe('Sign-in page wording', () => {
+  test('sign-in-user-limit: Tenant sign-in explains a refused account when the user limit is reached', async ({ page }) => {
+    // Sign-in with Slack, Google, Microsoft or Teams lands here when the tenant is full
+    await page.goto('/test-org.com/login?error=user_limit');
+
+    await expect(page.locator('.error-message')).toHaveText(
+      'This organization has reached its user limit, so a new account could not be created. Please contact your organization administrator.',
+      { timeout: 10000 }
+    );
+  });
+
+  test('sign-in-page-title: App title describes decision records for teams', async ({ page }) => {
+    await page.goto('/');
+
+    await expect(page).toHaveTitle('Decision Records - Open source decision records for teams');
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+      'content',
+      'Decision Records is an open source platform where teams record the decisions they make, why they made them and what follows from them.'
+    );
+  });
+});

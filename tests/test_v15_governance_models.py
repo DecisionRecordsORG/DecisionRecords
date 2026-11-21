@@ -360,7 +360,7 @@ class TestTenantSettings:
         assert settings.allow_passkey is True
         assert settings.allow_registration is True
         assert settings.require_approval is False
-        assert settings.rp_name == 'Architecture Decisions'
+        assert settings.rp_name == 'Decision Records'
 
     def test_settings_one_to_one(self, session, sample_tenant_with_settings):
         """Test that tenant can only have one settings record."""

@@ -25,7 +25,7 @@ test.describe('Super Admin - Licensing Settings', () => {
     await expect(page.locator('mat-label:has-text("Max Users Per Tenant")')).toBeVisible();
   });
 
-  test('view-default-user-limit: Default user limit is 5', async ({ page }) => {
+  test('view-default-user-limit: Default user limit is 25', async ({ page }) => {
     await page.goto('/superadmin/settings');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1000);
@@ -34,8 +34,8 @@ test.describe('Super Admin - Licensing Settings', () => {
     const maxUsersInput = page.locator('input[formcontrolname="max_users_per_tenant"]');
     await expect(maxUsersInput).toBeVisible();
 
-    // Check that hint shows default of 5
-    await expect(page.locator('mat-hint:has-text("default: 5")')).toBeVisible();
+    // Check that hint shows default of 25
+    await expect(page.locator('mat-hint:has-text("default: 25")')).toBeVisible();
   });
 
   test('update-user-limit: Can change max users per tenant', async ({ page }) => {
@@ -99,8 +99,8 @@ test.describe('Super Admin - Licensing Settings', () => {
     const resetButton = page.locator('button:has-text("Reset to Defaults")').first();
     await resetButton.click();
 
-    // Value should be back to 5 (default)
-    await expect(maxUsersInput).toHaveValue('5');
+    // Value should be back to 25 (default)
+    await expect(maxUsersInput).toHaveValue('25');
   });
 
   test('limit-info-display: Shows correct limit info based on value', async ({ page }) => {
@@ -198,7 +198,7 @@ test.describe('Licensing Settings - API Integration', () => {
       expect(data).toHaveProperty('max_users_per_tenant');
       expect(data).toHaveProperty('defaults');
       expect(data.defaults).toHaveProperty('max_users_per_tenant');
-      expect(data.defaults.max_users_per_tenant).toBe(5);
+      expect(data.defaults.max_users_per_tenant).toBe(25);
     }
   });
 

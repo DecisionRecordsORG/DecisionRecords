@@ -37,7 +37,7 @@ type LoginView = 'initial' | 'webauthn' | 'password' | 'register' | 'recovery';
       <mat-card class="login-card">
         <mat-card-header>
           <mat-card-title>
-            <mat-icon>architecture</mat-icon>
+            <mat-icon>description</mat-icon>
             Decision Records
           </mat-card-title>
           <mat-card-subtitle>
@@ -613,7 +613,7 @@ export class LoginComponent implements OnInit {
           auth_method: 'webauthn',
           allow_registration: true,
           require_approval: false,
-          rp_name: 'Architecture Decisions'
+          rp_name: 'Decision Records'
         };
         this.currentView = 'webauthn';
         this.registerForm.patchValue({ email: this.currentEmail });

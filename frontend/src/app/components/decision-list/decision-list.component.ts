@@ -165,7 +165,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
         <mat-card class="empty-state" appearance="outlined">
           <mat-card-content>
             <div class="empty-icon-container">
-              <mat-icon>{{ searchTerm || statusFilter ? 'search_off' : 'architecture' }}</mat-icon>
+              <mat-icon>{{ searchTerm || statusFilter ? 'search_off' : 'description' }}</mat-icon>
             </div>
             <h2>{{ searchTerm || statusFilter ? 'No matching decisions' : 'No decisions yet' }}</h2>
             <p>{{ searchTerm || statusFilter ? 'Try adjusting your search or filters' : 'Create your first decision record to start documenting choices that matter' }}</p>

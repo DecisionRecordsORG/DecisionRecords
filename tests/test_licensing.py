@@ -34,7 +34,7 @@ class TestSystemConfigLicensing:
         from models import SystemConfig
 
         assert hasattr(SystemConfig, 'DEFAULT_MAX_USERS_PER_TENANT')
-        assert SystemConfig.DEFAULT_MAX_USERS_PER_TENANT == 5
+        assert SystemConfig.DEFAULT_MAX_USERS_PER_TENANT == 25
 
 
 class TestUserLimitLogic:
@@ -228,7 +228,7 @@ class TestLicensingAPIEndpoints:
         data = response.get_json()
         assert 'max_users_per_tenant' in data
         assert 'defaults' in data
-        assert data['defaults']['max_users_per_tenant'] == 5
+        assert data['defaults']['max_users_per_tenant'] == 25
 
     @pytest.mark.skip(reason="Session handling issue with full app import - needs test refactoring")
     def test_save_licensing_settings_success(self, master_session):

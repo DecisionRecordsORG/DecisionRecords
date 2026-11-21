@@ -143,7 +143,7 @@ class SystemConfig(db.Model):
     # Default values
     DEFAULT_ADMIN_SESSION_TIMEOUT = 1  # 1 hour for super admin
     DEFAULT_USER_SESSION_TIMEOUT = 8   # 8 hours for regular users
-    DEFAULT_MAX_USERS_PER_TENANT = 5   # Free tier limit (0 = unlimited)
+    DEFAULT_MAX_USERS_PER_TENANT = 25  # Free tier limit (0 = unlimited)
     DEFAULT_SUPPORT_EMAIL = 'admin@decisionrecords.org'  # Default support email
 
     # Analytics defaults
@@ -562,7 +562,7 @@ class TenantSettings(db.Model):
     allow_slack_oidc = db.Column(db.Boolean, default=True)  # Allow "Sign in with Slack"
     allow_google_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Google"
     allow_microsoft_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Microsoft"
-    rp_name = db.Column(db.String(255), default='Architecture Decisions')
+    rp_name = db.Column(db.String(255), default='Decision Records')
 
     # Registration settings
     allow_registration = db.Column(db.Boolean, default=True)
@@ -1053,7 +1053,7 @@ class EmailConfig(db.Model):
     smtp_username = db.Column(db.String(255), nullable=False)
     smtp_password = db.Column(db.String(255), nullable=False)
     from_email = db.Column(db.String(255), nullable=False)
-    from_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')
+    from_name = db.Column(db.String(255), nullable=False, default='Decision Records')
     use_tls = db.Column(db.Boolean, default=True)
     enabled = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -1094,7 +1094,7 @@ class AuthConfig(db.Model):
     allow_microsoft_oauth = db.Column(db.Boolean, default=True)  # Allow "Sign in with Microsoft" option
     allow_registration = db.Column(db.Boolean, default=True)  # Allow new user registration
     require_approval = db.Column(db.Boolean, default=False)  # Require admin approval for new users to join tenant (default: auto-approve)
-    rp_name = db.Column(db.String(255), nullable=False, default='Architecture Decisions')  # Relying Party name for WebAuthn
+    rp_name = db.Column(db.String(255), nullable=False, default='Decision Records')  # Relying Party name for WebAuthn
     tenant_prefix = db.Column(db.String(3), unique=True, nullable=True)  # 3-letter prefix for decision IDs (consonants only)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

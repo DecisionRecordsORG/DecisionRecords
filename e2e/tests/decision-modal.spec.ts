@@ -631,3 +631,64 @@ test.describe('Decision Modal', () => {
     }
   });
 });
+
+// The decision form is described in words that fit any team, and the two
+// forms (modal and full page) use the same wording.
+const FIELD_WORDING: Record<string, { placeholder: string; hint: string }> = {
+  title: {
+    placeholder: 'For example: Move to quarterly pricing reviews',
+    hint: 'A short name people will recognise in a list.'
+  },
+  context: {
+    placeholder: 'What prompted this decision? Describe the situation, the problem and anything that limits your options.',
+    hint: 'The background someone needs to understand why this came up.'
+  },
+  decision: {
+    placeholder: 'What did you decide? State the choice plainly and mention the options you turned down.',
+    hint: 'What was decided, in words that make sense on their own.'
+  },
+  consequences: {
+    placeholder: 'What changes because of this? Include the benefits, the costs and the risks you accept.',
+    hint: 'What follows from the decision, good and bad.'
+  }
+};
+
+test.describe('Decision form wording', () => {
+  test('modal-field-wording: New decision modal explains each field for any team', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+    await page.waitForLoadState('networkidle');
+    await dismissOverlays(page);
+
+    await page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first().click();
+    const modal = page.locator('mat-dialog-container').first();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    for (const [field, wording] of Object.entries(FIELD_WORDING)) {
+      const input = modal.locator(`[formcontrolname="${field}"]`);
+      await expect(input).toHaveAttribute('placeholder', wording.placeholder);
+      const formField = modal.locator('mat-form-field', { has: page.locator(`[formcontrolname="${field}"]`) });
+      await expect(formField.locator('mat-hint')).toHaveText(wording.hint);
+    }
+    for (const label of ['Context', 'Decision', 'Consequences']) {
+      await expect(modal.locator('mat-label', { hasText: new RegExp(`^${label}$`) })).toBeVisible();
+    }
+    await expect(modal).not.toContainText(/architecture|ADR/i);
+  });
+
+  test('page-field-wording: Full-page decision form uses the same wording as the modal', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+    await page.waitForLoadState('networkidle');
+    await page.goto('/test-org.com/decision/new');
+    await dismissOverlays(page);
+
+    const form = page.locator('form').first();
+    await expect(form.locator('[formcontrolname="title"]')).toBeVisible({ timeout: 10000 });
+
+    for (const [field, wording] of Object.entries(FIELD_WORDING)) {
+      const input = form.locator(`[formcontrolname="${field}"]`);
+      await expect(input).toHaveAttribute('placeholder', wording.placeholder);
+      const formField = form.locator('mat-form-field', { has: page.locator(`[formcontrolname="${field}"]`) });
+      await expect(formField.locator('mat-hint')).toHaveText(wording.hint);
+    }
+  });
+});

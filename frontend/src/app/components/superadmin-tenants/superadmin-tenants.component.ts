@@ -1785,7 +1785,7 @@ interface DeleteTenantDialogData {
         <p>The following data will be permanently deleted:</p>
         <ul>
           <li>All users and their accounts</li>
-          <li>All architecture decisions</li>
+          <li>All decision records</li>
           <li>All decision spaces</li>
           <li>All tenant settings and configurations</li>
           <li>SSO configuration (if any)</li>

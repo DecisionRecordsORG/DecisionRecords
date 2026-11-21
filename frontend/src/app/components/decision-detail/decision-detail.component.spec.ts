@@ -5,6 +5,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Observable, Subject, isObservable, of, throwError } from 'rxjs';
 
 import { DecisionDetailComponent } from './decision-detail.component';
+import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
 import { DecisionService } from '../../services/decision.service';
 import { SpaceService } from '../../services/space.service';
 import { AuthService } from '../../services/auth.service';
@@ -138,6 +139,28 @@ describe('DecisionDetailComponent', () => {
 
       expect(component.tenantMembers).toEqual([]);
       expect(component.isLoading).toBeFalse();
+    });
+  });
+
+  describe('field wording', () => {
+    it('shows the same placeholder and hint as the decision modal for every field', () => {
+      createPage();
+      fixture.detectChanges();
+
+      for (const control of ['title', 'context', 'decision', 'consequences'] as const) {
+        const input: HTMLElement = fixture.nativeElement.querySelector(`[formControlName="${control}"]`);
+        const hint = input.closest('mat-form-field')?.querySelector('mat-hint')?.textContent?.trim();
+        expect({ placeholder: input.getAttribute('placeholder'), hint }).toEqual(DECISION_FORM_COPY[control]);
+      }
+    });
+
+    it('keeps the Context, Decision and Consequences labels', () => {
+      createPage();
+      fixture.detectChanges();
+
+      const labels = Array.from(fixture.nativeElement.querySelectorAll('mat-label'))
+        .map((label: any) => label.textContent.trim());
+      expect(labels).toEqual(jasmine.arrayContaining(['Title', 'Context', 'Decision', 'Consequences']));
     });
   });
 

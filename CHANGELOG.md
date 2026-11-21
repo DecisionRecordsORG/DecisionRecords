@@ -7,15 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
+### Added
+- Relationship packs for non-technical teams: People & Policy, Finance & Procurement and Product & Customer, with new relationship classes (exception to, sets precedent for, funds, approves, constrains, responds to, takes priority over). They are offered in organization settings and stay off until an administrator selects them
+- Helper text under the Title, Context, Decision and Consequences fields of both decision forms
 
 ### Changed
+- The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
+- The user limit counts every account that belongs to a tenant. Accounts admitted through access requests were not counted before, so a tenant could grow past its limit
+- Notification emails say "decision" and "decision record" and drop the "[ADR]" subject prefix: "New decision: <title>", "Decision updated: <title>", "Decision status changed: <title> is now <status>". They refer to a decision by the ID shown in the app
+- New email configurations and passkey settings use "Decision Records" as the default display name. On startup, a stored email from-name, passkey display name or default space description that still equals the old default is updated; names an administrator chose are kept
+- Decision form placeholders, the app title and description, the landing page, the README and settings copy describe decision records for any team instead of architecture decisions. The README keeps a section on the ADR format and arc42 for software teams
+- The login screen and the empty decision list use a neutral document icon
+- The Core relationship pack is described as fitting any kind of decision, and the settings tab calls the packs "Relationship Packs"
 - Terms of Service and Service Level Agreement pages describe a free plan for teams of up to 25 users in place of the limited preview
 - `requirements.txt` pins every installed package to an exact version, including packages that are only installed as dependencies and the `gunicorn` server; the Community image no longer installs anything outside that file
 - CI and the release workflow now also start the built Community image against a PostgreSQL container with a `postgresql://` `DATABASE_URL`, and require `/health` to report a connected database, before the release workflow publishes anything
 - CI runs the fixture-based backend tests against PostgreSQL as well as SQLite (`TEST_DATABASE_URL`)
 - The Enterprise deploy workflow starts the new image against PostgreSQL before it publishes or deploys anything, verifies the database health route after the restart, and restores the previous image automatically when the new one is not healthy
+
+### Fixed
+- The user limit is now enforced when an account is created by Slack, Google, Microsoft or Teams sign-in, by a tenant's own SSO provider, by the Teams tab sign-in and by an emailed sign-up link. A full tenant refuses the new account with the "User limit reached" error; existing members can still sign in and the first account of a new organization is never refused
+- The sign-in page and the access request list show what the user limit is when it stops an account from being added
+- The email telling someone they were made a decision owner was never sent, because it failed while building the message
+- Loading relationship settings no longer fails for a tenant whose custom relationship class uses the same key as a built-in class added later; the tenant's own class is used
+- Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
 
 ## [2.1.1] - 2026-11-21
 

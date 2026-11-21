@@ -1297,6 +1297,20 @@ def sso_callback():
             )
             return render_template('error.html', message='Email domain does not match SSO configuration'), 403
 
+        # A new account must fit within the tenant's user limit
+        limit_refusal = user_limit_refusal(sso_config.domain, email)
+        if limit_refusal:
+            log_login_attempt(
+                email=email,
+                login_method=LoginHistory.METHOD_SSO,
+                success=False,
+                tenant_domain=sso_config.domain,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason=USER_LIMIT_ERROR
+            )
+            return render_template('error.html', message=limit_refusal['message']), 403
+
         # Get or create user
         user = get_or_create_user(email, name, subject, sso_config.domain)
 
@@ -1596,6 +1610,11 @@ def slack_oidc_callback():
         # Check if this is the first user for this domain
         existing_domain_users = User.query.filter_by(sso_domain=domain).count()
         is_first_user = existing_domain_users == 0
+
+        # A new account must fit within the tenant's user limit
+        if user_limit_refusal(domain, email):
+            logger.warning(f"Slack OIDC sign-in refused, user limit reached for {domain}")
+            return user_limit_redirect(domain)
 
         # Get or create user
         user = get_or_create_user(email, name, slack_user_id, domain)
@@ -1932,6 +1951,11 @@ def google_oauth_callback():
         # Check if this is the first user for this domain
         existing_domain_users = User.query.filter_by(sso_domain=domain).count()
         is_first_user = existing_domain_users == 0
+
+        # A new account must fit within the tenant's user limit
+        if user_limit_refusal(domain, email):
+            logger.warning(f"Google OAuth sign-in refused, user limit reached for {domain}")
+            return user_limit_redirect(domain)
 
         # Get or create user
         user = get_or_create_user(email, name, google_user_id, domain)
@@ -2270,7 +2294,12 @@ def microsoft_oauth_callback():
         existing_domain_users = User.query.filter_by(sso_domain=domain).count()
         is_first_user = existing_domain_users == 0
 
-        # Get or create user (using same function as Google OAuth)
+        # A new account must fit within the tenant's user limit
+        if user_limit_refusal(domain, email):
+            logger.warning(f"Microsoft OAuth sign-in refused, user limit reached for {domain}")
+            return user_limit_redirect(domain)
+
+        # Get or create user
         user = get_or_create_user(email, name, microsoft_user_id, domain)
 
         # Create Tenant if it doesn't exist (v1.5 governance)
@@ -2444,6 +2473,11 @@ def teams_sso_validate():
     # Check for public email domains
     if DomainApproval.is_public_domain(domain):
         return jsonify({'valid': False, 'error': 'Personal accounts not allowed'}), 403
+
+    # A new account must fit within the tenant's user limit
+    limit_refusal = user_limit_refusal(domain, email)
+    if limit_refusal:
+        return jsonify({'valid': False, **limit_refusal}), 403
 
     # Get or create user
     user = get_or_create_user(email, name or email.split('@')[0], microsoft_user_id, domain)
@@ -5102,14 +5136,22 @@ def api_test_log_forwarding():
 
 
 def get_tenant_user_count(domain):
-    """Get the current user count for a tenant."""
-    # Try v1.5 model first (TenantMembership)
+    """Number of accounts that count towards a tenant's user limit.
+
+    An account counts when it belongs to the tenant: it has a membership, or it
+    was created for the tenant's domain and has no membership yet (accounts
+    admitted through an access request get no membership row). Anonymised
+    accounts keep their domain but have left the tenant, so they do not count.
+    """
+    belongs = User.sso_domain == domain
     tenant = Tenant.query.filter_by(domain=domain).first()
     if tenant:
-        return tenant.get_member_count()
+        member_ids = db.session.query(TenantMembership.user_id).filter(
+            TenantMembership.tenant_id == tenant.id
+        )
+        belongs = db.or_(belongs, User.id.in_(member_ids))
 
-    # Fallback to legacy model (User.sso_domain)
-    return User.query.filter_by(sso_domain=domain).count()
+    return User.query.filter(belongs, User.is_anonymized.isnot(True)).count()
 
 
 def system_email_configured():
@@ -5141,12 +5183,51 @@ def can_tenant_accept_users(domain, count=1):
     if current_count + count > max_users:
         return (
             False,
-            f'Tenant has reached the maximum user limit of {max_users}. Current users: {current_count}.',
+            f'This organization has reached the maximum user limit of {max_users}.',
             current_count,
             max_users
         )
 
     return (True, 'User limit not reached', current_count, max_users)
+
+
+USER_LIMIT_ERROR = 'User limit reached'
+USER_LIMIT_CONTACT_ADMIN = 'Please contact your organization administrator.'
+
+
+def user_limit_refusal(domain, email=None, contact_admin=True):
+    """Why one more account cannot be added to a tenant, or None when it can.
+
+    Every path that adds an account to an existing tenant calls this before
+    creating it. Pass the email when the account may already exist: an account
+    that already belongs to the tenant is not an addition and is never refused.
+    The first account of a new tenant always fits, because the limit is at
+    least 1 when it is not unlimited (0).
+
+    Returns the JSON body of the 403 response, or None.
+    """
+    if email:
+        existing = User.query.filter_by(email=email).first()
+        if existing and existing.sso_domain == domain and not existing.is_anonymized:
+            return None
+
+    can_accept, limit_message, current_count, max_allowed = can_tenant_accept_users(domain)
+    if can_accept:
+        return None
+
+    if contact_admin:
+        limit_message = f'{limit_message} {USER_LIMIT_CONTACT_ADMIN}'
+    return {
+        'error': USER_LIMIT_ERROR,
+        'message': limit_message,
+        'current_users': current_count,
+        'max_users': max_allowed
+    }
+
+
+def user_limit_redirect(domain):
+    """Send a browser sign-in that hit the user limit to the tenant sign-in page."""
+    return redirect(f'/{domain}/login?error=user_limit')
 
 
 @app.route('/api/tenants/<domain>/limits', methods=['GET'])
@@ -5591,6 +5672,11 @@ def api_send_verification():
             purpose = 'access_request'
         else:
             purpose = 'signup'
+            # Joining without approval creates the account when the link is
+            # opened: say now if the tenant has no place left
+            limit_refusal = user_limit_refusal(domain)
+            if limit_refusal:
+                return jsonify(limit_refusal), 403
 
     # Rate limiting: Check for recent verification emails
     recent_verification = EmailVerification.query.filter(
@@ -5988,6 +6074,15 @@ def api_verify_email(token):
         user = User.query.filter_by(email=verification.email).first()
         is_new_user = user is None
         if not user:
+            # A new account must fit within the tenant's user limit. The link
+            # stays unused, so it works once a place is free.
+            limit_refusal = user_limit_refusal(verification.domain)
+            if limit_refusal:
+                db.session.rollback()
+                if request.method == 'POST':
+                    return jsonify(limit_refusal), 403
+                return user_limit_redirect(verification.domain)
+
             # Determine if this is the first user for the domain
             is_first_user = User.query.filter_by(sso_domain=verification.domain).count() == 0
 
@@ -6230,14 +6325,9 @@ def api_submit_access_request():
         from notifications import send_account_setup_email
 
         # Check user limit before auto-approving
-        can_accept, limit_message, current_count, max_allowed = can_tenant_accept_users(domain)
-        if not can_accept:
-            return jsonify({
-                'error': 'User limit reached',
-                'message': f'{limit_message} Please contact your organization administrator.',
-                'current_users': current_count,
-                'max_users': max_allowed
-            }), 403
+        limit_refusal = user_limit_refusal(domain)
+        if limit_refusal:
+            return jsonify(limit_refusal), 403
 
         # Create the user account
         new_user = User(
@@ -6721,14 +6811,9 @@ def api_approve_access_request(request_id):
     # Check user limit before approving (only if creating a new user)
     existing_user_check = User.query.filter_by(email=access_request.email).first()
     if not existing_user_check:
-        can_accept, limit_message, current_count, max_allowed = can_tenant_accept_users(access_request.domain)
-        if not can_accept:
-            return jsonify({
-                'error': 'User limit reached',
-                'message': limit_message,
-                'current_users': current_count,
-                'max_users': max_allowed
-            }), 403
+        limit_refusal = user_limit_refusal(access_request.domain, contact_admin=False)
+        if limit_refusal:
+            return jsonify(limit_refusal), 403
 
     # Check if user already exists (could have been created via another path)
     existing_user = User.query.filter_by(email=access_request.email).first()
@@ -8080,7 +8165,7 @@ def api_setup_initialize():
         default_space = Space(
             tenant_id=tenant.id,
             name='General',
-            description='Default space for all architecture decisions',
+            description='Default space for all decisions',
             is_default=True
         )
         db.session.add(default_space)
@@ -9482,7 +9567,7 @@ def create_test_user():
             default_space = Space(
                 tenant_id=tenant.id,
                 name='General',
-                description='Default space for all architecture decisions',
+                description='Default space for all decisions',
                 is_default=True
             )
             db.session.add(default_space)
@@ -9629,7 +9714,7 @@ def create_incomplete_test_user():
             default_space = Space(
                 tenant_id=tenant.id,
                 name='General',
-                description='Default space for all architecture decisions',
+                description='Default space for all decisions',
                 is_default=True
             )
             db.session.add(default_space)
@@ -12389,6 +12474,10 @@ def teams_oidc_callback():
             user.name = name
         db.session.commit()
     else:
+        # A new account must fit within the tenant's user limit
+        if user_limit_refusal(domain):
+            return user_limit_redirect(domain)
+
         # New user - check if tenant exists
         tenant = Tenant.query.filter_by(domain=domain).first()
 

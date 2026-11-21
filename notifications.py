@@ -75,8 +75,18 @@ def send_email(email_config, to_email, subject, html_content, text_content=None)
         return False
 
 
+def decision_heading(decision):
+    """The decision as people refer to it: 'XYZ-003: Title', or the title alone.
+
+    Uses the display ID shown in the app. A decision without a number has no
+    ID anyone has seen, so only its title is used.
+    """
+    display_id = decision.get_display_id()
+    return f"{display_id}: {decision.title}" if display_id else decision.title
+
+
 def notify_subscribers_new_decision(db, decision, email_config):
-    """Notify subscribers about a new architecture decision."""
+    """Notify subscribers about a new decision."""
     from models import User, Subscription
 
     if not email_config or not email_config.enabled:
@@ -88,7 +98,7 @@ def notify_subscribers_new_decision(db, decision, email_config):
         Subscription.notify_on_create == True
     ).all()
 
-    subject = f"[ADR] New Architecture Decision: {decision.title}"
+    subject = f"New decision: {decision.title}"
 
     for subscriber in subscribers:
         # Don't notify the creator
@@ -98,8 +108,8 @@ def notify_subscribers_new_decision(db, decision, email_config):
         html_content = f"""
         <html>
         <body>
-            <h2>New Architecture Decision Created</h2>
-            <p><strong>ADR-{decision.id}: {decision.title}</strong></p>
+            <h2>New decision record</h2>
+            <p><strong>{decision_heading(decision)}</strong></p>
             <p><strong>Status:</strong> {decision.status.capitalize()}</p>
             <p><strong>Created by:</strong> {decision.creator.name if decision.creator else 'Unknown'}</p>
 
@@ -119,9 +129,9 @@ def notify_subscribers_new_decision(db, decision, email_config):
         """
 
         text_content = f"""
-New Architecture Decision Created
+New decision record
 
-ADR-{decision.id}: {decision.title}
+{decision_heading(decision)}
 Status: {decision.status.capitalize()}
 Created by: {decision.creator.name if decision.creator else 'Unknown'}
 
@@ -142,7 +152,7 @@ You are receiving this because you subscribed to new decision notifications.
 
 
 def notify_subscribers_decision_updated(db, decision, email_config, change_reason=None, status_changed=False):
-    """Notify subscribers about an updated architecture decision."""
+    """Notify subscribers about an updated decision."""
     from models import User, Subscription
 
     if not email_config or not email_config.enabled:
@@ -160,9 +170,9 @@ def notify_subscribers_decision_updated(db, decision, email_config, change_reaso
             Subscription.notify_on_update == True
         ).all()
 
-    subject = f"[ADR] Updated: {decision.title}"
+    subject = f"Decision updated: {decision.title}"
     if status_changed:
-        subject = f"[ADR] Status Changed: {decision.title} - Now {decision.status.capitalize()}"
+        subject = f"Decision status changed: {decision.title} is now {decision.status.capitalize()}"
 
     for subscriber in subscribers:
         # Don't notify the person who made the update
@@ -172,8 +182,8 @@ def notify_subscribers_decision_updated(db, decision, email_config, change_reaso
         html_content = f"""
         <html>
         <body>
-            <h2>Architecture Decision Updated</h2>
-            <p><strong>ADR-{decision.id}: {decision.title}</strong></p>
+            <h2>Decision record updated</h2>
+            <p><strong>{decision_heading(decision)}</strong></p>
             <p><strong>Status:</strong> {decision.status.capitalize()}</p>
             <p><strong>Updated by:</strong> {decision.updated_by.name if decision.updated_by else 'Unknown'}</p>
             {f'<p><strong>Change reason:</strong> {change_reason}</p>' if change_reason else ''}
@@ -194,9 +204,9 @@ def notify_subscribers_decision_updated(db, decision, email_config, change_reaso
         """
 
         text_content = f"""
-Architecture Decision Updated
+Decision record updated
 
-ADR-{decision.id}: {decision.title}
+{decision_heading(decision)}
 Status: {decision.status.capitalize()}
 Updated by: {decision.updated_by.name if decision.updated_by else 'Unknown'}
 {f'Change reason: {change_reason}' if change_reason else ''}
@@ -241,14 +251,14 @@ def notify_decision_owner(email_config, decision, owner_email, owner_name=None, 
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #3f51b5;">Decision Owner Assignment</h2>
+            <h2 style="color: #3f51b5;">Decision owner assignment</h2>
 
             <p>Hi {name},</p>
 
-            <p>You have been assigned as the <strong>decision owner</strong> for the following architecture decision:</p>
+            <p>You have been assigned as the <strong>decision owner</strong> for the following decision:</p>
 
             <div style="background-color: #f5f5f5; padding: 16px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="margin: 0 0 8px 0; color: #1976d2;">{decision.display_id or f'ADR-{decision.id}'}: {decision.title}</h3>
+                <h3 style="margin: 0 0 8px 0; color: #1976d2;">{decision_heading(decision)}</h3>
                 <p style="margin: 4px 0;"><strong>Status:</strong> {decision.status.capitalize()}</p>
                 <p style="margin: 4px 0;"><strong>Created by:</strong> {creator_name}</p>
             </div>
@@ -256,8 +266,8 @@ def notify_decision_owner(email_config, decision, owner_email, owner_name=None, 
             {f'<div style="text-align: center; margin: 20px 0;"><a href="{decision_url}" style="display: inline-block; background-color: #3f51b5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold;">View Decision</a></div>' if decision_url else ''}
 
             <p style="color: #666; font-size: 14px;">
-                As the decision owner, you are recognized as the person who made this architectural decision.
-                You may be contacted for clarification or questions about this decision.
+                As the decision owner, you are recorded as the person who made this decision.
+                People may contact you with questions about it.
             </p>
 
             <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
@@ -270,20 +280,20 @@ def notify_decision_owner(email_config, decision, owner_email, owner_name=None, 
     """
 
     text_content = f"""
-Decision Owner Assignment
+Decision owner assignment
 
 Hi {name},
 
-You have been assigned as the decision owner for the following architecture decision:
+You have been assigned as the decision owner for the following decision:
 
-{decision.display_id or f'ADR-{decision.id}'}: {decision.title}
+{decision_heading(decision)}
 Status: {decision.status.capitalize()}
 Created by: {creator_name}
 
 {f'View decision: {decision_url}' if decision_url else ''}
 
-As the decision owner, you are recognized as the person who made this architectural decision.
-You may be contacted for clarification or questions about this decision.
+As the decision owner, you are recorded as the person who made this decision.
+People may contact you with questions about it.
 
 ---
 This is an automated notification from Decision Records.
@@ -354,7 +364,7 @@ If you didn't request access to {app_name}, you can safely ignore this email.
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
-def send_account_setup_email(email_config, user_name, user_email, setup_url, expires_in_hours, tenant_name=None, app_name="Architecture Decisions"):
+def send_account_setup_email(email_config, user_name, user_email, setup_url, expires_in_hours, tenant_name=None, app_name="Decision Records"):
     """Send an email to a new user to complete their account setup (for auto-approved signups)."""
     subject = f"Complete Your {app_name} Account Setup"
 
@@ -418,7 +428,7 @@ If you didn't sign up for {app_name}, you can safely ignore this email.
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
-def send_account_recovery_email(email_config, user_name, user_email, recovery_url, expires_in_hours, app_name="Architecture Decisions"):
+def send_account_recovery_email(email_config, user_name, user_email, recovery_url, expires_in_hours, app_name="Decision Records"):
     """Send an account recovery email to a user so they can reset their credentials."""
     subject = f"Reset Your {app_name} Credentials"
 
@@ -480,7 +490,7 @@ If you didn't request this password reset, you can safely ignore this email. You
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
-def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Architecture Decisions", recipient_email=None):
+def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Decision Records", recipient_email=None):
     """Send user feedback to the feedback inbox.
 
     Args:
@@ -545,7 +555,7 @@ This feedback was submitted through the {app_name} website.
     return send_email(email_config, target_email, subject, html_content, text_content)
 
 
-def send_contact_email(email_config, sender_name, sender_email, message, app_name="Architecture Decisions", recipient_email=None):
+def send_contact_email(email_config, sender_name, sender_email, message, app_name="Decision Records", recipient_email=None):
     """Send a "Contact Us" form message to the contact inbox.
 
     Args:
@@ -605,7 +615,7 @@ This message was submitted through the {app_name} website contact form.
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
-                                    area_of_interest=None, message=None, app_name="Architecture Decisions"):
+                                    area_of_interest=None, message=None, app_name="Decision Records"):
     """Send sponsorship inquiry to the sponsorship inbox."""
     subject = f"[{app_name}] Sponsorship Inquiry from {org_name}"
 

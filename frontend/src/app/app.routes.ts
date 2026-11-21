@@ -69,8 +69,8 @@ export const routes: Routes = [
         .catch(() => import('./components/landing/landing.component').then(m => m.LandingComponent)),
     data: {
       seo: {
-        title: 'Decision Records - Open Source Architecture Decision Records',
-        description: 'Decision Records is an open source platform for capturing and preserving the reasoning behind important architecture decisions.',
+        title: 'Decision Records - Open source decision records for teams',
+        description: 'Decision Records is an open source platform where teams record the decisions they make, why they made them and what follows from them.',
         canonicalPath: '/',
         index: true
       }

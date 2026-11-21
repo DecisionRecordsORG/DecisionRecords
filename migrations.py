@@ -181,6 +181,11 @@ MIGRATIONS = [
         "description": "Backfill tenant and auth OAuth provider columns",
         "migrate": lambda db: migrate_1_16_1(db)
     },
+    {
+        "version": "2.2.0",
+        "description": "Rename stored default display names to Decision Records",
+        "migrate": lambda db: migrate_2_2_0(db)
+    },
 ]
 
 
@@ -442,6 +447,45 @@ def migrate_1_16_1(db):
                 continue
             add_column(db, table_name, column_name, column_type, default=default)
             changes += 1
+
+    return changes
+
+
+# Stored display defaults that named the product "Architecture Decisions".
+# (table, column, old default, new default)
+RENAMED_DISPLAY_DEFAULTS = (
+    ('email_configs', 'from_name', 'Architecture Decisions', 'Decision Records'),
+    ('auth_configs', 'rp_name', 'Architecture Decisions', 'Decision Records'),
+    ('tenant_settings', 'rp_name', 'Architecture Decisions', 'Decision Records'),
+    ('spaces', 'description', 'Default space for all architecture decisions',
+     'Default space for all decisions'),
+)
+
+
+def migrate_2_2_0(db):
+    """Migration for v2.2.0 - rename stored default display names.
+
+    Data only. A value is changed only where it still equals the old default,
+    so names an administrator chose are kept. Running it again changes nothing.
+    These columns are display text: the email from-name, the passkey prompt
+    name (rp_name, not rp_id) and the default space description.
+    """
+    changes = 0
+
+    for table_name, column_name, old_default, new_default in RENAMED_DISPLAY_DEFAULTS:
+        if not table_exists(db, table_name) or not column_exists(db, table_name, column_name):
+            continue
+
+        with db.engine.connect() as conn:
+            result = conn.execute(
+                db.text(f"UPDATE {table_name} SET {column_name} = :new WHERE {column_name} = :old"),
+                {"new": new_default, "old": old_default}
+            )
+            conn.commit()
+
+        if result.rowcount and result.rowcount > 0:
+            logger.info(f"Renamed {result.rowcount} default value(s) in {table_name}.{column_name}")
+            changes += result.rowcount
 
     return changes
 

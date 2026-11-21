@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, flush, tick } from '@angular/core/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { MAT_DIALOG_DATA, MatDialogRef, MatDialog } from '@angular/material/dialog';
 import { MatSnackBar } from '@angular/material/snack-bar';
@@ -6,6 +6,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Subject, of, throwError } from 'rxjs';
 
 import { DecisionModalComponent, DecisionModalData } from './decision-modal.component';
+import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
 import { DecisionService } from '../../services/decision.service';
 import { SpaceService } from '../../services/space.service';
 import { AuthService } from '../../services/auth.service';
@@ -180,6 +181,42 @@ describe('DecisionModalComponent', () => {
     expect(component.tenantMembers).toEqual([]);
     expect(dialogRef.close).not.toHaveBeenCalled();
   }));
+
+  describe('field wording', () => {
+    function fieldText(control: string): { placeholder: string | null; hint: string | undefined } {
+      const input: HTMLElement = fixture.nativeElement.querySelector(`[formControlName="${control}"]`);
+      const hint = input.closest('mat-form-field')?.querySelector('mat-hint')?.textContent?.trim();
+      return { placeholder: input.getAttribute('placeholder'), hint };
+    }
+
+    it('shows the shared placeholder and hint for every field when creating', fakeAsync(() => {
+      openLoaded(createData);
+      fixture.detectChanges();
+      flush();
+
+      for (const control of ['title', 'context', 'decision', 'consequences'] as const) {
+        expect(fieldText(control)).toEqual(DECISION_FORM_COPY[control]);
+      }
+    }));
+
+    it('keeps the Context, Decision and Consequences labels', fakeAsync(() => {
+      openLoaded(createData);
+      fixture.detectChanges();
+      flush();
+
+      const labels = Array.from(fixture.nativeElement.querySelectorAll('mat-label'))
+        .map((label: any) => label.textContent.trim());
+      expect(labels).toEqual(jasmine.arrayContaining(['Title', 'Context', 'Decision', 'Consequences']));
+    }));
+
+    it('shows no writing hints while only viewing a decision', fakeAsync(() => {
+      openLoaded(viewData);
+      fixture.detectChanges();
+      flush();
+
+      expect(fieldText('context').hint).toBeUndefined();
+    }));
+  });
 
   it('describes the soft delete truthfully in the delete confirmation', () => {
     createModal();

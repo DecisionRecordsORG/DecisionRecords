@@ -11,7 +11,7 @@ RELATIONSHIP_PACKS: List[Dict[str, Any]] = [
     {
         "id": "core",
         "label": "Core",
-        "description": "Default relationship classes used across architecture decisions.",
+        "description": "Default relationship classes that fit any kind of decision.",
         "relationship_types": [
             "supersedes",
             "amends",
@@ -63,6 +63,41 @@ RELATIONSHIP_PACKS: List[Dict[str, Any]] = [
             "informs",
             "depends_on",
             "governs",
+        ],
+    },
+    {
+        "id": "people",
+        "label": "People & Policy",
+        "description": "Useful for hiring, workplace policy, and people management decisions.",
+        "relationship_types": [
+            "governs",
+            "implements",
+            "exception_to",
+            "sets_precedent_for",
+        ],
+    },
+    {
+        "id": "finance",
+        "label": "Finance & Procurement",
+        "description": "Useful for budget, spending, supplier, and contract decisions.",
+        "relationship_types": [
+            "funds",
+            "approves",
+            "constrains",
+            "exception_to",
+            "depends_on",
+        ],
+    },
+    {
+        "id": "product",
+        "label": "Product & Customer",
+        "description": "Useful for product direction, pricing, and customer commitment decisions.",
+        "relationship_types": [
+            "responds_to",
+            "takes_priority_over",
+            "informs",
+            "blocks",
+            "constrains",
         ],
     },
 ]
@@ -195,7 +230,86 @@ BUILTIN_RELATIONSHIP_TYPES: Dict[str, Dict[str, Any]] = {
         "directional": True,
         "has_status_effect": False,
     },
+    "exception_to": {
+        "key": "exception_to",
+        "label": "Exception to",
+        "inverse_label": "Has exception",
+        "description": "Represents an agreed exception to a policy or rule set by another decision.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "sets_precedent_for": {
+        "key": "sets_precedent_for",
+        "label": "Sets precedent for",
+        "inverse_label": "Follows precedent of",
+        "description": "Represents a decision that later decisions are expected to follow in similar cases.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "funds": {
+        "key": "funds",
+        "label": "Funds",
+        "inverse_label": "Funded by",
+        "description": "Represents a decision that provides the budget or money for another.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "approves": {
+        "key": "approves",
+        "label": "Approves",
+        "inverse_label": "Approved by",
+        "description": "Represents a decision that gives formal approval for another to go ahead.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "constrains": {
+        "key": "constrains",
+        "label": "Constrains",
+        "inverse_label": "Constrained by",
+        "description": "Represents a decision that sets a limit, such as a budget or contract term, that another must stay within.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "responds_to": {
+        "key": "responds_to",
+        "label": "Responds to",
+        "inverse_label": "Prompted",
+        "description": "Represents a decision made in response to feedback, a request, or an outcome recorded in another.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
+    "takes_priority_over": {
+        "key": "takes_priority_over",
+        "label": "Takes priority over",
+        "inverse_label": "Gives way to",
+        "description": "Represents a decision that comes first when both compete for the same people, time, or money.",
+        "builtin": True,
+        "directional": True,
+        "has_status_effect": False,
+    },
 }
+
+
+# Built-in types added after tenants could already define custom classes. A
+# tenant may have stored a custom class under one of these keys, and links
+# between decisions refer to it by that key. Such a class keeps working and
+# takes the place of the built-in type of the same key for that tenant.
+# Add the key here whenever a new built-in type is introduced.
+TENANT_OVERRIDABLE_BUILTIN_TYPE_KEYS = frozenset({
+    "exception_to",
+    "sets_precedent_for",
+    "funds",
+    "approves",
+    "constrains",
+    "responds_to",
+    "takes_priority_over",
+})
 
 
 PACK_INDEX = {pack["id"]: pack for pack in RELATIONSHIP_PACKS}
@@ -294,7 +408,7 @@ def _normalize_custom_types(raw_custom_types: Any) -> List[Dict[str, Any]]:
             raise ValueError(
                 f"custom relationship key '{key}' must match {CUSTOM_RELATIONSHIP_KEY_PATTERN.pattern}"
             )
-        if key in BUILTIN_RELATIONSHIP_TYPES:
+        if key in BUILTIN_RELATIONSHIP_TYPES and key not in TENANT_OVERRIDABLE_BUILTIN_TYPE_KEYS:
             raise ValueError(f"custom relationship key '{key}' conflicts with a built-in relationship type")
         if key in seen_keys:
             raise ValueError(f"custom relationship key '{key}' is duplicated")
@@ -335,8 +449,12 @@ def normalize_relationship_settings(config: Optional[Dict[str, Any]]) -> Dict[st
 
     selected_pack_ids = _normalize_pack_ids(config.get("selected_pack_ids"))
     custom_relationship_types = _normalize_custom_types(config.get("custom_relationship_types"))
-    builtin_type_ids = get_builtin_type_ids_for_packs(selected_pack_ids)
     custom_type_ids = [item["key"] for item in custom_relationship_types]
+    # A tenant's own class replaces a built-in type of the same key
+    builtin_type_ids = [
+        type_id for type_id in get_builtin_type_ids_for_packs(selected_pack_ids)
+        if type_id not in custom_type_ids
+    ]
     allowed_type_ids = set(builtin_type_ids) | set(custom_type_ids)
 
     raw_enabled_types = config.get("enabled_relationship_types")
@@ -376,7 +494,7 @@ def get_effective_relationship_catalog(config: Optional[Dict[str, Any]] = None) 
 
     effective_types: List[Dict[str, Any]] = []
     for type_id in get_builtin_type_ids_for_packs(selected_pack_ids):
-        if type_id in enabled_type_ids:
+        if type_id in enabled_type_ids and type_id not in custom_types_by_key:
             effective_types.append(_serialize_builtin_type(type_id))
 
     for custom_type in normalized_config["custom_relationship_types"]:
