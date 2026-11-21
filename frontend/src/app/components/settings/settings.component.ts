@@ -1468,8 +1468,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               <mat-card-content>
                 <p>Control how decisions can supersede, amend, depend on, or otherwise relate to one another in your organisation.</p>
                 <ul>
-                  <li><strong>Industry packs:</strong> enable built-in relationship classes that fit your work</li>
-                  <li><strong>Custom classes:</strong> define tenant-specific relationship labels when the built-ins are not enough</li>
+                  <li><strong>Packs:</strong> turn on built-in relationship classes that fit your team, from software delivery to finance, people and product</li>
+                  <li><strong>Custom classes:</strong> define your own relationship labels when the built-in ones are not enough</li>
                   <li><strong>Supersedes:</strong> automatically moves the older decision into superseded status</li>
                 </ul>
               </mat-card-content>
@@ -1484,7 +1484,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 <mat-card-header>
                   <mat-card-title>
                     <mat-icon>widgets</mat-icon>
-                    Industry Packs
+                    Relationship Packs
                   </mat-card-title>
                 </mat-card-header>
                 <mat-card-content>
@@ -4205,8 +4205,10 @@ export class SettingsComponent implements OnInit {
     }
 
     const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
+    // A custom class replaces a built-in class that has the same key
+    const customKeys = new Set(this.decisionRelationshipConfig.custom_relationship_types.map((type) => type.key));
     const builtinTypes = this.decisionRelationshipSettingsResponse.available_catalog.types.filter(
-      (type) => type.builtin && type.pack_ids.some((packId) => selectedPackIds.has(packId))
+      (type) => type.builtin && !customKeys.has(type.key) && type.pack_ids.some((packId) => selectedPackIds.has(packId))
     );
     const customTypes = this.decisionRelationshipConfig.custom_relationship_types.map((type) => ({
       key: type.key,
@@ -4236,10 +4238,11 @@ export class SettingsComponent implements OnInit {
       .filter((id) => selected.has(id));
 
     const selectedPackIds = new Set(this.decisionRelationshipConfig.selected_pack_ids);
-    const availableBuiltinTypeKeys = this.decisionRelationshipSettingsResponse.available_catalog.types
-      .filter((type) => type.builtin && type.pack_ids.some((candidatePackId) => selectedPackIds.has(candidatePackId)))
-      .map((type) => type.key);
     const customTypeKeys = this.decisionRelationshipConfig.custom_relationship_types.map((type) => type.key);
+    const availableBuiltinTypeKeys = this.decisionRelationshipSettingsResponse.available_catalog.types
+      .filter((type) => type.builtin && !customTypeKeys.includes(type.key)
+        && type.pack_ids.some((candidatePackId) => selectedPackIds.has(candidatePackId)))
+      .map((type) => type.key);
     const enabledKeys = new Set(
       this.decisionRelationshipConfig.enabled_relationship_types.filter(
         (typeKey) => availableBuiltinTypeKeys.includes(typeKey) || customTypeKeys.includes(typeKey)
