@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-21
+
 ### Fixed
 - Community Docker image failed at startup with `ModuleNotFoundError: No module named 'decision_relationships'` because the module was not copied into the image. `Dockerfile.community` now ships every root Python module
 - Saving SMTP settings in Community Edition returned a 500 error because the encryption key lookup required a private Enterprise module. The key is now read from `SMTP_ENCRYPTION_KEY`
@@ -104,7 +106,8 @@ Security-related changes and fixes
 
 ---
 
-[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.28...v2.1.0
 [2.0.28]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.27...v2.0.28
 [2.0.27]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v1.15.0...v2.0.27
