@@ -12,9 +12,14 @@ duration of a test. Tests that need the real provider module live in
 tests/test_google_oauth.py behind the Enterprise skip marker.
 """
 import ast
+import importlib
 import os
+import secrets
 import sys
+import types
 from datetime import datetime, timezone
+from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -170,3 +175,314 @@ class TestSessionCreationGoesThroughOneHelper:
             "session['user_id'] must only be set by auth.start_user_session(), "
             f"which also sets the session expiry. Offenders: {offenders}"
         )
+
+
+# ==================== Social sign-in stand-ins ====================
+
+APP_BASE = 'https://app.example.test'
+
+
+class FakeProvider:
+    """Stand-in for one Enterprise provider module, enough to drive app.py's routes."""
+
+    def __init__(self, name, module, initiate, callback, attrs, userinfo, feature=None,
+                 welcome_suffix=''):
+        self.name = name
+        self.module = module
+        self.initiate = initiate
+        self.callback = callback
+        self.attrs = attrs
+        self.userinfo = userinfo
+        self.feature = feature
+        self.welcome_suffix = welcome_suffix
+        self.states = {}
+
+    def generate_state(self, return_url=None, extra_data=None):
+        token = f'state-{len(self.states) + 1}-{secrets.token_urlsafe(8)}'
+        self.states[token] = {
+            'type': self.name,
+            'return_url': return_url,
+            'extra_data': extra_data or {},
+        }
+        return token
+
+    def verify_state(self, state):
+        return self.states.get(state)
+
+    def install(self, monkeypatch):
+        module = types.ModuleType(self.module)
+        for attr, value in self.attrs(self).items():
+            setattr(module, attr, value)
+
+        # Make the parent packages importable where the Enterprise tree is absent.
+        parts = self.module.split('.')
+        for depth in range(1, len(parts)):
+            parent = '.'.join(parts[:depth])
+            try:
+                importlib.import_module(parent)
+            except ImportError:
+                stub = types.ModuleType(parent)
+                stub.__path__ = []
+                monkeypatch.setitem(sys.modules, parent, stub)
+        monkeypatch.setitem(sys.modules, self.module, module)
+
+        if self.feature:
+            import feature_flags
+            monkeypatch.setitem(feature_flags.FEATURES, self.feature, True)
+        return self
+
+    def default_destination(self, domain):
+        return f'{APP_BASE}/{domain}{self.welcome_suffix}'
+
+    def with_welcome(self, url):
+        if not self.welcome_suffix:
+            return url
+        return url + ('&' if '?' in url else '?') + self.welcome_suffix.lstrip('?')
+
+
+def _google():
+    return FakeProvider(
+        name='google',
+        module='ee.backend.oauth_providers.google_oauth',
+        initiate='/auth/google',
+        callback='/auth/google/callback',
+        attrs=lambda p: {
+            'is_google_oauth_configured': lambda: True,
+            'get_google_client_id': lambda: 'test-google-client-id',
+            'get_google_client_secret': lambda: 'test-google-client-secret',
+            'generate_google_oauth_state': p.generate_state,
+            'verify_google_oauth_state': p.verify_state,
+            'GOOGLE_OAUTH_AUTHORIZE_URL': 'https://accounts.google.com/o/oauth2/v2/auth',
+            'GOOGLE_OAUTH_TOKEN_URL': 'https://oauth2.googleapis.com/token',
+            'GOOGLE_OAUTH_USERINFO_URL': 'https://www.googleapis.com/oauth2/v3/userinfo',
+            'GOOGLE_OAUTH_SCOPES': 'openid email profile',
+        },
+        userinfo=lambda email: {'email': email, 'name': 'Pat Example', 'sub': 'google-sub-1'},
+    )
+
+
+def _microsoft():
+    return FakeProvider(
+        name='microsoft',
+        module='ee.backend.oauth_providers.microsoft_oauth',
+        initiate='/auth/microsoft',
+        callback='/auth/microsoft/callback',
+        attrs=lambda p: {
+            'is_microsoft_oauth_configured': lambda: True,
+            'get_microsoft_client_id': lambda: 'test-ms-client-id',
+            'get_microsoft_client_secret': lambda: 'test-ms-client-secret',
+            'generate_microsoft_oauth_state': p.generate_state,
+            'verify_microsoft_oauth_state': p.verify_state,
+            'MICROSOFT_OAUTH_AUTHORIZE_URL': 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+            'MICROSOFT_OAUTH_TOKEN_URL': 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+            'MICROSOFT_GRAPH_USER_URL': 'https://graph.microsoft.com/v1.0/me',
+            'MICROSOFT_OAUTH_SCOPES': 'openid email profile User.Read',
+        },
+        userinfo=lambda email: {'mail': email, 'displayName': 'Pat Example', 'id': 'ms-object-1'},
+    )
+
+
+def _slack():
+    return FakeProvider(
+        name='slack',
+        module='ee.backend.slack.slack_security',
+        initiate='/auth/slack/oidc',
+        callback='/auth/slack/oidc/callback',
+        attrs=lambda p: {
+            'get_slack_client_id': lambda: 'test-slack-client-id',
+            'get_slack_client_secret': lambda: 'test-slack-client-secret',
+            'generate_slack_oidc_state': p.generate_state,
+            'verify_slack_oidc_state': p.verify_state,
+            'SLACK_OIDC_AUTHORIZE_URL': 'https://slack.com/openid/connect/authorize',
+            'SLACK_OIDC_TOKEN_URL': 'https://slack.com/api/openid.connect.token',
+            'SLACK_OIDC_USERINFO_URL': 'https://slack.com/api/openid.connect.userInfo',
+            'SLACK_OIDC_SCOPES': 'openid email profile',
+        },
+        userinfo=lambda email: {'ok': True, 'email': email, 'name': 'Pat Example', 'sub': 'U123'},
+        feature='slack_integration',
+        welcome_suffix='?slack_welcome=1',
+    )
+
+
+def _teams():
+    provider = FakeProvider(
+        name='teams',
+        module='ee.backend.teams.teams_security',
+        initiate='/auth/teams/oidc',
+        callback='/auth/teams/oidc/callback',
+        attrs=lambda p: {
+            'get_teams_bot_app_id': lambda: 'test-teams-app-id',
+            'generate_teams_oidc_state': p.generate_state,
+            'verify_teams_oidc_state': p.verify_state,
+            'exchange_teams_oidc_code': lambda code, redirect_uri: (dict(p.claims), 'access-token'),
+            'get_teams_user_info': lambda access_token: None,
+            'TEAMS_OIDC_SCOPES': 'openid email profile',
+        },
+        userinfo=lambda email: {},
+        feature='teams_integration',
+    )
+    provider.claims = {}
+    return provider
+
+
+PROVIDER_FACTORIES = {
+    'google': _google,
+    'microsoft': _microsoft,
+    'slack': _slack,
+    'teams': _teams,
+}
+SOCIAL_PROVIDERS = ['google', 'microsoft', 'slack']
+ALL_PROVIDERS = SOCIAL_PROVIDERS + ['teams']
+
+
+@pytest.fixture
+def oauth_env(real_app, monkeypatch):
+    """Real app plus a factory that installs a stand-in provider module."""
+    app_module, test_app = real_app
+    monkeypatch.setenv('APP_BASE_URL', APP_BASE)
+    monkeypatch.delenv('OAUTH_BASE_URL', raising=False)
+
+    def install(name):
+        return PROVIDER_FACTORIES[name]().install(monkeypatch)
+
+    return test_app, install
+
+
+def _http_mocks(provider, email):
+    token = Mock(ok=True, status_code=200)
+    token.json.return_value = {'access_token': 'provider-access-token'}
+    userinfo = Mock(ok=True, status_code=200)
+    userinfo.json.return_value = provider.userinfo(email)
+    return patch('requests.post', return_value=token), patch('requests.get', return_value=userinfo)
+
+
+def start_sign_in(client, provider, return_url=None, **kwargs):
+    """Call the initiate route and return (response, state)."""
+    query = {} if return_url is None else {'return_url': return_url}
+    response = client.get(provider.initiate, query_string=query, **kwargs)
+    assert response.status_code == 302, response.get_data(as_text=True)
+    state = parse_qs(urlparse(response.headers['Location']).query)['state'][0]
+    return response, state
+
+
+def finish_sign_in(client, provider, email, state, **kwargs):
+    """Call the callback route with the provider's HTTP calls mocked."""
+    if provider.name == 'teams':
+        provider.claims = {'email': email, 'name': 'Pat Example', 'tid': 'ms-tenant'}
+    post, get = _http_mocks(provider, email)
+    with post as post_mock, get:
+        response = client.get(provider.callback, query_string={'code': 'auth-code', 'state': state},
+                              **kwargs)
+    response.token_request = post_mock
+    return response
+
+
+def sign_in(client, provider, email, return_url=None):
+    _, state = start_sign_in(client, provider, return_url=return_url)
+    return finish_sign_in(client, provider, email, state)
+
+
+# ==================== Open redirect after OAuth ====================
+
+HOSTILE_RETURN_URLS = [
+    'https://evil.example/phish',
+    'http://evil.example',
+    '//evil.example',
+    '///evil.example',
+    '/\\evil.example',
+    '\\\\evil.example',
+    'javascript:alert(document.domain)',
+    'evil.example',
+    '@evil.example',
+    '/\t/evil.example',
+    '/%2F/evil.example',
+    '/%5Cevil.example',
+    '/acme.test\r\nSet-Cookie: session=stolen',
+]
+
+
+class TestOAuthReturnUrlIsSameSiteOnly:
+    """return_url travels in the OAuth state; it must never send the user off-site."""
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    @pytest.mark.parametrize('return_url', HOSTILE_RETURN_URLS)
+    def test_hostile_return_url_falls_back_to_tenant_home(self, oauth_env, provider_name, return_url):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'pat@acme.test', return_url=return_url)
+
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.default_destination('acme.test')
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    @pytest.mark.parametrize('return_url', HOSTILE_RETURN_URLS)
+    def test_callback_does_not_trust_return_url_already_in_state(self, oauth_env, provider_name,
+                                                                return_url):
+        """States minted before this fix (or by another code path) are validated too."""
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+        state = provider.generate_state(return_url=return_url)
+
+        response = finish_sign_in(client, provider, 'pat@acme.test', state)
+
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.default_destination('acme.test')
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    def test_hostile_return_url_is_not_carried_in_state(self, oauth_env, provider_name):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        client = test_app.test_client()
+
+        _, state = start_sign_in(client, provider, return_url='https://evil.example/phish')
+
+        assert provider.states[state]['return_url'] == '/'
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    @pytest.mark.parametrize('return_url', [
+        '/acme.test/decisions/42',
+        '/acme.test/decisions?status=accepted',
+    ])
+    def test_same_site_return_url_is_honoured(self, oauth_env, provider_name, return_url):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'pat@acme.test', return_url=return_url)
+
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.with_welcome(f'{APP_BASE}{return_url}')
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    @pytest.mark.parametrize('return_url', [None, '/', '/?utm=1', ''])
+    def test_missing_or_root_return_url_goes_to_tenant_home(self, oauth_env, provider_name, return_url):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'pat@acme.test', return_url=return_url)
+
+        assert response.status_code == 302
+        assert response.headers['Location'] == provider.default_destination('acme.test')
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    def test_redirect_stays_on_request_host_without_app_base_url(self, oauth_env, monkeypatch,
+                                                                 provider_name):
+        test_app, install = oauth_env
+        monkeypatch.delenv('APP_BASE_URL', raising=False)
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'pat@acme.test', return_url='https://evil.example')
+
+        assert response.status_code == 302
+        assert urlparse(response.headers['Location']).netloc in ('', 'localhost')
+        assert 'evil.example' not in response.headers['Location']

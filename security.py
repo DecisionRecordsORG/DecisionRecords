@@ -13,6 +13,7 @@ from flask import g, jsonify, request, session
 import logging
 import hashlib
 import hmac
+import re
 import secrets
 import time
 
@@ -197,6 +198,60 @@ def csrf_protect(f):
 
         return f(*args, **kwargs)
     return decorated_function
+
+
+# ==================== Redirect Target Validation ====================
+
+MAX_REDIRECT_PATH_LENGTH = 2000
+
+# Unreserved, sub-delimiter and path/query/fragment characters from RFC 3986.
+# Deliberately excludes backslashes, whitespace, control characters and
+# anything outside ASCII: browsers normalise several of those into "/" or drop
+# them, which is how "/\host" and "/<tab>/host" become "//host".
+_REDIRECT_PATH_ALLOWED = re.compile(r"/[A-Za-z0-9\-._~!$&'()*+,;=:@/?#%]*")
+_PERCENT_ESCAPE = re.compile(r'%(.{0,2})')
+# Escapes that would smuggle a separator, a dot segment or another escape
+# into the path once decoded by a proxy or the browser.
+_FORBIDDEN_PATH_ESCAPES = {0x2F, 0x5C, 0x2E, 0x25}
+
+
+def safe_redirect_path(value, default='/'):
+    """Return `value` if it is a same-site relative path, otherwise `default`.
+
+    Use this for every redirect target that originates from a request
+    (query string, form field, OAuth state). Only an absolute path on this
+    site is accepted: it must start with a single "/", so it can be appended
+    to a trusted base URL or sent as a relative Location without changing
+    host. Schemes, "//host", backslashes, whitespace, control characters,
+    malformed or separator-hiding percent escapes and over-long values are
+    all rejected rather than repaired.
+    """
+    if not isinstance(value, str) or not value:
+        return default
+
+    if len(value) > MAX_REDIRECT_PATH_LENGTH:
+        return default
+
+    if not _REDIRECT_PATH_ALLOWED.fullmatch(value):
+        return default
+
+    path = value.split('#', 1)[0].split('?', 1)[0]
+
+    # No empty segments: rules out "//host" and "/.//host" style targets.
+    if '//' in path:
+        return default
+
+    for match in _PERCENT_ESCAPE.finditer(value):
+        digits = match.group(1)
+        if not re.fullmatch(r'[0-9A-Fa-f]{2}', digits):
+            return default
+        code = int(digits, 16)
+        if code < 0x20 or code == 0x7F:
+            return default
+        if match.start() < len(path) and code in _FORBIDDEN_PATH_ESCAPES:
+            return default
+
+    return value
 
 
 # ==================== Rate Limiting Helpers ====================

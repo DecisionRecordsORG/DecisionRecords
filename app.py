@@ -34,7 +34,7 @@ from webauthn_auth import (
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
     generate_csrf_token, validate_csrf_token, get_request_csrf_token,
-    should_enforce_csrf, apply_security_headers,
+    should_enforce_csrf, apply_security_headers, safe_redirect_path,
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data, sanitize_string
 )
@@ -1392,7 +1392,7 @@ def slack_oidc_initiate():
         return redirect('/?error=slack_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -1466,7 +1466,7 @@ def slack_oidc_callback():
         logger.warning("Invalid or expired Slack OIDC state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Slack credentials
     client_id = get_slack_client_id()
@@ -1645,10 +1645,8 @@ def slack_oidc_callback():
         if return_url and return_url != '/' and not return_url.startswith('/?'):
             # User had a specific destination, append welcome flag
             separator = '&' if '?' in return_url else '?'
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}{separator}slack_welcome=1')
-            return redirect(f'{return_url}{separator}slack_welcome=1')
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}{separator}slack_welcome=1')
 
         # Redirect to tenant dashboard with welcome modal trigger
         return redirect(f'{app_base}/{domain}?slack_welcome=1')
@@ -1731,7 +1729,7 @@ def google_oauth_initiate():
         return redirect('/?error=google_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -1807,7 +1805,7 @@ def google_oauth_callback():
         logger.warning("Invalid or expired Google OAuth state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Google credentials
     client_id = get_google_client_id()
@@ -1982,10 +1980,8 @@ def google_oauth_callback():
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}')
-            return redirect(return_url)
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}')
 
         # Redirect to tenant dashboard
         return redirect(f'{app_base}/{domain}')
@@ -2068,7 +2064,7 @@ def microsoft_oauth_initiate():
         return redirect('/?error=microsoft_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -2145,7 +2141,7 @@ def microsoft_oauth_callback():
         logger.warning("Invalid or expired Microsoft OAuth state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Microsoft credentials
     client_id = get_microsoft_client_id()
@@ -2323,10 +2319,8 @@ def microsoft_oauth_callback():
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}')
-            return redirect(return_url)
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}')
 
         # Redirect to tenant dashboard
         return redirect(f'{app_base}/{domain}')
@@ -12130,7 +12124,7 @@ def teams_oidc_start():
         return jsonify({'error': 'Teams OIDC not configured'}), 500
 
     # Get return URL from query params
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate state
     state = generate_teams_oidc_state(return_url=return_url)
@@ -12192,7 +12186,7 @@ def teams_oidc_callback():
     if not state_data:
         return redirect('/login?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Build redirect URI (must match the one used in authorization)
     base_url = get_oauth_base_url()
@@ -12307,10 +12301,8 @@ def teams_oidc_callback():
 
     # Redirect to return URL or tenant home
     if return_url and return_url != '/' and not return_url.startswith('/?'):
-        # Ensure return_url is absolute if APP_BASE_URL is set
-        if return_url.startswith('/') and app_base:
-            return redirect(f'{app_base}{return_url}')
-        return redirect(return_url)
+        # return_url is a validated same-site path (safe_redirect_path)
+        return redirect(f'{app_base}{return_url}')
 
     # Redirect to tenant dashboard
     return redirect(f'{app_base}/{domain}')
