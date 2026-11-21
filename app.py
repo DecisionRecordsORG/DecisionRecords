@@ -29,7 +29,8 @@ from notifications import notify_subscribers_new_decision, notify_subscribers_de
 from webauthn_auth import (
     create_registration_options, verify_registration,
     create_authentication_options, verify_authentication,
-    get_user_credentials, delete_credential, get_auth_config, domain_requires_sso
+    get_user_credentials, delete_credential, get_auth_config, domain_requires_sso,
+    new_account_registration_refusal
 )
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
@@ -7309,6 +7310,14 @@ def api_get_tenant_admins():
     })
 
 
+def _signed_in_user():
+    """The User behind the current session, or None (anonymous or master account)."""
+    if is_master_account() or 'user_id' not in session:
+        return None
+    user = get_current_user()
+    return user if isinstance(user, User) else None
+
+
 @app.route('/api/webauthn/register/options', methods=['POST'])
 @rate_limit("10 per minute")
 def api_webauthn_register_options():
@@ -7328,45 +7337,59 @@ def api_webauthn_register_options():
         log_security_event('auth', f"WebAuthn setup registration for {email} (setup token)", severity='INFO')
 
         try:
-            options = create_registration_options(email, name, domain)
+            options = create_registration_options(email, name, domain, existing_user=setup_user)
             return jsonify(json.loads(options))
         except Exception as e:
             app.logger.error(f"WebAuthn setup registration options error: {e}")
             return jsonify({'error': 'Failed to generate registration options'}), 500
 
-    # Standard registration flow
-    email = data.get('email')
-    name = data.get('name')
+    raw_email = data.get('email')
+    raw_name = data.get('name')
+    email = sanitize_email(raw_email) if isinstance(raw_email, str) else None
+    name = raw_name if isinstance(raw_name, str) else None
+
+    # Signed-in user adding a passkey to their own account (profile page)
+    current_user = _signed_in_user()
+    if current_user:
+        if raw_email and email != (current_user.email or '').strip().lower():
+            log_security_event(
+                'auth', f"Passkey registration for another address refused (user {current_user.id})",
+                severity='WARNING')
+            return jsonify({'error': 'You can only add a passkey to your own account'}), 403
+
+        if domain_requires_sso(current_user.sso_domain):
+            return jsonify({'error': 'This domain requires SSO authentication'}), 400
+
+        if current_user.auth_type == 'sso':
+            return jsonify({'error': 'This email is registered with SSO. Please use SSO to log in.'}), 400
+
+        try:
+            options = create_registration_options(
+                current_user.email, current_user.name, current_user.sso_domain,
+                existing_user=current_user)
+            return jsonify(json.loads(options))
+        except Exception as e:
+            app.logger.error(f"WebAuthn add credential options error: {e}")
+            return jsonify({'error': 'Failed to generate registration options'}), 500
+
+    # No proven identity: this can only create a new account
+    if not raw_email:
+        return jsonify({'error': 'Email is required'}), 400
 
     if not email:
-        return jsonify({'error': 'Email is required'}), 400
+        return jsonify({'error': 'Invalid email format'}), 400
 
     # SECURITY: Always extract domain from email - never trust user input
     from auth import extract_domain_from_email
     domain = extract_domain_from_email(email)
 
-    if not domain:
-        return jsonify({'error': 'Invalid email format'}), 400
-
     # Log registration attempt
     log_security_event('auth', f"WebAuthn registration attempt for {email}", severity='INFO')
 
-    # Check auth config for this domain
-    auth_config = get_auth_config(domain)
-
-    # Check if SSO is configured and required for this domain
-    if domain_requires_sso(domain):
-        return jsonify({'error': 'This domain requires SSO authentication'}), 400
-
-    # Check if user already exists
-    existing_user = User.query.filter_by(email=email).first()
-    if existing_user and existing_user.auth_type == 'sso':
-        return jsonify({'error': 'This email is registered with SSO. Please use SSO to log in.'}), 400
-
-    # Check if registration is allowed for new users
-    if not existing_user:
-        if auth_config and not auth_config.allow_registration:
-            return jsonify({'error': 'Registration is not allowed for this domain'}), 400
+    refusal = new_account_registration_refusal(email, domain)
+    if refusal:
+        message, status = refusal
+        return jsonify({'error': message}), status
 
     try:
         options = create_registration_options(email, name, domain)
@@ -7389,10 +7412,13 @@ def api_webauthn_register_verify():
     if not credential:
         return jsonify({'error': 'Credential is required'}), 400
 
-    # Check for setup token flow
+    # Identities this request has proven control of: a setup/recovery token
+    # and/or a signed-in session. A passkey is only ever added to one of these.
     setup_user, _ = validate_setup_token()
+    current_user = _signed_in_user()
+    proven_user_ids = {u.id for u in (setup_user, current_user) if u}
 
-    user, error = verify_registration(credential, device_name)
+    user, error = verify_registration(credential, device_name, proven_user_ids=proven_user_ids)
 
     if error:
         return jsonify({'error': error}), 400
@@ -7549,7 +7575,8 @@ def api_add_user_credential():
         options = create_registration_options(
             g.current_user.email,
             g.current_user.name,
-            g.current_user.sso_domain
+            g.current_user.sso_domain,
+            existing_user=g.current_user
         )
         return jsonify(json.loads(options))
     except Exception as e:
