@@ -167,11 +167,24 @@ jobs:
             docker pull ghcr.io/decisionrecordsorg/decisionrecords:${{ github.ref_name }}
             ```
 
-            Or use docker-compose:
+            Run it (SQLite data is kept in the `decision-records-data` volume):
 
             ```bash
-            curl -O https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/docker-compose.yml
-            docker-compose up -d
+            docker run -d --name decision-records -p 3000:8000 \
+              -v decision-records-data:/data \
+              -e SECRET_KEY="$(openssl rand -hex 32)" \
+              -e MASTER_PASSWORD="$(openssl rand -hex 24)" \
+              ghcr.io/decisionrecordsorg/decisionrecords:${{ github.ref_name }}
+            ```
+
+            Then open http://localhost:3000.
+
+            The `docker-compose.yml` in this repository builds the image from source, so it needs a full checkout of this tag:
+
+            ```bash
+            git clone --branch ${{ github.ref_name }} --depth 1 https://github.com/${{ github.repository }}.git
+            cd DecisionRecords
+            docker compose up -d
             ```
 
             See [Self-Hosting Guide](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/self-hosting.md) for details.

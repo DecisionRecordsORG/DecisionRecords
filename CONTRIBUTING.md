@@ -69,13 +69,15 @@ cd ..
 uv pip install -r ee/requirements.txt
 ln -sfn ../../frontend/node_modules ee/frontend/node_modules
 # Run development server
-# Terminal 1: Backend
-FLASK_ENV=development python run_local.py
+# Terminal 1: Backend (Community Edition; without ee/ this is also the default)
+FLASK_ENV=development python run_local.py --community
 
-# Terminal 2: Frontend
+# Terminal 2: Frontend (Community Edition)
 cd frontend
-npm start
+npm start -- --configuration=community
 ```
+
+The default `npm start` and `npm run build` configurations resolve `@ee/*` imports to the private `ee/frontend` tree and fail in a public checkout. Use `--configuration=community` unless you have `ee/` checked out.
 
 Access the app at http://localhost:4200
 
@@ -90,6 +92,9 @@ DECISION_RECORDS_EDITION=enterprise AZURE_KEYVAULT_URL= uv run pytest tests/ -q 
 
 # Community/Enterprise boundary check
 uv run python scripts/check_ce_boundary.py
+
+# Community image check: every module app.py imports is shipped by Dockerfile.community
+uv run python scripts/check_ce_image_modules.py
 
 # Open-source artifact boundary check
 uv run python scripts/check_public_artifacts.py --mode staged

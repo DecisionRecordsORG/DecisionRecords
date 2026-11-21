@@ -24,8 +24,10 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - For Enterprise frontend typechecks, create the ignored local symlink `ln -sfn ../../frontend/node_modules ee/frontend/node_modules`, then run `npx tsc -p tsconfig.app.json --noEmit` from `frontend/`.
 - The private marketing site under `ee/marketing` expects Node 20 (`.nvmrc` / `package.json` engines). Its Angular workspace keeps the persistent disk cache off for local builds and keeps Google Fonts inlining off for production builds so macOS local builds do not crash in LMDB native cache code or depend on live font fetches.
 - Run local CE backend with `python run_local.py --community`.
-- Run Angular dev server from `frontend/` with `npm start`.
+- Run Angular dev server from `frontend/` with `npm start -- --configuration=community` (plain `npm start` needs the private `ee/` checkout).
 - Check the CE/EE boundary locally with `uv run python scripts/check_ce_boundary.py`.
+- Check that `Dockerfile.community` ships every module `app.py` imports with `uv run python scripts/check_ce_image_modules.py`.
+- With Docker available, boot a locally built Community image with `scripts/smoke_test_ce_image.sh <image>`; CI and the release workflow run the same script.
 - Check the open-source artifact boundary with `uv run python scripts/check_public_artifacts.py --mode staged`.
 - Validate the staged delivery contract with `uv run python scripts/check_delivery_contract.py --mode staged`.
 - List currently open delivery obligations with `uv run python scripts/list_open_obligations.py --format markdown`.

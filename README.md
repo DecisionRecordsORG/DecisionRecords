@@ -86,11 +86,12 @@ docker-compose --profile postgres up -d
 ### Manual Installation
 
 ```bash
-# Install Python dependencies
-pip install -r requirements.txt
+# Install Python dependencies (gunicorn is the production server and is not in requirements.txt)
+pip install -r requirements.txt gunicorn
 
-# Install and build frontend
-cd frontend && npm ci && npm run build && cd ..
+# Install and build the Community frontend
+# (the default build configuration needs the private ee/ modules and fails without them)
+cd frontend && npm ci && npm run build -- --configuration=community && cd ..
 
 # Set environment variables
 export SECRET_KEY=$(python -c "import secrets; print(secrets.token_hex(32))")
