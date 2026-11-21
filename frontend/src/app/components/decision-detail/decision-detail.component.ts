@@ -20,6 +20,7 @@ import { SpaceService } from '../../services/space.service';
 import { AdminService } from '../../services/admin.service';
 import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatalog, DecisionStatus, Space } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
 import { Observable, of } from 'rxjs';
 import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operators';
 
@@ -1262,7 +1263,7 @@ export class DecisionDetailComponent implements OnInit {
     const dialogRef = this.dialog.open(ConfirmDialogComponent, {
       data: {
         title: 'Delete Decision',
-        message: `Are you sure you want to delete ${this.decision?.display_id || 'ADR-' + this.decision?.id}? This action cannot be undone.`,
+        message: buildDecisionDeleteMessage(this.decision?.display_id || 'ADR-' + this.decision?.id),
         confirmText: 'Delete',
         cancelText: 'Cancel'
       }

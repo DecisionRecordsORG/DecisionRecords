@@ -354,6 +354,11 @@ test.describe('Decision Modal', () => {
     const confirmDialog = page.locator('mat-dialog-container:has-text("Delete Decision")');
     await expect(confirmDialog).toBeVisible({ timeout: 3000 });
 
+    // The copy describes the soft delete truthfully (30-day retention, no restore)
+    await expect(confirmDialog).toContainText('permanently erased after 30 days');
+    await expect(confirmDialog).toContainText('no restore option');
+    await expect(confirmDialog).not.toContainText('cannot be undone');
+
     // Confirm deletion
     const confirmDeleteButton = confirmDialog.locator('button:has-text("Delete")');
     await confirmDeleteButton.click();

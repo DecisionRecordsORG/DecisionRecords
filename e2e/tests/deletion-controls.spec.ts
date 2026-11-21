@@ -165,13 +165,14 @@ test.describe('Deletion Controls', () => {
     const dialogTitle = page.locator('h2:has-text("Delete Decision"), mat-dialog-container h2:has-text("Delete")');
     await expect(dialogTitle).toBeVisible({ timeout: 5000 });
 
-    // Check for warning message about deletion (should mention "cannot be undone" or similar)
+    // The message must describe the soft delete truthfully: hidden now, erased after
+    // the 30-day retention window, and no restore option in the app.
     const dialogMessage = page.locator('mat-dialog-content, .mat-mdc-dialog-content');
-    const messageText = await dialogMessage.textContent();
+    const messageText = (await dialogMessage.textContent()) || '';
 
-    // Assert that the message contains information about deletion
-    expect(messageText).toContain('delete');
-    expect(messageText?.toLowerCase()).toMatch(/cannot be undone|permanent|delete/i);
+    expect(messageText).toContain('permanently erased after 30 days');
+    expect(messageText).toContain('no restore option');
+    expect(messageText.toLowerCase()).not.toContain('cannot be undone');
 
     // Cancel the deletion (don't actually delete)
     const cancelButton = page.locator('button:has-text("Cancel")');

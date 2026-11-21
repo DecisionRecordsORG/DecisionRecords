@@ -3189,7 +3189,7 @@ def api_delete_decision(decision_id):
             'deleted_at': deletion_time.isoformat(),
             'expires_at': decision.deletion_expires_at.isoformat(),
             'retention_days': retention_days,
-            'note': f'This decision can be restored within {retention_days} days by an administrator.'
+            'note': f'This decision is hidden now and will be permanently deleted after {retention_days} days. There is no restore action in the app.'
         }
     })
 

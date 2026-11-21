@@ -845,6 +845,37 @@ class TestDecisionDeleteAPI:
         assert decision.deleted_at is not None
         assert decision.deleted_by_id == admin_user.id
 
+    def test_delete_response_describes_retention_truthfully(self, admin_client, test_tenant, admin_user):
+        """The delete response states the real retention window and promises no restore."""
+        decision = ArchitectureDecision(
+            title='Test Decision',
+            context='Test context',
+            decision='Test decision',
+            consequences='Test consequences',
+            status='accepted',
+            domain=test_tenant.domain,
+            tenant_id=test_tenant.id,
+            created_by_id=admin_user.id,
+            decision_number=1
+        )
+        db.session.add(decision)
+        db.session.commit()
+
+        response = admin_client.delete(f'/api/decisions/{decision.id}')
+
+        assert response.status_code == 200
+        details = response.get_json()['deletion_details']
+        assert details['retention_days'] == 30
+
+        db.session.refresh(decision)
+        assert decision.deletion_expires_at - decision.deleted_at == timedelta(days=30)
+
+        # No restore endpoint exists for decisions, so the note must not offer one.
+        note = details['note'].lower()
+        assert '30 days' in note
+        assert 'permanently deleted' in note
+        assert 'can be restored' not in note
+
     def test_steward_can_delete_decision(self, steward_client, test_tenant, steward_user):
         """Steward can soft-delete decision."""
         decision = ArchitectureDecision(

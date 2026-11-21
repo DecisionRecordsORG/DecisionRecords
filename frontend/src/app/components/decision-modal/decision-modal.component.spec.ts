@@ -110,4 +110,18 @@ describe('DecisionModalComponent', () => {
     expect(dialogRef.close).not.toHaveBeenCalled();
     expect(snackBar.open).not.toHaveBeenCalledWith('Failed to load decision', 'Close', { duration: 3000 });
   }));
+
+  it('describes the soft delete truthfully in the delete confirmation', () => {
+    component.decision = { ...mockDecision, display_id: 'DR-42' } as Decision;
+    const openSpy = spyOn((component as any).dialog, 'open').and.returnValue({ afterClosed: () => of(false) });
+
+    component.confirmDelete();
+
+    const message: string = (openSpy.calls.mostRecent().args[1] as any).data.message;
+    expect(message).toContain('DR-42');
+    expect(message).toContain('permanently erased after 30 days');
+    expect(message).toContain('no restore option');
+    expect(message).not.toContain('cannot be undone');
+    expect(decisionService.deleteDecision).not.toHaveBeenCalled();
+  });
 });
