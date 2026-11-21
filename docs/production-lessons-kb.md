@@ -83,6 +83,15 @@ Before building, deploying, or validating anything, identify which artifact is b
 - Enable hooks in both the public repo and `ee`, then verify them with `uv run python scripts/verify_git_hooks.py`.
 - Keep delivery obligations in repo state, not in memory. If a merge creates release or deploy follow-up work, record it through `.delivery/changes/*.toml` so the next session can derive what is still owed.
 
+## Edge Routing
+
+- Do not route static assets by `Referer`. Chrome sends the importing module (a `.js` URL) as `Referer` for dynamic `import()`, Safari sends the page; both Angular builds emit hashed chunks at the root, so neither the file name nor the `Referer` identifies the owning origin. Serving the app's HTML on the website host made every lazy route blank in Chrome while Safari worked.
+- The website host serves the website. App pages requested there are redirected (302, `no-store`) to the app host; only `/api/*` and `/auth/*` are proxied. Pages a third party embeds from the website host cannot be redirected and need an explicit exception with its own tests.
+- Never use a permanent redirect at the edge for app routing: browsers cache 301/308 indefinitely and a rollback cannot reach them.
+- Edge routing has a test suite in the private infrastructure repo. A routing change is not done until a table case covers it, and after every edge or Enterprise deploy the read-only handoff smoke check must pass.
+- The website-to-app sign-in depends on environment variables (`SESSION_COOKIE_DOMAIN`, `OAUTH_BASE_URL`, `APP_BASE_URL`, `USE_HTTPS`) that no workflow sets. Keep the committed environment template in the private infrastructure repo in step with the running configuration.
+- Test fixes on a path that is actually registered. A defect reported in a module that is never imported or routed is not live; confirm the route exists in the running app's URL map first.
+
 ## Deployment Rule
 
 Normal production deployments go through GitHub Actions and GitHub Environments. Local Azure CLI deploys are break-glass only and must be documented in the deployment notes for that incident.

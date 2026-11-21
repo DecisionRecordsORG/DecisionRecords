@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-ee-worker-routing-slack"
+title = "Advance ee for edge routing tests, Slack optional fields and app link base URL"
+summary = "Advances the private ee submodule to the merged commit that redirects app pages requested on the website host to the app host, adds edge routing tests and a read-only handoff smoke check, requires only a title in the Slack create-decision modals, and builds Slack and Teams links from one configured base URL. Adds the Enterprise-gated tests for the Slack change and records the edge routing lessons."
+change_type = "bugfix"
+surfaces = ["enterprise_only"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
