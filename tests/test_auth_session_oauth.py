@@ -1016,3 +1016,22 @@ class TestCsrfContractForWebsiteForms:
         assert token.headers['Access-Control-Allow-Origin'] == website_origin
         assert token.headers['Access-Control-Allow-Credentials'] == 'true'
         assert 'Access-Control-Allow-Origin' not in stranger.headers
+
+
+class TestProviderSessionsSurviveTheNextRequest:
+    """Each provider callback must leave a session that the next request accepts."""
+
+    @pytest.mark.parametrize('provider_name', ALL_PROVIDERS)
+    def test_signed_in_after_provider_callback(self, oauth_env, provider_name):
+        test_app, install = oauth_env
+        provider = install(provider_name)
+        make_user('pat@acme.test', password=STRONG_PASSWORD)
+        client = test_app.test_client()
+
+        assert sign_in(client, provider, 'pat@acme.test').status_code == 302
+
+        with client.session_transaction() as sess:
+            assert datetime.fromisoformat(sess['_expires_at']) > datetime.now(timezone.utc)
+        me = client.get('/api/user/me')
+        assert me.status_code == 200, me.get_json()
+        assert me.get_json()['email'] == 'pat@acme.test'
