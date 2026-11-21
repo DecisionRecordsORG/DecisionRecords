@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Community Docker image failed at startup with `ModuleNotFoundError: No module named 'decision_relationships'` because the module was not copied into the image. `Dockerfile.community` now ships every root Python module
+- Saving SMTP settings in Community Edition returned a 500 error because the encryption key lookup required a private Enterprise module. The key is now read from `SMTP_ENCRYPTION_KEY`
+- `python run_local.py` crashed in a checkout without the private `ee/` modules. It now runs Community Edition when they are absent
+- Release notes, README and CONTRIBUTING documented build and run commands that only worked with the private `ee/` modules or a full source checkout
+
+### Changed
+- CI and the release workflow now start the built Community image and require it to answer `/api/health` before the release workflow publishes anything
+- New `scripts/check_ce_image_modules.py` check fails when a module imported by `app.py` is not shipped by `Dockerfile.community`
+
 ## [2.1.0] - 2026-08-09
 
 ### Added

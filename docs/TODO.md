@@ -20,6 +20,13 @@ Update rules:
 
 ## Versioning / Releases
 
+- [ ] Publish Community `v2.1.1` to replace the broken `2.1.0` and `latest` images (missing `decision_relationships.py`), then pull the published image and run `scripts/smoke_test_ce_image.sh` against it.
+- [ ] Watch the first CI and release runs of the new image smoke test; it was written without a local Docker daemon and has only been exercised against a stand-in.
+- [ ] Confirm the published image manifest really contains `linux/arm64` and decide whether to smoke test it under emulation; the release gate only boots `linux/amd64`.
+- [ ] Align the interpreter used by backend tests (3.12) with the Community image (`python:3.11-slim`), or add a 3.11 test lane.
+- [ ] Make `docker-compose.yml` usable for self-hosters: the `postgres` profile starts a database the app is not pointed at, and the file builds from source so it cannot be used standalone.
+- [ ] Reconcile self-hosting docs with the shipped defaults: docs use `/data/decisions.db` and a `decision-records` container name, the image and compose file use `/data/architecture_decisions.db` and compose-generated names. Changing a default can orphan existing SQLite data, so decide deliberately.
+- [ ] Decide whether the default Angular build and serve configurations should be Community, so `npm start` and `npm run build` work in a public checkout without `--configuration=community`.
 - [ ] Verify the live marketing `/releases` page after the latest deploy finishes.
 - [ ] Decide whether the marketing `/releases` page should keep using the runtime GitHub Releases API or switch to a build-time release snapshot for stronger SEO and lower runtime dependency.
 - [ ] Decide whether release notes should stay GitHub-driven only or also be curated in-site.
