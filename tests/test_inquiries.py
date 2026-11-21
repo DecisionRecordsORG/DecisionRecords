@@ -604,3 +604,292 @@ class TestFeedbackForm:
         client.post('/api/feedback', json={**FEEDBACK, 'feedback': 'F' * 20000})
 
         assert stored()[0].message == 'F' * 5000
+
+
+# ==================== Super admin endpoints ====================
+
+SUPERADMIN_REQUESTS = [
+    ('get', '/api/superadmin/inquiries', None),
+    ('get', '/api/superadmin/inquiries/summary', None),
+    ('put', '/api/superadmin/inquiries/{id}/handled', {'handled': True}),
+    ('delete', '/api/superadmin/inquiries/{id}', None),
+]
+SUPERADMIN_IDS = ['list', 'summary', 'mark-handled', 'delete']
+
+
+def _call(test_client, method, url, body, inquiry_id):
+    kwargs = {'json': body} if body is not None else {}
+    return getattr(test_client, method)(url.format(id=inquiry_id), **kwargs)
+
+
+@pytest.mark.parametrize('method,url,body', SUPERADMIN_REQUESTS, ids=SUPERADMIN_IDS)
+class TestSuperadminInquiriesAuthorisation:
+
+    def test_anonymous_is_refused(self, client, method, url, body):
+        inquiry = add_inquiry()
+
+        response = _call(client, method, url, body, inquiry.id)
+
+        assert response.status_code == 401
+        assert response.get_json() == {'error': 'Authentication required'}
+        assert len(stored()) == 1 and stored()[0].handled is False
+
+    def test_ordinary_user_is_refused(self, member_client, method, url, body):
+        inquiry = add_inquiry()
+
+        response = _call(member_client, method, url, body, inquiry.id)
+
+        assert response.status_code == 403
+        assert response.get_json() == {'error': 'Master account access required'}
+        assert len(stored()) == 1 and stored()[0].handled is False
+
+    def test_tenant_admin_is_refused(self, admin_client, method, url, body):
+        inquiry = add_inquiry()
+
+        response = _call(admin_client, method, url, body, inquiry.id)
+
+        assert response.status_code == 403
+        assert response.get_json() == {'error': 'Master account access required'}
+        assert len(stored()) == 1 and stored()[0].handled is False
+
+    def test_super_admin_is_allowed(self, master_client, method, url, body):
+        inquiry = add_inquiry()
+
+        response = _call(master_client, method, url, body, inquiry.id)
+
+        assert response.status_code == 200
+
+
+class TestSuperadminInquiryList:
+
+    def test_empty_list(self, master_client):
+        body = master_client.get('/api/superadmin/inquiries').get_json()
+
+        assert body == {'total': 0, 'limit': 50, 'offset': 0, 'unhandled_total': 0, 'items': []}
+
+    def test_newest_first_with_every_field(self, master_client):
+        old = add_inquiry(days_ago=3, name='Old')
+        new = add_inquiry('sponsorship', days_ago=0, name='New', organisation='Acme',
+                          area_of_interest='Sponsorship', team_focus='Hiring', team_size='6-25')
+
+        body = master_client.get('/api/superadmin/inquiries').get_json()
+
+        assert [item['id'] for item in body['items']] == [new.id, old.id]
+        assert body['total'] == 2 and body['unhandled_total'] == 2
+        first = body['items'][0]
+        assert first['source'] == 'sponsorship'
+        assert first['organisation'] == 'Acme'
+        assert first['team_focus'] == 'Hiring'
+        assert first['team_size'] == '6-25'
+        assert first['team_size_label'] == '6 to 25 people'
+        assert first['email_sent'] is False
+        assert first['handled'] is False
+        assert first['redacted'] is False
+        assert set(first) >= {
+            'id', 'source', 'name', 'email', 'organisation', 'area_of_interest', 'message',
+            'team_focus', 'team_size', 'user_id', 'tenant_domain', 'created_at', 'email_sent',
+            'handled', 'handled_at', 'handled_by', 'contact_consent',
+        }
+
+    def test_paging(self, master_client):
+        ids = [add_inquiry(days_ago=10 - n, name=f'Sender {n}').id for n in range(5)]
+        newest_first = list(reversed(ids))
+
+        first = master_client.get('/api/superadmin/inquiries?limit=2').get_json()
+        second = master_client.get('/api/superadmin/inquiries?limit=2&offset=2').get_json()
+        last = master_client.get('/api/superadmin/inquiries?limit=2&offset=4').get_json()
+        beyond = master_client.get('/api/superadmin/inquiries?limit=2&offset=40').get_json()
+
+        assert [item['id'] for item in first['items']] == newest_first[:2]
+        assert [item['id'] for item in second['items']] == newest_first[2:4]
+        assert [item['id'] for item in last['items']] == newest_first[4:]
+        assert beyond['items'] == []
+        for page in (first, second, last, beyond):
+            assert page['total'] == 5 and page['limit'] == 2
+
+    def test_limit_is_capped(self, master_client):
+        assert master_client.get('/api/superadmin/inquiries?limit=5000').get_json()['limit'] == 200
+        assert master_client.get('/api/superadmin/inquiries?limit=0').get_json()['limit'] == 1
+        assert master_client.get('/api/superadmin/inquiries?offset=-5').get_json()['offset'] == 0
+
+    @pytest.mark.parametrize('query', ['limit=abc', 'offset=1.5', 'source=newsletter', 'handled=maybe'])
+    def test_invalid_query_is_rejected(self, master_client, query):
+        response = master_client.get(f'/api/superadmin/inquiries?{query}')
+
+        assert response.status_code == 400
+        assert 'error' in response.get_json()
+
+    def test_filter_by_source(self, master_client):
+        add_inquiry('contact')
+        add_inquiry('feedback')
+        add_inquiry('feedback')
+
+        body = master_client.get('/api/superadmin/inquiries?source=feedback').get_json()
+
+        assert body['total'] == 2
+        assert {item['source'] for item in body['items']} == {'feedback'}
+
+    def test_filter_by_handled_state(self, master_client):
+        add_inquiry(name='Open')
+        add_inquiry(name='Done', handled=True)
+
+        handled = master_client.get('/api/superadmin/inquiries?handled=true').get_json()
+        unhandled = master_client.get('/api/superadmin/inquiries?handled=false').get_json()
+        everything = master_client.get('/api/superadmin/inquiries?handled=').get_json()
+
+        assert [item['name'] for item in handled['items']] == ['Done']
+        assert [item['name'] for item in unhandled['items']] == ['Open']
+        assert everything['total'] == 2
+        # The unhandled count ignores the filter: it feeds the navigation badge
+        assert handled['unhandled_total'] == 1
+
+    def test_filters_combine(self, master_client):
+        add_inquiry('contact', handled=True)
+        add_inquiry('feedback', handled=True)
+        add_inquiry('feedback')
+
+        body = master_client.get('/api/superadmin/inquiries?source=feedback&handled=true').get_json()
+
+        assert body['total'] == 1
+
+
+class TestSuperadminInquiryActions:
+
+    def test_mark_handled_records_who_and_when(self, master_client):
+        inquiry = add_inquiry()
+
+        response = master_client.put(f'/api/superadmin/inquiries/{inquiry.id}/handled', json={'handled': True})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['message'] == 'Inquiry marked as handled'
+        assert body['inquiry']['handled'] is True
+        assert body['inquiry']['handled_by'] == DEFAULT_MASTER_USERNAME
+        assert body['inquiry']['handled_at'] is not None
+        assert stored()[0].handled is True
+
+    def test_mark_unhandled_clears_who_and_when(self, master_client):
+        inquiry = add_inquiry(handled=True, handled_by='admin', handled_at=datetime.now(timezone.utc))
+
+        response = master_client.put(f'/api/superadmin/inquiries/{inquiry.id}/handled', json={'handled': False})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body['message'] == 'Inquiry marked as not handled'
+        assert body['inquiry']['handled'] is False
+        assert body['inquiry']['handled_by'] is None
+        assert body['inquiry']['handled_at'] is None
+
+    @pytest.mark.parametrize('body', [None, {}, {'handled': None}, {'handled': 'yes'}, {'handled': 1}, ['true']])
+    def test_handled_must_be_a_boolean(self, master_client, body):
+        inquiry = add_inquiry()
+
+        response = master_client.put(f'/api/superadmin/inquiries/{inquiry.id}/handled', json=body)
+
+        assert response.status_code == 400
+        assert response.get_json() == {'error': 'handled must be true or false'}
+        assert stored()[0].handled is False
+
+    def test_mark_handled_unknown_id_is_404(self, master_client):
+        response = master_client.put('/api/superadmin/inquiries/9999/handled', json={'handled': True})
+
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Inquiry not found'}
+
+    def test_delete_removes_only_that_inquiry(self, master_client):
+        keep = add_inquiry(name='Keep')
+        remove = add_inquiry(name='Remove')
+
+        response = master_client.delete(f'/api/superadmin/inquiries/{remove.id}')
+
+        assert response.status_code == 200
+        assert response.get_json() == {'message': 'Inquiry deleted'}
+        assert [inquiry.id for inquiry in stored()] == [keep.id]
+
+    def test_delete_unknown_id_is_404(self, master_client):
+        response = master_client.delete('/api/superadmin/inquiries/9999')
+
+        assert response.status_code == 404
+        assert response.get_json() == {'error': 'Inquiry not found'}
+
+    @pytest.mark.parametrize('method', ['put', 'delete'])
+    def test_writes_need_a_csrf_token(self, master_client, method):
+        inquiry = add_inquiry()
+        url = f'/api/superadmin/inquiries/{inquiry.id}' + ('/handled' if method == 'put' else '')
+
+        response = getattr(master_client, method)(
+            url, json={'handled': True}, environ_overrides={'HTTP_X_CSRF_TOKEN': ''}
+        )
+
+        assert response.status_code == 403
+        assert len(stored()) == 1 and stored()[0].handled is False
+
+
+class TestInterestSummary:
+
+    def test_empty_installation(self, master_client):
+        body = master_client.get('/api/superadmin/inquiries/summary').get_json()
+
+        assert body['tenants']['total'] == 0
+        assert body['inquiries'] == {
+            'total': 0, 'unhandled': 0, 'not_emailed': 0,
+            'by_source': [
+                {'source': 'contact', 'count': 0},
+                {'source': 'sponsorship', 'count': 0},
+                {'source': 'feedback', 'count': 0},
+            ],
+            'by_team_size': body['tenants']['by_team_size'],
+        }
+        assert [row['code'] for row in body['tenants']['by_team_size']] == list(TEAM_SIZE_CODES) + [None]
+        assert all(row['count'] == 0 for row in body['tenants']['by_team_size'])
+        assert body['team_focus_answers'] == []
+
+    def test_counts_and_distinct_answers(self, master_client):
+        small = _make_tenant('small.test', 'Small')
+        small.team_size, small.team_focus = '1-5', 'Hiring'
+        other = _make_tenant('other.test', 'Other')
+        other.team_size, other.team_focus = '1-5', '  hiring '
+        large = _make_tenant('large.test', 'Large')
+        large.team_size, large.team_focus = '501+', 'Clinical protocols'
+        _make_tenant('silent.test', 'Silent')
+        deleted = _make_tenant('gone.test', 'Gone')
+        deleted.team_size, deleted.team_focus = '6-25', 'Should not be listed'
+        deleted.deleted_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        add_inquiry('contact', team_focus='Hiring', team_size='6-25', email_sent=True)
+        add_inquiry('contact', team_focus='Supplier choices', handled=True)
+        add_inquiry('feedback')
+
+        body = master_client.get('/api/superadmin/inquiries/summary').get_json()
+
+        tenant_sizes = {row['code']: row['count'] for row in body['tenants']['by_team_size']}
+        assert body['tenants']['total'] == 4
+        assert body['tenants']['with_team_focus'] == 3
+        assert tenant_sizes == {'1-5': 2, '6-25': 0, '26-100': 0, '101-500': 0, '501+': 1, None: 1}
+
+        inquiry_sizes = {row['code']: row['count'] for row in body['inquiries']['by_team_size']}
+        assert body['inquiries']['total'] == 3
+        assert body['inquiries']['unhandled'] == 2
+        assert body['inquiries']['not_emailed'] == 2
+        assert inquiry_sizes['6-25'] == 1 and inquiry_sizes[None] == 2
+        assert {row['source']: row['count'] for row in body['inquiries']['by_source']} == {
+            'contact': 2, 'sponsorship': 0, 'feedback': 1,
+        }
+
+        answers = {entry['text']: (entry['tenants'], entry['inquiries']) for entry in body['team_focus_answers']}
+        assert answers == {
+            'Clinical protocols': (1, 0),
+            'Hiring': (2, 1),
+            'Supplier choices': (0, 1),
+        }
+        assert [entry['text'] for entry in body['team_focus_answers']] == sorted(answers, key=str.lower)
+
+    def test_labels_are_given_for_every_size(self, master_client):
+        body = master_client.get('/api/superadmin/inquiries/summary').get_json()
+
+        labels = [row['label'] for row in body['tenants']['by_team_size']]
+        assert labels == [
+            '1 to 5 people', '6 to 25 people', '26 to 100 people', '101 to 500 people',
+            'More than 500 people', 'Not answered',
+        ]

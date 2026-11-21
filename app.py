@@ -8635,6 +8635,191 @@ def api_login_history_stats():
     })
 
 
+# ============================================================================
+# Superadmin Inquiries (messages from the contact, sponsorship and feedback forms)
+# ============================================================================
+
+def _query_int(name, default, minimum, maximum):
+    """A bounded integer query parameter, or None when it is not a whole number."""
+    raw = request.args.get(name)
+    if raw is None or raw == '':
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return max(minimum, min(value, maximum))
+
+
+def _query_bool(name):
+    """(given, value) for a true/false query parameter. value is None when it is neither."""
+    raw = request.args.get(name)
+    if raw is None or raw == '':
+        return False, None
+    lowered = raw.strip().lower()
+    if lowered in ('true', '1'):
+        return True, True
+    if lowered in ('false', '0'):
+        return True, False
+    return True, None
+
+
+@app.route('/api/superadmin/inquiries', methods=['GET'])
+@master_required
+def api_list_inquiries():
+    """List stored inquiries, newest first (super admin only).
+
+    Query params:
+    - limit: Number of records to return (default 50, max 200)
+    - offset: Number of records to skip (default 0)
+    - source: 'contact', 'sponsorship' or 'feedback'
+    - handled: 'true' or 'false'
+    """
+    limit = _query_int('limit', 50, 1, 200)
+    offset = _query_int('offset', 0, 0, 10 ** 9)
+    if limit is None or offset is None:
+        return jsonify({'error': 'limit and offset must be whole numbers'}), 400
+
+    source = request.args.get('source') or None
+    if source is not None and source not in Inquiry.SOURCES:
+        return jsonify({'error': f"source must be one of: {', '.join(Inquiry.SOURCES)}"}), 400
+
+    handled_given, handled = _query_bool('handled')
+    if handled_given and handled is None:
+        return jsonify({'error': 'handled must be true or false'}), 400
+
+    query = Inquiry.query
+    if source:
+        query = query.filter(Inquiry.source == source)
+    if handled_given:
+        query = query.filter(Inquiry.handled.is_(handled))
+
+    total = query.count()
+    items = query.order_by(Inquiry.created_at.desc(), Inquiry.id.desc()).offset(offset).limit(limit).all()
+
+    return jsonify({
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'unhandled_total': Inquiry.query.filter(Inquiry.handled.is_(False)).count(),
+        'items': [item.to_dict() for item in items]
+    })
+
+
+@app.route('/api/superadmin/inquiries/summary', methods=['GET'])
+@master_required
+def api_inquiries_summary():
+    """Interest summary (super admin only): who is interested and what kind of team they are.
+
+    Plain counts and the distinct team focus answers as they were typed.
+    No analysis of the free text.
+    """
+    def by_team_size(rows):
+        counts = {code: 0 for code in TEAM_SIZE_CODES}
+        not_given = 0
+        for code, count in rows:
+            if code in counts:
+                counts[code] += count
+            else:
+                not_given += count
+        result = [
+            {'code': code, 'label': label, 'count': counts[code]}
+            for code, label in TEAM_SIZE_OPTIONS
+        ]
+        result.append({'code': None, 'label': 'Not answered', 'count': not_given})
+        return result
+
+    active_tenants = Tenant.query.filter(Tenant.deleted_at.is_(None))
+    tenant_sizes = db.session.query(Tenant.team_size, db.func.count(Tenant.id)).filter(
+        Tenant.deleted_at.is_(None)
+    ).group_by(Tenant.team_size).all()
+    inquiry_sizes = db.session.query(Inquiry.team_size, db.func.count(Inquiry.id)).group_by(
+        Inquiry.team_size
+    ).all()
+    source_counts = dict(db.session.query(Inquiry.source, db.func.count(Inquiry.id)).group_by(
+        Inquiry.source
+    ).all())
+
+    # Distinct answers, compared without regard to case or surrounding spaces
+    answers = {}
+
+    def add_answer(text, origin):
+        if not text or not text.strip():
+            return
+        key = text.strip().lower()
+        entry = answers.setdefault(key, {'text': text.strip(), 'tenants': 0, 'inquiries': 0})
+        entry[origin] += 1
+
+    for (text,) in db.session.query(Tenant.team_focus).filter(
+        Tenant.deleted_at.is_(None), Tenant.team_focus.isnot(None)
+    ).all():
+        add_answer(text, 'tenants')
+    for (text,) in db.session.query(Inquiry.team_focus).filter(Inquiry.team_focus.isnot(None)).all():
+        add_answer(text, 'inquiries')
+
+    return jsonify({
+        'tenants': {
+            'total': active_tenants.count(),
+            'with_team_focus': active_tenants.filter(
+                Tenant.team_focus.isnot(None), Tenant.team_focus != ''
+            ).count(),
+            'by_team_size': by_team_size(tenant_sizes),
+        },
+        'inquiries': {
+            'total': Inquiry.query.count(),
+            'unhandled': Inquiry.query.filter(Inquiry.handled.is_(False)).count(),
+            'not_emailed': Inquiry.query.filter(Inquiry.email_sent.is_(False)).count(),
+            'by_source': [
+                {'source': source, 'count': source_counts.get(source, 0)}
+                for source in Inquiry.SOURCES
+            ],
+            'by_team_size': by_team_size(inquiry_sizes),
+        },
+        'team_focus_answers': sorted(answers.values(), key=lambda entry: entry['text'].lower()),
+    })
+
+
+@app.route('/api/superadmin/inquiries/<int:inquiry_id>/handled', methods=['PUT'])
+@master_required
+def api_set_inquiry_handled(inquiry_id):
+    """Mark an inquiry handled or unhandled (super admin only). Body: {"handled": true|false}."""
+    inquiry = db.session.get(Inquiry, inquiry_id)
+    if not inquiry:
+        return jsonify({'error': 'Inquiry not found'}), 404
+
+    data = request.get_json(silent=True)
+    handled = data.get('handled') if isinstance(data, dict) else None
+    if not isinstance(handled, bool):
+        return jsonify({'error': 'handled must be true or false'}), 400
+
+    inquiry.handled = handled
+    if handled:
+        inquiry.handled_at = datetime.now(timezone.utc)
+        inquiry.handled_by = getattr(g.current_user, 'username', None) or 'super_admin'
+    else:
+        inquiry.handled_at = None
+        inquiry.handled_by = None
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Inquiry marked as handled' if handled else 'Inquiry marked as not handled',
+        'inquiry': inquiry.to_dict()
+    })
+
+
+@app.route('/api/superadmin/inquiries/<int:inquiry_id>', methods=['DELETE'])
+@master_required
+def api_delete_inquiry(inquiry_id):
+    """Permanently delete an inquiry (super admin only)."""
+    inquiry = db.session.get(Inquiry, inquiry_id)
+    if not inquiry:
+        return jsonify({'error': 'Inquiry not found'}), 404
+
+    db.session.delete(inquiry)
+    db.session.commit()
+    return jsonify({'message': 'Inquiry deleted'})
+
+
 @app.route('/api/tenants', methods=['GET'])
 @master_required
 def api_list_tenants():

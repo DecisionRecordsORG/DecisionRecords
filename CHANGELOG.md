@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The app has a complete icon set: `favicon.ico`, an SVG icon, an Apple touch icon, 192 and 512 pixel icons and a web manifest. It had only an SVG icon, which is hard to see on dark browser tabs
 - Messages from the website contact form, the "Get in touch" dialog and the in-app feedback dialog are stored before the notification email is sent, so a message is no longer lost when email is not set up or the send fails. No IP address or user agent is stored
 - `/api/contact`, `/api/sponsorship` and `/api/feedback` accept an optional `team_focus` ("What does your team make decisions about?", up to 200 characters) and an optional `team_size` code, store them with the message and include the team focus in the contact and "Get in touch" notification emails
+- Super admins have an Inquiries page listing stored messages newest first, with filters by form and status, a detail view, mark as handled, and delete with confirmation. Messages that were never emailed are marked "Not emailed". The dashboard shows how many inquiries are not handled
 
 ### Changed
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
@@ -38,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Community Edition could not initialise its database on a PostgreSQL server without TLS, which is the setup shown in the self-hosting guide: the start-up connection check forced `sslmode=require` whatever `DATABASE_URL` said, and `/health` stayed unhealthy. The check now uses the same connection settings as the rest of the application, so `sslmode` in `DATABASE_URL` decides
 - A rate-limited request was answered with 500 "An internal server error occurred" instead of 429, and a request with the wrong HTTP method with 500 instead of 405. HTTP errors now keep their status. API paths answer `{ "error": ... }`, and a 429 says "Too many requests. Please wait a minute and try again." with a `Retry-After` header, which is what the sign-in pages and the contact and feedback forms now show
 - `/api/sponsorship` answered 500 when an optional field was sent as JSON `null`, and `/api/feedback` answered 500 for `null` fields and for a body that was not JSON. All three form endpoints now treat missing, `null` and wrong-typed optional fields as not given and answer 400 for an invalid body
+- End-to-end tests: the sign-in helpers typed into the server-rendered form before the app was running, lost the text when it started, and timed out on a disabled button. They now fill the form until the app has taken the values
 
 ## [2.1.1] - 2026-11-21
 

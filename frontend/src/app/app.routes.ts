@@ -172,6 +172,11 @@ export const routes: Routes = [
     loadComponent: () => import('./components/superadmin-settings/superadmin-settings.component').then(m => m.SuperadminSettingsComponent),
     canActivate: [masterGuard]
   },
+  {
+    path: 'superadmin/inquiries',
+    loadComponent: () => import('./components/superadmin-inquiries/superadmin-inquiries.component').then(m => m.SuperadminInquiriesComponent),
+    canActivate: [masterGuard]
+  },
 
   // ============================================================================
   // ENTERPRISE EDITION ROUTES

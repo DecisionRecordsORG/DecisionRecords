@@ -1,7 +1,31 @@
-import { Page, APIRequestContext } from '@playwright/test';
+import { Page, APIRequestContext, Locator, expect } from '@playwright/test';
 
 // E2E tests use port 5002 to avoid conflicts with development backend on 5001
 const API_URL = 'http://localhost:5002';
+
+/**
+ * Fill a form and wait until its submit button is enabled.
+ *
+ * The Angular dev server sends server-rendered HTML, so the form's inputs are
+ * in the page before the app has started in the browser. Text typed into them
+ * that early is thrown away when the app starts and binds the (empty) form,
+ * which left the submit button disabled and the login helpers waiting until
+ * they timed out. The submit button is only enabled by the running app once
+ * the form is valid, so filling again until it is enabled is a reliable sign
+ * that the values were really taken.
+ */
+export async function fillFormUntilReady(
+  fields: Array<[Locator, string]>,
+  submitButton: Locator,
+  timeout: number = 20000
+): Promise<void> {
+  await expect(async () => {
+    for (const [field, value] of fields) {
+      await field.fill(value);
+    }
+    await expect(submitButton).toBeEnabled({ timeout: 1000 });
+  }).toPass({ timeout });
+}
 
 /**
  * Login as a tenant user with email/password
@@ -21,10 +45,10 @@ export async function loginAsUser(page: Page, email: string, password: string): 
   // Wait for email input and fill
   await page.waitForSelector('[data-testid="email-input"]', { timeout: 10000 });
   const emailInput = page.locator('[data-testid="email-input"]');
-  await emailInput.fill(email);
+  const continueButton = page.locator('[data-testid="continue-button"]');
+  await fillFormUntilReady([[emailInput, email]], continueButton);
 
   // Click continue/sign in to proceed
-  const continueButton = page.locator('[data-testid="continue-button"]');
   await continueButton.click();
 
   // Wait for login view (tenant-login shows password form directly if user has password)
@@ -76,16 +100,13 @@ export async function loginAsSuperAdmin(page: Page, username: string = 'admin', 
   // Wait for login form to be ready
   await page.waitForSelector('[data-testid="username-input"]', { timeout: 10000 });
 
-  // Fill username using data-testid
+  // Fill username and password, again if the app was not running yet the first time
   const usernameInput = page.locator('[data-testid="username-input"]');
-  await usernameInput.fill(username);
-
-  // Fill password
   const passwordInput = page.locator('[data-testid="password-input"]');
-  await passwordInput.fill(password);
+  const loginButton = page.locator('[data-testid="login-button"]');
+  await fillFormUntilReady([[usernameInput, username], [passwordInput, password]], loginButton);
 
   // Click login and wait for navigation to complete
-  const loginButton = page.locator('[data-testid="login-button"]');
 
   // Wait for both the navigation and the network to be idle
   // This ensures the login request completes and redirect happens
