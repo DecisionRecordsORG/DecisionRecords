@@ -12344,6 +12344,8 @@ def teams_oidc_callback():
             global_role=GlobalRole.PROVISIONAL_ADMIN if is_first_member else GlobalRole.USER
         )
         db.session.add(membership)
+        # admin_required reads the user flag, as for first users of other sign-up paths
+        user.is_admin = is_first_member
         db.session.commit()
 
     # Log successful Teams OIDC login

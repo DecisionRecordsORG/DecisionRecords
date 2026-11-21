@@ -1071,6 +1071,9 @@ class TestTeamsFirstSignIn:
         membership = TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first()
         assert membership is not None
         assert membership.global_role == GlobalRole.PROVISIONAL_ADMIN
+        # ...and can reach the admin screens, where access requests are approved
+        assert user.is_admin is True
+        assert client.get('/api/admin/access-requests/pending').status_code == 200
         me = client.get('/api/user/me')
         assert me.status_code == 200, me.get_json()
         assert me.get_json()['email'] == 'founder@newco.test'
@@ -1092,6 +1095,8 @@ class TestTeamsFirstSignIn:
         membership = TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first()
         assert membership is not None
         assert membership.global_role == GlobalRole.USER
+        assert not user.is_admin
+        assert client.get('/api/admin/access-requests/pending').status_code == 403
         assert client.get('/api/user/me').status_code == 200
 
     def test_returning_user_signs_in_without_changes_to_their_account(self, oauth_env):
