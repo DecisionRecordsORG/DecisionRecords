@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-decision-capture-fixes"
+title = "Fix unsaved input loss, owner picker, delete copy and contact form"
+summary = "Decision forms now confirm before discarding unsaved input (Esc, backdrop, X, Cancel, route change, unload), any tenant member can pick a decision owner through a new tenant-scoped members endpoint, the delete confirmation describes the 30-day soft delete truthfully, and POST /api/contact now exists so contact form messages are emailed instead of silently dropped."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"
