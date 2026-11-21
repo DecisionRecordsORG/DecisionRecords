@@ -1398,8 +1398,11 @@ class TestSuperadminSecurityCoverage:
 class TestContactAPI:
     """POST /api/contact receives the public "Contact Us" form.
 
-    The message is emailed to the super admin Contact Form Email setting.
-    Nothing is stored, so every failure must be reported as a failure.
+    The message is stored, then emailed to the super admin Contact Form Email
+    setting. Because it is stored first, a missing email configuration or a
+    failed send no longer loses it: the visitor is told the message was
+    received and the stored record is marked as not emailed
+    (see tests/test_inquiries.py for the storage behaviour).
     """
 
     VALID = {
@@ -1463,28 +1466,51 @@ class TestContactAPI:
         assert response.status_code == 200
         assert send_email.call_args.args[1] == 'hello@selfhosted.example'
 
-    def test_returns_503_and_sends_nothing_when_email_is_not_configured(self, api_client):
+    def test_message_is_received_and_stored_when_email_is_not_configured(self, api_client):
+        from models import Inquiry
+
         with patch('notifications.send_email', return_value=True) as send_email:
             response = api_client.post('/api/contact', json=self.VALID)
 
-        assert response.status_code == 503
-        assert response.get_json() == {'error': 'Email service temporarily unavailable'}
+        assert response.status_code == 200
+        assert response.get_json() == {'message': 'Thank you for your message! We will get back to you soon.'}
         send_email.assert_not_called()
+        stored = Inquiry.query.one()
+        assert stored.message == self.VALID['message']
+        assert stored.email_sent is False
 
-    def test_returns_503_when_the_only_email_config_is_disabled(self, api_client):
+    def test_message_is_received_and_stored_when_the_only_email_config_is_disabled(self, api_client):
+        from models import Inquiry
         self._enable_email(enabled=False)
 
         with patch('notifications.send_email', return_value=True) as send_email:
             response = api_client.post('/api/contact', json=self.VALID)
 
-        assert response.status_code == 503
+        assert response.status_code == 200
         send_email.assert_not_called()
+        assert Inquiry.query.one().email_sent is False
 
-    def test_returns_500_when_the_email_cannot_be_sent(self, api_client):
-        """A delivery failure is an error, never a silent success."""
+    def test_message_is_received_and_stored_when_the_email_cannot_be_sent(self, api_client):
+        """A delivery failure no longer loses the message: it is kept and flagged as not emailed."""
+        from models import Inquiry
         self._enable_email()
 
         with patch('notifications.send_email', return_value=False):
+            response = api_client.post('/api/contact', json=self.VALID)
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert 'message' in body
+        assert 'error' not in body
+        assert Inquiry.query.one().email_sent is False
+
+    def test_returns_500_when_the_message_can_be_neither_stored_nor_sent(self, api_app, api_client):
+        """Only a message that was not received at all is reported as a failure."""
+        import app as app_module
+        self._enable_email()
+
+        with patch.object(app_module, '_store_inquiry', return_value=None), \
+                patch('notifications.send_email', return_value=False):
             response = api_client.post('/api/contact', json=self.VALID)
 
         assert response.status_code == 500

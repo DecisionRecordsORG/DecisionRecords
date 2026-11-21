@@ -12,7 +12,7 @@ from flask import Flask, Response, render_template, request, jsonify, session, r
 from werkzeug.exceptions import HTTPException
 from authlib.integrations.requests_client import OAuth2Session
 # Core models (always available)
-from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
+from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment, DecisionRelationship, AuthConfig, WebAuthnCredential, AccessRequest, EmailVerification, ITInfrastructure, SystemConfig, DomainApproval, save_history, Tenant, TenantMembership, TenantSettings, Space, DecisionSpace, GlobalRole, MaturityState, AuditLog, RoleRequest, RequestedRole, RequestStatus, SetupToken, LoginHistory, log_login_attempt, UserConsent, Inquiry, TEAM_SIZE_OPTIONS, TEAM_SIZE_CODES, TEAM_FOCUS_MAX_LENGTH, team_size_label, decision_relationships_changed, get_tenant_relationship_catalog, normalize_decision_relationships, sync_decision_relationships
 
 # EE:START - EE Model Imports
 # Enterprise Edition models (Slack, Teams, AI integration)
@@ -784,24 +784,136 @@ def get_features():
 
 
 # ==================== Feedback, Contact & Sponsorship ====================
+#
+# All three forms work the same way: validate, store the message as an Inquiry,
+# then try to email it to the team. Storing comes first so a message is never
+# lost because email is not configured or the send failed; the super admin
+# reads stored messages under Super Admin > Inquiries.
+
+def _form_text(data, key):
+    """A submitted text value, trimmed. Missing, null and non-text values count as empty."""
+    value = data.get(key)
+    return value.strip() if isinstance(value, str) else ''
+
+
+def _stored_text(value):
+    """Sanitised text as it is kept in the database.
+
+    The sanitisers escape "&" for use in HTML emails. Stored text is shown as
+    plain text, so "R&amp;D" is turned back into "R&D". Only the ampersand is
+    restored: "<" and ">" stay escaped or stripped.
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.replace('&amp;', '&').strip()
+    return value or None
+
+
+def _form_team_fields(data):
+    """Optional team answers a form may carry: (team_focus, team_size).
+
+    team_focus is free text, trimmed, stripped of markup and cut to
+    TEAM_FOCUS_MAX_LENGTH. team_size is kept only when it is a known code.
+    Anything else is ignored rather than rejected: the fields are optional and
+    must never cost a visitor their message.
+    """
+    team_focus = sanitize_title(_form_text(data, 'team_focus'), max_length=TEAM_FOCUS_MAX_LENGTH) or None
+    team_size = _form_text(data, 'team_size')
+    return team_focus, (team_size if team_size in TEAM_SIZE_CODES else None)
+
+
+def _inquiry_sender():
+    """(user_id, tenant_domain) of the signed-in sender, or (None, None)."""
+    try:
+        if is_master_account():
+            return None, None
+        user = get_current_user()
+    except Exception:
+        return None, None
+    if not user:
+        return None, None
+    return user.id, user.sso_domain
+
+
+def _store_inquiry(source, **fields):
+    """Store an inbound message. Returns the Inquiry, or None when storing failed.
+
+    No IP address or user agent is recorded.
+    """
+    user_id, tenant_domain = _inquiry_sender()
+    try:
+        inquiry = Inquiry(
+            source=source,
+            user_id=user_id,
+            tenant_domain=tenant_domain,
+            email_sent=False,
+            handled=False,
+            **fields
+        )
+        db.session.add(inquiry)
+        db.session.commit()
+        return inquiry
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Failed to store {source} inquiry: {e}")
+        capture_exception(e, endpoint_name=f'api_{source}_store')
+        return None
+
+
+def _deliver_inquiry(inquiry, source, send, success_message, failure_message):
+    """Try the notification email for a stored message and build the response.
+
+    The visitor gets 200 once the message is stored, whether or not the email
+    went out: their message was received, and whether the team is notified by
+    email is our concern, shown to the super admin as "not emailed". An error
+    is returned only when the message was neither stored nor emailed.
+    """
+    email_config = EmailConfig.query.filter_by(enabled=True).first()
+    sent = False
+    if email_config:
+        try:
+            sent = bool(send(email_config))
+        except Exception as e:
+            logger.error(f"Sending the {source} notification email raised: {e}")
+            capture_exception(e, endpoint_name=f'api_{source}_email')
+    else:
+        logger.warning(f"{source} message received but no email config available")
+
+    if inquiry is not None and sent:
+        try:
+            inquiry.email_sent = True
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Failed to mark {source} inquiry as emailed: {e}")
+
+    if inquiry is None and not sent:
+        if not email_config:
+            return jsonify({'error': 'Email service temporarily unavailable'}), 503
+        return jsonify({'error': failure_message}), 500
+
+    if inquiry is not None and not sent:
+        logger.warning(f"{source} inquiry {inquiry.id} stored but not emailed")
+    return jsonify({'message': success_message})
+
 
 def _api_submit_feedback_impl():
     """Submit feedback from users.
 
     Rate limited to 5 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
+    The feedback is stored first, then emailed to the support address.
     """
     from notifications import send_feedback_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field
 
-    data = request.get_json()
-    if not data:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
     # Validate required fields
-    name = data.get('name', '').strip()
-    email = data.get('email', '').strip()
-    feedback = data.get('feedback', '').strip()
+    name = _form_text(data, 'name')
+    email = _form_text(data, 'email')
+    feedback = _form_text(data, 'feedback')
     contact_consent = data.get('contact_consent', data.get('contactConsent', False))
 
     if not name or not email or not feedback:
@@ -812,18 +924,27 @@ def _api_submit_feedback_impl():
     email = sanitize_email(email)
     feedback = sanitize_text_field(feedback, max_length=5000)
     contact_consent = bool(contact_consent)
+    team_focus, team_size = _form_team_fields(data)
 
     if not email:
         return jsonify({'error': 'Invalid email address'}), 400
 
+    # Sanitizing can strip a value down to nothing (for example a name made only of markup)
+    if not name:
+        return jsonify({'error': 'Name, email, and feedback are required'}), 400
+
     if len(feedback) < 10:
         return jsonify({'error': 'Feedback must be at least 10 characters'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Feedback received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_FEEDBACK,
+        name=_stored_text(name),
+        email=email,
+        message=_stored_text(feedback),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
+        contact_consent=contact_consent,
+    )
 
     # Get support email from SystemConfig (fallback to default)
     support_email = SystemConfig.get(
@@ -831,15 +952,16 @@ def _api_submit_feedback_impl():
         SystemConfig.DEFAULT_SUPPORT_EMAIL
     )
 
-    # Send the feedback email
-    success = send_feedback_email(email_config, name, email, feedback, contact_consent=contact_consent, recipient_email=support_email)
-
-    if success:
-        logger.info(f"Feedback submitted successfully from {email}")
-        return jsonify({'message': 'Thank you for your feedback! We will review it shortly.'})
-    else:
-        logger.error(f"Failed to send feedback email from {email}")
-        return jsonify({'error': 'Failed to submit feedback. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_FEEDBACK,
+        lambda email_config: send_feedback_email(
+            email_config, name, email, feedback,
+            contact_consent=contact_consent, recipient_email=support_email
+        ),
+        success_message='Thank you for your feedback! We will review it shortly.',
+        failure_message='Failed to submit feedback. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (5 requests/minute to prevent spam)
@@ -859,26 +981,21 @@ def _api_submit_contact_impl():
     Public endpoint (no login). Rate limited to 5 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
 
-    The message is emailed to the super admin "Contact Form Email" setting
-    (SystemConfig support_email). Nothing is stored, so when no email
-    configuration is enabled the request fails with 503 instead of pretending
-    the message was delivered.
+    The message is stored, then emailed to the super admin "Contact Form Email"
+    setting (SystemConfig support_email). When no email configuration is
+    enabled or the send fails, the stored message is still there for the super
+    admin and the visitor is told it was received.
     """
     from notifications import send_contact_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field
 
     data = request.get_json(silent=True)
     if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
-    def _text(key):
-        value = data.get(key)
-        return value.strip() if isinstance(value, str) else ''
-
     # Validate required fields
-    name = _text('name')
-    email = _text('email')
-    message = _text('message')
+    name = _form_text(data, 'name')
+    email = _form_text(data, 'email')
+    message = _form_text(data, 'message')
 
     if not name or not email or not message:
         return jsonify({'error': 'Name, email, and message are required'}), 400
@@ -887,6 +1004,7 @@ def _api_submit_contact_impl():
     name = sanitize_name(name, max_length=100)
     email = sanitize_email(email)
     message = sanitize_text_field(message, max_length=5000)
+    team_focus, team_size = _form_team_fields(data)
 
     if not email:
         return jsonify({'error': 'Invalid email address'}), 400
@@ -895,11 +1013,14 @@ def _api_submit_contact_impl():
     if not name or not message:
         return jsonify({'error': 'Name, email, and message are required'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Contact message received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_CONTACT,
+        name=_stored_text(name),
+        email=email,
+        message=_stored_text(message),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
+    )
 
     # Contact Form Email from super admin settings (fallback to default)
     support_email = SystemConfig.get(
@@ -907,14 +1028,16 @@ def _api_submit_contact_impl():
         SystemConfig.DEFAULT_SUPPORT_EMAIL
     )
 
-    success = send_contact_email(email_config, name, email, message, recipient_email=support_email)
-
-    if success:
-        logger.info(f"Contact message submitted successfully from {email}")
-        return jsonify({'message': 'Thank you for your message! We will get back to you soon.'})
-    else:
-        logger.error(f"Failed to send contact message email from {email}")
-        return jsonify({'error': 'Failed to send your message. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_CONTACT,
+        lambda email_config: send_contact_email(
+            email_config, name, email, message,
+            recipient_email=support_email, team_focus=team_focus
+        ),
+        success_message='Thank you for your message! We will get back to you soon.',
+        failure_message='Failed to send your message. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (5 requests/minute to prevent spam)
@@ -929,63 +1052,72 @@ else:
 
 
 def _api_submit_sponsorship_impl():
-    """Submit sponsorship inquiry.
+    """Submit sponsorship inquiry (the "Get in touch" dialog).
 
     Rate limited to 3 requests per minute to prevent spam.
     All inputs are sanitized to prevent XSS and injection attacks.
+    The inquiry is stored first, then emailed.
     """
     from notifications import send_sponsorship_inquiry_email
-    from security import sanitize_name, sanitize_email, sanitize_text_field, sanitize_title
 
-    data = request.get_json()
-    if not data:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
     # Validate required fields
-    org_name = data.get('organisation_name', '').strip()
-    contact_email = data.get('contact_email', '').strip()
+    org_name = _form_text(data, 'organisation_name')
+    contact_email = _form_text(data, 'contact_email')
 
     if not org_name or not contact_email:
         return jsonify({'error': 'Organisation name and contact email are required'}), 400
 
-    # Get optional fields
-    contact_name = data.get('contact_name', '').strip() or None
-    area_of_interest = data.get('area_of_interest', '').strip() or None
-    message = data.get('message', '').strip() or None
+    # Optional fields: missing, null and non-text values are treated as not given
+    contact_name = _form_text(data, 'contact_name') or None
+    area_of_interest = _form_text(data, 'area_of_interest') or None
+    message = _form_text(data, 'message') or None
 
     # Sanitize all inputs
     org_name = sanitize_title(org_name, max_length=200)
     contact_email = sanitize_email(contact_email)
     if contact_name:
-        contact_name = sanitize_name(contact_name, max_length=100)
+        contact_name = sanitize_name(contact_name, max_length=100) or None
     if area_of_interest:
-        area_of_interest = sanitize_title(area_of_interest, max_length=100)
+        area_of_interest = sanitize_title(area_of_interest, max_length=100) or None
     if message:
-        message = sanitize_text_field(message, max_length=2000)
+        message = sanitize_text_field(message, max_length=2000) or None
+    team_focus, team_size = _form_team_fields(data)
 
     if not contact_email:
         return jsonify({'error': 'Invalid email address'}), 400
 
-    # Get email config (use any enabled config)
-    email_config = EmailConfig.query.filter_by(enabled=True).first()
-    if not email_config:
-        logger.warning("Sponsorship inquiry received but no email config available")
-        return jsonify({'error': 'Email service temporarily unavailable'}), 503
+    # Sanitizing can strip a value down to nothing (for example a name made only of markup)
+    if not org_name:
+        return jsonify({'error': 'Organisation name and contact email are required'}), 400
 
-    # Send the sponsorship inquiry email
-    success = send_sponsorship_inquiry_email(
-        email_config, org_name, contact_email,
-        contact_name=contact_name,
-        area_of_interest=area_of_interest,
-        message=message
+    inquiry = _store_inquiry(
+        Inquiry.SOURCE_SPONSORSHIP,
+        name=_stored_text(contact_name),
+        email=contact_email,
+        organisation=_stored_text(org_name),
+        area_of_interest=_stored_text(area_of_interest),
+        message=_stored_text(message),
+        team_focus=_stored_text(team_focus),
+        team_size=team_size,
     )
 
-    if success:
-        logger.info(f"Sponsorship inquiry submitted from {org_name} ({contact_email})")
-        return jsonify({'message': 'Thank you for reaching out! We will be in touch shortly.'})
-    else:
-        logger.error(f"Failed to send sponsorship inquiry email from {contact_email}")
-        return jsonify({'error': 'Failed to submit inquiry. Please try again later.'}), 500
+    return _deliver_inquiry(
+        inquiry,
+        Inquiry.SOURCE_SPONSORSHIP,
+        lambda email_config: send_sponsorship_inquiry_email(
+            email_config, org_name, contact_email,
+            contact_name=contact_name,
+            area_of_interest=area_of_interest,
+            message=message,
+            team_focus=team_focus
+        ),
+        success_message='Thank you for reaching out! We will be in touch shortly.',
+        failure_message='Failed to submit inquiry. Please try again later.',
+    )
 
 
 # Apply rate limiting if available (3 requests/minute to prevent spam)
