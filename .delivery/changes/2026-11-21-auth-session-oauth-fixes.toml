@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-auth-session-oauth-fixes"
+title = "Fix OAuth open redirect, sessions without expiry and passkey lockout after social sign-in"
+summary = "Rejects off-site return_url values after Slack, Google, Microsoft and Teams sign-in (open redirect), gives every sign-in session an expiry through one helper so setup-link and Teams sessions are no longer wiped on the next request, stops social sign-in from flipping auth_type and blocking passkey sign-in while keeping SSO-enforced tenants enforced, and adds regression tests for the website-to-app sign-in handoff and the CSRF contract the website relies on."
+change_type = "security_fix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
