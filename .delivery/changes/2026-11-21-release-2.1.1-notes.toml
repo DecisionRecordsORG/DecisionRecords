@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-release-2.1.1-notes"
+title = "Fold today's fixes into the 2.1.1 release notes"
+summary = "Community 2.1.1 had not been tagged when the sign-in, access-request, decision capture and dependency pin fixes merged. Moves their changelog entries from Unreleased into the 2.1.1 section so the release notes match what the tag contains."
+change_type = "docs"
+surfaces = ["ops_docs_only"]
+
+[artifacts]
+enterprise_app = "none"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"

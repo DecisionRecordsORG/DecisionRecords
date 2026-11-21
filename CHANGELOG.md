@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-21
+
 ### Security
 - Passkey registration now requires proof of account control: a signed-in session for the same account, or a valid setup or recovery link. Anonymous registration can only create the first account of a new organisation
 - Account setup links for access requests are delivered only by email to the requester or shown to the administrator who approves the request; they are never returned in the response to the request
 - Sign-in with Slack, Google, Microsoft and Teams only redirects to same-site paths afterwards
 
 ### Fixed
+- Community Docker image failed at startup with `ModuleNotFoundError: No module named 'decision_relationships'` because the module was not copied into the image. `Dockerfile.community` now ships every root Python module
+- Saving SMTP settings in Community Edition returned a 500 error because the encryption key lookup required a private Enterprise module. The key is now read from `SMTP_ENCRYPTION_KEY`
+- `python run_local.py` crashed in a checkout without the private `ee/` modules. It now runs Community Edition when they are absent
+- Release notes, README and CONTRIBUTING documented build and run commands that only worked with the private `ee/` modules or a full source checkout
 - A freshly built image could not connect to PostgreSQL (`ImportError: no pq wrapper available`): unpinned SQLAlchemy resolved to 2.1, which selects the psycopg 3 driver for `postgresql://` URLs. SQLAlchemy and the PostgreSQL drivers are now pinned
 - Sessions created by Teams sign-in, by setting a password from a setup link and by registering a first passkey from a setup link were cleared on the next request
 - Signing in once with Slack, Google or Microsoft no longer disables passkey sign-in for an account that has a password or passkey
@@ -23,20 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The contact form now sends its message: `POST /api/contact` emails the configured Contact Form Email address, and the footer shows an error and keeps the text when sending fails
 
 ### Changed
-- In organisations that enforce single sign-on, passkey sign-in is refused for every account
-- Without system email configured, an access request always waits for an administrator, who is shown the setup link to pass on
-
-## [2.1.1] - 2026-11-21
-
-### Fixed
-- Community Docker image failed at startup with `ModuleNotFoundError: No module named 'decision_relationships'` because the module was not copied into the image. `Dockerfile.community` now ships every root Python module
-- Saving SMTP settings in Community Edition returned a 500 error because the encryption key lookup required a private Enterprise module. The key is now read from `SMTP_ENCRYPTION_KEY`
-- `python run_local.py` crashed in a checkout without the private `ee/` modules. It now runs Community Edition when they are absent
-- Release notes, README and CONTRIBUTING documented build and run commands that only worked with the private `ee/` modules or a full source checkout
-
-### Changed
 - CI and the release workflow now start the built Community image and require it to answer `/api/health` before the release workflow publishes anything
 - New `scripts/check_ce_image_modules.py` check fails when a module imported by `app.py` is not shipped by `Dockerfile.community`
+- In organisations that enforce single sign-on, passkey sign-in is refused for every account
+- Without system email configured, an access request always waits for an administrator, who is shown the setup link to pass on
 
 ## [2.1.0] - 2026-08-09
 
