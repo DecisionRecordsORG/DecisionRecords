@@ -397,3 +397,110 @@ class TestInputValidationEdgeCases:
         assert sanitize_title('') == ''
         assert sanitize_text_field('') == ''
         assert sanitize_name('') == ''
+
+
+class TestSafeRedirectPath:
+    """safe_redirect_path only lets same-site relative paths through."""
+
+    @pytest.mark.parametrize('value', [
+        '/',
+        '/acme.com',
+        '/acme.com/decisions/42',
+        '/acme.com?tab=members',
+        '/acme.com/decisions?next=https://example.com/a',
+        '/acme.com#section',
+        '/a/b/c.d-e_f~g',
+        '/acme.com/decisions/42?x=1&y=%2F%2Fok',
+        '/acme.com/search?q=a%20b',
+    ])
+    def test_accepts_same_site_relative_paths(self, value):
+        from security import safe_redirect_path
+        assert safe_redirect_path(value) == value
+
+    @pytest.mark.parametrize('value', [
+        'https://evil.example',
+        'http://evil.example/path',
+        'HTTPS://EVIL.EXAMPLE',
+        '//evil.example',
+        '//evil.example/path',
+        '///evil.example',
+        '////evil.example',
+        '/\\evil.example',
+        '\\\\evil.example',
+        '\\/evil.example',
+        '/\\/evil.example',
+        '/acme.com\\..\\evil',
+        '/acme.com?next=\\\\evil.example',
+        'javascript:alert(1)',
+        'JaVaScRiPt:alert(1)',
+        'data:text/html,<script>alert(1)</script>',
+        'mailto:someone@example.com',
+        'evil.example',
+        'evil.example/path',
+        'acme.com',
+        '@evil.example',
+        'https:evil.example',
+        'https:/evil.example',
+        '?next=/acme.com',
+        '#fragment',
+        '/\t/evil.example',
+        '/\n/evil.example',
+        '/\r/evil.example',
+        '\t//evil.example',
+        ' //evil.example',
+        ' /acme.com',
+        '/acme.com\r\nSet-Cookie: x=1',
+        '/acme.com\x00',
+        '/acme.com\x7f',
+        '/\x0b/evil.example',
+        '/acme.com/a b',
+        '/%2F/evil.example',
+        '/%2f%2fevil.example',
+        '/%5Cevil.example',
+        '/%5c/evil.example',
+        '/%09/evil.example',
+        '/%0d%0aLocation: https://evil.example',
+        '/%0D%0ASet-Cookie:x=1',
+        '/%00',
+        '/acme.com/%zz',
+        '/acme.com/%2',
+        '/ /evil.example',
+        '/ /evil.example',
+        '/／/evil.example',
+        '/.//evil.example',
+        '/..//evil.example',
+        '/acme.com//decisions',
+        '/' + 'a' * 2100,
+    ])
+    def test_rejects_cross_site_and_malformed_targets(self, value):
+        from security import safe_redirect_path
+        assert safe_redirect_path(value) == '/'
+
+    @pytest.mark.parametrize('value', [None, '', 0, 42, [], ['/acme.com'], {'a': 1}, b'/acme.com', True])
+    def test_rejects_missing_and_non_string_values(self, value):
+        from security import safe_redirect_path
+        assert safe_redirect_path(value) == '/'
+
+    def test_uses_supplied_default(self):
+        from security import safe_redirect_path
+        assert safe_redirect_path('https://evil.example', default='/acme.com') == '/acme.com'
+        assert safe_redirect_path(None, default='/acme.com') == '/acme.com'
+        assert safe_redirect_path('/kept', default='/acme.com') == '/kept'
+
+    def test_result_never_leaves_the_origin(self):
+        """Whatever comes back must resolve on the same host in a browser."""
+        from urllib.parse import urljoin, urlparse
+        from security import safe_redirect_path
+
+        candidates = [
+            '/acme.com', '//evil.example', '/\\evil.example', 'https://evil.example',
+            '/acme.com?next=//evil.example', '/%2F/evil.example', '/@evil.example',
+            '/.//evil.example', '/..//evil.example', '/acme.com/../..//evil.example',
+        ]
+        for value in candidates:
+            result = safe_redirect_path(value)
+            assert result.startswith('/') and not result.startswith('//'), (value, result)
+            joined = urlparse(urljoin('https://app.example.org/current', result))
+            assert joined.netloc == 'app.example.org', (value, result)
+            concatenated = urlparse('https://app.example.org' + result)
+            assert concatenated.netloc == 'app.example.org', (value, result)

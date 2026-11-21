@@ -362,3 +362,142 @@ class TestMasterAccountModel:
         master = MasterAccount.create_default_master(session)
         assert master is None
         assert MasterAccount.query.count() == 0
+
+
+class TestStartUserSession:
+    """auth.start_user_session is the single way to sign a user in."""
+
+    @staticmethod
+    def _expiry():
+        return datetime.fromisoformat(flask_session['_expires_at'])
+
+    def test_sets_user_id_and_expiry(self, app, sample_user):
+        """A started session carries the user and a future, timezone-aware expiry."""
+        from datetime import timezone
+        from auth import start_user_session
+
+        with app.test_request_context():
+            start_user_session(sample_user)
+
+            assert flask_session['user_id'] == sample_user.id
+            assert flask_session.permanent is True
+            expiry = self._expiry()
+            assert expiry.tzinfo is not None
+            remaining = expiry - datetime.now(timezone.utc)
+            assert timedelta(hours=7, minutes=59) < remaining <= timedelta(hours=8)
+
+    def test_admin_session_uses_admin_timeout(self, app, sample_user):
+        """is_admin=True applies the (shorter) admin timeout."""
+        from datetime import timezone
+        from auth import start_user_session
+
+        with app.test_request_context():
+            start_user_session(sample_user, is_admin=True)
+
+            remaining = self._expiry() - datetime.now(timezone.utc)
+            assert timedelta(minutes=59) < remaining <= timedelta(hours=1)
+
+    def test_honours_configured_user_timeout(self, app, session, sample_user):
+        """The super-admin session timeout setting is respected."""
+        from datetime import timezone
+        from models import SystemConfig
+        from auth import start_user_session
+
+        SystemConfig.set(SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS, '2')
+        session.commit()
+
+        with app.test_request_context():
+            start_user_session(sample_user)
+
+            remaining = self._expiry() - datetime.now(timezone.utc)
+            assert timedelta(hours=1, minutes=59) < remaining <= timedelta(hours=2)
+
+    def test_none_is_admin_is_treated_as_regular_user(self, app, sample_user):
+        """User.is_admin can be NULL on legacy rows; that must not raise."""
+        from datetime import timezone
+        from auth import start_user_session
+
+        with app.test_request_context():
+            start_user_session(sample_user, is_admin=None)
+
+            remaining = self._expiry() - datetime.now(timezone.utc)
+            assert remaining > timedelta(hours=7)
+
+    def test_rejects_missing_user(self, app):
+        """Starting a session for nobody is a programming error, not a login."""
+        from auth import start_user_session
+
+        with app.test_request_context():
+            with pytest.raises(ValueError):
+                start_user_session(None)
+            assert 'user_id' not in flask_session
+            assert '_expires_at' not in flask_session
+
+    def test_complete_setup_and_login_sets_expiry(self, app, sample_user):
+        """First-credential setup must leave a session that survives the next request."""
+        with app.test_request_context():
+            flask_session['setup_token'] = 'token'
+            flask_session['setup_user_id'] = sample_user.id
+            flask_session['setup_expires'] = 'whenever'
+
+            complete_setup_and_login(sample_user)
+
+            assert flask_session['user_id'] == sample_user.id
+            assert '_expires_at' in flask_session
+            assert 'setup_token' not in flask_session
+
+
+class TestMarkSocialSignIn:
+    """auth.mark_social_sign_in only relabels accounts with no local credential."""
+
+    @staticmethod
+    def _user(session, auth_type='local', password=None, passkey=False):
+        user = User(email='social@example.com', sso_domain='example.com', auth_type=auth_type)
+        if password:
+            user.set_password(password)
+        session.add(user)
+        session.flush()
+        if passkey:
+            session.add(WebAuthnCredential(
+                user_id=user.id, credential_id=b'cred-1', public_key=b'key', sign_count=0))
+        session.commit()
+        return user
+
+    def test_marks_credential_less_local_user_as_sso(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session)
+
+        assert mark_social_sign_in(user) is True
+        assert user.auth_type == 'sso'
+
+    def test_marks_user_with_empty_auth_type_as_sso(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session)
+
+        # The column is NOT NULL today; older rows and in-flight objects can still be empty.
+        with session.no_autoflush:
+            user.auth_type = None
+            assert mark_social_sign_in(user) is True
+        assert user.auth_type == 'sso'
+
+    def test_keeps_local_user_with_password(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session, password='Str0ngPassword')
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == 'local'
+
+    def test_keeps_local_user_with_passkey(self, app, session):
+        from auth import mark_social_sign_in
+        user = self._user(session, passkey=True)
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == 'local'
+
+    @pytest.mark.parametrize('auth_type', ['webauthn', 'sso', 'teams'])
+    def test_never_changes_other_auth_types(self, app, session, auth_type):
+        from auth import mark_social_sign_in
+        user = self._user(session, auth_type=auth_type)
+
+        assert mark_social_sign_in(user) is False
+        assert user.auth_type == auth_type

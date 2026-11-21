@@ -20,7 +20,16 @@ from webauthn.helpers.structs import (
     AuthenticatorTransport,
 )
 
-from models import db, User, WebAuthnCredential, AuthConfig
+from sqlalchemy import func
+
+from models import (
+    db, User, WebAuthnCredential, AuthConfig, SSOConfig, SystemConfig, Tenant,
+    DomainApproval
+)
+
+# Returned whenever a registration cannot be tied to a proven identity.
+REGISTRATION_REFUSED = 'Registration could not be completed. Please sign in and try again.'
+_UNSET = object()
 
 
 def get_rp_id():
@@ -50,16 +59,95 @@ def get_auth_config(domain):
     return AuthConfig.query.filter_by(domain=domain).first()
 
 
-def create_registration_options(user_email, user_name, domain):
-    """Generate WebAuthn registration options for a new user or new credential."""
+def domain_requires_sso(domain):
+    """Return True when a tenant enforces its own SSO provider for sign-in.
+
+    A tenant enforces SSO when it has an enabled SSO configuration and has not
+    chosen another primary method in its auth config. This is a property of the
+    tenant, not of User.auth_type: a user may also have signed in with a social
+    provider (which records auth_type 'sso' for accounts with no local
+    credential) without the tenant requiring SSO.
+    """
+    if not domain:
+        return False
+
+    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
+    if not sso_config:
+        return False
+
+    auth_config = get_auth_config(domain)
+    return not auth_config or auth_config.auth_method == 'sso'
+
+
+def find_user_by_email(email):
+    """Look a user up by email address, ignoring case and surrounding whitespace."""
+    if not email or not isinstance(email, str):
+        return None
+    return User.query.filter(func.lower(User.email) == email.strip().lower()).first()
+
+
+def new_account_registration_refusal(email, domain):
+    """Why a caller with no proven identity may not register a passkey for `email`.
+
+    Returns (message, status) or None when registration may go ahead.
+
+    A caller who has not proven control of an account (no signed-in session,
+    no setup or recovery token) can only create the first account of an
+    organisation that has none, and only when the instance does not require
+    email verification. These are the conditions direct sign-up applies.
+    Existing accounts are reached through sign-in, a setup link or a recovery
+    link; existing organisations through their access-request and invite flows.
+    """
+    if not email or not domain:
+        return 'Invalid email format', 400
+
+    if domain_requires_sso(domain):
+        return 'This domain requires SSO authentication', 400
+
+    if find_user_by_email(email):
+        return 'An account with this email already exists. Please sign in to add a passkey.', 400
+
+    if SystemConfig.get_bool(SystemConfig.KEY_EMAIL_VERIFICATION_REQUIRED, default=True):
+        return 'Email verification is required. Please sign up with your email address first.', 403
+
+    if DomainApproval.is_public_domain(domain):
+        return f'{domain} is a public email provider. Please use your work email address.', 400
+
+    if DomainApproval.is_disposable_domain(domain):
+        return 'Disposable email addresses are not allowed. Please use your work email address.', 400
+
+    domain_approval = DomainApproval.query.filter_by(domain=domain).first()
+    if domain_approval and domain_approval.status == 'rejected':
+        return 'Your organization domain has been rejected.', 403
+
+    has_tenant = Tenant.query.filter(func.lower(Tenant.domain) == domain).first() is not None
+    has_users = User.query.filter(func.lower(User.sso_domain) == domain).count() > 0
+    if has_tenant or has_users:
+        return 'This organization already has users. Please use the login page.', 400
+
+    auth_config = get_auth_config(domain)
+    if auth_config and not auth_config.allow_registration:
+        return 'Registration is not allowed for this domain', 400
+
+    return None
+
+
+def create_registration_options(user_email, user_name, domain, existing_user=None):
+    """Generate WebAuthn registration options.
+
+    `existing_user` is the account the passkey will be added to. The caller
+    must already have proven control of it (signed-in session or setup token):
+    it is never looked up from an email address here. Leave it as None only to
+    register the first passkey of an account that does not exist yet.
+
+    The challenge is bound to that identity in the session, and
+    verify_registration() checks the binding again.
+    """
     rp_id = get_rp_id()
 
     # Get RP name from auth config or use default
     auth_config = get_auth_config(domain)
     rp_name = auth_config.rp_name if auth_config else 'Architecture Decisions'
-
-    # Check if user already exists
-    existing_user = User.query.filter_by(email=user_email).first()
 
     # Get existing credentials to exclude
     exclude_credentials = []
@@ -97,19 +185,45 @@ def create_registration_options(user_email, user_name, domain):
     session['webauthn_register_email'] = user_email
     session['webauthn_register_name'] = user_name
     session['webauthn_register_domain'] = domain
+    session['webauthn_register_user_id'] = existing_user.id if existing_user else None
 
     return options_to_json(options)
 
 
-def verify_registration(credential_json, device_name=None):
-    """Verify WebAuthn registration response and create/update user."""
+def verify_registration(credential_json, device_name=None, proven_user_ids=()):
+    """Verify a WebAuthn registration response and store the credential.
+
+    `proven_user_ids` are the accounts the current request has proven control
+    of (signed-in session, setup or recovery token). The credential is stored
+    on an existing account only if the challenge was issued for that account
+    and it is still among them. Otherwise the registration may only create a
+    new account, subject to new_account_registration_refusal(). This check
+    does not rely on the options step having been enforced.
+    """
     challenge_b64 = session.pop('webauthn_register_challenge', None)
     email = session.pop('webauthn_register_email', None)
     name = session.pop('webauthn_register_name', None)
     domain = session.pop('webauthn_register_domain', None)
+    bound_user_id = session.pop('webauthn_register_user_id', _UNSET)
 
     if not challenge_b64 or not email or not domain:
         return None, 'Registration session expired'
+
+    if bound_user_id is _UNSET:
+        # State written before challenges were bound to an identity.
+        return None, REGISTRATION_REFUSED
+
+    user = None
+    if bound_user_id is not None:
+        user = db.session.get(User, bound_user_id)
+        if (not user
+                or bound_user_id not in set(proven_user_ids)
+                or (user.email or '').strip().lower() != email.strip().lower()):
+            return None, REGISTRATION_REFUSED
+    else:
+        refusal = new_account_registration_refusal(email, domain)
+        if refusal:
+            return None, refusal[0]
 
     try:
         challenge = base64url_to_bytes(challenge_b64)
@@ -121,14 +235,8 @@ def verify_registration(credential_json, device_name=None):
             expected_origin=get_rp_origin(),
         )
 
-        # Get or create user
-        user = User.query.filter_by(email=email).first()
         if not user:
-            # Check if registration is allowed
-            auth_config = get_auth_config(domain)
-            if auth_config and not auth_config.allow_registration:
-                return None, 'Registration is not allowed for this domain'
-
+            # New account (allowed by new_account_registration_refusal above).
             # Check if this is the first user for the domain (make them admin)
             is_first_user = User.query.filter_by(sso_domain=domain).count() == 0
 
@@ -171,7 +279,9 @@ def create_authentication_options(email=None):
 
     if email:
         # Specific user authentication
-        user = User.query.filter_by(email=email, auth_type='webauthn').first()
+        # Offer the user's registered credentials whatever their auth_type:
+        # password-first and social sign-in accounts can hold passkeys too.
+        user = User.query.filter_by(email=email).first()
         if user and user.webauthn_credentials:
             for cred in user.webauthn_credentials:
                 transports = json.loads(cred.transports) if cred.transports else ['internal', 'hybrid']

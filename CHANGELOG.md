@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Passkey registration now requires proof of account control: a signed-in session for the same account, or a valid setup or recovery link. Anonymous registration can only create the first account of a new organisation
+- Account setup links for access requests are delivered only by email to the requester or shown to the administrator who approves the request; they are never returned in the response to the request
+- Sign-in with Slack, Google, Microsoft and Teams only redirects to same-site paths afterwards
+
+### Fixed
+- Sessions created by Teams sign-in, by setting a password from a setup link and by registering a first passkey from a setup link were cleared on the next request
+- Signing in once with Slack, Google or Microsoft no longer disables passkey sign-in for an account that has a password or passkey
+- First-time Teams sign-in for a new account returned a 500 error
+
+### Changed
+- In organisations that enforce single sign-on, passkey sign-in is refused for every account
+- Without system email configured, an access request always waits for an administrator, who is shown the setup link to pass on
+
 ## [2.1.1] - 2026-11-21
 
 ### Fixed

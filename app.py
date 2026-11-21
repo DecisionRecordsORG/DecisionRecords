@@ -23,18 +23,19 @@ from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription
 from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 # EE:END - EE Model Imports
 from datetime import datetime, timedelta, timezone
-from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
     create_registration_options, verify_registration,
     create_authentication_options, verify_authentication,
-    get_user_credentials, delete_credential, get_auth_config
+    get_user_credentials, delete_credential, get_auth_config, domain_requires_sso,
+    new_account_registration_refusal
 )
 from security import (
     validate_tenant_ownership, filter_by_tenant, log_security_event,
     generate_csrf_token, validate_csrf_token, get_request_csrf_token,
-    should_enforce_csrf, apply_security_headers,
+    should_enforce_csrf, apply_security_headers, safe_redirect_path,
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data, sanitize_string
 )
@@ -598,22 +599,6 @@ def init_database():
             app_error_state['details'] = traceback.format_exc()
             # Don't raise - let the app run but in error state
 
-def set_session_expiry(is_admin=False):
-    """Set session expiry based on user type (admin vs regular user)."""
-    if is_admin:
-        timeout_hours = SystemConfig.get_int(
-            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
-            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
-        )
-    else:
-        timeout_hours = SystemConfig.get_int(
-            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
-            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
-        )
-    session['_expires_at'] = (datetime.now(timezone.utc) + timedelta(hours=timeout_hours)).isoformat()
-    session.permanent = True
-
-
 def is_session_expired():
     """Check if current session has expired."""
     expires_at = session.get('_expires_at')
@@ -1118,8 +1103,7 @@ def api_tenant_login():
         user_agent=user_agent
     )
 
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
+    start_user_session(user, is_admin=False)  # 8 hours default for regular users
     user.last_login = datetime.now(timezone.utc)
     db.session.commit()
 
@@ -1285,8 +1269,7 @@ def sso_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
         return redirect(url_for('index'))
 
@@ -1349,7 +1332,10 @@ def api_get_csrf_token():
     in the X-CSRF-Token header for all state-changing requests.
     """
     token = generate_csrf_token()
-    return jsonify({'csrf_token': token})
+    response = jsonify({'csrf_token': token})
+    # The token is bound to one session: never let a proxy or browser cache replay it.
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 # EE:START - Slack OIDC Authentication
@@ -1410,7 +1396,7 @@ def slack_oidc_initiate():
         return redirect('/?error=slack_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -1484,7 +1470,7 @@ def slack_oidc_callback():
         logger.warning("Invalid or expired Slack OIDC state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Slack credentials
     client_id = get_slack_client_id()
@@ -1634,9 +1620,8 @@ def slack_oidc_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Slack OIDC login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Slack OIDC; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Slack OIDC login
@@ -1651,8 +1636,7 @@ def slack_oidc_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Slack OIDC login successful for {email}")
 
@@ -1664,10 +1648,8 @@ def slack_oidc_callback():
         if return_url and return_url != '/' and not return_url.startswith('/?'):
             # User had a specific destination, append welcome flag
             separator = '&' if '?' in return_url else '?'
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}{separator}slack_welcome=1')
-            return redirect(f'{return_url}{separator}slack_welcome=1')
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}{separator}slack_welcome=1')
 
         # Redirect to tenant dashboard with welcome modal trigger
         return redirect(f'{app_base}/{domain}?slack_welcome=1')
@@ -1750,7 +1732,7 @@ def google_oauth_initiate():
         return redirect('/?error=google_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -1826,7 +1808,7 @@ def google_oauth_callback():
         logger.warning("Invalid or expired Google OAuth state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Google credentials
     client_id = get_google_client_id()
@@ -1975,9 +1957,8 @@ def google_oauth_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Google OAuth login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Google OAuth; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Google OAuth login
@@ -1992,8 +1973,7 @@ def google_oauth_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Google OAuth login successful for {email}")
 
@@ -2002,10 +1982,8 @@ def google_oauth_callback():
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}')
-            return redirect(return_url)
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}')
 
         # Redirect to tenant dashboard
         return redirect(f'{app_base}/{domain}')
@@ -2088,7 +2066,7 @@ def microsoft_oauth_initiate():
         return redirect('/?error=microsoft_not_configured')
 
     # Get optional return_url from query params (where to redirect after login)
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate encrypted state for CSRF protection
     try:
@@ -2165,7 +2143,7 @@ def microsoft_oauth_callback():
         logger.warning("Invalid or expired Microsoft OAuth state")
         return redirect('/?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Get Microsoft credentials
     client_id = get_microsoft_client_id()
@@ -2317,9 +2295,8 @@ def microsoft_oauth_callback():
 
         db.session.commit()
 
-        # Update auth_type to indicate Microsoft OAuth login
-        if not user.auth_type or user.auth_type == 'local':
-            user.auth_type = 'sso'  # Use 'sso' as it's the closest existing type
+        # Accounts with no local credential rely on Microsoft OAuth; others keep their auth_type
+        if mark_social_sign_in(user):
             db.session.commit()
 
         # Log successful Microsoft OAuth login
@@ -2334,8 +2311,7 @@ def microsoft_oauth_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Microsoft OAuth login successful for {email}")
 
@@ -2344,10 +2320,8 @@ def microsoft_oauth_callback():
 
         # Redirect to return URL or tenant home
         if return_url and return_url != '/' and not return_url.startswith('/?'):
-            # Ensure return_url is absolute if APP_BASE_URL is set
-            if return_url.startswith('/') and app_base:
-                return redirect(f'{app_base}{return_url}')
-            return redirect(return_url)
+            # return_url is a validated same-site path (safe_redirect_path)
+            return redirect(f'{app_base}{return_url}')
 
         # Redirect to tenant dashboard
         return redirect(f'{app_base}/{domain}')
@@ -5095,6 +5069,11 @@ def get_tenant_user_count(domain):
     return User.query.filter_by(sso_domain=domain).count()
 
 
+def system_email_configured():
+    """The enabled system email configuration used for account emails, or None."""
+    return EmailConfig.query.filter_by(domain='system', enabled=True).first()
+
+
 def can_tenant_accept_users(domain, count=1):
     """Check if a tenant can accept more users.
 
@@ -5299,9 +5278,14 @@ def _api_get_tenant_status_impl(domain):
             ).count()
             can_process_access_requests = approving_admin_count > 0
 
-    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false
+    # Effective approval requirement: respects tenant setting, but if no one can approve, it's false.
+    # Joining without approval is only possible when the setup link can be emailed to the
+    # requester; without email every request waits for an administrator (see access-request).
     require_approval_setting = auth_config.require_approval if auth_config else True
-    effective_require_approval = require_approval_setting and can_process_access_requests
+    effective_require_approval = (
+        (require_approval_setting and can_process_access_requests)
+        or not system_email_configured()
+    )
 
     return jsonify({
         'domain': domain,
@@ -5867,8 +5851,7 @@ def api_direct_signup():
         app.logger.info(f"Created setup token for user {email} - credential setup required")
     else:
         # Password auth - user already has credentials, log them in fully
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
         user.last_login = datetime.now(timezone.utc)
         db.session.commit()
         redirect_url = f'/{domain}'
@@ -6136,13 +6119,28 @@ def api_submit_access_request():
                 TenantMembership.global_role.in_([GlobalRole.ADMIN, GlobalRole.STEWARD])
             ).count()
             if full_admin_count == 0:
-                # No full admins or stewards - provisional admin only tenant
-                # Auto-approve since no one can approve access requests
+                # No full admins or stewards yet - provisional admin only tenant.
+                # Admit by emailed setup link where email is configured; without
+                # email the provisional admin approves the request (see below).
                 require_approval = False
-                logger.info(f"Auto-approving access request for {domain} - tenant has only provisional admin")
+                logger.info(f"Access request for {domain} does not need full-admin approval - tenant has only provisional admin")
 
-    if not require_approval:
-        # Auto-approval enabled: create user immediately and send setup email
+    # The setup link is only ever delivered to the requester's mailbox (which
+    # proves they control the address) or shown to an administrator who approves
+    # the request. It is never returned in this response: the caller is anonymous.
+    email_config = system_email_configured()
+    pending_message = 'Access request submitted successfully'
+
+    if not require_approval and not email_config:
+        # No way to deliver the link to the requester: an administrator admits them
+        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
+        pending_message = (
+            'Your request has been submitted. An administrator of your organization '
+            'will approve it and give you a link to set up your sign-in.'
+        )
+
+    elif not require_approval:
+        # Auto-approval enabled: create the account and email the setup link
         from models import SetupToken
         from notifications import send_account_setup_email
 
@@ -6170,49 +6168,47 @@ def api_submit_access_request():
 
         # Generate setup token for the new user
         setup_token = SetupToken.create_for_user(new_user)
-        setup_token_str = setup_token._token_string
-        setup_url = f"{request.host_url.rstrip('/')}/{domain}/setup?token={setup_token_str}"
+        setup_url = f"{request.host_url.rstrip('/')}/{domain}/setup?token={setup_token._token_string}"
 
         db.session.commit()
 
-        # Send setup email to user (if email is configured)
-        email_config = EmailConfig.query.filter_by(domain='system', enabled=True).first()
         email_sent = False
-        if email_config:
-            try:
-                send_account_setup_email(
-                    email_config,
-                    name,
-                    email,
-                    setup_url,
-                    SetupToken.TOKEN_VALIDITY_HOURS,
-                    tenant_name=domain
-                )
-                email_sent = True
-                app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
-            except Exception as e:
-                app.logger.warning(f"Failed to send setup email to {email}: {e}")
-        else:
-            app.logger.warning(f"Auto-approved user {email} for tenant {domain}, but no email config")
-
-        # Build response based on whether email was sent
-        response_data = {
-            'auto_approved': True,
-            'email': email,
-            'domain': domain
-        }
+        try:
+            email_sent = bool(send_account_setup_email(
+                email_config,
+                name,
+                email,
+                setup_url,
+                SetupToken.TOKEN_VALIDITY_HOURS,
+                tenant_name=domain
+            ))
+        except Exception as e:
+            app.logger.warning(f"Failed to send setup email to {email}: {e}")
 
         if email_sent:
-            response_data['message'] = 'Your account has been created! Check your email for a link to set up your login credentials.'
-        else:
-            # Email not configured/sent - provide setup URL directly for Community Edition
-            # This allows users to complete setup without requiring email
-            response_data['message'] = 'Your account has been created! Click the button below to set up your login credentials.'
-            response_data['setup_url'] = setup_url  # Include setup URL when email fails
+            app.logger.info(f"Auto-approved user {email} for tenant {domain}, setup email sent")
+            return jsonify({
+                'auto_approved': True,
+                'email': email,
+                'domain': domain,
+                'message': 'Your account has been created! Check your email for a link to set up your login credentials.'
+            })
 
-        return jsonify(response_data)
+        # The link did not reach the mailbox, so nobody has proven control of the
+        # address. Withdraw the account and its unused link and leave a request
+        # an administrator can approve instead.
+        app.logger.warning(
+            f"Setup email for {email} could not be sent - access request for {domain} held for administrator approval")
+        db.session.delete(setup_token)
+        db.session.delete(new_user)
+        db.session.commit()
+        pending_message = (
+            'Your request was received, but the setup email could not be sent. '
+            'An administrator of your organization can approve your request and give you '
+            'a setup link. Please contact them.'
+        )
 
-    # require_approval=True: Create access request for admin review
+    # Create access request for admin review
     access_request = AccessRequest(
         email=email,
         name=name,
@@ -6226,7 +6222,9 @@ def api_submit_access_request():
     # notify_admins_access_request(domain, access_request)
 
     return jsonify({
-        'message': 'Access request submitted successfully',
+        'message': pending_message,
+        'auto_approved': False,
+        'email_sent': False,
         'request': access_request.to_dict()
     })
 
@@ -6467,7 +6465,7 @@ def api_setup_password():
     db.session.commit()
 
     # Log the user in
-    session['user_id'] = user.id
+    start_user_session(user)
     session['user_type'] = 'user'
 
     return jsonify({
@@ -7337,6 +7335,14 @@ def api_get_tenant_admins():
     })
 
 
+def _signed_in_user():
+    """The User behind the current session, or None (anonymous or master account)."""
+    if is_master_account() or 'user_id' not in session:
+        return None
+    user = get_current_user()
+    return user if isinstance(user, User) else None
+
+
 @app.route('/api/webauthn/register/options', methods=['POST'])
 @rate_limit("10 per minute")
 def api_webauthn_register_options():
@@ -7356,46 +7362,59 @@ def api_webauthn_register_options():
         log_security_event('auth', f"WebAuthn setup registration for {email} (setup token)", severity='INFO')
 
         try:
-            options = create_registration_options(email, name, domain)
+            options = create_registration_options(email, name, domain, existing_user=setup_user)
             return jsonify(json.loads(options))
         except Exception as e:
             app.logger.error(f"WebAuthn setup registration options error: {e}")
             return jsonify({'error': 'Failed to generate registration options'}), 500
 
-    # Standard registration flow
-    email = data.get('email')
-    name = data.get('name')
+    raw_email = data.get('email')
+    raw_name = data.get('name')
+    email = sanitize_email(raw_email) if isinstance(raw_email, str) else None
+    name = raw_name if isinstance(raw_name, str) else None
+
+    # Signed-in user adding a passkey to their own account (profile page)
+    current_user = _signed_in_user()
+    if current_user:
+        if raw_email and email != (current_user.email or '').strip().lower():
+            log_security_event(
+                'auth', f"Passkey registration for another address refused (user {current_user.id})",
+                severity='WARNING')
+            return jsonify({'error': 'You can only add a passkey to your own account'}), 403
+
+        if domain_requires_sso(current_user.sso_domain):
+            return jsonify({'error': 'This domain requires SSO authentication'}), 400
+
+        if current_user.auth_type == 'sso':
+            return jsonify({'error': 'This email is registered with SSO. Please use SSO to log in.'}), 400
+
+        try:
+            options = create_registration_options(
+                current_user.email, current_user.name, current_user.sso_domain,
+                existing_user=current_user)
+            return jsonify(json.loads(options))
+        except Exception as e:
+            app.logger.error(f"WebAuthn add credential options error: {e}")
+            return jsonify({'error': 'Failed to generate registration options'}), 500
+
+    # No proven identity: this can only create a new account
+    if not raw_email:
+        return jsonify({'error': 'Email is required'}), 400
 
     if not email:
-        return jsonify({'error': 'Email is required'}), 400
+        return jsonify({'error': 'Invalid email format'}), 400
 
     # SECURITY: Always extract domain from email - never trust user input
     from auth import extract_domain_from_email
     domain = extract_domain_from_email(email)
 
-    if not domain:
-        return jsonify({'error': 'Invalid email format'}), 400
-
     # Log registration attempt
     log_security_event('auth', f"WebAuthn registration attempt for {email}", severity='INFO')
 
-    # Check auth config for this domain
-    auth_config = get_auth_config(domain)
-
-    # Check if SSO is configured and required for this domain
-    sso_config = SSOConfig.query.filter_by(domain=domain, enabled=True).first()
-    if sso_config and (not auth_config or auth_config.auth_method == 'sso'):
-        return jsonify({'error': 'This domain requires SSO authentication'}), 400
-
-    # Check if user already exists
-    existing_user = User.query.filter_by(email=email).first()
-    if existing_user and existing_user.auth_type == 'sso':
-        return jsonify({'error': 'This email is registered with SSO. Please use SSO to log in.'}), 400
-
-    # Check if registration is allowed for new users
-    if not existing_user:
-        if auth_config and not auth_config.allow_registration:
-            return jsonify({'error': 'Registration is not allowed for this domain'}), 400
+    refusal = new_account_registration_refusal(email, domain)
+    if refusal:
+        message, status = refusal
+        return jsonify({'error': message}), status
 
     try:
         options = create_registration_options(email, name, domain)
@@ -7418,10 +7437,13 @@ def api_webauthn_register_verify():
     if not credential:
         return jsonify({'error': 'Credential is required'}), 400
 
-    # Check for setup token flow
+    # Identities this request has proven control of: a setup/recovery token
+    # and/or a signed-in session. A passkey is only ever added to one of these.
     setup_user, _ = validate_setup_token()
+    current_user = _signed_in_user()
+    proven_user_ids = {u.id for u in (setup_user, current_user) if u}
 
-    user, error = verify_registration(credential, device_name)
+    user, error = verify_registration(credential, device_name, proven_user_ids=proven_user_ids)
 
     if error:
         return jsonify({'error': error}), 400
@@ -7432,8 +7454,7 @@ def api_webauthn_register_verify():
         log_security_event('auth', f"Passkey setup completed for {user.email} (first credential)", severity='INFO')
     else:
         # Standard registration - log the user in
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Registration successful',
@@ -7453,9 +7474,13 @@ def api_webauthn_auth_options():
         user = User.query.filter_by(email=email).first()
         if not user:
             return jsonify({'error': 'User not found'}), 404
-        if user.auth_type == 'sso':
+        # Tenant-enforced SSO blocks passkeys. auth_type 'sso' alone does not:
+        # it also marks social sign-in accounts, which may hold passkeys.
+        if domain_requires_sso(user.sso_domain):
             return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
         if not user.webauthn_credentials:
+            if user.auth_type == 'sso':
+                return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
             return jsonify({'error': 'No passkeys registered for this account'}), 400
 
     try:
@@ -7495,6 +7520,21 @@ def api_webauthn_auth_verify():
         )
         return jsonify({'error': error}), 400
 
+    # The email-less passkey flow never reaches the options check above,
+    # so tenant-enforced SSO is checked again once the user is known.
+    if domain_requires_sso(user.sso_domain):
+        log_login_attempt(
+            email=user.email,
+            login_method=LoginHistory.METHOD_WEBAUTHN,
+            success=False,
+            user_id=user.id,
+            tenant_domain=user.sso_domain,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason='Tenant requires SSO'
+        )
+        return jsonify({'error': 'This account uses SSO. Please use SSO to log in.'}), 400
+
     # Log successful WebAuthn login
     log_login_attempt(
         email=user.email,
@@ -7507,8 +7547,7 @@ def api_webauthn_auth_verify():
     )
 
     # Log the user in
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
+    start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Authentication successful',
@@ -7561,7 +7600,8 @@ def api_add_user_credential():
         options = create_registration_options(
             g.current_user.email,
             g.current_user.name,
-            g.current_user.sso_domain
+            g.current_user.sso_domain,
+            existing_user=g.current_user
         )
         return jsonify(json.loads(options))
     except Exception as e:
@@ -12154,7 +12194,7 @@ def teams_oidc_start():
         return jsonify({'error': 'Teams OIDC not configured'}), 500
 
     # Get return URL from query params
-    return_url = request.args.get('return_url', '/')
+    return_url = safe_redirect_path(request.args.get('return_url'))
 
     # Generate state
     state = generate_teams_oidc_state(return_url=return_url)
@@ -12216,7 +12256,7 @@ def teams_oidc_callback():
     if not state_data:
         return redirect('/login?error=invalid_state')
 
-    return_url = state_data.get('return_url', '/')
+    return_url = safe_redirect_path(state_data.get('return_url'))
 
     # Build redirect URI (must match the one used in authorization)
     base_url = get_oauth_base_url()
@@ -12250,13 +12290,9 @@ def teams_oidc_callback():
 
     domain = email_parts[1].lower()
 
-    # Check if domain is a public email provider
-    try:
-        from free_email_domains import FREE_EMAIL_DOMAINS
-        if domain in FREE_EMAIL_DOMAINS:
-            return redirect('/login?error=personal_email')
-    except ImportError:
-        pass
+    # Personal and disposable mailboxes cannot sign up (same rule as the other providers)
+    if DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain):
+        return redirect('/login?error=personal_email')
 
     # Find or create user
     user = User.query.filter_by(email=email.lower()).first()
@@ -12293,20 +12329,23 @@ def teams_oidc_callback():
             email=email.lower(),
             name=name,
             sso_domain=domain,
-            auth_method='teams_oidc',
+            auth_type='teams',  # No local credential: Microsoft is the identity provider
             email_verified=True,  # Microsoft verified the email
             last_login=datetime.now(timezone.utc)
         )
         db.session.add(user)
         db.session.flush()
 
-        # Add tenant membership
+        # Add tenant membership (first member of a tenant becomes provisional admin)
+        is_first_member = TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0
         membership = TenantMembership(
             user_id=user.id,
             tenant_id=tenant.id,
-            role='admin' if TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0 else 'member'
+            global_role=GlobalRole.PROVISIONAL_ADMIN if is_first_member else GlobalRole.USER
         )
         db.session.add(membership)
+        # admin_required reads the user flag, as for first users of other sign-up paths
+        user.is_admin = is_first_member
         db.session.commit()
 
     # Log successful Teams OIDC login
@@ -12321,9 +12360,8 @@ def teams_oidc_callback():
     )
 
     # Set session
-    session['user_id'] = user.id
+    start_user_session(user)
     session['auth_method'] = 'teams_oidc'
-    session.permanent = True
 
     logger.info(f"User {user.id} logged in via Teams OIDC")
 
@@ -12332,10 +12370,8 @@ def teams_oidc_callback():
 
     # Redirect to return URL or tenant home
     if return_url and return_url != '/' and not return_url.startswith('/?'):
-        # Ensure return_url is absolute if APP_BASE_URL is set
-        if return_url.startswith('/') and app_base:
-            return redirect(f'{app_base}{return_url}')
-        return redirect(return_url)
+        # return_url is a validated same-site path (safe_redirect_path)
+        return redirect(f'{app_base}{return_url}')
 
     # Redirect to tenant dashboard
     return redirect(f'{app_base}/{domain}')
