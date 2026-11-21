@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-ee-marketing-signin-www-route"
+title = "Advance ee for the website sign-in fixes and the worker route config"
+summary = "Advances the private ee submodule to the merged commit that pins the marketing website with visible sign-in errors, CSRF token handling, signed-in visitor detection and honest contact form errors, and that lists the www route in the worker configuration. Pointer change only; the website and worker were deployed from those commits on 2026-11-21."
+change_type = "bugfix"
+surfaces = ["enterprise_only"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
