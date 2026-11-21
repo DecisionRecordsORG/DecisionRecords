@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, HostListener, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
@@ -19,6 +19,7 @@ import { AuthService } from '../../services/auth.service';
 import { SpaceService } from '../../services/space.service';
 import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatalog, DecisionStatus, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
+import { HasUnsavedChanges } from '../../guards/unsaved-changes.guard';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
 import { Observable, of } from 'rxjs';
 import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operators';
@@ -963,7 +964,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
     }
   `]
 })
-export class DecisionDetailComponent implements OnInit {
+export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
   decision: Decision | null = null;
   form: FormGroup;
   isNew = false;
@@ -985,6 +986,9 @@ export class DecisionDetailComponent implements OnInit {
   relationshipCatalog: DecisionRelationshipCatalog | null = null;
   decisionReferences: DecisionReference[] = [];
   editableRelationships: Array<{ target_decision_id: number | null; relationship_type: string; notes: string }> = [];
+
+  // Unsaved-changes tracking: snapshot of the input as last loaded or saved (null until loaded)
+  private savedState: string | null = null;
 
   constructor(
     private route: ActivatedRoute,
@@ -1026,6 +1030,8 @@ export class DecisionDetailComponent implements OnInit {
       if (this.authService.isMasterAccount) {
         this.form.disable();
       }
+      // A new decision starts from the empty form
+      this.markSaved();
     } else {
       this.loadDecision(+id);
     }
@@ -1051,7 +1057,12 @@ export class DecisionDetailComponent implements OnInit {
         if (this.isNew && this.selectedSpaceIds.length === 0) {
           const defaultSpace = spaces.find(s => s.is_default);
           if (defaultSpace) {
+            // The preselected default space is not something the user entered
+            const untouched = !this.hasUnsavedChanges();
             this.selectedSpaceIds = [defaultSpace.id];
+            if (untouched) {
+              this.markSaved();
+            }
           }
         }
       },
@@ -1184,6 +1195,7 @@ export class DecisionDetailComponent implements OnInit {
       if (this.authService.isMasterAccount) {
         this.form.disable();
       }
+        this.markSaved();
         this.isLoading = false;
       },
       error: () => {
@@ -1219,6 +1231,8 @@ export class DecisionDetailComponent implements OnInit {
       } as any).subscribe({
         next: (decision) => {
           this.snackBar.open('Decision created successfully', 'Close', { duration: 3000 });
+          // Saved: leaving this page must not ask about unsaved changes
+          this.savedState = null;
           this.router.navigate(['/', this.tenant, 'decision', decision.id]);
         },
         error: (err) => {
@@ -1247,6 +1261,7 @@ export class DecisionDetailComponent implements OnInit {
           this.decision = decision;
           this.selectedSpaceIds = decision.spaces?.map(s => s.id) || [];
           this.form.get('change_reason')?.reset();
+          this.markSaved();
           this.isSaving = false;
           this.snackBar.open('Decision updated successfully', 'Close', { duration: 3000 });
         },
@@ -1281,11 +1296,79 @@ export class DecisionDetailComponent implements OnInit {
     this.decisionService.deleteDecision(this.decision.id).subscribe({
       next: () => {
         this.snackBar.open('Decision deleted successfully', 'Close', { duration: 3000 });
+        // Nothing left to save: leaving this page must not ask about unsaved changes
+        this.savedState = null;
         this.router.navigate(['/']);
       },
       error: (err) => {
         this.snackBar.open(err.error?.error || 'Failed to delete decision', 'Close', { duration: 3000 });
       }
     });
+  }
+
+  /**
+   * Everything the user can enter on this form, as one comparable value.
+   * Owner, spaces and relationship rows are standalone ngModel fields, so
+   * `form.dirty` alone does not notice changes to them.
+   */
+  private captureState(): string {
+    const value = this.form.getRawValue();
+    return JSON.stringify({
+      title: value.title ?? '',
+      status: value.status ?? '',
+      context: value.context ?? '',
+      decision: value.decision ?? '',
+      consequences: value.consequences ?? '',
+      change_reason: value.change_reason ?? '',
+      space_ids: [...this.selectedSpaceIds].sort((a, b) => a - b),
+      owner_id: this.selectedOwnerId ?? null,
+      owner_email: this.ownerEmail || '',
+      // A row with no target and no notes holds nothing the user would miss
+      relationships: this.editableRelationships
+        .filter((relationship) => relationship.target_decision_id || relationship.notes)
+        .map((relationship) => ({
+          target_decision_id: relationship.target_decision_id ?? null,
+          relationship_type: relationship.relationship_type || '',
+          notes: relationship.notes || ''
+        }))
+    });
+  }
+
+  /** Record the current input as the saved state: nothing would be lost by leaving now. */
+  private markSaved(): void {
+    this.savedState = this.captureState();
+  }
+
+  /** True when leaving now would lose something the user entered. */
+  hasUnsavedChanges(): boolean {
+    if (this.authService.isMasterAccount || this.savedState === null) {
+      return false;
+    }
+    return this.captureState() !== this.savedState;
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  onBeforeUnload(event: BeforeUnloadEvent): void {
+    if (this.hasUnsavedChanges()) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  }
+
+  /** Called by unsavedChangesGuard before the router leaves this page. */
+  confirmDiscardChanges(): Observable<boolean> | boolean {
+    if (!this.hasUnsavedChanges()) {
+      return true;
+    }
+
+    return this.dialog.open(ConfirmDialogComponent, {
+      data: {
+        title: 'Unsaved Changes',
+        message: 'You have unsaved changes. Are you sure you want to leave this page?',
+        confirmText: 'Discard',
+        cancelText: 'Keep Editing',
+        isDanger: true
+      }
+    }).afterClosed().pipe(map(result => !!result));
   }
 }

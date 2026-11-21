@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { authGuard, adminGuard, masterGuard, guestGuard, tenantGuard } from './guards/auth.guard';
+import { unsavedChangesGuard } from './guards/unsaved-changes.guard';
 
 /**
  * Application Routes
@@ -310,12 +311,14 @@ export const routes: Routes = [
   {
     path: ':tenant/decision/new',
     loadComponent: () => import('./components/decision-detail/decision-detail.component').then(m => m.DecisionDetailComponent),
-    canActivate: [authGuard, tenantGuard]
+    canActivate: [authGuard, tenantGuard],
+    canDeactivate: [unsavedChangesGuard]
   },
   {
     path: ':tenant/decision/:id',
     loadComponent: () => import('./components/decision-detail/decision-detail.component').then(m => m.DecisionDetailComponent),
-    canActivate: [authGuard, tenantGuard]
+    canActivate: [authGuard, tenantGuard],
+    canDeactivate: [unsavedChangesGuard]
   },
   // This must be LAST among tenant routes - it matches any single segment
   {

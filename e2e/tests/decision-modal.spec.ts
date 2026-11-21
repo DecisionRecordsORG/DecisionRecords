@@ -271,7 +271,7 @@ test.describe('Decision Modal', () => {
     }
 
     // Open the owner picker: colleagues are listed by name, without email addresses
-    await modal.locator('mat-form-field:has-text("Team member") mat-select').click();
+    await modal.locator('mat-form-field:has-text("Team member")').click();
     const stewardOption = page.locator('mat-option:has-text("Test Steward")');
     await expect(stewardOption).toBeVisible({ timeout: 5000 });
     await expect(page.locator('mat-option:has-text("Test Admin")')).toBeVisible();
@@ -331,6 +331,33 @@ test.describe('Decision Modal', () => {
 
     // Original modal should still be visible
     await expect(modal).toBeVisible();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+
+    const titleInput = modal.locator('input[formcontrolname="title"]');
+
+    // Esc goes through the same warning instead of closing the modal
+    await titleInput.focus();
+    await page.keyboard.press('Escape');
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await keepEditingButton.click();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+    await expect(modal).toBeVisible();
+    await expect(titleInput).toHaveValue('Unsaved Test');
+
+    // So does a click on the backdrop, outside the modal
+    await page.mouse.click(5, 5);
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await keepEditingButton.click();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+    await expect(modal).toBeVisible();
+    await expect(titleInput).toHaveValue('Unsaved Test');
+
+    // And the X button in the header
+    await modal.locator('button[mattooltip="Close"]').click();
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await keepEditingButton.click();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+    await expect(titleInput).toHaveValue('Unsaved Test');
 
     // Now try again and discard
     await cancelButton.click();
@@ -341,6 +368,82 @@ test.describe('Decision Modal', () => {
 
     // Modal should close
     await expect(modal).toBeHidden({ timeout: 5000 });
+  });
+
+  test('unsaved-changes-owner-only: Warns when only the owner was chosen', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+
+    await page.waitForLoadState('networkidle');
+    await page.waitForSelector('h1', { timeout: 10000 });
+
+    await dismissOverlays(page);
+
+    const createButton = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
+
+    if (!(await createButton.isVisible({ timeout: 5000 }).catch(() => false))) {
+      test.skip(true, 'Create button not visible');
+      return;
+    }
+
+    await createButton.click();
+
+    const modal = page.locator('mat-dialog-container').first();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+
+    // Choose an owner and nothing else: the owner field is outside the reactive form
+    await modal.locator('mat-form-field:has-text("Team member")').click();
+    await page.locator('mat-option:has-text("Test Steward")').click();
+    await expect(page.locator('mat-option')).toHaveCount(0);
+
+    const warningDialog = page.locator('mat-dialog-container:has-text("Unsaved Changes")');
+
+    await modal.locator('input[formcontrolname="title"]').focus();
+    await page.keyboard.press('Escape');
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await warningDialog.locator('button:has-text("Keep Editing")').click();
+    await expect(warningDialog).toBeHidden({ timeout: 3000 });
+    await expect(modal.locator('mat-form-field:has-text("Team member") mat-select')).toContainText('Test Steward');
+
+    await page.mouse.click(5, 5);
+    await expect(warningDialog).toBeVisible({ timeout: 3000 });
+    await warningDialog.locator('button:has-text("Discard")').click();
+    await expect(modal).toBeHidden({ timeout: 5000 });
+  });
+
+  test('no-warning-when-nothing-entered: Esc and backdrop close an untouched modal', async ({ page }) => {
+    await loginAsUser(page, 'user@test-org.com', 'TestPass123');
+
+    await page.waitForLoadState('networkidle');
+    await page.waitForSelector('h1', { timeout: 10000 });
+
+    await dismissOverlays(page);
+
+    const createButton = page.locator('button:has-text("New Decision"), button:has-text("Create Your First Decision")').first();
+
+    if (!(await createButton.isVisible({ timeout: 5000 }).catch(() => false))) {
+      test.skip(true, 'Create button not visible');
+      return;
+    }
+
+    const modal = page.locator('mat-dialog-container').first();
+    const warningDialog = page.locator('mat-dialog-container:has-text("Unsaved Changes")');
+
+    // Esc on an untouched form closes straight away
+    await createButton.click();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    await page.waitForLoadState('networkidle');
+    await modal.locator('input[formcontrolname="title"]').focus();
+    await page.keyboard.press('Escape');
+    await expect(modal).toBeHidden({ timeout: 5000 });
+    await expect(warningDialog).toHaveCount(0);
+
+    // So does a backdrop click
+    await createButton.click();
+    await expect(modal).toBeVisible({ timeout: 5000 });
+    await page.waitForLoadState('networkidle');
+    await page.mouse.click(5, 5);
+    await expect(modal).toBeHidden({ timeout: 5000 });
+    await expect(warningDialog).toHaveCount(0);
   });
 
   test('delete-decision-in-modal: Can delete from modal', async ({ page }) => {
