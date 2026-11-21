@@ -6,6 +6,9 @@
 # Build:
 #   docker build -f Dockerfile.community -t decision-records:community .
 #
+# Requires BuildKit (the default builder since Docker 23), which applies
+# Dockerfile.community.dockerignore as the build-context allowlist.
+#
 # Run with persistent storage (RECOMMENDED):
 #   docker run -d -p 3000:8000 \
 #     -v decision-records-data:/data \
@@ -62,15 +65,20 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # ==============================================================================
-# Copy ONLY core application files
-# IMPORTANT: Do NOT copy ee/ directory or any files that import from ee/
+# Copy core application files
+#
+# Every root-level Python module is copied with a glob so a new module can never
+# be forgotten here (v2.1.0 shipped without decision_relationships.py and could
+# not start). What the glob can see is restricted by the allowlist in
+# Dockerfile.community.dockerignore: ee/, tests/, run_local.py, .env files and
+# local databases never enter the build context.
+#
+# scripts/check_ce_image_modules.py verifies this file set statically, and the
+# CI and release workflows boot the built image before anything is published.
 # ==============================================================================
 
-# Core application
-COPY app.py models.py version.py feature_flags.py migrations.py ./
-
-# Core modules (these do NOT import from ee/)
-COPY auth.py governance.py notifications.py security.py webauthn_auth.py crypto.py ./
+# Core application modules (root-level *.py only; the glob does not recurse)
+COPY *.py ./
 
 # Templates and static assets
 COPY templates/ ./templates/

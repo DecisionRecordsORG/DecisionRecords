@@ -45,6 +45,7 @@ SHARED_CORE_PATTERNS = (
     "version.py",
     "webauthn_auth.py",
     "Dockerfile.community",
+    "Dockerfile.community.dockerignore",
     "docker-compose.yml",
     "frontend/**",
     "static/**",
