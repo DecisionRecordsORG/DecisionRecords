@@ -1,7 +1,7 @@
 from functools import wraps
 from flask import session, redirect, url_for, request, jsonify, g
 from authlib.integrations.requests_client import OAuth2Session
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,44 @@ def setup_token_required(f):
     return decorated_function
 
 
+def set_session_expiry(is_admin=False):
+    """Set session expiry based on user type (admin vs regular user)."""
+    from models import SystemConfig
+
+    if is_admin:
+        timeout_hours = SystemConfig.get_int(
+            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
+        )
+    else:
+        timeout_hours = SystemConfig.get_int(
+            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
+            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
+        )
+    session['_expires_at'] = (datetime.now(timezone.utc) + timedelta(hours=timeout_hours)).isoformat()
+    session.permanent = True
+
+
+def start_user_session(user, is_admin=False):
+    """Sign `user` in: the only place a user session may be created.
+
+    Sets session['user_id'] together with the expiry that check_session_expiry()
+    in app.py requires. A session that has a user_id but no expiry is treated as
+    a legacy session and cleared on the very next request, so every sign-in path
+    (password, passkey, tenant SSO, social OAuth, Teams, setup links, and the
+    Enterprise routes) must call this instead of assigning session['user_id'].
+
+    Args:
+        user: The authenticated User.
+        is_admin: Apply the admin session timeout instead of the user timeout.
+    """
+    if user is None or getattr(user, 'id', None) is None:
+        raise ValueError('start_user_session requires a persisted user')
+
+    session['user_id'] = user.id
+    set_session_expiry(is_admin=bool(is_admin))
+
+
 def complete_setup_and_login(user):
     """
     Complete the setup process and convert setup token to full session.
@@ -136,8 +174,7 @@ def complete_setup_and_login(user):
     session.pop('setup_purpose', None)
 
     # Create full session
-    session['user_id'] = user.id
-    session.permanent = True
+    start_user_session(user)
 
     # Update last login
     user.last_login = datetime.now(timezone.utc)

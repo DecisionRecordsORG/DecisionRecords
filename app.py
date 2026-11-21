@@ -23,7 +23,7 @@ from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription
 from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 # EE:END - EE Model Imports
 from datetime import datetime, timedelta, timezone
-from auth import login_required, admin_required, get_current_user, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
@@ -598,22 +598,6 @@ def init_database():
             app_error_state['details'] = traceback.format_exc()
             # Don't raise - let the app run but in error state
 
-def set_session_expiry(is_admin=False):
-    """Set session expiry based on user type (admin vs regular user)."""
-    if is_admin:
-        timeout_hours = SystemConfig.get_int(
-            SystemConfig.KEY_ADMIN_SESSION_TIMEOUT_HOURS,
-            default=SystemConfig.DEFAULT_ADMIN_SESSION_TIMEOUT
-        )
-    else:
-        timeout_hours = SystemConfig.get_int(
-            SystemConfig.KEY_USER_SESSION_TIMEOUT_HOURS,
-            default=SystemConfig.DEFAULT_USER_SESSION_TIMEOUT
-        )
-    session['_expires_at'] = (datetime.now(timezone.utc) + timedelta(hours=timeout_hours)).isoformat()
-    session.permanent = True
-
-
 def is_session_expired():
     """Check if current session has expired."""
     expires_at = session.get('_expires_at')
@@ -1118,8 +1102,7 @@ def api_tenant_login():
         user_agent=user_agent
     )
 
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
+    start_user_session(user, is_admin=False)  # 8 hours default for regular users
     user.last_login = datetime.now(timezone.utc)
     db.session.commit()
 
@@ -1285,8 +1268,7 @@ def sso_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
         return redirect(url_for('index'))
 
@@ -1651,8 +1633,7 @@ def slack_oidc_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Slack OIDC login successful for {email}")
 
@@ -1992,8 +1973,7 @@ def google_oauth_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Google OAuth login successful for {email}")
 
@@ -2334,8 +2314,7 @@ def microsoft_oauth_callback():
         )
 
         # Set session
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=user.is_admin)
+        start_user_session(user, is_admin=user.is_admin)
 
         logger.info(f"Microsoft OAuth login successful for {email}")
 
@@ -5867,8 +5846,7 @@ def api_direct_signup():
         app.logger.info(f"Created setup token for user {email} - credential setup required")
     else:
         # Password auth - user already has credentials, log them in fully
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
         user.last_login = datetime.now(timezone.utc)
         db.session.commit()
         redirect_url = f'/{domain}'
@@ -6467,7 +6445,7 @@ def api_setup_password():
     db.session.commit()
 
     # Log the user in
-    session['user_id'] = user.id
+    start_user_session(user)
     session['user_type'] = 'user'
 
     return jsonify({
@@ -7432,8 +7410,7 @@ def api_webauthn_register_verify():
         log_security_event('auth', f"Passkey setup completed for {user.email} (first credential)", severity='INFO')
     else:
         # Standard registration - log the user in
-        session['user_id'] = user.id
-        set_session_expiry(is_admin=False)  # 8 hours default for regular users
+        start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Registration successful',
@@ -7507,8 +7484,7 @@ def api_webauthn_auth_verify():
     )
 
     # Log the user in
-    session['user_id'] = user.id
-    set_session_expiry(is_admin=False)  # 8 hours default for regular users
+    start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
     return jsonify({
         'message': 'Authentication successful',
@@ -12321,9 +12297,8 @@ def teams_oidc_callback():
     )
 
     # Set session
-    session['user_id'] = user.id
+    start_user_session(user)
     session['auth_method'] = 'teams_oidc'
-    session.permanent = True
 
     logger.info(f"User {user.id} logged in via Teams OIDC")
 
