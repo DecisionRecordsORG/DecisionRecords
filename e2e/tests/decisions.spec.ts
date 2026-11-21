@@ -357,9 +357,11 @@ test.describe('Decision Form - Space Selector (Modal)', () => {
     // Wait for modal to open
     await page.waitForSelector('mat-dialog-container input[formcontrolname="title"]', { timeout: 15000 });
 
-    const spaceSelector = page.locator('mat-dialog-container .side-panel mat-select, mat-dialog-container mat-form-field:has(mat-label:has-text("Select spaces")) mat-select').first();
+    // The Spaces card is only rendered once the spaces have loaded. Until then the first
+    // select in the side panel is the owner picker, so target the Spaces card and wait for it.
+    const spaceSelector = page.locator('mat-dialog-container .side-panel .meta-card:has-text("Spaces") mat-select').first();
 
-    if (!(await spaceSelector.isVisible({ timeout: 5000 }).catch(() => false))) {
+    if (!(await spaceSelector.waitFor({ state: 'visible', timeout: 5000 }).then(() => true).catch(() => false))) {
       test.skip(true, 'Space selector not visible in modal');
       return;
     }
