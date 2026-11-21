@@ -12265,13 +12265,9 @@ def teams_oidc_callback():
 
     domain = email_parts[1].lower()
 
-    # Check if domain is a public email provider
-    try:
-        from free_email_domains import FREE_EMAIL_DOMAINS
-        if domain in FREE_EMAIL_DOMAINS:
-            return redirect('/login?error=personal_email')
-    except ImportError:
-        pass
+    # Personal and disposable mailboxes cannot sign up (same rule as the other providers)
+    if DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain):
+        return redirect('/login?error=personal_email')
 
     # Find or create user
     user = User.query.filter_by(email=email.lower()).first()
@@ -12308,18 +12304,19 @@ def teams_oidc_callback():
             email=email.lower(),
             name=name,
             sso_domain=domain,
-            auth_method='teams_oidc',
+            auth_type='teams',  # No local credential: Microsoft is the identity provider
             email_verified=True,  # Microsoft verified the email
             last_login=datetime.now(timezone.utc)
         )
         db.session.add(user)
         db.session.flush()
 
-        # Add tenant membership
+        # Add tenant membership (first member of a tenant becomes provisional admin)
+        is_first_member = TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0
         membership = TenantMembership(
             user_id=user.id,
             tenant_id=tenant.id,
-            role='admin' if TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0 else 'member'
+            global_role=GlobalRole.PROVISIONAL_ADMIN if is_first_member else GlobalRole.USER
         )
         db.session.add(membership)
         db.session.commit()

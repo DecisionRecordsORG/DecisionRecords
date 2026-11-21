@@ -1035,3 +1035,76 @@ class TestProviderSessionsSurviveTheNextRequest:
         me = client.get('/api/user/me')
         assert me.status_code == 200, me.get_json()
         assert me.get_json()['email'] == 'pat@acme.test'
+
+
+class TestTeamsFirstSignIn:
+    """The Teams OIDC callback must be able to create the account it signs in."""
+
+    def test_first_sign_in_for_a_new_organisation_creates_tenant_and_admin(self, oauth_env):
+        test_app, install = oauth_env
+        provider = install('teams')
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'Founder@NewCo.test')
+
+        assert response.status_code == 302, response.get_data(as_text=True)
+        assert response.headers['Location'] == f'{APP_BASE}/newco.test'
+        user = User.query.filter_by(email='founder@newco.test').first()
+        assert user is not None
+        assert user.sso_domain == 'newco.test'
+        assert user.auth_type == 'teams'
+        assert user.email_verified is True
+        tenant = Tenant.query.filter_by(domain='newco.test').first()
+        assert tenant is not None
+        membership = TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first()
+        assert membership is not None
+        assert membership.global_role == GlobalRole.PROVISIONAL_ADMIN
+        me = client.get('/api/user/me')
+        assert me.status_code == 200, me.get_json()
+        assert me.get_json()['email'] == 'founder@newco.test'
+        # login_required must accept the account without a local credential
+        assert client.get('/api/decisions').status_code == 200
+
+    def test_first_sign_in_into_an_existing_organisation_joins_as_member(self, oauth_env):
+        test_app, install = oauth_env
+        provider = install('teams')
+        make_user('owner@acme.test', password=STRONG_PASSWORD, role=GlobalRole.ADMIN)
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'newhire@acme.test')
+
+        assert response.status_code == 302, response.get_data(as_text=True)
+        user = User.query.filter_by(email='newhire@acme.test').first()
+        assert user is not None
+        tenant = Tenant.query.filter_by(domain='acme.test').first()
+        membership = TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first()
+        assert membership is not None
+        assert membership.global_role == GlobalRole.USER
+        assert client.get('/api/user/me').status_code == 200
+
+    def test_returning_user_signs_in_without_changes_to_their_account(self, oauth_env):
+        test_app, install = oauth_env
+        provider = install('teams')
+        user_id = make_user('pat@acme.test', password=STRONG_PASSWORD).id
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, 'pat@acme.test')
+
+        assert response.status_code == 302
+        db.session.expire_all()
+        assert db.session.get(User, user_id).auth_type == 'local'
+        assert User.query.count() == 1
+        assert client.get('/api/user/me').get_json()['email'] == 'pat@acme.test'
+
+    @pytest.mark.parametrize('email', ['someone@outlook.com', 'someone@gmail.com'])
+    def test_personal_mailbox_cannot_create_an_account(self, oauth_env, email):
+        test_app, install = oauth_env
+        provider = install('teams')
+        client = test_app.test_client()
+
+        response = sign_in(client, provider, email)
+
+        assert response.status_code == 302
+        assert response.headers['Location'] == '/login?error=personal_email'
+        assert User.query.filter_by(email=email).first() is None
+        assert client.get('/api/user/me').status_code == 401
