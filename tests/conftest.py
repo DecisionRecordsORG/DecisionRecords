@@ -12,6 +12,29 @@ from models import db, User, Tenant, TenantMembership, TenantSettings, Space, De
     AuditLog, ArchitectureDecision, MaturityState, GlobalRole, VisibilityPolicy, \
     LoginHistory, log_login_attempt, EmailVerification, MasterAccount
 from flask import Flask
+from sqlalchemy.engine import make_url
+
+
+def fixture_database_url():
+    """Database the ``app`` fixture creates and drops its schema in.
+
+    In-memory SQLite by default. CI also runs the suite with TEST_DATABASE_URL
+    pointing at a PostgreSQL service, because SQLite does not load the
+    PostgreSQL driver, enforce foreign keys or check column types.
+
+    Every test drops all tables afterwards, so a database whose name does not
+    contain "test" is refused rather than emptied.
+    """
+    url = os.environ.get('TEST_DATABASE_URL', '').strip()
+    if not url:
+        return 'sqlite:///:memory:'
+    database_name = make_url(url).database or ''
+    if 'test' not in database_name.lower():
+        raise RuntimeError(
+            'TEST_DATABASE_URL must name a database containing "test" '
+            f'(got {database_name!r}): the test fixtures drop every table.'
+        )
+    return url
 
 
 @pytest.fixture
@@ -19,7 +42,7 @@ def app():
     """Create application for testing."""
     app = Flask(__name__)
     app.config['TESTING'] = True
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    app.config['SQLALCHEMY_DATABASE_URI'] = fixture_database_url()
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['SECRET_KEY'] = 'test-secret-key'
 
@@ -28,6 +51,9 @@ def app():
     with app.app_context():
         db.create_all()
         yield app
+        # Release the session's connection first: on PostgreSQL an open
+        # transaction holds locks that make DROP TABLE wait forever.
+        db.session.remove()
         db.drop_all()
 
 

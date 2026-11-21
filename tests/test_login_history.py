@@ -48,13 +48,13 @@ class TestLoginHistoryModel:
         assert data['failure_reason'] == 'Invalid credential'
         assert data['ip_address'] == '10.0.0.1'
 
-    def test_log_login_attempt_success(self, app, session):
+    def test_log_login_attempt_success(self, app, session, sample_user):
         """Test log_login_attempt helper function for successful login."""
         entry = log_login_attempt(
             email='user@example.com',
             login_method=LoginHistory.METHOD_SSO,
             success=True,
-            user_id=123,
+            user_id=sample_user.id,
             tenant_domain='example.com',
             ip_address='172.16.0.1',
             user_agent='Test Agent'
@@ -62,7 +62,7 @@ class TestLoginHistoryModel:
 
         assert entry.id is not None
         assert entry.email == 'user@example.com'
-        assert entry.user_id == 123
+        assert entry.user_id == sample_user.id
         assert entry.tenant_domain == 'example.com'
         assert entry.success is True
 
