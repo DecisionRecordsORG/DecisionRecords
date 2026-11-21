@@ -49,8 +49,8 @@ interface TenantInfo {
           <h1>Decision Records</h1>
           <p class="tagline">Helping teams remember why decisions were made</p>
           <p class="description">
-            An open source platform for capturing and preserving the reasoning behind
-            important architecture decisions using the ADR format.
+            An open source platform where teams record the decisions they make,
+            why they made them and what follows from them.
           </p>
           <div class="source-banner">
             <span>

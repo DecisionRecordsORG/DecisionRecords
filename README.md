@@ -1,11 +1,13 @@
 # Decision Records
 
-> Open source platform for capturing and preserving Decision Records
+> Open source decision records for teams
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](docker-compose.yml)
 
-Decision Records helps teams remember why decisions were made. Based on the [Architecture Decision Records (ADR)](https://adr.github.io/) format, it provides a collaborative platform for documenting technical decisions with their context, rationale, and consequences.
+Decision Records helps teams remember why decisions were made. It gives any team one shared place to record a decision, the situation that led to it, and what follows from it: a pricing change, a supplier choice, a hiring policy, or a software design.
+
+Each record has the same three parts: Context, Decision, and Consequences. Records can be linked to each other, grouped into spaces, and replaced by later decisions without losing the history. Software teams will recognise the structure as the [Architecture Decision Record (ADR)](https://adr.github.io/) format; see [Decision record format](#decision-record-format).
 
 ## Quick Start
 
@@ -31,7 +33,8 @@ The default bootstrap username is `admin`; you must set a strong `MASTER_PASSWOR
 
 ### Community Edition (Free & Open Source)
 
-- **Architecture Decision Records** - Create and manage ADRs with the proven format: Context, Decision, Consequences
+- **Decision Records** - Record decisions in one proven format: Context, Decision, Consequences
+- **Decision Relationships** - Link decisions that supersede, amend, or depend on each other, with relationship packs for software, data, security, operations, people, finance, and product teams
 - **Multi-Tenant** - Each organization gets isolated workspace based on email domain
 - **Passkey Authentication** - Secure passwordless login with WebAuthn/FIDO2
 - **SSO/OIDC Integration** - Connect with Okta, Azure AD, Auth0, or any OIDC provider
@@ -113,15 +116,25 @@ See [docs/self-hosting.md](docs/self-hosting.md) for detailed deployment instruc
 | `DATABASE_URL` | Database connection string | `sqlite:///decisions.db` |
 | `DECISION_RECORDS_EDITION` | `community` or `enterprise` | `community` |
 
-## ADR Format
+## Decision Record Format
 
-Each decision follows the Michael Nygard format:
+Every decision record has the same fields:
 
-- **Title** - Short description of the decision
-- **Status** - `proposed`, `accepted`, `deprecated`, or `superseded`
-- **Context** - The forces at play (technical, political, social)
-- **Decision** - What was decided, in active voice ("We will...")
-- **Consequences** - Results of the decision (positive, negative, neutral)
+- **Title** - Short name for the decision
+- **Status** - `proposed`, `accepted`, `archived`, or `superseded`
+- **Context** - What prompted the decision: the situation, the problem, and what limits the options
+- **Decision** - What was decided, stated plainly ("We will...")
+- **Consequences** - What follows from the decision: benefits, costs, and accepted risks
+
+Each tenant gets a short prefix, so decisions have IDs such as `XYZ-001` that people can quote.
+
+### For software teams: ADRs and arc42
+
+The format is the Architecture Decision Record (ADR) format described by Michael Nygard: Title, Status, Context, Decision, Consequences. A decision record in this tool is an ADR, and the statuses cover the usual ADR lifecycle (`archived` takes the place of "deprecated").
+
+[arc42](https://arc42.org/) reserves section 9, "Architecture Decisions", for exactly these records. Teams that document with arc42 can keep their decisions here and refer to them from section 9 by ID.
+
+The Software Delivery, Data & Analytics, Security & Risk, and Operations & Service relationship packs add relationship classes such as "implements", "blocks", and "mitigates" for technical decisions.
 
 ## Authentication
 

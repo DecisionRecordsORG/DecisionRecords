@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-21-decision-records-for-teams"
+title = "Decision records for teams: 25-user limit, neutral wording and non-technical relationship packs"
+summary = "Raises the default per-tenant user limit from 5 to 25 and enforces it on every path that adds an account to an existing tenant (social sign-in, tenant SSO, Teams tab sign-in, email-verified sign-up, access requests), counting accounts that have no membership row. Rewords notification emails, the decision forms, app metadata, README and in-app copy from architecture decisions to decision records for any team, fixes the decision owner email that was never sent, migrates stored default display names to Decision Records at startup, and adds People & Policy, Finance & Procurement and Product & Customer relationship packs without enabling them for existing tenants."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"

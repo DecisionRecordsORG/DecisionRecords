@@ -220,7 +220,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's architecture decisions.</p>
+                <p><strong>What is this for?</strong> Configure email delivery for notifications about your organisation's decisions.</p>
                 <h4>Use Cases</h4>
                 <ul>
                   <li>Decision status changes</li>
@@ -742,7 +742,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                 </mat-card-title>
               </mat-card-header>
               <mat-card-content>
-                <p>Spaces help organize your architecture decisions into logical groups.</p>
+                <p>Spaces help organize your decisions into groups, such as a team, a project or a topic.</p>
                 <ul>
                   <li><strong>Default Space:</strong> New decisions are automatically assigned to this space</li>
                   <li><strong>Multiple Spaces:</strong> Decisions can belong to multiple spaces</li>
