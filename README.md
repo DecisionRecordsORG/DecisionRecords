@@ -69,7 +69,7 @@ Example:
 docker pull ghcr.io/decisionrecordsorg/decisionrecords:latest
 ```
 
-For a pinned install, prefer a version tag such as `v2.1.0` once that release is published.
+For a pinned install, prefer a version tag such as `v2.1.1` once that release is published.
 
 ## Installation
 
