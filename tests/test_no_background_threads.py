@@ -153,7 +153,9 @@ def test_next_one_is_clean():
 def pytester_like(tmp_path):
     """Run a small test file in a child pytest that uses this suite's conftest."""
     def run(source):
-        path = os.path.join(ROOT, 'tests', f'_guard_probe_{os.getpid()}_test.py')
+        # Not named like a test file: a pytest run collecting tests/ at this
+        # moment must not pick it up. Given by path, the child still runs it.
+        path = os.path.join(ROOT, 'tests', f'_guard_probe_{os.getpid()}.py')
         with open(path, 'w', encoding='utf-8') as handle:
             handle.write(source)
         try:
