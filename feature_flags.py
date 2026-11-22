@@ -14,6 +14,7 @@ Security Note:
 - Physical code separation (ee/ directory excluded in Community builds) provides
   additional protection - EE code doesn't exist in Community Edition Docker images
 """
+from urllib.parse import urlparse
 import os
 import logging
 from functools import wraps
@@ -186,6 +187,47 @@ def get_enabled_features() -> dict:
         'slack': is_slack_enabled(),
         'teams': is_teams_enabled(),
     }
+
+
+SUPPORT_URL_HIDDEN = 'none'
+SUPPORT_URL_MAX_LENGTH = 500
+_SUPPORT_URL_FORBIDDEN = set(' \t\r\n<>"\'`\\')
+
+
+def normalise_support_url(value):
+    """Read a support page address given by an operator or a super admin.
+
+    Returns:
+        ''      nothing was given
+        'none'  the literal word "none": the help link is hidden
+        the address, trimmed, when it is an http(s) address
+        None    anything else: not acceptable
+
+    Only http and https addresses are accepted, because the value becomes the
+    target of a link shown to people who are not signed in. An address with
+    credentials in it, with whitespace or with markup characters is refused.
+    """
+    if value is None:
+        return ''
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return ''
+    if text.lower() == SUPPORT_URL_HIDDEN:
+        return SUPPORT_URL_HIDDEN
+    if len(text) > SUPPORT_URL_MAX_LENGTH or any(ch in _SUPPORT_URL_FORBIDDEN or ord(ch) < 32 for ch in text):
+        return None
+    try:
+        parsed = urlparse(text)
+        hostname = parsed.hostname
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in ('http', 'https') or not hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    return text
 
 
 def invalidate_cache():

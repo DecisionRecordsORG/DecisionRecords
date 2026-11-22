@@ -121,6 +121,7 @@ docker run -d \
 | `DECISION_RECORDS_EDITION` | `community` or `enterprise` | `community` |
 | `ENVIRONMENT` | `development` or `production` | `production` |
 | `SKIP_CLOUDFLARE_CHECK` | Skip Cloudflare validation | `true` |
+| `SUPPORT_URL` | Address of your own support page for the "Can't sign in? Get help" link. `none` hides the link | no link |
 
 ### Email Configuration
 
@@ -395,6 +396,17 @@ Messages sent through `/api/contact`, `/api/sponsorship` and `/api/feedback` are
 #### 4. Existing installations
 
 If upgrading from a version before `v2.1.1`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
+
+## Pointing the help link at your own support page
+
+The sign-in, setup and recovery pages can show a "Can't sign in? Get help" link. On a self-hosted installation the link is not shown, so your users are not sent to the hosted service's support. To show it, give the address of a page of your own:
+
+```yaml
+environment:
+  - SUPPORT_URL=https://intranet.example.org/decision-records-help
+```
+
+The address must start with `http://` or `https://`. The app opens it in a new tab and adds `topic` and, when it knows them, `email` and `org` as query parameters; your page can ignore them. `SUPPORT_URL=none` hides the link. A super admin can also set or hide the link under Super Admin > Settings > Help link, and that setting wins over the environment variable. More detail is in [Configuration](configuration.md#help-link).
 
 ## Support
 

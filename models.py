@@ -123,6 +123,7 @@ class SystemConfig(db.Model):
     KEY_EMAIL_VERIFICATION_REQUIRED = 'email_verification_required'
     KEY_SUPER_ADMIN_EMAIL = 'super_admin_notification_email'
     KEY_SUPPORT_EMAIL = 'support_email'  # Email address for contact form submissions
+    KEY_SUPPORT_URL = 'support_url'  # Address of the help link's support page, or "none" to hide the link
     KEY_ADMIN_SESSION_TIMEOUT_HOURS = 'admin_session_timeout_hours'
     KEY_USER_SESSION_TIMEOUT_HOURS = 'user_session_timeout_hours'
 

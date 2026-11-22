@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every retention run and every erasure is recorded (kind, id, for a tenant its domain, and row counts; never names, email addresses or content) in the new `retention_runs` and `retention_erasures` tables
 - `RETENTION_AUTO_RUN=false` and a super admin setting turn the automatic run off
 - `GET /api/superadmin/retention`, `POST /api/superadmin/retention/run` and `GET`/`PUT /api/admin/settings/retention` for super admins
+- `SUPPORT_URL` environment variable: a self-hosted installation can point the "Can't sign in? Get help" link at its own support page (an `http://` or `https://` address) or hide it (`none`). The server reports the choice as `support_url` in `/api/features` in both editions; the app already read it and nothing sent it. A value that is not an http(s) address hides the link and is never passed to a page
+- Super admins can set the same address under Settings > Help link, in every edition. The setting wins over `SUPPORT_URL`, and clearing it goes back to the environment variable. `GET` and `POST /api/admin/settings/support` carry `support_url`
+- `docs/configuration.md` and `docs/self-hosting.md` describe the help link and `SUPPORT_URL`
 
 ### Changed
 - The in-app data processing page describes the messages people send us and the optional organisation details: what is stored, why, the legal basis, that they are deleted after 24 months or with the organisation, and that Decision Records is the Data Controller for them

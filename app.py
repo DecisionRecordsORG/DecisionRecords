@@ -40,7 +40,8 @@ from security import (
 from feature_flags import (
     require_slack, require_teams, require_enterprise, require_feature,
     get_enabled_features, is_slack_enabled, is_teams_enabled, is_enterprise,
-    is_feature_enabled, is_analytics_enabled, EDITION, Edition
+    is_feature_enabled, is_analytics_enabled, EDITION, Edition,
+    normalise_support_url, SUPPORT_URL_HIDDEN
 )
 
 # Enterprise Edition imports - loaded conditionally based on edition
@@ -783,10 +784,50 @@ def check_version():
     return jsonify(check_for_updates()), 200
 
 
+def environment_support_url():
+    """SUPPORT_URL from the environment: '' when unset, 'none', or an http(s) address.
+
+    A value that is neither hides the link: the operator wanted something
+    other than the default, and an address that cannot be used must never
+    reach a page.
+    """
+    raw = os.environ.get('SUPPORT_URL', '')
+    value = normalise_support_url(raw)
+    if value is None:
+        logger.warning('SUPPORT_URL is not an http(s) address or "none"; the help link is hidden')
+        return SUPPORT_URL_HIDDEN
+    return value
+
+
+def stored_support_url():
+    """The super admin's support page setting: '' when there is none, 'none', or an http(s) address."""
+    try:
+        raw = SystemConfig.get(SystemConfig.KEY_SUPPORT_URL)
+    except Exception:
+        # /api/features must answer even when the database cannot be read
+        db.session.rollback()
+        return ''
+    if raw is None:
+        return ''
+    value = normalise_support_url(raw)
+    return SUPPORT_URL_HIDDEN if value is None else value
+
+
+def effective_support_url():
+    """What the app is told about the help link. The super admin setting wins over SUPPORT_URL."""
+    return stored_support_url() or environment_support_url()
+
+
 @app.route('/api/features')
 def get_features():
     """Get enabled feature flags for frontend UI conditional rendering."""
-    return jsonify(get_enabled_features()), 200
+    features = get_enabled_features()
+    # Only present when someone chose: the app has its own default otherwise
+    # (the hosted service links to its support page, other installations show no link).
+    support_url = effective_support_url()
+    if support_url:
+        features['support_url'] = support_url
+    return jsonify(features), 200
 
 
 # EE:START - Blog API
@@ -4730,6 +4771,10 @@ def api_get_support_settings():
             SystemConfig.KEY_SUPPORT_EMAIL,
             default=SystemConfig.DEFAULT_SUPPORT_EMAIL
         ),
+        # The help link: the stored setting, what the environment says, and what applies
+        'support_url': stored_support_url(),
+        'support_url_environment': environment_support_url(),
+        'support_url_effective': effective_support_url(),
         'defaults': {
             'support_email': SystemConfig.DEFAULT_SUPPORT_EMAIL
         }
@@ -4743,20 +4788,45 @@ def api_save_support_settings():
     """Update support/contact email settings (super admin only)."""
     from security import sanitize_email
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
 
-    support_email = data.get('support_email', '').strip()
+    support_email = data.get('support_email') or ''
+    support_email = support_email.strip() if isinstance(support_email, str) else ''
 
+    # Check everything before saving anything
+    sanitized = None
     if support_email:
-        # Validate email format
         sanitized = sanitize_email(support_email)
         if not sanitized:
             return jsonify({'error': 'Invalid email address format'}), 400
 
+    support_url = None
+    if 'support_url' in data:
+        support_url = normalise_support_url(data.get('support_url'))
+        if support_url is None:
+            return jsonify({
+                'error': 'The support page address must start with http:// or https://. '
+                         'Enter "none" to hide the link.'
+            }), 400
+
+    if sanitized:
         SystemConfig.set(
             SystemConfig.KEY_SUPPORT_EMAIL,
             sanitized,
             description='Email address for contact form submissions'
+        )
+
+    if support_url == '':
+        # Cleared: SUPPORT_URL from the environment, or the app's default, applies again
+        SystemConfig.query.filter_by(key=SystemConfig.KEY_SUPPORT_URL).delete()
+        db.session.commit()
+    elif support_url:
+        SystemConfig.set(
+            SystemConfig.KEY_SUPPORT_URL,
+            support_url,
+            description='Address of the support page the help link leads to ("none" hides the link)'
         )
 
     return jsonify({
@@ -4764,7 +4834,10 @@ def api_save_support_settings():
         'support_email': SystemConfig.get(
             SystemConfig.KEY_SUPPORT_EMAIL,
             default=SystemConfig.DEFAULT_SUPPORT_EMAIL
-        )
+        ),
+        'support_url': stored_support_url(),
+        'support_url_environment': environment_support_url(),
+        'support_url_effective': effective_support_url()
     })
 
 
