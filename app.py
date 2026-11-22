@@ -2626,38 +2626,19 @@ def microsoft_oauth_callback():
         return redirect('/?error=internal_error')
 
 
-# Clock difference tolerated when checking a Teams sign-in token's validity period
-TEAMS_SSO_CLOCK_LEEWAY_SECONDS = 60
-
-
-def _teams_sso_audiences(app_id):
-    """Audience values a Teams sign-in token issued for this app can carry.
-
-    The bare application ID, and the Application ID URI forms a Teams app
-    manifest can declare. The host part comes from this installation's
-    configured base URLs only, never from the request.
-    """
-    from urllib.parse import urlparse
-
-    audiences = [app_id, f'api://{app_id}', f'api://botid-{app_id}']
-    for variable in ('OAUTH_BASE_URL', 'APP_BASE_URL'):
-        host = urlparse(os.environ.get(variable, '')).netloc.lower()
-        for form in (f'api://{host}/{app_id}', f'api://{host}/botid-{app_id}'):
-            if host and form not in audiences:
-                audiences.append(form)
-    return audiences
-
-
 def _teams_sso_identity(token):
     """Identity proven by a Teams sign-in token, or the reason there is none.
 
-    Returns (identity, None) or (None, (json_body, status)). The signature,
-    audience and validity period are verified by the Microsoft sign-in module
-    against Microsoft's published signing keys. The checks below are applied to
-    the verified claims: the audience is one of this app's, the issuer is the
-    Microsoft tenant named in `tid`, the validity period holds, and the user
-    is identified by `oid` and a sign-in name. Nothing is read from a token
-    that failed verification.
+    Returns (identity, None) or (None, (json_body, status)).
+
+    The Microsoft sign-in module verifies the token: RS256 signature against
+    Microsoft's published signing keys, audience (the Teams app's application
+    ID, passed here, and the Application ID URI forms that module accepts),
+    validity period and required claims. This function decides who the
+    verified claims identify:
+    - the issuer must be the Microsoft tenant named in `tid`
+    - the user is identified by `oid`, `tid` and a sign-in name
+    Nothing is read from a token that failed verification.
     """
     from ee.backend.oauth_providers.microsoft_oauth import validate_teams_sso_token
     from ee.backend.teams.teams_security import get_teams_bot_app_id
@@ -2668,12 +2649,12 @@ def _teams_sso_identity(token):
         return refused
 
     app_id = get_teams_bot_app_id()
-    if not app_id:
+    if not app_id or not isinstance(app_id, str):
         logger.error("Teams sign-in refused: the Teams app ID is not configured")
         return None, ({'valid': False, 'error': 'Teams sign-in is not configured'}, 503)
 
-    audiences = _teams_sso_audiences(app_id)
-    validated = validate_teams_sso_token(token.strip(), expected_audience=audiences)
+    # Always name the application the token must be for: the Teams app
+    validated = validate_teams_sso_token(token.strip(), expected_audience=app_id)
     if not validated or not isinstance(validated, dict):
         return refused
 
@@ -2690,24 +2671,9 @@ def _teams_sso_identity(token):
         logger.warning("Teams sign-in refused: token has no oid or tid claim")
         return refused
 
-    if claims.get('aud') not in audiences:
-        logger.warning("Teams sign-in refused: token was issued for another audience")
-        return refused
-
-    if claims.get('iss') not in (f'https://login.microsoftonline.com/{ms_tenant_id}/v2.0',
-                                 f'https://sts.windows.net/{ms_tenant_id}/'):
+    if text('iss').lower() not in (f'https://login.microsoftonline.com/{ms_tenant_id}/v2.0'.lower(),
+                                   f'https://sts.windows.net/{ms_tenant_id}/'.lower()):
         logger.warning("Teams sign-in refused: issuer does not match the token's tenant")
-        return refused
-
-    now = datetime.now(timezone.utc).timestamp()
-    expires_at, not_before = claims.get('exp'), claims.get('nbf')
-    if isinstance(expires_at, bool) or not isinstance(expires_at, (int, float)) \
-            or expires_at < now - TEAMS_SSO_CLOCK_LEEWAY_SECONDS:
-        logger.warning("Teams sign-in refused: token has expired or carries no expiry")
-        return refused
-    if not_before is not None and (isinstance(not_before, bool) or not isinstance(not_before, (int, float))
-                                   or not_before > now + TEAMS_SSO_CLOCK_LEEWAY_SECONDS):
-        logger.warning("Teams sign-in refused: token is not valid yet")
         return refused
 
     # The sign-in name belongs to a domain the Microsoft tenant has verified.
@@ -2758,7 +2724,7 @@ def _teams_sso_sign_in(token):
     # tenant it connected, and from no other
     if tenant:
         workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
-        if workspace and workspace.ms_tenant_id != identity['ms_tenant_id']:
+        if workspace and (workspace.ms_tenant_id or '').lower() != identity['ms_tenant_id'].lower():
             logger.warning(f"Teams sign-in refused: Microsoft tenant {identity['ms_tenant_id']} "
                            f"is not the one connected to {domain}")
             return None, ({
@@ -12245,18 +12211,28 @@ def teams_webhook():
     All messages, invokes, and events come through here.
     """
     import asyncio
+    import inspect
     from ee.backend.teams.teams_security import validate_teams_jwt
     from ee.backend.teams.teams_service import TeamsService
 
-    # Validate JWT Bearer token from Bot Framework
+    activity = request.get_json(silent=True)
+    if not isinstance(activity, dict):
+        activity = None
+
+    # Validate JWT Bearer token from Bot Framework. The token is bound to the
+    # service URL of the activity it was sent with.
     auth_header = request.headers.get('Authorization', '')
-    claims = validate_teams_jwt(auth_header)
+    service_url = activity.get('serviceUrl') if activity else None
+    if 'service_url' in inspect.signature(validate_teams_jwt).parameters:
+        claims = validate_teams_jwt(auth_header, service_url=service_url)
+    else:
+        # Enterprise module released before the service URL check
+        claims = validate_teams_jwt(auth_header)
 
     if not claims:
         logger.warning("Invalid Teams webhook authorization")
         return jsonify({'error': 'Unauthorized'}), 401
 
-    activity = request.get_json()
     if not activity:
         return jsonify({'error': 'Invalid request body'}), 400
 

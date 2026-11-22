@@ -7,12 +7,14 @@ Microsoft's signing keys is replaced by that key's public half, so the
 signature, audience, issuer, expiry and claim checks all run for real.
 
 Private functions these tests rely on (documented signatures):
-- ee.backend.oauth_providers.microsoft_oauth.validate_teams_sso_token(token, expected_audience=None)
+- ee.backend.oauth_providers.microsoft_oauth.validate_teams_sso_token(token, expected_audience=None),
+  where expected_audience is the Teams app's application ID
 - ee.backend.oauth_providers.microsoft_oauth.clear_credential_cache()
 - ee.backend.teams.teams_security.get_teams_bot_app_id()
 - ee.backend.teams.teams_security.generate_tab_auth_token(user_id, tenant_domain, user_email)
 - ee.backend.teams.teams_security.verify_tab_auth_token(token)
 - ee.backend.teams.teams_security.generate_teams_link_token(teams_workspace_id, aad_object_id, aad_email=None)
+- ee.backend.teams.teams_security.validate_teams_jwt(auth_header, service_url=None)
 """
 import base64
 import hashlib
@@ -331,6 +333,9 @@ def _refused_tokens():
     return {
         'wrong audience': lambda: sso_token(aud='99999999-0000-4000-8000-000000000000'),
         'audience of another host': lambda: sso_token(aud=f'api://elsewhere.test/{APP_ID}'),
+        'audience URI of another application': lambda: sso_token(aud=f'api://{SITE_HOST}/{APP_ID}-other'),
+        'botid audience without a host': lambda: sso_token(aud=f'api://botid-{APP_ID}'),
+        'no issued-at time': lambda: sso_token(iat=None),
         'issuer that is not Microsoft': lambda: sso_token(iss='https://login.example.test/common/v2.0'),
         'issuer without a tenant': lambda: sso_token(iss='https://login.microsoftonline.com/common/v2.0'),
         'tenant mismatch between issuer and tid': lambda: sso_token(
@@ -350,6 +355,11 @@ def _refused_tokens():
 
 
 REFUSED = sorted(_refused_tokens()) if EE_AVAILABLE else []
+
+# Tokens Microsoft's signature, audience, issuer and validity checks all pass
+# for, which the route still refuses because the verified claims do not name
+# an account. Every other case is refused by the token validator itself.
+REFUSED_BY_THE_ROUTE = {'no username, unverified email', 'username that is not an address'}
 
 
 class TestSignInTokenValidation:
@@ -384,11 +394,12 @@ class TestSignInTokenValidation:
 
     @pytest.mark.parametrize('audience', [
         APP_ID,
+        APP_ID.upper(),
         f'api://{APP_ID}',
-        f'api://botid-{APP_ID}',
         f'api://{SITE_HOST}/{APP_ID}',
         f'api://{SITE_HOST}/botid-{APP_ID}',
         f'api://{APP_HOST}/{APP_ID}',
+        f'api://{APP_HOST}/botid-{APP_ID}',
     ])
     def test_accepted_audience_forms(self, client, two_orgs, audience):
         response = sign_in(client, sso_token(aud=audience))
@@ -406,9 +417,13 @@ class TestSignInTokenValidation:
 
     @pytest.mark.parametrize('case', REFUSED)
     @pytest.mark.parametrize('endpoint', ['sso/validate', 'tab/provision'])
-    def test_refused_tokens(self, client, two_orgs, endpoint, case):
+    def test_refused_tokens(self, real_app, client, two_orgs, endpoint, case):
         token = _refused_tokens()[case]()
         before = row_counts()
+        _, test_app = real_app
+        with test_app.test_request_context('/'):
+            verified = microsoft_oauth.validate_teams_sso_token(token, expected_audience=APP_ID)
+        assert (verified is None) == (case not in REFUSED_BY_THE_ROUTE)
 
         response = sign_in(client, token) if endpoint == 'sso/validate' else provision(client, token)
 
@@ -673,6 +688,104 @@ class TestOtherTeamsRoutesNeedProof:
 
         assert response.status_code == 401
         assert row_counts() == before
+
+    SERVICE_URL = 'https://smba.example.test/emea/'
+
+    def bot_framework_token(self, **overrides):
+        now = int(time.time())
+        claims = {
+            'iss': 'https://api.botframework.com',
+            'aud': APP_ID,
+            'iat': now - 10,
+            'nbf': now - 10,
+            'exp': now + 600,
+            'serviceurl': self.SERVICE_URL,
+        }
+        claims.update(overrides)
+        claims = {name: value for name, value in claims.items() if value is not None}
+        return jwt.encode(claims, _pem(MICROSOFT_KEY),
+                          algorithm='RS256', headers={'kid': KID})
+
+    def install(self, client, monkeypatch, token, service_url=None):
+        """Deliver a bot installation activity; a workspace row appears only when it is accepted."""
+        # The Bot Framework key set is "downloaded" from the key generated in this file
+        monkeypatch.setattr(teams_security, '_get_jwks_client',
+                            lambda: jwt.PyJWKClient('https://keys.invalid/bot-framework'))
+        return client.post(
+            '/api/teams/webhook',
+            headers={'Authorization': f'Bearer {token}'},
+            json={'type': 'installationUpdate', 'action': 'add', 'channelId': 'msteams',
+                  'serviceUrl': service_url or self.SERVICE_URL,
+                  'channelData': {'tenant': {'id': MS_TENANT_UNKNOWN}}})
+
+    def installed(self):
+        return TeamsWorkspace.query.filter_by(ms_tenant_id=MS_TENANT_UNKNOWN).count() == 1
+
+    def test_webhook_accepts_a_token_bound_to_the_activitys_service_url(self, client, two_orgs, monkeypatch):
+        response = self.install(client, monkeypatch, self.bot_framework_token())
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert self.installed()
+
+    @pytest.mark.parametrize('case,claims', [
+        ('service URL of another activity', {'serviceurl': 'https://elsewhere.test/emea/'}),
+        ('no service URL claim', {'serviceurl': None}),
+        ('issuer that is not the Bot Framework', {'iss': f'https://login.microsoftonline.com/{MS_TENANT_A}/v2.0'}),
+        ('another audience', {'aud': '99999999-0000-4000-8000-000000000000'}),
+        ('expired', {'exp': 1000000000}),
+    ])
+    def test_webhook_refuses(self, client, two_orgs, monkeypatch, case, claims):
+        before = row_counts()
+
+        response = self.install(client, monkeypatch, self.bot_framework_token(**claims))
+
+        assert response.status_code == 401, response.get_data(as_text=True)
+        assert not self.installed()
+        assert row_counts() == before
+
+    def test_webhook_refuses_a_valid_token_replayed_with_another_service_url(
+            self, client, two_orgs, monkeypatch):
+        before = row_counts()
+
+        response = self.install(client, monkeypatch, self.bot_framework_token(),
+                                service_url='https://elsewhere.test/emea/')
+
+        assert response.status_code == 401
+        assert row_counts() == before
+
+    def test_webhook_refuses_a_token_signed_by_another_key(self, client, two_orgs, monkeypatch):
+        now = int(time.time())
+        token = jwt.encode({'iss': 'https://api.botframework.com', 'aud': APP_ID, 'exp': now + 600,
+                            'serviceurl': self.SERVICE_URL},
+                           _pem(OTHER_KEY), algorithm='RS256', headers={'kid': KID})
+
+        response = self.install(client, monkeypatch, token)
+
+        assert response.status_code == 401
+        assert not self.installed()
+
+    def test_webhook_passes_the_activitys_service_url_to_the_validator(self, client, two_orgs, monkeypatch):
+        seen = {}
+
+        def validator(auth_header, service_url=None):
+            seen['service_url'] = service_url
+            return None
+        monkeypatch.setattr(teams_security, 'validate_teams_jwt', validator)
+
+        response = client.post('/api/teams/webhook', headers={'Authorization': 'Bearer x'},
+                               json={'type': 'message', 'serviceUrl': self.SERVICE_URL})
+
+        assert response.status_code == 401
+        assert seen == {'service_url': self.SERVICE_URL}
+
+    def test_webhook_works_with_a_validator_that_takes_only_the_header(self, client, two_orgs, monkeypatch):
+        """The Enterprise module released before the service URL check has this signature."""
+        monkeypatch.setattr(teams_security, 'validate_teams_jwt', lambda auth_header: None)
+
+        response = client.post('/api/teams/webhook', headers={'Authorization': 'Bearer x'},
+                               json={'type': 'message', 'serviceUrl': self.SERVICE_URL})
+
+        assert response.status_code == 401
 
     def test_webhook_refuses_when_the_signing_keys_cannot_be_fetched(self, client, two_orgs, monkeypatch):
         def unreachable():
