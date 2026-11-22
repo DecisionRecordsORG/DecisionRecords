@@ -490,6 +490,13 @@ If you didn't request this password reset, you can safely ignore this email. You
     return send_email(email_config, user_email, subject, html_content, text_content)
 
 
+def default_contact_recipient():
+    """Where form messages go when the caller names no recipient: the default
+    of the Contact Form Email setting. One address for all three forms."""
+    from models import SystemConfig
+    return SystemConfig.DEFAULT_SUPPORT_EMAIL
+
+
 def send_feedback_email(email_config, sender_name, sender_email, feedback_message, contact_consent=False, app_name="Decision Records", recipient_email=None):
     """Send user feedback to the feedback inbox.
 
@@ -550,8 +557,8 @@ Feedback Message:
 This feedback was submitted through the {app_name} website.
     """
 
-    # Send to the feedback inbox (use provided recipient or default)
-    target_email = recipient_email or "admin@decisionrecords.org"
+    # The Contact Form Email setting, passed in by the caller, or its default
+    target_email = recipient_email or default_contact_recipient()
     return send_email(email_config, target_email, subject, html_content, text_content)
 
 
@@ -626,14 +633,14 @@ Message:
 This message was submitted through the {app_name} website contact form.
     """
 
-    target_email = recipient_email or SystemConfig.DEFAULT_SUPPORT_EMAIL
+    target_email = recipient_email or default_contact_recipient()
     return send_email(email_config, target_email, subject, html_content, text_content)
 
 
 def send_sponsorship_inquiry_email(email_config, org_name, contact_email, contact_name=None,
                                     area_of_interest=None, message=None, app_name="Decision Records",
-                                    team_focus=None):
-    """Send sponsorship inquiry to the sponsorship inbox."""
+                                    team_focus=None, recipient_email=None):
+    """Send a sponsorship inquiry to the Contact Form Email address (or its default)."""
     subject = f"[{app_name}] Sponsorship Inquiry from {org_name}"
     team_focus_row, team_focus_line = _team_focus_email_parts(team_focus)
 
@@ -696,5 +703,6 @@ Message:
 This sponsorship inquiry was submitted through the {app_name} website.
     """
 
-    # Send to the admin inbox
-    return send_email(email_config, "adr-admin@decisionrecords.org", subject, html_content, text_content)
+    # The Contact Form Email setting, passed in by the caller, or its default
+    target_email = recipient_email or default_contact_recipient()
+    return send_email(email_config, target_email, subject, html_content, text_content)

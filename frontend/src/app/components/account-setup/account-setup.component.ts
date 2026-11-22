@@ -39,7 +39,7 @@ import { SupportLinkComponent } from '../shared/support-link.component';
             <p>Validating setup link...</p>
           </div>
         } @else if (error) {
-          <div class="error-state">
+          <div class="error-state" data-testid="setup-error">
             <mat-icon class="error-icon">error</mat-icon>
             <h2>{{ errorTitle }}</h2>
             <p>{{ error }}</p>
@@ -55,7 +55,7 @@ import { SupportLinkComponent } from '../shared/support-link.component';
           </div>
         } @else if (user) {
           <mat-card-header>
-            <mat-card-title>
+            <mat-card-title data-testid="setup-title">
               @if (isRecovery) {
                 <mat-icon>lock_reset</mat-icon>
                 Reset Your Credentials
@@ -89,7 +89,7 @@ import { SupportLinkComponent } from '../shared/support-link.component';
                 <span class="recommended">Recommended</span>
               </div>
 
-              <div class="option-card password-option" (click)="showPasswordForm = true" [class.active]="showPasswordForm">
+              <div class="option-card password-option" (click)="showPasswordForm = true" [class.active]="showPasswordForm" data-testid="password-option">
                 <mat-icon>password</mat-icon>
                 <h3>Use Password</h3>
                 <p>Create a traditional password for your account</p>
@@ -100,7 +100,7 @@ import { SupportLinkComponent } from '../shared/support-link.component';
               <form [formGroup]="passwordForm" (ngSubmit)="setupPassword()" class="password-form">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Password</mat-label>
-                  <input matInput type="password" formControlName="password">
+                  <input matInput type="password" formControlName="password" data-testid="setup-password-input">
                   <mat-hint>At least 8 characters with uppercase, lowercase, and number</mat-hint>
                   @if (passwordForm.get('password')?.hasError('minlength')) {
                     <mat-error>Password must be at least 8 characters</mat-error>
@@ -109,14 +109,14 @@ import { SupportLinkComponent } from '../shared/support-link.component';
 
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Confirm Password</mat-label>
-                  <input matInput type="password" formControlName="confirmPassword">
+                  <input matInput type="password" formControlName="confirmPassword" data-testid="setup-confirm-input">
                   @if (passwordForm.hasError('mismatch')) {
                     <mat-error>Passwords do not match</mat-error>
                   }
                 </mat-form-field>
 
                 <button mat-raised-button color="primary" type="submit"
-                        [disabled]="passwordForm.invalid || settingUp">
+                        [disabled]="passwordForm.invalid || settingUp" data-testid="setup-password-submit">
                   @if (settingUp) {
                     <mat-spinner diameter="20"></mat-spinner>
                   } @else {

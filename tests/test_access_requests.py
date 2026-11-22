@@ -226,8 +226,12 @@ class TestEmailConfiguredProvisionalAdminOnly:
         assert body['email_sent'] is False
         assert 'could not be sent' in body['message']
 
-        approval = approve_as(test_app, f'owner@{DOMAIN}')
+        # Email is still failing when the administrator approves
+        with patch(SEND, **behaviour):
+            approval = approve_as(test_app, f'owner@{DOMAIN}')
         assert approval.status_code == 200, approval.get_json()
+        assert approval.get_json()['email_sent'] is False
+        assert 'yourself' in approval.get_json()['delivery_message']
         assert complete_setup_and_read_decisions(
             test_app, approval.get_json()['setup_url']) == ['Internal decision']
 
@@ -262,8 +266,10 @@ class TestEmailConfiguredFullAdmin:
         assert_waiting_for_admin(response)
         assert send.call_count == 0
 
-        approval = approve_as(test_app, f'owner@{DOMAIN}')
+        with patch(SEND, return_value=True) as send:
+            approval = approve_as(test_app, f'owner@{DOMAIN}')
         assert approval.status_code == 200
+        assert send.call_count == 1  # approval is when the requester is emailed
         assert complete_setup_and_read_decisions(
             test_app, approval.get_json()['setup_url']) == ['Internal decision']
 
@@ -441,3 +447,216 @@ class TestTenantStatusMatchesAdmission:
         assert status.get_json()['effective_require_approval'] is expected
         # what the page promised is what the request did
         assert bool(response.get_json().get('auto_approved')) is (not expected)
+
+
+# ==================== Approval emails the requester ====================
+
+class TestApprovalEmailsTheRequester:
+    """The sign-in page tells a requester they will hear by email; approval sends that email."""
+
+    def _request_and_approve(self, test_app, send_result=True, side_effect=None):
+        ask_to_join(test_app.test_client())
+        with patch(SEND, return_value=send_result, side_effect=side_effect) as send:
+            approval = approve_as(test_app, f'owner@{DOMAIN}')
+        assert approval.status_code == 200, approval.get_json()
+        return approval.get_json(), send
+
+    def test_requester_is_emailed_the_setup_link_the_administrator_is_shown(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+
+        body, send = self._request_and_approve(test_app)
+
+        assert send.call_count == 1
+        args = send.call_args.args
+        assert args[1] == 'New Comer'                       # name
+        assert args[2] == f'newcomer@{DOMAIN}'              # recipient: the requester, nobody else
+        assert args[3] == body['setup_url']                 # the same link
+        assert args[4] == SetupToken.TOKEN_VALIDITY_HOURS
+        assert send.call_args.kwargs == {'tenant_name': DOMAIN}
+        assert body['email_sent'] is True
+        assert body['delivery_message'] == f'The setup link was emailed to newcomer@{DOMAIN}.'
+        # The emailed link works
+        assert complete_setup_and_read_decisions(test_app, args[3]) == ['Internal decision']
+
+    def test_without_email_the_administrator_is_told_to_pass_the_link_on(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+
+        body, send = self._request_and_approve(test_app)
+
+        assert send.call_count == 0
+        assert body['email_sent'] is False
+        assert body['delivery_message'] == (
+            f'Email is not set up, so no email was sent. Give this link to newcomer@{DOMAIN} yourself.')
+        assert f'/{DOMAIN}/setup?token=' in body['setup_url']
+
+    @pytest.mark.parametrize('failure', [
+        {'send_result': False},
+        {'side_effect': RuntimeError('smtp down')},
+    ], ids=['send reports failure', 'send raises'])
+    def test_failed_send_still_approves_and_tells_the_administrator(self, real_app, failure):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+
+        body, send = self._request_and_approve(test_app, **failure)
+
+        assert send.call_count == 1
+        assert body['message'] == 'Access request approved'
+        assert body['email_sent'] is False
+        assert body['delivery_message'] == (
+            f'The email to newcomer@{DOMAIN} could not be sent. Give this link to newcomer@{DOMAIN} yourself.')
+        assert AccessRequest.query.filter_by(status='approved').count() == 1
+        assert complete_setup_and_read_decisions(test_app, body['setup_url']) == ['Internal decision']
+
+    def test_the_organisation_s_own_email_settings_are_used_when_there_are_no_system_ones(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        db.session.add(EmailConfig(
+            domain=DOMAIN, smtp_server='smtp.acme.test', smtp_port=587, smtp_username='mailer',
+            smtp_password='secret', from_email=f'noreply@{DOMAIN}', enabled=True))
+        db.session.commit()
+
+        body, send = self._request_and_approve(test_app)
+
+        assert send.call_count == 1
+        assert send.call_args.args[0].domain == DOMAIN
+        assert body['email_sent'] is True
+
+    def test_another_organisation_s_email_settings_are_never_used(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        db.session.add(EmailConfig(
+            domain='globex.test', smtp_server='smtp.globex.test', smtp_port=587, smtp_username='mailer',
+            smtp_password='secret', from_email='noreply@globex.test', enabled=True))
+        db.session.commit()
+
+        body, send = self._request_and_approve(test_app)
+
+        assert send.call_count == 0
+        assert body['email_sent'] is False
+
+    def test_existing_account_without_credentials_is_emailed_its_link(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+        waiting = User(email=f'newcomer@{DOMAIN}', sso_domain=DOMAIN, auth_type='webauthn')
+        waiting.set_name(first_name='New', last_name='Comer')
+        db.session.add_all([waiting, AccessRequest(
+            email=f'newcomer@{DOMAIN}', name='New Comer', domain=DOMAIN, reason='x')])
+        db.session.commit()
+
+        with patch(SEND, return_value=True) as send:
+            approval = approve_as(test_app, f'owner@{DOMAIN}')
+
+        body = approval.get_json()
+        assert approval.status_code == 200, body
+        assert send.call_count == 1
+        assert send.call_args.args[3] == body['setup_url']
+        assert body['email_sent'] is True
+
+    def test_existing_account_with_credentials_gets_no_link_and_no_email(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+        make_member(f'newcomer@{DOMAIN}', GlobalRole.USER)
+        db.session.add(AccessRequest(email=f'newcomer@{DOMAIN}', name='New Comer', domain=DOMAIN, reason='x'))
+        db.session.commit()
+
+        with patch(SEND, return_value=True) as send:
+            approval = approve_as(test_app, f'owner@{DOMAIN}')
+
+        body = approval.get_json()
+        assert approval.status_code == 200, body
+        assert send.call_count == 0
+        assert body['setup_url'] is None
+        assert body['email_sent'] is False
+        assert body['delivery_message'] is None
+
+    def test_refused_approval_sends_nothing(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        make_organisation(GlobalRole.ADMIN, domain='globex.test')
+        configure_email()
+        ask_to_join(test_app.test_client())
+        request_id = AccessRequest.query.one().id
+
+        with patch(SEND, return_value=True) as send:
+            response = sign_in(test_app, 'owner@globex.test').post(
+                f'/api/admin/access-requests/{request_id}/approve', json={})
+
+        assert response.status_code == 403
+        assert send.call_count == 0
+        assert User.query.filter_by(email=f'newcomer@{DOMAIN}').first() is None
+
+    def test_rejecting_a_request_sends_no_email(self, real_app):
+        """There is no rejection email in the product; rejecting stays silent."""
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+        ask_to_join(test_app.test_client())
+        request_id = AccessRequest.query.one().id
+
+        with patch('notifications.send_email', return_value=True) as send:
+            response = sign_in(test_app, f'owner@{DOMAIN}').post(
+                f'/api/admin/access-requests/{request_id}/reject', json={'reason': 'Not a colleague'})
+
+        assert response.status_code == 200, response.get_json()
+        assert send.call_count == 0
+
+
+class TestRequesterIsToldWhatWillHappen:
+    """What the sign-in page says after a request matches what approval will do."""
+
+    def test_with_email_the_requester_is_told_an_email_will_come(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        configure_email()
+
+        body = assert_waiting_for_admin(ask_to_join(test_app.test_client()))
+
+        assert body['approval_email'] is True
+        assert body['message'] == (
+            'Your request has been submitted. When an administrator of your organization approves it, '
+            'you will receive an email with a link to set up your sign-in. If the email cannot be sent, '
+            'the administrator will give you the link.')
+
+    def test_without_email_the_requester_is_told_the_administrator_gives_the_link(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+
+        body = assert_waiting_for_admin(ask_to_join(test_app.test_client()))
+
+        assert body['approval_email'] is False
+        assert body['message'] == (
+            'Your request has been submitted. An administrator of your organization '
+            'will approve it and give you a link to set up your sign-in.')
+        assert 'email' not in body['message'].lower()
+
+    @pytest.mark.parametrize('email_configured', [True, False])
+    def test_tenant_status_says_whether_approval_can_be_emailed(self, real_app, email_configured):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        if email_configured:
+            configure_email()
+
+        status = test_app.test_client().get(f'/api/auth/tenant/{DOMAIN}')
+
+        assert status.status_code == 200, status.get_json()
+        assert status.get_json()['email_available'] is email_configured
+
+    def test_tenant_status_counts_the_organisation_s_own_email_settings_only(self, real_app):
+        _, test_app = real_app
+        make_organisation(GlobalRole.ADMIN)
+        make_organisation(GlobalRole.ADMIN, domain='globex.test')
+        db.session.add(EmailConfig(
+            domain='globex.test', smtp_server='smtp.globex.test', smtp_port=587, smtp_username='mailer',
+            smtp_password='secret', from_email='noreply@globex.test', enabled=True))
+        db.session.commit()
+
+        client = test_app.test_client()
+
+        assert client.get('/api/auth/tenant/globex.test').get_json()['email_available'] is True
+        assert client.get(f'/api/auth/tenant/{DOMAIN}').get_json()['email_available'] is False

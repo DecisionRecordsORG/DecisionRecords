@@ -33,6 +33,7 @@ SHARED_CORE_PATTERNS = (
     "app.py",
     "auth.py",
     "crypto.py",
+    "data_export.py",
     "decision_relationships.py",
     "feature_flags.py",
     "governance.py",

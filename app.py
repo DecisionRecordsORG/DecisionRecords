@@ -19,8 +19,9 @@ from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription
 from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 # EE:END - EE Model Imports
 from datetime import datetime, timedelta, timezone
-from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, complete_setup_and_login, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
+from data_export import build_personal_data_export
 import retention
 from models import RetentionRun
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -40,7 +41,8 @@ from security import (
 from feature_flags import (
     require_slack, require_teams, require_enterprise, require_feature,
     get_enabled_features, is_slack_enabled, is_teams_enabled, is_enterprise,
-    is_feature_enabled, is_analytics_enabled, EDITION, Edition
+    is_feature_enabled, is_analytics_enabled, EDITION, Edition,
+    normalise_support_url, SUPPORT_URL_HIDDEN
 )
 
 # Enterprise Edition imports - loaded conditionally based on edition
@@ -783,10 +785,50 @@ def check_version():
     return jsonify(check_for_updates()), 200
 
 
+def environment_support_url():
+    """SUPPORT_URL from the environment: '' when unset, 'none', or an http(s) address.
+
+    A value that is neither hides the link: the operator wanted something
+    other than the default, and an address that cannot be used must never
+    reach a page.
+    """
+    raw = os.environ.get('SUPPORT_URL', '')
+    value = normalise_support_url(raw)
+    if value is None:
+        logger.warning('SUPPORT_URL is not an http(s) address or "none"; the help link is hidden')
+        return SUPPORT_URL_HIDDEN
+    return value
+
+
+def stored_support_url():
+    """The super admin's support page setting: '' when there is none, 'none', or an http(s) address."""
+    try:
+        raw = SystemConfig.get(SystemConfig.KEY_SUPPORT_URL)
+    except Exception:
+        # /api/features must answer even when the database cannot be read
+        db.session.rollback()
+        return ''
+    if raw is None:
+        return ''
+    value = normalise_support_url(raw)
+    return SUPPORT_URL_HIDDEN if value is None else value
+
+
+def effective_support_url():
+    """What the app is told about the help link. The super admin setting wins over SUPPORT_URL."""
+    return stored_support_url() or environment_support_url()
+
+
 @app.route('/api/features')
 def get_features():
     """Get enabled feature flags for frontend UI conditional rendering."""
-    return jsonify(get_enabled_features()), 200
+    features = get_enabled_features()
+    # Only present when someone chose: the app has its own default otherwise
+    # (the hosted service links to its support page, other installations show no link).
+    support_url = effective_support_url()
+    if support_url:
+        features['support_url'] = support_url
+    return jsonify(features), 200
 
 
 # EE:START - Blog API
@@ -1116,6 +1158,12 @@ def _api_submit_sponsorship_impl():
         team_size=team_size,
     )
 
+    # Contact Form Email from super admin settings (fallback to default)
+    support_email = SystemConfig.get(
+        SystemConfig.KEY_SUPPORT_EMAIL,
+        SystemConfig.DEFAULT_SUPPORT_EMAIL
+    )
+
     return _deliver_inquiry(
         inquiry,
         Inquiry.SOURCE_SPONSORSHIP,
@@ -1124,7 +1172,8 @@ def _api_submit_sponsorship_impl():
             contact_name=contact_name,
             area_of_interest=area_of_interest,
             message=message,
-            team_focus=team_focus
+            team_focus=team_focus,
+            recipient_email=support_email
         ),
         success_message='Thank you for reaching out! We will be in touch shortly.',
         failure_message='Failed to submit inquiry. Please try again later.',
@@ -1154,6 +1203,21 @@ def inject_user():
 
 
 # ==================== Auth Routes ====================
+
+def signed_in_home(domain=None, super_admin=False):
+    """Path a person is sent to after signing in through a server redirect.
+
+    The legacy `index` view must never be named in a redirect: it is one of the legacy template routes,
+    which are registered only when there is no built frontend. With the built
+    frontend (every production installation) the name does not exist and
+    building its URL raises.
+    """
+    if not SERVE_ANGULAR:
+        return '/'
+    if super_admin:
+        return '/superadmin/dashboard'
+    return f'/{domain}' if domain else '/'
+
 
 @app.route('/login')
 def login():
@@ -1232,7 +1296,7 @@ def local_login():
         set_session_expiry(is_admin=True)  # 1 hour default for super admin
         if request.is_json:
             return jsonify({'message': 'Login successful'}), 200
-        return redirect(url_for('index'))
+        return redirect(signed_in_home(super_admin=True))
     else:
         # Log failed master login
         log_login_attempt(
@@ -1513,7 +1577,7 @@ def sso_callback():
                 user_agent=user_agent,
                 failure_reason=USER_LIMIT_ERROR
             )
-            return render_template('error.html', message=limit_refusal['message']), 403
+            return user_limit_redirect(sso_config.domain)
 
         # Get or create user
         user = get_or_create_user(email, name, subject, sso_config.domain)
@@ -1532,7 +1596,7 @@ def sso_callback():
         # Set session
         start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
-        return redirect(url_for('index'))
+        return redirect(signed_in_home(sso_config.domain))
 
     except Exception as e:
         app.logger.error(f"SSO callback error: {e}")
@@ -3807,7 +3871,12 @@ def api_dismiss_admin_onboarding():
         return jsonify({'error': 'Not applicable for master accounts'}), 400
 
     user = g.current_user
-    if not user.is_admin:
+    # The dialog is shown to whoever /api/user/me reports as is_admin: the role
+    # on the membership (admin, provisional admin or steward), or the legacy
+    # column for an account without a membership. The same people dismiss it.
+    membership = user.get_membership()
+    shown_as_admin = membership.is_admin if membership else bool(user.is_admin)
+    if not shown_as_admin:
         return jsonify({'error': 'Not an admin'}), 403
 
     user.has_seen_admin_onboarding = True
@@ -4034,86 +4103,8 @@ def api_export_user_data():
 
     user = g.current_user
 
-    # Gather all personal data
-    export = {
-        'export_date': datetime.now(timezone.utc).isoformat(),
-        'data_subject': {
-            'id': user.id,
-            'email': user.email,
-            'name': user.get_full_name(),
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-        },
-        'profile': {
-            'auth_type': user.auth_type,
-            'email_verified': user.email_verified,
-            'created_at': user.created_at.isoformat(),
-            'last_login': user.last_login.isoformat() if user.last_login else None,
-            'sso_domain': user.sso_domain,
-        },
-        'decisions_authored': [],
-        'memberships': [],
-        'audit_trail': [],
-        'login_history': [],
-        'inquiries': [],
-    }
-
-    # Decisions authored
-    decisions = ArchitectureDecision.query.filter_by(created_by_id=user.id).all()
-    for d in decisions:
-        export['decisions_authored'].append({
-            'id': d.id,
-            'title': d.title,
-            'status': d.status,
-            'created_at': d.created_at.isoformat() if d.created_at else None,
-            'updated_at': d.updated_at.isoformat() if d.updated_at else None,
-        })
-
-    # Tenant memberships
-    memberships = TenantMembership.query.filter_by(user_id=user.id).all()
-    for m in memberships:
-        tenant = db.session.get(Tenant, m.tenant_id)
-        export['memberships'].append({
-            'tenant_name': tenant.name if tenant else None,
-            'tenant_domain': tenant.domain if tenant else None,
-            'role': m.global_role.value,
-            'joined_at': m.joined_at.isoformat() if m.joined_at else None,
-        })
-
-    # Audit trail (actions performed by this user)
-    audit_entries = AuditLog.query.filter_by(actor_user_id=user.id).order_by(AuditLog.created_at.desc()).limit(500).all()
-    for entry in audit_entries:
-        export['audit_trail'].append({
-            'action': entry.action_type,
-            'target': entry.target_entity,
-            'created_at': entry.created_at.isoformat(),
-        })
-
-    # Login history
-    login_entries = LoginHistory.query.filter_by(user_id=user.id).order_by(LoginHistory.created_at.desc()).limit(500).all()
-    for entry in login_entries:
-        export['login_history'].append({
-            'method': entry.login_method,
-            'success': entry.success,
-            'ip_address': entry.ip_address,
-            'created_at': entry.created_at.isoformat() if entry.created_at else None,
-        })
-
-    # Messages sent through the contact, sponsorship and feedback forms while signed in
-    sent_inquiries = Inquiry.query.filter_by(user_id=user.id).order_by(Inquiry.created_at.desc()).limit(500).all()
-    for inquiry in sent_inquiries:
-        export['inquiries'].append({
-            'source': inquiry.source,
-            'name': inquiry.name,
-            'email': inquiry.email,
-            'organisation': inquiry.organisation,
-            'area_of_interest': inquiry.area_of_interest,
-            'message': inquiry.message,
-            'team_focus': inquiry.team_focus,
-            'team_size': inquiry.team_size,
-            'contact_consent': inquiry.contact_consent,
-            'created_at': inquiry.created_at.isoformat() if inquiry.created_at else None,
-        })
+    # Everything held about this person and nothing about anyone else: see data_export.py
+    export = build_personal_data_export(user)
 
     # Log the export action
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
@@ -4802,6 +4793,10 @@ def api_get_support_settings():
             SystemConfig.KEY_SUPPORT_EMAIL,
             default=SystemConfig.DEFAULT_SUPPORT_EMAIL
         ),
+        # The help link: the stored setting, what the environment says, and what applies
+        'support_url': stored_support_url(),
+        'support_url_environment': environment_support_url(),
+        'support_url_effective': effective_support_url(),
         'defaults': {
             'support_email': SystemConfig.DEFAULT_SUPPORT_EMAIL
         }
@@ -4815,20 +4810,45 @@ def api_save_support_settings():
     """Update support/contact email settings (super admin only)."""
     from security import sanitize_email
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        data = {}
 
-    support_email = data.get('support_email', '').strip()
+    support_email = data.get('support_email') or ''
+    support_email = support_email.strip() if isinstance(support_email, str) else ''
 
+    # Check everything before saving anything
+    sanitized = None
     if support_email:
-        # Validate email format
         sanitized = sanitize_email(support_email)
         if not sanitized:
             return jsonify({'error': 'Invalid email address format'}), 400
 
+    support_url = None
+    if 'support_url' in data:
+        support_url = normalise_support_url(data.get('support_url'))
+        if support_url is None:
+            return jsonify({
+                'error': 'The support page address must start with http:// or https://. '
+                         'Enter "none" to hide the link.'
+            }), 400
+
+    if sanitized:
         SystemConfig.set(
             SystemConfig.KEY_SUPPORT_EMAIL,
             sanitized,
             description='Email address for contact form submissions'
+        )
+
+    if support_url == '':
+        # Cleared: SUPPORT_URL from the environment, or the app's default, applies again
+        SystemConfig.query.filter_by(key=SystemConfig.KEY_SUPPORT_URL).delete()
+        db.session.commit()
+    elif support_url:
+        SystemConfig.set(
+            SystemConfig.KEY_SUPPORT_URL,
+            support_url,
+            description='Address of the support page the help link leads to ("none" hides the link)'
         )
 
     return jsonify({
@@ -4836,7 +4856,10 @@ def api_save_support_settings():
         'support_email': SystemConfig.get(
             SystemConfig.KEY_SUPPORT_EMAIL,
             default=SystemConfig.DEFAULT_SUPPORT_EMAIL
-        )
+        ),
+        'support_url': stored_support_url(),
+        'support_url_environment': environment_support_url(),
+        'support_url_effective': effective_support_url()
     })
 
 
@@ -5570,6 +5593,47 @@ def system_email_configured():
     return EmailConfig.query.filter_by(domain='system', enabled=True).first()
 
 
+def account_email_config(domain):
+    """The email configuration that sends an organisation's account emails, or None.
+
+    The system configuration when there is one, otherwise the organisation's
+    own. Never another organisation's.
+    """
+    return system_email_configured() or EmailConfig.query.filter_by(domain=domain, enabled=True).first()
+
+
+def email_setup_link_after_approval(access_request, setup_url):
+    """Email an approved requester their setup link.
+
+    Returns (email_sent, delivery_message). The message is one line for the
+    approving administrator: whether the email went out, or that they need to
+    pass the link on themselves.
+    """
+    from notifications import send_account_setup_email
+
+    recipient = access_request.email
+    email_config = account_email_config(access_request.domain)
+    if not email_config:
+        return False, f'Email is not set up, so no email was sent. Give this link to {recipient} yourself.'
+
+    try:
+        email_sent = bool(send_account_setup_email(
+            email_config,
+            access_request.name,
+            recipient,
+            setup_url,
+            SetupToken.TOKEN_VALIDITY_HOURS,
+            tenant_name=access_request.domain
+        ))
+    except Exception as e:
+        app.logger.warning(f"Failed to send setup email after approval of request {access_request.id}: {e}")
+        email_sent = False
+
+    if email_sent:
+        return True, f'The setup link was emailed to {recipient}.'
+    return False, f'The email to {recipient} could not be sent. Give this link to {recipient} yourself.'
+
+
 def can_tenant_accept_users(domain, count=1):
     """Check if a tenant can accept more users.
 
@@ -5877,6 +5941,9 @@ def _api_get_tenant_status_impl(domain):
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
         'email_verification_required': email_verification_required,
+        # Whether an approved requester can be emailed their setup link. Without
+        # it the approving administrator passes the link on.
+        'email_available': account_email_config(domain) is not None,
     })
 
 
@@ -6720,15 +6787,24 @@ def api_submit_access_request():
     # proves they control the address) or shown to an administrator who approves
     # the request. It is never returned in this response: the caller is anonymous.
     email_config = system_email_configured()
-    pending_message = 'Access request submitted successfully'
-
-    if not require_approval and not email_config:
-        # No way to deliver the link to the requester: an administrator admits them
-        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
+    # What happens on approval: the requester is emailed their setup link when
+    # email is available, otherwise the administrator passes the link on.
+    approval_email = account_email_config(domain) is not None
+    if approval_email:
+        pending_message = (
+            'Your request has been submitted. When an administrator of your organization approves it, '
+            'you will receive an email with a link to set up your sign-in. If the email cannot be sent, '
+            'the administrator will give you the link.'
+        )
+    else:
         pending_message = (
             'Your request has been submitted. An administrator of your organization '
             'will approve it and give you a link to set up your sign-in.'
         )
+
+    if not require_approval and not email_config:
+        # No way to deliver the link to the requester: an administrator admits them
+        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
 
     elif not require_approval:
         # Auto-approval enabled: create the account and email the setup link
@@ -6811,6 +6887,7 @@ def api_submit_access_request():
         'message': pending_message,
         'auto_approved': False,
         'email_sent': False,
+        'approval_email': approval_email,
         'request': access_request.to_dict()
     })
 
@@ -6949,12 +7026,12 @@ def api_validate_setup_token():
     session['setup_expires'] = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
     session['setup_purpose'] = setup_token.purpose  # Track if this is recovery or initial setup
 
-    # Determine the redirect based on token purpose
+    # Setup and recovery share one page of the app (/<domain>/setup); the page
+    # reads `is_recovery` to word itself. There is no separate recovery page.
+    redirect_url = f'/{user.sso_domain}/setup?token={token}'
     if is_recovery:
-        redirect_url = f'/{user.sso_domain}/recover?token={token}'
         message = 'Recovery token validated. You can now reset your credentials.'
     else:
-        redirect_url = f'/{user.sso_domain}/setup?token={token}'
         message = 'Setup token validated. You can now set up your credentials.'
 
     return jsonify({
@@ -7050,8 +7127,10 @@ def api_setup_password():
 
     db.session.commit()
 
-    # Log the user in
-    start_user_session(user)
+    # Sign the user in and end the setup session. A recovery leaves the setup
+    # session valid for the rest of its 30 minutes otherwise, and the app
+    # would keep treating a signed-in person as still setting up credentials.
+    complete_setup_and_login(user)
     session['user_type'] = 'user'
 
     return jsonify({
@@ -7239,17 +7318,21 @@ def api_approve_access_request(request_id):
         setup_token_str = None
         has_passkey = len(existing_user.webauthn_credentials) > 0 if existing_user.webauthn_credentials else False
         has_password = existing_user.has_password()
+        email_sent, delivery_message = False, None
         if not has_passkey and not has_password:
             setup_token = SetupToken.create_for_user(existing_user)
             setup_token_str = setup_token._token_string
             setup_url = f"{request.host_url.rstrip('/')}/{access_request.domain}/setup?token={setup_token_str}"
+            email_sent, delivery_message = email_setup_link_after_approval(access_request, setup_url)
 
         return jsonify({
             'message': 'User already exists, request marked as approved',
             'user': existing_user.to_dict(),
             'setup_url': setup_url,
             'setup_token': setup_token_str,
-            'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS if setup_token_str else None
+            'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS if setup_token_str else None,
+            'email_sent': email_sent,
+            'delivery_message': delivery_message
         })
 
     # Create the user account
@@ -7276,15 +7359,19 @@ def api_approve_access_request(request_id):
 
     db.session.commit()
 
-    # TODO: Send email to user informing them they've been approved
-    # notify_user_access_approved(access_request, new_user, setup_url)
+    # Tell the requester: the sign-in page said they would hear by email. The
+    # approval stands whether or not the email goes out; the administrator is
+    # shown the link either way and is told if they need to pass it on.
+    email_sent, delivery_message = email_setup_link_after_approval(access_request, setup_url)
 
     return jsonify({
         'message': 'Access request approved',
         'user': new_user.to_dict(),
         'setup_url': setup_url,
         'setup_token': setup_token_str,
-        'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS
+        'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS,
+        'email_sent': email_sent,
+        'delivery_message': delivery_message
     })
 
 
@@ -7314,8 +7401,8 @@ def api_reject_access_request(request_id):
 
     db.session.commit()
 
-    # TODO: Send email to user informing them they've been rejected
-    # notify_user_access_rejected(access_request)
+    # The requester is not told: the product has no rejection email or wording
+    # for one. Adding it is a product decision, not a missing send.
 
     return jsonify({
         'message': 'Access request rejected',
@@ -10397,22 +10484,8 @@ def create_incomplete_test_user():
         )
         db.session.add(membership)
 
-        # Generate setup token
-        setup_token = secrets.token_urlsafe(32)
-        token_expires = datetime.now(timezone.utc) + timedelta(hours=48)
-
-        # Store token in SetupToken table if it exists, otherwise use session approach
-        try:
-            setup_token_record = SetupToken(
-                user_id=user.id,
-                token=setup_token,
-                expires_at=token_expires,
-                is_recovery=False
-            )
-            db.session.add(setup_token_record)
-        except Exception:
-            # If SetupToken model doesn't exist, we'll just return the token
-            pass
+        # A real setup token, as an administrator's setup link carries
+        setup_token = SetupToken.create_for_user(user)._token_string
 
         db.session.commit()
 
@@ -10437,6 +10510,34 @@ def create_incomplete_test_user():
         db.session.rollback()
         logger.error(f"Create incomplete test user failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/create-setup-token', methods=['POST'])
+def create_test_setup_token():
+    """Create a setup or recovery link for an existing user. TEST ONLY.
+
+    Stands in for the email a person would receive: the browser tests have no
+    mailbox to read the link from.
+    """
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    purpose = data.get('purpose') or SetupToken.PURPOSE_INITIAL_SETUP
+    if purpose not in SetupToken.VALID_PURPOSES:
+        return jsonify({'error': 'Unknown purpose'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    token = SetupToken.create_for_user(user, purpose=purpose)._token_string
+    return jsonify({
+        'setup_token': token,
+        'setup_url': f'/{user.sso_domain}/setup?token={token}',
+        'purpose': purpose,
+    })
 
 
 # EE:START - Slack Integration Endpoints
@@ -11462,23 +11563,41 @@ def slack_link_complete():
 if is_enterprise():
     from ee.backend.ai import AIConfig, AIApiKeyService, AIInteractionLogger
 else:
-    # Community Edition stubs
-    class AIConfig:
-        @staticmethod
-        def get_system_ai_config():
-            return {'enabled': False, 'edition': 'community'}
-        @staticmethod
-        def get_system_ai_enabled():
-            return False
-        @staticmethod
-        def get_system_mcp_server_enabled():
-            return False
+    # Community Edition has no AI module. These stand in for its services so
+    # the routes below can be defined once for both editions. The few answers
+    # a page needs are given here; anything else raises AIFeatureUnavailable,
+    # which is answered as a clean "not available" instead of a 500.
+    class AIFeatureUnavailable(Exception):
+        """An AI service was called in an edition that does not have it."""
 
-    class AIApiKeyService:
-        pass
+    class _CommunityAIService:
+        def __init__(self, name, **answers):
+            self._name = name
+            self._answers = answers
 
-    class AIInteractionLogger:
-        pass
+        def __getattr__(self, method):
+            if method.startswith('_'):
+                raise AttributeError(method)
+            if method in self._answers:
+                answer = self._answers[method]
+                return lambda *args, **kwargs: answer
+            def unavailable(*args, **kwargs):
+                raise AIFeatureUnavailable(f'{self._name}.{method}')
+            return unavailable
+
+    AIConfig = _CommunityAIService(
+        'AIConfig',
+        get_system_ai_config={'enabled': False, 'edition': 'community'},
+        get_system_ai_enabled=False,
+        get_system_mcp_server_enabled=False,
+        is_external_ai_available=False,
+    )
+    AIApiKeyService = _CommunityAIService('AIApiKeyService')
+    AIInteractionLogger = _CommunityAIService('AIInteractionLogger')
+
+    @app.errorhandler(AIFeatureUnavailable)
+    def handle_ai_feature_unavailable(e):
+        return jsonify({'error': 'AI features are not available in this edition'}), 404
 
 
 # --- Super Admin AI Configuration ---
@@ -11606,6 +11725,24 @@ def api_get_tenant_ai_config():
     membership = get_current_membership()
     if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
         return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    if not is_enterprise():
+        # Community Edition has no AI features. The organisation settings page
+        # asks on every visit, so answer in the shape it reads, with everything
+        # off, and say that the feature is not available.
+        return jsonify({
+            'available': False,
+            'system_ai_enabled': False,
+            'system_slack_bot_enabled': False,
+            'system_mcp_enabled': False,
+            'system_external_api_enabled': False,
+            'ai_features_enabled': False,
+            'ai_slack_queries_enabled': False,
+            'ai_assisted_creation_enabled': False,
+            'ai_external_access_enabled': False,
+            'ai_require_anonymization': False,
+            'ai_log_interactions': False,
+        })
 
     # Get both system and tenant config
     system_config = AIConfig.get_system_ai_config()

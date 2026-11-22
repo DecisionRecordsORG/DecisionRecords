@@ -121,6 +121,7 @@ docker run -d \
 | `DECISION_RECORDS_EDITION` | `community` or `enterprise` | `community` |
 | `ENVIRONMENT` | `development` or `production` | `production` |
 | `SKIP_CLOUDFLARE_CHECK` | Skip Cloudflare validation | `true` |
+| `SUPPORT_URL` | Address of your own support page for the "Can't sign in? Get help" link. `none` hides the link | no link |
 
 ### Email Configuration
 
@@ -313,7 +314,7 @@ Decision Records keeps these deletion timelines by itself. There is nothing to i
 
 | What | When | What happens |
 |------|------|--------------|
-| Accounts | 7 days after the owner asked for deletion | The account is anonymised. Its decisions stay, shown as written by "Former Member" |
+| Accounts | 7 days after the owner asked for deletion | The account is anonymised. Its decisions, comments and changes stay. Comments and the change history show "Former Member"; a decision the person wrote or owned no longer shows an author or owner. The person's name, email address and IP address are removed everywhere else they were written: sign-in history (including failed attempts recorded by address), audit log details, the request for the organisation's domain, linked Slack and Teams accounts, stored Teams conversations, API key names and the text of AI queries. Their passkeys, notification settings, role requests, access requests and setup links are deleted |
 | Soft-deleted decisions | 30 days after deletion | The decision, its history, comments and links are erased |
 | Soft-deleted tenants | 30 days after deletion | The tenant, its decisions, spaces, settings, sign-in configuration, logs and the accounts of its members are erased |
 | Login history | After 90 days | The entries are deleted |
@@ -395,6 +396,17 @@ Messages sent through `/api/contact`, `/api/sponsorship` and `/api/feedback` are
 #### 4. Existing installations
 
 If upgrading from a version before `v2.1.1`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
+
+## Pointing the help link at your own support page
+
+The sign-in, setup and recovery pages can show a "Can't sign in? Get help" link. On a self-hosted installation the link is not shown, so your users are not sent to the hosted service's support. To show it, give the address of a page of your own:
+
+```yaml
+environment:
+  - SUPPORT_URL=https://intranet.example.org/decision-records-help
+```
+
+The address must start with `http://` or `https://`. The app opens it in a new tab and adds `topic` and, when it knows them, `email` and `org` as query parameters; your page can ignore them. `SUPPORT_URL=none` hides the link. A super admin can also set or hide the link under Super Admin > Settings > Help link, and that setting wins over the environment variable. More detail is in [Configuration](configuration.md#help-link).
 
 ## Support
 

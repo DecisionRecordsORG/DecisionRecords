@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import session, redirect, url_for, request, jsonify, g
+from flask import session, redirect, request, jsonify, g
 from authlib.integrations.requests_client import OAuth2Session
 from datetime import datetime, timedelta, timezone
 import logging
@@ -243,8 +243,36 @@ def login_required(f):
     return decorated_function
 
 
+# The decorators below send a browser request that is refused to '/', by path.
+# The `index` view must not be named here: it exists only without a built frontend.
+
+def is_tenant_admin(user):
+    """Whether `user` is an administrator of their own organisation.
+
+    A person's role is on their membership of the organisation their account
+    belongs to: ADMIN, or PROVISIONAL_ADMIN (the first administrator of a new
+    organisation). The `users.is_admin` column is older. It is set for the
+    first account of an organisation and by the legacy admin switch, and it is
+    not changed when a member is promoted through a role request, so a
+    promoted administrator has the role on the membership only.
+
+    Either one is enough. The legacy column still counts so that nobody who
+    has access loses it, and it is all there is for an account without a
+    membership. A steward is not an administrator here, and a membership of
+    another organisation does not count.
+    """
+    from models import GlobalRole
+
+    if user is None:
+        return False
+    if getattr(user, 'is_admin', False):
+        return True
+    membership = user.get_membership()
+    return bool(membership) and membership.global_role in (GlobalRole.ADMIN, GlobalRole.PROVISIONAL_ADMIN)
+
+
 def admin_required(f):
-    """Decorator to require admin privileges for a route."""
+    """Decorator to require tenant administrator privileges for a route (see is_tenant_admin)."""
     @wraps(f)
     @login_required
     def decorated_function(*args, **kwargs):
@@ -252,10 +280,10 @@ def admin_required(f):
         if is_master_account():
             return f(*args, **kwargs)
 
-        if not g.current_user.is_admin:
+        if not is_tenant_admin(g.current_user):
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -268,7 +296,7 @@ def master_required(f):
         if not is_master_account():
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Master account access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -289,19 +317,19 @@ def steward_or_admin_required(f):
         if not tenant:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Tenant not found'}), 404
-            return redirect(url_for('index'))
+            return redirect('/')
 
         membership = g.current_user.get_membership(tenant_id=tenant.id)
         if not membership:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Not a member of this tenant'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
 
         # Check if user is steward or admin (any admin level)
         if membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Steward or admin access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
 
         # Set tenant and membership in g for route handlers
         g.current_tenant = tenant

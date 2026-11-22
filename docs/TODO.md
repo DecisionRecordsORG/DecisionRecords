@@ -28,6 +28,16 @@ Update rules:
 - [ ] Decide how long `retention_runs` and `retention_erasures` rows are kept. They hold ids and counts only and are never deleted.
 - [ ] Restoring a tenant restores every soft-deleted decision in it, including ones a member deleted before the tenant was deleted.
 
+## Accounts / Privacy
+
+- [ ] Decide whether stewards may use the tenant administrator endpoints (`@admin_required` in `auth.py`). The app shows a steward the organisation settings page, `TenantMembership.can_approve_requests` says a steward can approve access requests, and the sign-in page counts stewards as approvers, but every administrator endpoint refuses them. A tenant whose only approvers are stewards holds access requests nobody can approve. Not changed: which of the 34 routes a steward should reach (users, SSO, email, Slack, Teams) is a product decision.
+- [ ] Decide what a decision shows after its author's account is deleted. Published text says contributions are attributed to "Former Member". Comments and the change history are; a decision loses its author and owner and shows nobody. Either keep the author reference (it then shows "Former Member") or change the published wording.
+- [ ] Decide whether rejecting an access request should email the requester. Nothing is sent and the product has no wording for it; the sign-in page does not promise one.
+- [ ] `PUT /api/admin/users/<id>/admin` only changes the old `users.is_admin` flag. Nothing in the app calls it. Remove it, or make it change the membership role, so that it cannot disagree with the role.
+- [ ] The website pages that describe the export and account deletion (FAQ, data processing, security policy) should be read against `data_export.py` and `retention.ACCOUNT_TEXT_RULES` when they are next edited. The export sentence is now accurate; the "Former Member" sentences are accurate for comments and not for decisions.
+- [ ] Account recovery says "a recovery link has been sent" even when email is not configured, to avoid revealing which addresses have accounts. On an installation without email nothing can be sent. Consider hiding the recovery option when `email_available` is false.
+- [ ] Several older browser tests cannot pass against a Community build served by Flask: they use fixed addresses (`localhost:4200`, `localhost:5001`), expect Enterprise-only cards (licensing, cookie consent), or look for a checkbox inside a slide toggle. They need the dev-server setup or an update.
+
 ## Versioning / Releases
 
 - [ ] Publish Community `v2.1.1` to replace the broken `2.1.0` and `latest` images (missing `decision_relationships.py`), then pull the published image and run `scripts/smoke_test_ce_image.sh` against it.

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import * as fs from 'fs';
 import { loginAsUser, dismissOverlays } from '../fixtures/auth';
 
 // Test credentials matching global-setup.ts
@@ -68,6 +69,36 @@ test.describe('GDPR - Profile Privacy & Data Section', () => {
     // Verify success snackbar
     const snackbar = page.locator('simple-snack-bar:has-text("exported"), .mat-mdc-snack-bar-label:has-text("exported")').first();
     await expect(snackbar).toBeVisible({ timeout: 5000 });
+  });
+
+  test('export-file-holds-what-is-published: the downloaded file has account details, decisions, comments, activity and consents', async ({ page }) => {
+    await loginAsUser(page, TEST_USER_EMAIL, TEST_USER_PASSWORD);
+    await page.goto(`/${TEST_TENANT}/profile`);
+    await dismissOverlays(page);
+
+    const exportButton = page.locator('button:has-text("Export My Data")');
+    await expect(exportButton).toBeVisible({ timeout: 15000 });
+    const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
+    await exportButton.click();
+    const download = await downloadPromise;
+
+    const path = await download.path();
+    const data = JSON.parse(fs.readFileSync(path, 'utf-8'));
+
+    // What the published text lists
+    expect(data.data_subject.email).toBe(TEST_USER_EMAIL);
+    for (const section of ['decisions_authored', 'comments', 'audit_trail', 'login_history', 'consents', 'inquiries']) {
+      expect(Array.isArray(data[section]), section).toBeTruthy();
+    }
+    // The person signed in a moment ago, so their activity is there
+    expect(data.login_history.length).toBeGreaterThan(0);
+    // Nobody else's account is in the file
+    const text = JSON.stringify(data);
+    expect(text).not.toContain('admin@test-org.com');
+    expect(text).not.toContain('steward@test-org.com');
+    // Nothing that signs in
+    expect(text).not.toContain('password_hash');
+    expect(text).not.toContain('public_key');
   });
 
   test('consent-toggles-update-preferences: Toggling consent shows appropriate snackbar', async ({ page }) => {

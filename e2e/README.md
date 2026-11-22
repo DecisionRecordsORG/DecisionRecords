@@ -180,6 +180,18 @@ def set_tenant_maturity():
         return jsonify({'error': 'Not available'}), 403
     # Set tenant.maturity_state directly
     return jsonify({'tenant': tenant.to_dict()})
+
+@app.route('/api/test/create-incomplete-user', methods=['POST'])
+def create_incomplete_test_user():
+    """Create a user without credentials and a working setup link. TEST ONLY."""
+    # Returns {'setup_url': '/<domain>/setup?token=...', 'setup_token': '...'}
+
+@app.route('/api/test/create-setup-token', methods=['POST'])
+def create_test_setup_token():
+    """Create a setup or recovery link for an existing user. TEST ONLY."""
+    # Body: {'email': ..., 'purpose': 'initial_setup' | 'account_recovery' | 'admin_invite'}
+    # Stands in for the email a person would receive: the tests have no mailbox.
+    # Returns {'setup_url': '/<domain>/setup?token=...', 'setup_token': '...', 'purpose': ...}
 ```
 
 ---

@@ -25,7 +25,7 @@
  */
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
+import { AbstractControl, FormBuilder, FormGroup, ValidationErrors, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
@@ -107,6 +107,9 @@ interface LogForwardingSettings {
 
 interface SupportSettings {
   support_email: string;
+  support_url?: string;
+  support_url_environment?: string;
+  support_url_effective?: string;
   defaults: {
     support_email: string;
   };
@@ -256,6 +259,55 @@ interface SystemAISettings {
         </mat-card-content>
       </mat-card>
 
+      <!-- Help link: where "Can't sign in? Get help" leads. Every edition. -->
+      <mat-card data-testid="help-link-card">
+        <mat-card-header>
+          <mat-card-title>
+            <mat-icon>help_outline</mat-icon>
+            Help link
+          </mat-card-title>
+          <mat-card-subtitle>
+            Where the "Can't sign in? Get help" link on the sign-in pages leads
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          @if (supportLoading) {
+            <div class="loading">
+              <mat-spinner diameter="40"></mat-spinner>
+            </div>
+          } @else {
+            <form [formGroup]="helpLinkForm" (ngSubmit)="saveHelpLink()">
+              <div class="form-section">
+                <h3>Support page address</h3>
+                <p class="hint">
+                  The address of your own support page, starting with http:// or https://.
+                  Enter "none" to hide the link. Leave it empty to use the SUPPORT_URL environment variable.
+                </p>
+                <mat-form-field appearance="outline" class="full-width">
+                  <mat-label>Support page address</mat-label>
+                  <input matInput type="text" formControlName="support_url" placeholder="https://example.org/support"
+                         data-testid="support-url-input">
+                  <mat-icon matPrefix>link</mat-icon>
+                  @if (helpLinkForm.get('support_url')?.hasError('supportUrl')) {
+                    <mat-error data-testid="support-url-error">Enter an address that starts with http:// or https://, or "none"</mat-error>
+                  }
+                </mat-form-field>
+                <p class="hint" data-testid="support-url-effective">{{ helpLinkStatus }}</p>
+              </div>
+
+              <div class="actions">
+                <button mat-raised-button color="primary" type="submit" [disabled]="helpLinkSaving || !helpLinkForm.valid"
+                        data-testid="support-url-save">
+                  <mat-spinner diameter="20" *ngIf="helpLinkSaving"></mat-spinner>
+                  <mat-icon *ngIf="!helpLinkSaving">save</mat-icon>
+                  <span *ngIf="!helpLinkSaving">Save</span>
+                </button>
+              </div>
+            </form>
+          }
+        </mat-card-content>
+      </mat-card>
+
       <!-- Support Email Settings Card (Enterprise only) -->
       @if (featureFlags.isEnterprise) {
       <mat-card>
@@ -277,7 +329,7 @@ interface SystemAISettings {
             <form [formGroup]="supportForm" (ngSubmit)="saveSupportSettings()">
               <div class="form-section">
                 <h3>Contact Form Email</h3>
-                <p class="hint">All submissions from the website contact form will be sent to this address</p>
+                <p class="hint">Messages from the contact form, the Get in touch form and the feedback form are sent to this address</p>
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Support Email Address</mat-label>
                   <input matInput type="email" formControlName="support_email" placeholder="admin@example.com">
@@ -1652,8 +1704,14 @@ export class SuperadminSettingsComponent implements OnInit {
   supportLoading = true;
   supportSaving = false;
   supportDefaults = {
-    support_email: 'admin@decisionrecords.org'
+    support_email: 'contact@decisionrecords.org'
   };
+
+  // Help link settings
+  helpLinkForm: FormGroup;
+  helpLinkSaving = false;
+  helpLinkEffective = '';
+  helpLinkEnvironment = '';
 
   // AI settings
   aiLoading = true;
@@ -1681,6 +1739,9 @@ export class SuperadminSettingsComponent implements OnInit {
     });
     this.supportForm = this.fb.group({
       support_email: ['', [Validators.required, Validators.email]]
+    });
+    this.helpLinkForm = this.fb.group({
+      support_url: ['', [SuperadminSettingsComponent.supportUrlValidator, Validators.maxLength(500)]]
     });
   }
 
@@ -2134,6 +2195,9 @@ export class SuperadminSettingsComponent implements OnInit {
         this.supportForm.patchValue({
           support_email: settings.support_email
         });
+        this.helpLinkForm.patchValue({ support_url: settings.support_url || '' });
+        this.helpLinkEffective = settings.support_url_effective || '';
+        this.helpLinkEnvironment = settings.support_url_environment || '';
         this.supportDefaults = settings.defaults;
         this.supportLoading = false;
       },
@@ -2156,6 +2220,50 @@ export class SuperadminSettingsComponent implements OnInit {
       error: (error) => {
         this.snackBar.open(error.error?.error || 'Failed to save support settings', 'Close', { duration: 3000 });
         this.supportSaving = false;
+      }
+    });
+  }
+
+  /** Empty, the word "none", or an http(s) address. The server checks again. */
+  static supportUrlValidator(control: AbstractControl): ValidationErrors | null {
+    const value = typeof control.value === 'string' ? control.value.trim() : '';
+    if (!value || value.toLowerCase() === 'none' || /^https?:\/\/[^\s<>"'`\\]+$/i.test(value)) {
+      return null;
+    }
+    return { supportUrl: true };
+  }
+
+  /** One line saying what the sign-in pages do now. */
+  get helpLinkStatus(): string {
+    const fromEnvironment = !this.helpLinkForm.get('support_url')?.value && !!this.helpLinkEnvironment;
+    const source = fromEnvironment ? ' (from the SUPPORT_URL environment variable)' : '';
+    if (this.helpLinkEffective === 'none') {
+      return `Now: the link is hidden${source}.`;
+    }
+    if (this.helpLinkEffective) {
+      return `Now: the link leads to ${this.helpLinkEffective}${source}.`;
+    }
+    return this.featureFlags.flags.marketing_pages
+      ? 'Now: the link leads to the Decision Records support page.'
+      : 'Now: no link is shown.';
+  }
+
+  saveHelpLink() {
+    if (!this.helpLinkForm.valid) return;
+
+    this.helpLinkSaving = true;
+    const support_url = (this.helpLinkForm.value.support_url || '').trim();
+    this.http.post<SupportSettings>('/api/admin/settings/support', { support_url }).subscribe({
+      next: (settings) => {
+        this.helpLinkForm.patchValue({ support_url: settings.support_url || '' });
+        this.helpLinkEffective = settings.support_url_effective || '';
+        this.helpLinkEnvironment = settings.support_url_environment || '';
+        this.snackBar.open('Help link saved', 'Close', { duration: 3000 });
+        this.helpLinkSaving = false;
+      },
+      error: (error) => {
+        this.snackBar.open(error.error?.error || 'Failed to save the help link', 'Close', { duration: 5000 });
+        this.helpLinkSaving = false;
       }
     });
   }

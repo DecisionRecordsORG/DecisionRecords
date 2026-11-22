@@ -68,6 +68,7 @@ import threading
 import time
 import uuid
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
@@ -485,18 +486,228 @@ def _normalise_categories(categories):
 # Accounts
 # ---------------------------------------------------------------------------
 
+# The name a deleted member's contributions carry.
+FORMER_MEMBER = 'Former Member'
+# What replaces the person's email address where it was written into a record.
+DELETED_USER = 'deleted-user'
+# The name left on an API key of a deleted member (the key itself is revoked).
+DELETED_KEY_NAME = 'Deleted key'
+
+# What anonymising an account does with every text, JSON and binary column in
+# the database. A person's name, email address or IP address can sit in a
+# column as text instead of being a reference to their account; a reference
+# turns into "Former Member" by itself when the account row is anonymised, a
+# copy of the name does not.
+#
+#   CLEARED         can name the person. Anonymisation empties it, replaces it
+#                   or deletes the row.
+#   CONTENT         what the person wrote as part of the organisation's record
+#                   (a decision, a comment, the reason for a change). Kept on
+#                   purpose: the product keeps contributions and removes who
+#                   made them.
+#   NOT_THE_PERSON  settings, codes, the organisation's own details, and names
+#                   of other people (a super admin, another requester), who are
+#                   handled when their own account is anonymised.
+#
+# tests/test_account_anonymise.py fails when a column is missing from this
+# list, and searches every one of these columns for the person after an
+# anonymisation, so a new column cannot be added without deciding.
+CLEARED = 'cleared'
+CONTENT = 'content'
+NOT_THE_PERSON = 'not the person'
+
+
+def _account_text_rules():
+    cleared = {
+        'users': 'email name first_name last_name password_hash sso_subject aad_object_id',
+        'webauthn_credentials': 'credential_id public_key device_name transports',  # rows deleted
+        'setup_tokens': 'email token_hash',                                          # rows deleted
+        'email_verifications': 'email name token access_request_reason',             # rows deleted
+        'access_requests': 'email name reason rejection_reason',                     # rows deleted
+        'role_requests': 'reason rejection_reason',                # the person's own requests are deleted
+        'slack_user_mappings': 'slack_user_id slack_email',                          # rows deleted
+        'teams_user_mappings': 'aad_object_id aad_user_principal_name aad_email aad_display_name',  # rows deleted
+        'teams_conversation_references': 'conversation_id reference_json',  # personal chat deleted, name removed elsewhere
+        'domain_approvals': 'requested_by_email requested_by_name',
+        'login_history': 'email ip_address user_agent',
+        'user_consents': 'ip_address',
+        'inquiries': 'name email message',
+        'architecture_decisions': 'owner_email',
+        'decision_comments': 'author_display',
+        'audit_logs': 'details',                                   # the name and address are replaced
+        'ai_api_keys': 'name description',
+        'ai_interaction_logs': 'query_text',
+    }
+    content = {
+        'architecture_decisions': 'title context decision consequences',
+        'decision_history': 'title context decision_text consequences change_reason',
+        'decision_comments': 'body',
+        'decision_relationships': 'notes',
+        'spaces': 'name description',
+        'it_infrastructure': 'name description',
+    }
+    not_the_person = {
+        'users': 'sso_domain auth_type',
+        'setup_tokens': 'purpose',
+        'email_verifications': 'purpose domain',
+        'access_requests': 'domain status',
+        'slack_user_mappings': 'link_method',
+        'teams_user_mappings': 'link_method',
+        'teams_conversation_references': 'channel_id team_id context_type',
+        'domain_approvals': 'domain status rejection_reason',
+        'login_history': 'tenant_domain login_method failure_reason',
+        'user_consents': 'consent_type',
+        # organisation, area of interest and the team answers describe an organisation; handled_by is a super admin
+        'inquiries': 'source organisation area_of_interest team_focus team_size tenant_domain handled_by',
+        'architecture_decisions': 'status domain',
+        'decision_history': 'status',
+        'decision_relationships': 'relationship_type target_previous_status',
+        'it_infrastructure': 'type domain',
+        'audit_logs': 'action_type target_entity',
+        'ai_api_keys': 'key_hash key_prefix scopes',               # the key is revoked
+        'ai_interaction_logs': 'decision_ids llm_provider llm_model error_message',
+        'tenants': 'domain name status deleted_by_admin team_focus team_size',
+        'tenant_settings': 'auth_method rp_name tenant_prefix decision_relationship_pack_ids '
+                           'decision_relationship_enabled_types decision_relationship_custom_types',
+        'auth_configs': 'domain auth_method rp_name tenant_prefix',
+        'sso_configs': 'domain provider_name client_id client_secret discovery_url',
+        'email_configs': 'domain smtp_server smtp_username smtp_password from_email from_name',
+        'slack_workspaces': 'workspace_id workspace_name bot_token_encrypted status default_channel_id '
+                            'default_channel_name granted_scopes app_version',
+        'teams_workspaces': 'ms_tenant_id ms_tenant_name service_url bot_id status default_channel_id '
+                            'default_channel_name default_team_id default_team_name app_version',
+        'master_accounts': 'username password_hash name',
+        'system_config': 'key value description',
+        'blog_posts': 'slug title excerpt author category read_time image meta_description meta_keywords content',
+        'retention_runs': 'claim_key trigger started_by status categories results error',
+        'retention_erasures': 'category entity_type identifier counts',
+    }
+    rules = {}
+    for rule, tables in ((CLEARED, cleared), (CONTENT, content), (NOT_THE_PERSON, not_the_person)):
+        for table, columns in tables.items():
+            for column in columns.split():
+                rules[f'{table}.{column}'] = rule
+    return rules
+
+
+ACCOUNT_TEXT_RULES = _account_text_rules()
+
+
+def _replace_in_text(text, replacements):
+    """`text` with every (pattern, replacement) applied."""
+    for pattern, replacement in replacements:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+def _redact_json(value, replacements):
+    """A copy of a JSON value with the replacements applied to every string in it."""
+    if isinstance(value, str):
+        return _replace_in_text(value, replacements)
+    if isinstance(value, list):
+        return [_redact_json(item, replacements) for item in value]
+    if isinstance(value, dict):
+        return {_replace_in_text(key, replacements) if isinstance(key, str) else key:
+                _redact_json(item, replacements) for key, item in value.items()}
+    return value
+
+
+def _person_replacements(email, names):
+    """Patterns that find a person in free text: their address, then their name.
+
+    Both are matched whatever the letter case. A name is matched as whole
+    words only, so a short name is not found inside another word.
+    """
+    replacements = []
+    if email:
+        replacements.append((re.compile(re.escape(email), re.IGNORECASE), DELETED_USER))
+    for name in sorted({(name or '').strip() for name in names}, key=len, reverse=True):
+        if len(name) < 2 or name == FORMER_MEMBER:
+            continue
+        replacements.append((re.compile(r'(?<!\w)' + re.escape(name) + r'(?!\w)', re.IGNORECASE), FORMER_MEMBER))
+    return replacements
+
+
+def _redact_audit_entries(user_id, tenant_ids, replacements):
+    """Replace the person's address and name in audit log details. Returns the number of rows changed.
+
+    Looks at the entries of the person's organisations, the entries they
+    performed and the entries about them, not at every entry of every tenant.
+    """
+    if not replacements:
+        return 0
+    scope = sa.or_(
+        AuditLog.actor_user_id == user_id,
+        sa.and_(AuditLog.target_entity == 'user', AuditLog.target_id == user_id),
+        AuditLog.tenant_id.in_(tenant_ids) if tenant_ids else sa.false(),
+    )
+    changed = 0
+    for entry in AuditLog.query.filter(scope).all():
+        if entry.details is None:
+            continue
+        redacted = _redact_json(entry.details, replacements)
+        if redacted != entry.details:
+            entry.details = redacted
+            changed += 1
+    return changed
+
+
+def _forget_in_teams_conversations(aad_object_ids):
+    """Remove a person from stored Teams conversation references. Returns the number of rows touched.
+
+    A reference records who the bot was talking to when it was stored (their
+    display name and directory id). A personal chat with the person is
+    deleted. A channel or group conversation is kept, without the person:
+    sending a message there needs the service address and the conversation id
+    only.
+    """
+    touched = 0
+    for aad_object_id in sorted({value for value in aad_object_ids if value}):
+        rows = TeamsConversationReference.query.filter(
+            TeamsConversationReference.reference_json.contains(aad_object_id, autoescape=True)).all()
+        for row in rows:
+            try:
+                reference = json.loads(row.reference_json)
+            except (TypeError, ValueError):
+                reference = None
+            member = reference.get('user') if isinstance(reference, dict) else None
+            names_person = isinstance(member, dict) and aad_object_id in (member.get('aadObjectId'), member.get('id'))
+            if row.context_type == 'personal' and (names_person or reference is None):
+                db.session.delete(row)
+            elif names_person:
+                reference.pop('user')
+                row.reference_json = json.dumps(reference)
+            elif reference is None:
+                # Not readable as JSON and it carries the id: keep the row, drop the text
+                row.reference_json = '{}'
+            else:
+                continue
+            touched += 1
+    return touched
+
+
 def _anonymise_user_record(user):
     """Strip a user's personal data in the current transaction. Returns counts.
 
     The row stays so contributions keep a (now anonymous) author. Does not commit.
+    ACCOUNT_TEXT_RULES lists every column this has to deal with.
     """
     anonymous_email = f"deleted-{uuid.uuid4()}@anonymized.local"
     original_email = user.email
     email_key = (original_email or '').lower()
     counts = {}
 
+    # Read what identifies the person before it is overwritten
+    names = [user.name, user.get_full_name(), ' '.join(part for part in (user.first_name, user.last_name) if part)]
+    replacements = _person_replacements(original_email, names)
+    home_tenant = Tenant.query.filter_by(domain=user.sso_domain).first() if user.sso_domain else None
+    tenant_ids = {membership.tenant_id for membership in TenantMembership.query.filter_by(user_id=user.id).all()}
+    if home_tenant:
+        tenant_ids.add(home_tenant.id)
+    aad_object_ids = {user.aad_object_id}
+
     user.email = anonymous_email
-    user.name = 'Former Member'
+    user.name = FORMER_MEMBER
     user.first_name = None
     user.last_name = None
     user.password_hash = None
@@ -515,6 +726,16 @@ def _anonymise_user_record(user):
         ArchitectureDecision.query.filter(
             sa.func.lower(ArchitectureDecision.owner_email) == email_key
         ).update({'owner_email': None}, synchronize_session=False)
+
+    # Comments stay. The author is stored as text beside the reference, so the
+    # text is replaced: comments of this account, and comments recorded with
+    # only the person's address as author.
+    comment_filter = DecisionComment.user_id == user.id
+    if email_key:
+        comment_filter = sa.or_(comment_filter, sa.and_(
+            DecisionComment.user_id.is_(None), sa.func.lower(DecisionComment.author_display) == email_key))
+    counts['comments_reattributed'] = DecisionComment.query.filter(comment_filter).update(
+        {'author_display': FORMER_MEMBER}, synchronize_session=False)
 
     # Everything that lets this person sign in or act
     credentials = list(user.webauthn_credentials)
@@ -535,22 +756,53 @@ def _anonymise_user_record(user):
     counts['ai_api_keys_revoked'] = AIApiKey.query.filter(
         AIApiKey.user_id == user.id, AIApiKey.revoked_at.is_(None)
     ).update({'revoked_at': utcnow()}, synchronize_session=False)
+    # The key rows stay for the usage records that point at them, without the
+    # name and description the person typed
+    AIApiKey.query.filter(AIApiKey.user_id == user.id).update(
+        {'name': DELETED_KEY_NAME, 'description': None}, synchronize_session=False)
+    # The usage record stays (when, which kind, how many decisions), not what was asked
+    counts['ai_queries_cleared'] = AIInteractionLog.query.filter(
+        AIInteractionLog.user_id == user.id, AIInteractionLog.query_text.isnot(None)
+    ).update({'query_text': None}, synchronize_session=False)
 
     # Rows that only describe this person
     counts['subscriptions'] = Subscription.query.filter_by(user_id=user.id).delete(synchronize_session=False)
-    counts['slack_user_mappings'] = SlackUserMapping.query.filter_by(user_id=user.id).delete(
+    # Linked chat accounts, and unlinked ones that carry the person's address
+    slack_filter = SlackUserMapping.user_id == user.id
+    teams_filter = TeamsUserMapping.user_id == user.id
+    if email_key:
+        slack_filter = sa.or_(slack_filter, sa.func.lower(SlackUserMapping.slack_email) == email_key)
+        teams_filter = sa.or_(
+            teams_filter,
+            sa.func.lower(TeamsUserMapping.aad_email) == email_key,
+            sa.func.lower(TeamsUserMapping.aad_user_principal_name) == email_key)
+    if user.aad_object_id:
+        teams_filter = sa.or_(teams_filter, TeamsUserMapping.aad_object_id == user.aad_object_id)
+    aad_object_ids.update(row.aad_object_id for row in TeamsUserMapping.query.filter(teams_filter).all())
+    counts['slack_user_mappings'] = SlackUserMapping.query.filter(slack_filter).delete(
         synchronize_session=False)
-    counts['teams_user_mappings'] = TeamsUserMapping.query.filter_by(user_id=user.id).delete(
+    counts['teams_user_mappings'] = TeamsUserMapping.query.filter(teams_filter).delete(
         synchronize_session=False)
+    counts['teams_conversations'] = _forget_in_teams_conversations(aad_object_ids)
+    # A role request only describes the person who made it
+    counts['role_requests'] = RoleRequest.query.filter_by(user_id=user.id).delete(synchronize_session=False)
     UserConsent.query.filter_by(user_id=user.id).update({'ip_address': None}, synchronize_session=False)
     if email_key:
         counts['email_verifications'] = EmailVerification.query.filter(
             sa.func.lower(EmailVerification.email) == email_key).delete(synchronize_session=False)
         counts['access_requests'] = AccessRequest.query.filter(
             sa.func.lower(AccessRequest.email) == email_key).delete(synchronize_session=False)
+        # The request for the organisation's domain keeps its outcome, not who asked
+        counts['domain_approvals_redacted'] = DomainApproval.query.filter(
+            sa.func.lower(DomainApproval.requested_by_email) == email_key
+        ).update({'requested_by_email': None, 'requested_by_name': None}, synchronize_session=False)
 
-    # Redact LoginHistory entries
-    counts['login_history_redacted'] = LoginHistory.query.filter_by(user_id=user.id).update(
+    # Redact LoginHistory entries: the person's sign-ins, and attempts recorded
+    # with their address before any account was matched (failed sign-ins)
+    login_filter = LoginHistory.user_id == user.id
+    if email_key:
+        login_filter = sa.or_(login_filter, sa.func.lower(LoginHistory.email) == email_key)
+    counts['login_history_redacted'] = LoginHistory.query.filter(login_filter).update(
         {'email': anonymous_email, 'ip_address': None, 'user_agent': None}, synchronize_session=False)
 
     # Remove the personal fields from messages this person sent through the
@@ -569,13 +821,8 @@ def _anonymise_user_record(user):
         {'team_profile_answered_by_id': None}, synchronize_session=False
     )
 
-    # Redact AuditLog details containing the user's email
-    if original_email:
-        for entry in AuditLog.query.filter(AuditLog.details.isnot(None)).all():
-            if entry.details and isinstance(entry.details, dict):
-                details_str = json.dumps(entry.details)
-                if original_email in details_str:
-                    entry.details = json.loads(details_str.replace(original_email, 'deleted-user'))
+    # Audit log entries stay; the person's address and name inside their details are replaced
+    counts['audit_entries_redacted'] = _redact_audit_entries(user.id, tenant_ids, replacements)
 
     return counts
 
@@ -1280,6 +1527,7 @@ def retention_status(now=None):
 # a crash can never block the following day's run. Every item is erased in its
 # own transaction, so an interrupted run leaves nothing half done.
 
+SCHEDULER_THREAD_NAME = 'retention-scheduler'
 CHECK_INTERVAL_SECONDS = 15 * 60
 FIRST_CHECK_DELAY_SECONDS = 60
 
@@ -1287,6 +1535,11 @@ _scheduler_lock = threading.Lock()
 _scheduler_pid = None
 _scheduler_thread = None
 _scheduler_stop = None
+# Every thread this module started in this process, with the event that stops
+# it. A forked worker starts its own thread while the module state it
+# inherited still names the parent's; stop_scheduler() must be able to stop
+# whatever was started here, not only the one the globals point at.
+_scheduler_started = []
 
 
 def automatic_claim_key(now):
@@ -1359,11 +1612,26 @@ def _scheduler_loop(app, stop, interval, first_delay):
 
 
 def _testing(app):
+    """True under tests, however the app was created.
+
+    PYTEST_CURRENT_TEST is set by pytest in its own process for the length of
+    every test and is inherited by child processes a test starts, so an app
+    created without the TESTING flag, or in a subprocess whose environment was
+    cleaned, still never starts the thread. A thread that outlives its test
+    runs retention queries against the shared test database while another
+    test is dropping its tables.
+    """
     return bool(
         app.config.get('TESTING')
         or os.environ.get('FLASK_ENV') == 'testing'
         or os.environ.get('TESTING', '').lower() in ('1', 'true', 'yes')
+        or os.environ.get('PYTEST_CURRENT_TEST')
     )
+
+
+def scheduler_threads():
+    """The retention threads alive in this process."""
+    return [thread for thread in threading.enumerate() if thread.name == SCHEDULER_THREAD_NAME]
 
 
 def ensure_scheduler(app, force=False, interval=None, first_delay=None):
@@ -1389,21 +1657,24 @@ def ensure_scheduler(app, force=False, interval=None, first_delay=None):
         stop = threading.Event()
         thread = threading.Thread(
             target=_scheduler_loop, args=(app, stop, interval, first_delay),
-            name='retention-scheduler', daemon=True,
+            name=SCHEDULER_THREAD_NAME, daemon=True,
         )
         thread.start()
         _scheduler_pid, _scheduler_thread, _scheduler_stop = pid, thread, stop
+        _scheduler_started.append((thread, stop))
         logger.info('Retention: automatic run thread started in process %s', pid)
         return thread
 
 
 def stop_scheduler(timeout=5):
-    """Stop this process's retention thread (tests)."""
+    """Stop every retention thread this process started (tests)."""
     global _scheduler_pid, _scheduler_thread, _scheduler_stop
     with _scheduler_lock:
-        thread, stop = _scheduler_thread, _scheduler_stop
+        started = list(_scheduler_started)
+        del _scheduler_started[:]
         _scheduler_pid = _scheduler_thread = _scheduler_stop = None
-    if stop is not None:
+    for _thread, stop in started:
         stop.set()
-    if thread is not None:
-        thread.join(timeout)
+    for thread, _stop in started:
+        if thread.is_alive():
+            thread.join(timeout)

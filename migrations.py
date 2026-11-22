@@ -196,6 +196,11 @@ MIGRATIONS = [
         "description": "Add retention run history tables",
         "migrate": lambda db: migrate_2_4_0(db)
     },
+    {
+        "version": "2.5.0",
+        "description": "Finish the anonymisation of accounts anonymised by earlier versions",
+        "migrate": lambda db: migrate_2_5_0(db)
+    },
 ]
 
 
@@ -587,6 +592,58 @@ def migrate_2_4_0(db):
         logger.info(f"Created {model.__tablename__} table")
         changes += 1
 
+    return changes
+
+
+def migrate_2_5_0(db):
+    """Migration for v2.5.0 - finish the anonymisation of accounts anonymised earlier.
+
+    Until this version, anonymising an account left the author's name on their
+    comments (decision_comments.author_display), the name and description they
+    gave their API keys, their role requests and the text of their AI queries.
+    Accounts anonymised from now on are cleaned in full by
+    retention._anonymise_user_record; this does the same for accounts that
+    were already anonymised, which can be told apart by users.is_anonymized.
+
+    What cannot be repaired here: text that was keyed by the person's email
+    address or name (a failed sign-in recorded by address, the requester of a
+    domain, a name inside an audit entry). The address and the name were
+    erased with the account, so those rows can no longer be matched.
+
+    Plain UPDATE and DELETE statements that SQLite and PostgreSQL both run.
+    Safe to repeat: a second run finds nothing to change.
+    """
+    from retention import FORMER_MEMBER, DELETED_KEY_NAME
+
+    anonymised = "SELECT id FROM users WHERE is_anonymized"
+    statements = []
+    if table_exists(db, 'users') and column_exists(db, 'users', 'is_anonymized'):
+        if table_exists(db, 'decision_comments'):
+            statements.append((
+                f"UPDATE decision_comments SET author_display = :former "
+                f"WHERE user_id IN ({anonymised}) "
+                f"AND (author_display IS NULL OR author_display <> :former)",
+                {'former': FORMER_MEMBER}))
+        if table_exists(db, 'ai_api_keys'):
+            statements.append((
+                f"UPDATE ai_api_keys SET name = :name, description = NULL "
+                f"WHERE user_id IN ({anonymised}) AND (name <> :name OR description IS NOT NULL)",
+                {'name': DELETED_KEY_NAME}))
+        if table_exists(db, 'ai_interaction_logs'):
+            statements.append((
+                f"UPDATE ai_interaction_logs SET query_text = NULL "
+                f"WHERE user_id IN ({anonymised}) AND query_text IS NOT NULL", {}))
+        if table_exists(db, 'role_requests'):
+            statements.append((f"DELETE FROM role_requests WHERE user_id IN ({anonymised})", {}))
+
+    changes = 0
+    with db.engine.connect() as conn:
+        for sql, params in statements:
+            changes += conn.execute(db.text(sql), params).rowcount or 0
+        conn.commit()
+
+    if changes:
+        logger.info(f"Finished the anonymisation of earlier deleted accounts ({changes} rows)")
     return changes
 
 

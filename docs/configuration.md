@@ -16,6 +16,25 @@ Configuration guide for self-hosting Decision Records Community Edition.
 | `DATABASE_URL` | No | `sqlite:////data/decisions.db` | Database connection string |
 | `DECISION_RECORDS_EDITION` | No | `community` | Edition: `community` or `enterprise` |
 | `ENVIRONMENT` | No | `production` | Runtime environment: `development` or `production` |
+| `SUPPORT_URL` | No | - | Address of your own support page for the "Can't sign in? Get help" link on the sign-in pages. Must start with `http://` or `https://`. Set it to `none` to hide the link. See [Help link](#help-link) |
+
+### Help link
+
+The sign-in, setup and recovery pages can show a "Can't sign in? Get help" link for people who are stuck before they are signed in. A self-hosted installation shows no link unless you give it an address.
+
+| `SUPPORT_URL` | What the app does |
+|---------------|-------------------|
+| not set or empty | The default: no link on a self-hosted installation |
+| an `http://` or `https://` address | The link leads to that address. The app adds `topic`, and when they are known `email` and `org` (the organisation's email domain), as query parameters |
+| `none` | The link is hidden |
+| anything else | The link is hidden and a warning is written to the log. Addresses with a user name or password in them, with spaces or with markup characters are not accepted |
+
+A super admin can set the same value under Super Admin > Settings > Help link. A saved setting wins over `SUPPORT_URL`; clearing the setting goes back to `SUPPORT_URL`. The value is stored in system settings under the key `support_url` and is reported to the app as `support_url` by `/api/features`.
+
+```yaml
+environment:
+  - SUPPORT_URL=https://intranet.example.org/decision-records-help
+```
 
 ### Database Configuration
 
@@ -100,6 +119,7 @@ Access via `/superadmin` with master credentials.
 | Email verification | System Config | Require email verification for new users |
 | Default email config | Email Settings | SMTP configuration for all tenants |
 | Data retention | Data retention | Turn the daily automatic run on or off, set its limits, see what is waiting and the last runs, and run a held back category |
+| Help link | Settings | Address of your own support page for the "Can't sign in? Get help" link, or `none` to hide it. Wins over `SUPPORT_URL` |
 
 ### Tenant Admin Settings
 
@@ -247,6 +267,8 @@ Returns enabled features based on edition:
   "ai_features": false
 }
 ```
+
+When a support page address was chosen (see [Help link](#help-link)), the answer also has `"support_url"`: the address, or `"none"` when the link is hidden. Without a choice the key is absent.
 
 ## Example Configurations
 

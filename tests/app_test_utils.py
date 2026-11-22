@@ -7,26 +7,49 @@ import os
 import sys
 from contextlib import contextmanager
 from types import ModuleType
+from unittest.mock import patch
+
+# app.py looks for this folder when it is imported. With it the app serves the
+# built Angular frontend; without it the app registers the legacy template
+# routes instead (`index`, `settings`, `profile` and so on).
+_BUILD_SUFFIX = os.path.join("frontend", "dist", "frontend", "browser")
+_REAL_EXISTS = os.path.exists
 
 
 def load_test_app(
     *,
     secret_key: str,
     database_url: str = "sqlite:///:memory:",
+    built_frontend: str | os.PathLike | None = None,
 ) -> tuple[ModuleType, object]:
-    """Load or reload the Flask app module with deterministic test settings."""
+    """Load or reload the Flask app module with deterministic test settings.
+
+    Whether a frontend build happens to exist in the checkout does not change
+    what is loaded. By default the app is loaded as if there were no build,
+    which is what CI has. Pass `built_frontend` (a folder holding an
+    `index.html`) to load it the way production runs it, serving that folder.
+    """
     os.environ["FLASK_ENV"] = "testing"
     os.environ["TESTING"] = "True"
     os.environ["DATABASE_URL"] = database_url
     os.environ["SECRET_KEY"] = secret_key
     os.environ["FLASK_SECRET_KEY"] = secret_key
 
-    if "app" in sys.modules:
-        app_module = importlib.reload(sys.modules["app"])
-    else:
-        import app as app_module
+    def exists(path):
+        if str(path).endswith(_BUILD_SUFFIX):
+            return built_frontend is not None
+        return _REAL_EXISTS(path)
+
+    with patch("os.path.exists", exists):
+        if "app" in sys.modules:
+            app_module = importlib.reload(sys.modules["app"])
+        else:
+            import app as app_module
 
     test_app = app_module.app
+    if built_frontend is not None:
+        app_module.FRONTEND_DIR = str(built_frontend)
+        test_app.static_folder = str(built_frontend)
     app_module._db_initialized = False
     test_app.config["TESTING"] = True
     test_app.config["SECRET_KEY"] = secret_key
