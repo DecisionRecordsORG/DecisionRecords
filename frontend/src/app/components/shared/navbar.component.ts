@@ -120,6 +120,10 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
               <mat-icon>inbox</mat-icon>
               Inquiries
             </a>
+            <a mat-menu-item routerLink="/superadmin/retention" data-testid="menu-retention">
+              <mat-icon>auto_delete</mat-icon>
+              Data retention
+            </a>
           } @else {
             <a mat-menu-item [routerLink]="profileLink">
               <mat-icon>person</mat-icon>
