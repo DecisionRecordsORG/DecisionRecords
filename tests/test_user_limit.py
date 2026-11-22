@@ -178,29 +178,46 @@ class TenantSso:
 
 
 class TeamsTabSignIn:
-    """The Teams tab token endpoint creates the account on first use."""
+    """The Teams tab token endpoint creates the account on first use.
+
+    The Microsoft token validator is replaced by one that returns verified
+    claims, so this path also runs without the Enterprise modules. Validation
+    of real signed tokens is covered in tests/test_teams_tab_auth.py.
+    """
     name = 'Teams tab sign-in'
+    app_id = 'test-teams-app-id'
+    ms_tenant_id = 'ms-tenant-1'
 
     def prepare(self, real_app, monkeypatch, domain):
         import feature_flags
         self.claims = {}
-        module = types.ModuleType('ee.backend.oauth_providers.microsoft_oauth')
-        module.validate_teams_sso_token = lambda token: dict(self.claims)
-        module.generate_teams_tab_auth_token = lambda user_id, tenant_domain: 'tab-token'
-        for parent in ('ee', 'ee.backend', 'ee.backend.oauth_providers'):
+        sign_in = types.ModuleType('ee.backend.oauth_providers.microsoft_oauth')
+        sign_in.validate_teams_sso_token = lambda token, expected_audience=None: dict(self.claims)
+        security = types.ModuleType('ee.backend.teams.teams_security')
+        security.get_teams_bot_app_id = lambda: self.app_id
+        security.generate_tab_auth_token = lambda user_id, tenant_domain, user_email: 'tab-token'
+        for parent in ('ee', 'ee.backend', 'ee.backend.oauth_providers', 'ee.backend.teams'):
             if parent not in sys.modules:
                 stub = types.ModuleType(parent)
                 stub.__path__ = []
                 monkeypatch.setitem(sys.modules, parent, stub)
-        monkeypatch.setitem(sys.modules, module.__name__, module)
+        monkeypatch.setitem(sys.modules, sign_in.__name__, sign_in)
+        monkeypatch.setitem(sys.modules, security.__name__, security)
         monkeypatch.setitem(feature_flags.FEATURES, 'teams_integration', True)
-        app_module, _ = real_app
-        monkeypatch.setattr(app_module, 'generate_teams_tab_auth_token',
-                            module.generate_teams_tab_auth_token, raising=False)
 
     def attempt(self, real_app, email):
         _, test_app = real_app
-        self.claims = {'email': email, 'name': 'New Comer', 'oid': 'ms-object-1'}
+        raw_claims = {
+            'aud': self.app_id,
+            'iss': f'https://login.microsoftonline.com/{self.ms_tenant_id}/v2.0',
+            'exp': int(datetime.now(timezone.utc).timestamp()) + 600,
+            'oid': 'ms-object-1',
+            'tid': self.ms_tenant_id,
+            'name': 'New Comer',
+            'preferred_username': email,
+        }
+        self.claims = {'email': email, 'name': 'New Comer', 'oid': 'ms-object-1',
+                       'tid': self.ms_tenant_id, 'raw_claims': raw_claims}
         return test_app.test_client().post('/api/teams/sso/validate', json={'token': 'teams-token'})
 
     def refused(self, response, domain):

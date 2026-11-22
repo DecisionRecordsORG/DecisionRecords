@@ -2690,68 +2690,121 @@ def microsoft_oauth_callback():
         return redirect('/?error=internal_error')
 
 
-@app.route('/api/teams/sso/validate', methods=['POST'])
-@require_teams
-@track_endpoint('api_teams_sso_validate')
-def teams_sso_validate():
-    """Validate a Teams SSO token and return user info.
+def _teams_sso_identity(token):
+    """Identity proven by a Teams sign-in token, or the reason there is none.
 
-    This endpoint is called from Teams apps (tab, bot) when they have a Teams SSO token
-    from microsoftTeams.authentication.getAuthToken().
+    Returns (identity, None) or (None, (json_body, status)).
 
-    The token is validated against Microsoft's public keys, and if valid,
-    the user is authenticated based on the token claims.
-
-    Request body:
-    {
-        "token": "<JWT from Teams getAuthToken()>"
-    }
-
-    Returns:
-    {
-        "valid": true,
-        "user": { user info },
-        "tenant_domain": "example.com",
-        "tab_auth_token": "..." (for subsequent requests)
-    }
+    The Microsoft sign-in module verifies the token: RS256 signature against
+    Microsoft's published signing keys, audience (the Teams app's application
+    ID, passed here, and the Application ID URI forms that module accepts),
+    validity period and required claims. This function decides who the
+    verified claims identify:
+    - the issuer must be the Microsoft tenant named in `tid`
+    - the user is identified by `oid`, `tid` and a sign-in name
+    Nothing is read from a token that failed verification.
     """
     from ee.backend.oauth_providers.microsoft_oauth import validate_teams_sso_token
+    from ee.backend.teams.teams_security import get_teams_bot_app_id
 
-    data = request.get_json()
-    if not data or not data.get('token'):
-        return jsonify({'error': 'Token is required'}), 400
+    refused = (None, ({'valid': False, 'error': 'Invalid or expired token'}, 401))
 
-    token = data.get('token')
+    if not isinstance(token, str) or not token.strip():
+        return refused
 
-    # Validate the Teams SSO token
-    claims = validate_teams_sso_token(token)
-    if not claims:
-        return jsonify({'valid': False, 'error': 'Invalid or expired token'}), 401
+    app_id = get_teams_bot_app_id()
+    if not app_id or not isinstance(app_id, str):
+        logger.error("Teams sign-in refused: the Teams app ID is not configured")
+        return None, ({'valid': False, 'error': 'Teams sign-in is not configured'}, 503)
 
-    email = claims.get('email')
-    name = claims.get('name')
-    microsoft_user_id = claims.get('oid')
+    # Always name the application the token must be for: the Teams app
+    validated = validate_teams_sso_token(token.strip(), expected_audience=app_id)
+    if not validated or not isinstance(validated, dict):
+        return refused
 
-    if not email:
-        return jsonify({'valid': False, 'error': 'No email in token'}), 401
+    claims = validated.get('raw_claims')
+    if not isinstance(claims, dict):
+        claims = validated
 
-    # Extract domain from email
-    domain = extract_domain_from_email(email)
+    def text(name):
+        value = claims.get(name)
+        return value.strip() if isinstance(value, str) else ''
 
-    # Check for public email domains
-    if DomainApproval.is_public_domain(domain):
-        return jsonify({'valid': False, 'error': 'Personal accounts not allowed'}), 403
+    object_id, ms_tenant_id = text('oid'), text('tid')
+    if not object_id or not ms_tenant_id:
+        logger.warning("Teams sign-in refused: token has no oid or tid claim")
+        return refused
+
+    if text('iss').lower() not in (f'https://login.microsoftonline.com/{ms_tenant_id}/v2.0'.lower(),
+                                   f'https://sts.windows.net/{ms_tenant_id}/'.lower()):
+        logger.warning("Teams sign-in refused: issuer does not match the token's tenant")
+        return refused
+
+    # The sign-in name belongs to a domain the Microsoft tenant has verified.
+    # The email claim is a profile field and only counts when Microsoft marks
+    # its domain as verified for the tenant.
+    email = text('preferred_username') or text('upn')
+    if not email and claims.get('xms_edov') in (True, 'true', 'True', 1, '1'):
+        email = text('email')
+    email = email.lower()
+    local_part, at, domain = email.partition('@')
+    if not at or not local_part or not domain or '@' in domain or any(c.isspace() for c in email):
+        logger.warning("Teams sign-in refused: token carries no usable sign-in name")
+        return refused
+
+    return {
+        'object_id': object_id,
+        'ms_tenant_id': ms_tenant_id,
+        'email': email,
+        'domain': domain,
+        'name': text('name') or local_part,
+    }, None
+
+
+def _teams_sso_sign_in(token):
+    """Sign a Teams user in from a Teams sign-in token and issue a tab token.
+
+    The only way to obtain a `TabAuth` token. Who the user is and which
+    organisation they belong to come from the validated token alone.
+
+    Returns (result, None) or (None, (json_body, status)). Nothing is created
+    unless the token is valid.
+    """
+    from ee.backend.teams.teams_security import generate_tab_auth_token
+
+    identity, refusal = _teams_sso_identity(token)
+    if refusal:
+        return None, refusal
+
+    email, domain = identity['email'], identity['domain']
+
+    # Personal and disposable mailboxes cannot sign up (same rule as the other providers)
+    if DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain):
+        return None, ({'valid': False, 'error': 'Personal accounts not allowed'}, 403)
+
+    tenant = Tenant.query.filter_by(domain=domain).first()
+
+    # An organisation that connected Teams accepts sign-ins from the Microsoft
+    # tenant it connected, and from no other
+    if tenant:
+        workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+        if workspace and (workspace.ms_tenant_id or '').lower() != identity['ms_tenant_id'].lower():
+            logger.warning(f"Teams sign-in refused: Microsoft tenant {identity['ms_tenant_id']} "
+                           f"is not the one connected to {domain}")
+            return None, ({
+                'valid': False,
+                'error': 'Your Microsoft 365 organisation is not the one connected to this organisation'
+            }, 403)
 
     # A new account must fit within the tenant's user limit
     limit_refusal = user_limit_refusal(domain, email)
     if limit_refusal:
-        return jsonify({'valid': False, **limit_refusal}), 403
+        return None, ({'valid': False, **limit_refusal}, 403)
 
     # Get or create user
-    user = get_or_create_user(email, name or email.split('@')[0], microsoft_user_id, domain)
+    user = get_or_create_user(email, identity['name'], identity['object_id'], domain)
 
     # Create Tenant if it doesn't exist
-    tenant = Tenant.query.filter_by(domain=domain).first()
     if not tenant:
         tenant = Tenant(
             domain=domain,
@@ -2782,7 +2835,7 @@ def teams_sso_validate():
             domain=domain,
             status='approved',
             requested_by_email=email,
-            requested_by_name=name,
+            requested_by_name=identity['name'],
             auto_approved=True,
             reviewed_at=datetime.now(timezone.utc)
         )
@@ -2819,19 +2872,53 @@ def teams_sso_validate():
         user_agent=request.headers.get('User-Agent')
     )
 
-    # Generate TabAuth token for subsequent requests
-    tab_auth_token = generate_teams_tab_auth_token(user.id, domain)
-
-    return jsonify({
-        'valid': True,
+    return {
         'user': {
             'id': user.id,
             'email': user.email,
             'name': user.name
         },
         'tenant_domain': domain,
-        'tab_auth_token': tab_auth_token
-    })
+        # Token for the tab's subsequent requests (Authorization: TabAuth <token>)
+        'tab_auth_token': generate_tab_auth_token(user.id, domain, user.email)
+    }, None
+
+
+@app.route('/api/teams/sso/validate', methods=['POST'])
+@require_teams
+@track_endpoint('api_teams_sso_validate')
+def teams_sso_validate():
+    """Sign in from a Teams app with a Teams sign-in token.
+
+    Called from the Teams tab with the token returned by
+    microsoftTeams.authentication.getAuthToken(). The token is verified against
+    Microsoft's signing keys; the user and their organisation are taken from
+    its claims. Nothing else in the request identifies the user.
+
+    Request body:
+    {
+        "token": "<JWT from Teams getAuthToken()>"
+    }
+
+    Returns:
+    {
+        "valid": true,
+        "user": { "id": 1, "email": "...", "name": "..." },
+        "tenant_domain": "example.com",
+        "tab_auth_token": "..." (for subsequent requests)
+    }
+    """
+    data = request.get_json(silent=True)
+    token = data.get('token') if isinstance(data, dict) else None
+    if not token or not isinstance(token, str):
+        return jsonify({'error': 'Token is required'}), 400
+
+    result, refusal = _teams_sso_sign_in(token)
+    if refusal:
+        body, status = refusal
+        return jsonify(body), status
+
+    return jsonify({'valid': True, **result})
 # EE:END - Microsoft OAuth Authentication
 
 
@@ -12261,18 +12348,28 @@ def teams_webhook():
     All messages, invokes, and events come through here.
     """
     import asyncio
+    import inspect
     from ee.backend.teams.teams_security import validate_teams_jwt
     from ee.backend.teams.teams_service import TeamsService
 
-    # Validate JWT Bearer token from Bot Framework
+    activity = request.get_json(silent=True)
+    if not isinstance(activity, dict):
+        activity = None
+
+    # Validate JWT Bearer token from Bot Framework. The token is bound to the
+    # service URL of the activity it was sent with.
     auth_header = request.headers.get('Authorization', '')
-    claims = validate_teams_jwt(auth_header)
+    service_url = activity.get('serviceUrl') if activity else None
+    if 'service_url' in inspect.signature(validate_teams_jwt).parameters:
+        claims = validate_teams_jwt(auth_header, service_url=service_url)
+    else:
+        # Enterprise module released before the service URL check
+        claims = validate_teams_jwt(auth_header)
 
     if not claims:
         logger.warning("Invalid Teams webhook authorization")
         return jsonify({'error': 'Unauthorized'}), 401
 
-    activity = request.get_json()
     if not activity:
         return jsonify({'error': 'Invalid request body'}), 400
 
@@ -12610,115 +12707,55 @@ def teams_channels():
 @require_teams
 @track_endpoint('api_teams_tab_provision')
 def teams_tab_provision():
-    """Provision a user from the Teams Tab.
+    """Sign the Teams tab user in. Requires a validated Teams sign-in token.
 
-    Called when a user first opens the Decisions Tab in Teams.
-    Uses the Teams context to auto-provision the user (zero-friction).
-
-    Expected request body:
-    {
-        "aadObjectId": "azure-ad-object-id",
-        "userPrincipalName": "user@domain.com",
-        "displayName": "User Name",
-        "msTenantId": "teams-tenant-id"
-    }
+    Send the token from microsoftTeams.authentication.getAuthToken() as
+    `Authorization: Bearer <token>`. The request body is not read: the user
+    and their organisation come from the token's claims. Same sign-in as
+    POST /api/teams/sso/validate, with the response shape this route has
+    always had.
 
     Returns:
     {
         "success": true,
         "tenantDomain": "domain.com",
+        "tabAuthToken": "...",
         "user": { "id": 1, "email": "...", "name": "..." }
     }
     """
-    from ee.backend.teams.teams_service import TeamsService
-
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Invalid request body'}), 400
-
-    aad_object_id = data.get('aadObjectId')
-    upn = data.get('userPrincipalName')
-    display_name = data.get('displayName')
-    ms_tenant_id = data.get('msTenantId')
-
-    if not aad_object_id:
-        return jsonify({'error': 'aadObjectId is required'}), 400
-
-    # Find workspace by MS tenant ID
-    workspace = None
-    if ms_tenant_id:
-        workspace = TeamsWorkspace.query.filter_by(
-            ms_tenant_id=ms_tenant_id,
-            is_active=True
-        ).first()
-
-    if not workspace:
-        # Try to find any workspace linked to the user's domain
-        if upn and '@' in upn:
-            domain = upn.split('@')[1].lower()
-            tenant = Tenant.query.filter_by(domain=domain).first()
-            if tenant:
-                workspace = TeamsWorkspace.query.filter_by(
-                    tenant_id=tenant.id,
-                    is_active=True
-                ).first()
-
-    if not workspace:
+    scheme, _, token = request.headers.get('Authorization', '').partition(' ')
+    token = token.strip()
+    if scheme != 'Bearer' or not token:
         return jsonify({
-            'error': 'Teams workspace not configured',
-            'code': 'WORKSPACE_NOT_FOUND'
-        }), 404
+            'error': 'A Teams sign-in token is required',
+            'code': 'SSO_TOKEN_REQUIRED'
+        }), 401
 
-    try:
-        service = TeamsService(workspace)
-        mapping, user, needs_linking = service.get_or_provision_user(
-            aad_object_id, upn, display_name
-        )
+    result, refusal = _teams_sso_sign_in(token)
+    if refusal:
+        body, status = refusal
+        body.pop('valid', None)
+        return jsonify(body), status
 
-        if not user:
-            return jsonify({
-                'error': 'Could not provision user',
-                'code': 'PROVISION_FAILED'
-            }), 400
-
-        # Get the tenant domain for the tab to use
-        tenant = workspace.tenant
-        if not tenant:
-            return jsonify({
-                'error': 'Tenant not configured for workspace',
-                'code': 'TENANT_NOT_FOUND'
-            }), 404
-
-        # Generate a tab auth token for subsequent API calls.
-        # Teams tabs run in an iframe (teams.microsoft.com) so session cookies
-        # (SameSite=Lax) won't be sent. Token-based auth is used instead.
-        from ee.backend.teams.teams_security import generate_tab_auth_token
-        tab_token = generate_tab_auth_token(user.id, tenant.domain, user.email)
-        logger.info(f"Teams tab: Provisioned user {user.id} ({user.email}) with tab auth token")
-
-        return jsonify({
-            'success': True,
-            'tenantDomain': tenant.domain,
-            'tabAuthToken': tab_token,
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'name': user.get_full_name() if hasattr(user, 'get_full_name') else user.email
-            }
-        })
-
-    except Exception as e:
-        logger.error(f"Teams tab provision error: {str(e)}")
-        capture_exception(e, endpoint_name='teams_tab_provision')
-        return jsonify({'error': 'Internal server error'}), 500
+    return jsonify({
+        'success': True,
+        'tenantDomain': result['tenant_domain'],
+        'tabAuthToken': result['tab_auth_token'],
+        'user': result['user']
+    })
 
 
 def _validate_tab_auth():
-    """Validate Teams tab auth token from Authorization header.
+    """Validate the Teams tab token in the Authorization header.
 
-    Returns (user, tenant_domain) tuple or raises an error response.
-    Teams tabs use token-based auth because session cookies (SameSite=Lax)
-    are not sent in cross-site iframe requests.
+    Returns (user, tenant), or (None, None) when the request is not
+    authenticated. Teams tabs use token-based auth because session cookies
+    (SameSite=Lax) are not sent in cross-site iframe requests.
+
+    The token is encrypted and signed by this server and expires after 24
+    hours. It names one user and one tenant: it is accepted only while that
+    account exists and still belongs to that tenant, and every tab route
+    reads and writes inside the returned tenant only.
     """
     from ee.backend.teams.teams_security import verify_tab_auth_token
 
@@ -12726,16 +12763,34 @@ def _validate_tab_auth():
     if not auth_header.startswith('TabAuth '):
         return None, None
 
-    token = auth_header[8:]  # Remove 'TabAuth ' prefix
-    token_data = verify_tab_auth_token(token)
-    if not token_data:
+    token = auth_header[8:].strip()  # Remove 'TabAuth ' prefix
+    token_data = verify_tab_auth_token(token) if token else None
+    if not isinstance(token_data, dict):
         return None, None
 
-    user = db.session.get(User, token_data['user_id'])
-    if not user:
+    user_id = token_data.get('user_id')
+    tenant_domain = token_data.get('tenant_domain')
+    if isinstance(user_id, bool) or not isinstance(user_id, int) \
+            or not isinstance(tenant_domain, str) or not tenant_domain:
         return None, None
 
-    return user, token_data.get('tenant_domain')
+    user = db.session.get(User, user_id)
+    if not user or user.is_anonymized or user.deleted_at is not None:
+        return None, None
+
+    token_email = token_data.get('user_email')
+    if token_email and token_email != user.email:
+        return None, None
+
+    # The token is bound to the tenant it was issued for
+    if user.sso_domain != tenant_domain:
+        return None, None
+
+    tenant = Tenant.query.filter_by(domain=tenant_domain).first()
+    if not tenant or tenant.deleted_at is not None:
+        return None, None
+
+    return user, tenant
 
 
 @app.route('/api/teams/tab/decisions', methods=['GET'])
@@ -12747,12 +12802,12 @@ def teams_tab_decisions():
     Uses token-based auth instead of session cookies because
     Teams tabs run in a cross-site iframe.
     """
-    user, tenant_domain = _validate_tab_auth()
+    user, tenant = _validate_tab_auth()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
     decisions = ArchitectureDecision.query.filter_by(
-        domain=user.sso_domain,
+        domain=tenant.domain,
         deleted_at=None
     ).order_by(ArchitectureDecision.id.desc()).all()
 
@@ -12768,17 +12823,18 @@ def teams_tab_decision_detail(decision_id):
     Uses token-based auth instead of session cookies because
     Teams dialogs run in a cross-site iframe.
     """
-    user, tenant_domain = _validate_tab_auth()
+    user, tenant = _validate_tab_auth()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    decision = db.session.get(ArchitectureDecision, decision_id)
+    # A decision of another tenant is answered exactly like one that does not exist
+    decision = ArchitectureDecision.query.filter_by(
+        id=decision_id,
+        domain=tenant.domain,
+        deleted_at=None
+    ).first()
     if not decision:
         return jsonify({'error': 'Decision not found'}), 404
-
-    # Verify the decision belongs to the user's tenant
-    if decision.domain != user.sso_domain:
-        return jsonify({'error': 'Access denied'}), 403
 
     return jsonify(decision.to_dict_with_history())
 
@@ -12791,14 +12847,11 @@ def teams_tab_spaces():
 
     Uses token-based auth instead of session cookies.
     """
-    user, tenant_domain = _validate_tab_auth()
+    user, tenant = _validate_tab_auth()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
     from models import Space
-    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
-    if not tenant:
-        return jsonify({'spaces': []})
 
     spaces = Space.query.filter_by(tenant_id=tenant.id).order_by(Space.name).all()
     return jsonify({'spaces': [{'id': s.id, 'name': s.name, 'is_default': s.is_default} for s in spaces]})
@@ -12813,21 +12866,18 @@ def teams_tab_create_decision():
     Uses token-based auth instead of session cookies because
     Teams dialogs run in a cross-site iframe.
     """
-    user, tenant_domain = _validate_tab_auth()
+    user, tenant = _validate_tab_auth()
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    data = request.get_json()
-    if not data:
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
         return jsonify({'error': 'No data provided'}), 400
 
-    title = data.get('title', '').strip()
+    title = data.get('title')
+    title = title.strip() if isinstance(title, str) else ''
     if not title:
         return jsonify({'error': 'Title is required'}), 400
-
-    tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
-    if not tenant:
-        return jsonify({'error': 'Tenant not found'}), 404
 
     from models import Space, DecisionSpace
 
@@ -12936,7 +12986,8 @@ def teams_link_initiate():
         return jsonify({'error': 'Missing link token'}), 400
 
     # Redirect to the Teams link page
-    return redirect(f'/teams/link?token={token}')
+    from urllib.parse import quote
+    return redirect(f"/teams/link?token={quote(token, safe='')}")
 
 
 @app.route('/api/teams/link/validate', methods=['POST'])
