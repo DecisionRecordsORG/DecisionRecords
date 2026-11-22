@@ -314,7 +314,7 @@ Decision Records keeps these deletion timelines by itself. There is nothing to i
 
 | What | When | What happens |
 |------|------|--------------|
-| Accounts | 7 days after the owner asked for deletion | The account is anonymised. Its decisions stay, shown as written by "Former Member" |
+| Accounts | 7 days after the owner asked for deletion | The account is anonymised. Its decisions, comments and changes stay. Comments and the change history show "Former Member"; a decision the person wrote or owned no longer shows an author or owner. The person's name, email address and IP address are removed everywhere else they were written: sign-in history (including failed attempts recorded by address), audit log details, the request for the organisation's domain, linked Slack and Teams accounts, stored Teams conversations, API key names and the text of AI queries. Their passkeys, notification settings, role requests, access requests and setup links are deleted |
 | Soft-deleted decisions | 30 days after deletion | The decision, its history, comments and links are erased |
 | Soft-deleted tenants | 30 days after deletion | The tenant, its decisions, spaces, settings, sign-in configuration, logs and the accounts of its members are erased |
 | Login history | After 90 days | The entries are deleted |
