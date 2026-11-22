@@ -107,6 +107,15 @@ Before building, deploying, or validating anything, identify which artifact is b
 - `/api/health` is a liveness route: it answers `{"status": "ok"}` with no database at all. `/health` is the route that reports the database (`"status": "healthy"`, `"database": "connected"`). Anything that decides whether a build or a deploy is good must read `/health`.
 - Test fixtures that drop tables must release their session first (`db.session.remove()`); on PostgreSQL an open transaction makes `DROP TABLE` wait forever. `TEST_DATABASE_URL` is refused unless the database name contains "test", because the fixtures drop every table.
 
+## Data Retention
+
+- A promise that depends on an operator step is not kept where nobody took the step. The deletion timelines (7, 30 and 90 days, 24 months) ran only when something called `POST /api/admin/execute-gdpr-tasks`, the self-hosting guide left that to a cron job, and nothing in the repository scheduled it. Work the product promises must be started by the product. Retention now runs from a thread in each worker that claims the day's run in the database (`retention.py`).
+- The task could not have finished on PostgreSQL even when called. It deleted a decision or a tenant while rows still pointed at it (relationships, space links, audit log entries, role requests), so the first real expired tenant made the request answer 500 and skipped everything after it, every time. The tests of that route repeated the route's queries in the test body and ran on SQLite, which enforces no foreign keys, so they proved nothing. Test a delete on PostgreSQL with a row in every table, and compare the whole database before and after.
+- The undo was broken too: restoring a soft-deleted tenant always answered 500 and had no test. Before automating an erasure, test the way back.
+- A first automatic run after a long gap is the dangerous one. Count limits alone would let a small backlog through, so a category is also held back when its oldest item is more than a few days overdue. A person looks at the list before a backlog is erased.
+- Compare stored dates with naive UTC values. The application writes aware datetimes into `timestamp` columns; on a PostgreSQL session that is not UTC they are stored shifted by the session's offset, and an aware value in a filter is converted the same way. On a server in `Europe/Stockholm` a deadline 30 minutes in the future already counted as passed.
+- When hard-deleting, list every table and decide. `retention.TENANT_ERASE_RULES` names each table and a test fails when a model is added without a rule.
+
 ## Enterprise Deploy Safety
 
 - Order matters more than checks. The deploy used to push `latest`, restart production and only then look at health. It now builds the image with the commit tag only, imports and boots that image against PostgreSQL on the runner, and logs in to Azure only after that has passed.

@@ -40,6 +40,7 @@ SHARED_CORE_PATTERNS = (
     "models.py",
     "notifications.py",
     "requirements.txt",
+    "retention.py",
     "run_local.py",
     "security.py",
     "version.py",

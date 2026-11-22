@@ -19,6 +19,15 @@ Update rules:
 - [ ] Collapse duplicated Community CI and release validation steps into a reusable workflow once the tag-release hardening has proven stable.
 - [ ] Mirror the delivery-contract system into the private `ee` and `marketing` repositories so private-repo-local work can declare obligations before the public submodule pointer update stage.
 
+## Data Retention
+
+- [ ] After the first Enterprise deploy with automatic retention, open Super Admin > Data retention on production, read what is waiting and what was held back, take a database backup, and release the held back categories deliberately. Nothing has run there before.
+- [ ] Give super admins a way to see and restore soft-deleted tenants in the tenants page. The tenant list hides them and `POST /api/tenants/<domain>/restore` has no button; the retention page only lists tenants whose 30 days are already over.
+- [ ] Decide whether a held back category should also send an email to the super admin notification address. Today it is shown on the Data retention page and the dashboard and written to the log.
+- [ ] Set the PostgreSQL session time zone to UTC for every connection (or stop writing aware datetimes). Retention waits out the offset, but every other date comparison in the application is still off by the offset on a server that is not UTC.
+- [ ] Decide how long `retention_runs` and `retention_erasures` rows are kept. They hold ids and counts only and are never deleted.
+- [ ] Restoring a tenant restores every soft-deleted decision in it, including ones a member deleted before the tenant was deleted.
+
 ## Versioning / Releases
 
 - [ ] Publish Community `v2.1.1` to replace the broken `2.1.0` and `latest` images (missing `decision_relationships.py`), then pull the published image and run `scripts/smoke_test_ce_image.sh` against it.

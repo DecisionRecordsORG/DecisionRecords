@@ -21,6 +21,8 @@ from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMa
 from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
+import retention
+from models import RetentionRun
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
 from webauthn_auth import (
     create_registration_options, verify_registration,
@@ -693,6 +695,15 @@ def initialize_db():
             app_error_state['healthy'] = False
             app_error_state['error'] = f"Critical database error: {str(e)}"
             app_error_state['details'] = traceback.format_exc()
+
+    # Data retention runs by itself once a day. Starting its thread here, on a
+    # request and after the tables exist, keeps it out of imports, tests and
+    # the gunicorn master. It is a no-op once the thread is running.
+    if _db_initialized:
+        try:
+            retention.ensure_scheduler(app)
+        except Exception:
+            logger.exception('Could not start the data retention thread')
 
 
 @app.after_request
@@ -3829,93 +3840,11 @@ def api_update_team_profile():
 
 # ==================== API Routes - GDPR (Art. 17, 20) ====================
 
-def anonymize_user(user_id):
-    """
-    Anonymize a user's personal data per GDPR Art. 17 and deletion-controls.md spec.
-
-    Preserves contributions (decisions remain, author set to None).
-    Redacts PII from audit logs and login history.
-    """
-    import uuid
-
-    user = db.session.get(User, user_id)
-    if not user or user.is_anonymized:
-        return False
-
-    anonymous_email = f"deleted-{uuid.uuid4()}@anonymized.local"
-
-    # Anonymize user PII
-    original_email = user.email
-    user.email = anonymous_email
-    user.name = 'Former Member'
-    user.first_name = None
-    user.last_name = None
-    user.password_hash = None
-    user.sso_subject = None
-    user.aad_object_id = None
-    user.is_anonymized = True
-    user.deleted_at = datetime.now(timezone.utc)
-
-    # Detach decisions (keep content, remove author link)
-    for decision in user.decisions_created:
-        decision.created_by_id = None
-
-    # Remove WebAuthn credentials
-    for cred in list(user.webauthn_credentials):
-        db.session.delete(cred)
-
-    # Remove tenant memberships
-    memberships = TenantMembership.query.filter_by(user_id=user.id).all()
-    for membership in memberships:
-        db.session.delete(membership)
-
-    # Redact LoginHistory entries
-    login_entries = LoginHistory.query.filter_by(user_id=user.id).all()
-    for entry in login_entries:
-        entry.email = anonymous_email
-        entry.ip_address = None
-        entry.user_agent = None
-
-    # Remove the personal fields from messages this person sent through the
-    # contact, sponsorship and feedback forms: those sent while signed in and
-    # those that carry the account's email address.
-    for inquiry in Inquiry.query.filter(
-        db.or_(Inquiry.user_id == user.id, db.func.lower(Inquiry.email) == original_email.lower())
-    ).all():
-        inquiry.redact()
-
-    # A team profile answer stays with the tenant, without the link to this person
-    Tenant.query.filter_by(team_profile_answered_by_id=user.id).update(
-        {'team_profile_answered_by_id': None}, synchronize_session=False
-    )
-
-    # Redact AuditLog details containing user email
-    audit_entries = AuditLog.query.filter(
-        AuditLog.details.isnot(None)
-    ).all()
-    for entry in audit_entries:
-        if entry.details and isinstance(entry.details, dict):
-            details_str = json.dumps(entry.details)
-            if original_email in details_str:
-                details_str = details_str.replace(original_email, 'deleted-user')
-                entry.details = json.loads(details_str)
-
-    db.session.commit()
-    return True
-
-
-def purge_old_inquiries(now=None):
-    """Delete inquiries older than Inquiry.RETENTION_DAYS (24 months). Returns how many.
-
-    Called by the scheduled GDPR task (/api/admin/execute-gdpr-tasks).
-    """
-    now = now or datetime.now(timezone.utc)
-    # created_at is stored without a timezone, in UTC
-    cutoff = now.replace(tzinfo=None) - timedelta(days=Inquiry.RETENTION_DAYS)
-    purged = Inquiry.query.filter(Inquiry.created_at < cutoff).delete(synchronize_session=False)
-    if purged:
-        db.session.commit()
-    return purged
+# The retention work (anonymising accounts, erasing expired soft deletes,
+# cleaning login history, purging old inquiries) lives in retention.py so it
+# can run without a request. These names stay importable from here.
+anonymize_user = retention.anonymize_user
+purge_old_inquiries = retention.purge_old_inquiries
 
 
 @app.route('/api/user/delete-request', methods=['POST'])
@@ -4200,17 +4129,29 @@ def api_update_user_consent():
 @track_endpoint('api_admin_execute_gdpr_tasks')
 def api_execute_gdpr_tasks():
     """
-    Execute scheduled GDPR tasks: anonymize users past grace period,
-    purge expired soft-deletes, clean old login history.
+    Run data retention now: anonymize users past grace period, purge expired
+    soft-deletes, clean old login history, purge old inquiries.
 
     Requires master account session OR X-Cron-Secret header.
+
+    The application also runs this by itself once a day (see retention.py), so
+    a cron job is optional. This call is subject to the same limits as the
+    automatic run: a category with more waiting than its limit is held back
+    and reported under "held_back". A super admin releases it from the
+    retention page (POST /api/superadmin/retention/run).
+
+    Optional JSON body: {"categories": ["accounts", ...]} to limit the run.
     """
     # Auth: master account or cron secret
     cron_secret = request.headers.get('X-Cron-Secret')
     expected_secret = os.environ.get('GDPR_CRON_SECRET')
 
-    is_cron = cron_secret and expected_secret and cron_secret == expected_secret
+    is_cron = bool(
+        cron_secret and expected_secret
+        and secrets.compare_digest(cron_secret.encode('utf-8'), expected_secret.encode('utf-8'))
+    )
 
+    started_by = None
     if not is_cron:
         # Require master account
         if not (session.get('is_master') and session.get('master_id')):
@@ -4219,71 +4160,101 @@ def api_execute_gdpr_tasks():
         master = db.session.get(MasterAccount, session.get('master_id'))
         if not master:
             return jsonify({'error': 'Authentication required'}), 403
+        started_by = master.username
 
-    now = datetime.now(timezone.utc)
-    results = {'anonymized_users': 0, 'purged_decisions': 0, 'purged_tenants': 0, 'cleaned_login_history': 0,
-               'purged_inquiries': 0}
+    data = request.get_json(silent=True) or {}
+    categories = data.get('categories')
+    if categories is not None:
+        if not isinstance(categories, list) or not categories or any(
+            category not in retention.CATEGORIES for category in categories
+        ):
+            return jsonify({'error': f"categories must be a list from: {', '.join(retention.CATEGORIES)}"}), 400
 
-    # 1. Anonymize users past their scheduled deletion date
-    users_to_delete = User.query.filter(
-        User.deletion_scheduled_at <= now,
-        User.deleted_at.is_(None),
-        User.is_anonymized == False
-    ).all()
-
-    for user in users_to_delete:
-        if anonymize_user(user.id):
-            results['anonymized_users'] += 1
-
-    # Delete contact, sponsorship and feedback messages older than 24 months.
-    # Runs before the hard-deletes below so a failure there cannot hold it up.
-    results['purged_inquiries'] = purge_old_inquiries(now)
-
-    # 2. Hard-delete decisions past 30-day soft-delete retention
-    expired_decisions = ArchitectureDecision.query.filter(
-        ArchitectureDecision.deleted_at.isnot(None),
-        ArchitectureDecision.deletion_expires_at <= now
-    ).all()
-
-    for decision in expired_decisions:
-        # Delete associated history entries first
-        DecisionHistory.query.filter_by(decision_id=decision.id).delete()
-        # Delete decision-space associations
-        DecisionSpace.query.filter_by(decision_id=decision.id).delete()
-        db.session.delete(decision)
-        results['purged_decisions'] += 1
-
-    if results['purged_decisions'] > 0:
-        db.session.commit()
-
-    # 3. Hard-delete tenants past 30-day soft-delete retention
-    expired_tenants = Tenant.query.filter(
-        Tenant.deleted_at.isnot(None),
-        Tenant.deletion_expires_at <= now
-    ).all()
-
-    for tenant in expired_tenants:
-        # Delete tenant memberships
-        TenantMembership.query.filter_by(tenant_id=tenant.id).delete()
-        # Delete tenant settings
-        TenantSettings.query.filter_by(tenant_id=tenant.id).delete()
-        # Delete spaces
-        Space.query.filter_by(tenant_id=tenant.id).delete()
-        db.session.delete(tenant)
-        results['purged_tenants'] += 1
-
-    if results['purged_tenants'] > 0:
-        db.session.commit()
-
-    # 4. Clean LoginHistory entries older than 90 days
-    cutoff = now.replace(tzinfo=None) - timedelta(days=90)
-    cleaned = LoginHistory.query.filter(LoginHistory.created_at < cutoff).delete()
-    if cleaned > 0:
-        db.session.commit()
-    results['cleaned_login_history'] = cleaned
+    run = retention.run_retention(
+        RetentionRun.TRIGGER_CRON if is_cron else RetentionRun.TRIGGER_SUPER_ADMIN,
+        categories=categories,
+        started_by=started_by,
+    )
+    results = retention.legacy_results(run)
 
     logger.info(f"GDPR tasks executed: {results}")
-    return jsonify({'message': 'GDPR tasks executed', 'results': results})
+    return jsonify({
+        'message': 'GDPR tasks executed',
+        'results': results,
+        'run_id': run['id'],
+        'status': run['status'],
+        'held_back': retention.held_back(run),
+        'errors': retention.run_errors(run),
+    })
+
+
+# ==================== API Routes - Data retention (super admin) ====================
+
+@app.route('/api/superadmin/retention', methods=['GET'])
+@master_required
+@track_endpoint('api_superadmin_retention_status')
+def api_retention_status():
+    """What is waiting to be erased, what was held back, and the last runs (super admin only).
+
+    Reads only: the preview changes nothing.
+    """
+    return jsonify(retention.retention_status())
+
+
+@app.route('/api/superadmin/retention/run', methods=['POST'])
+@master_required
+@track_endpoint('api_superadmin_retention_run')
+def api_retention_run():
+    """Run chosen retention categories now, past the automatic limits (super admin only).
+
+    Body: {"categories": ["tenants"], "confirm_counts": {"tenants": 3}}.
+    confirm_counts repeats the number waiting that the super admin saw. If more
+    are waiting now, nothing is run and the current numbers are returned (409).
+    """
+    data = request.get_json(silent=True) or {}
+    release, problem = retention.check_release(data.get('categories'), data.get('confirm_counts'))
+    if problem:
+        message, status_code, extra = problem
+        return jsonify({'error': message, **extra}), status_code
+
+    if retention.run_in_progress() is not None:
+        return jsonify({'error': 'A retention run is in progress. Try again when it has finished.'}), 409
+
+    run = retention.run_retention(
+        RetentionRun.TRIGGER_SUPER_ADMIN,
+        categories=list(release),
+        release=release,
+        started_by=session.get('master_username') or getattr(g.current_user, 'username', None),
+    )
+    return jsonify({'message': 'Retention run finished', 'run': run})
+
+
+@app.route('/api/admin/settings/retention', methods=['GET'])
+@master_required
+@track_endpoint('api_admin_settings_retention_get')
+def api_get_retention_settings():
+    """Get data retention settings (super admin only)."""
+    return jsonify(retention.get_settings())
+
+
+@app.route('/api/admin/settings/retention', methods=['POST', 'PUT'])
+@master_required
+@track_endpoint('api_admin_settings_retention_save')
+def api_save_retention_settings():
+    """Update data retention settings (super admin only).
+
+    Body: any of {"auto_run_enabled": bool, "limits": {"accounts": n,
+    "decisions": n, "tenants": n}, "backlog_days": n}.
+    """
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'Send the settings as a JSON object'}), 400
+    error = retention.save_settings(data)
+    if error:
+        return jsonify({'error': error}), 400
+    settings = retention.get_settings()
+    settings['message'] = 'Retention settings saved'
+    return jsonify(settings)
 
 
 # ==================== API Routes - Admin (SSO Config) ====================
@@ -9428,18 +9399,13 @@ def api_restore_tenant(domain):
                 decision.deletion_expires_at = None
                 restored_count += 1
 
-        # Log the restoration
-        log_admin_action(
-            tenant_id=tenant.id,
-            actor_user_id=None,
-            action_type='restore',
-            target_entity='tenant',
-            target_id=tenant.id,
-            details={
-                'domain': domain,
-                'actor': 'super_admin',
-                'decisions_restored': restored_count
-            }
+        # A tenant audit log entry needs a tenant user as its actor and a super
+        # admin is not one. Writing one with no actor failed on the NOT NULL
+        # column, so every restore answered 500. The application log records it,
+        # as it does for the delete.
+        app.logger.info(
+            f'Tenant {domain} restored by super admin '
+            f"{session.get('master_username', 'super_admin')}: {restored_count} decisions restored"
         )
 
         # Update domain approval
@@ -10166,6 +10132,62 @@ def create_test_user():
         db.session.rollback()
         logger.error(f"Create test user failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/retention-backlog', methods=['POST'])
+def create_test_retention_backlog():
+    """Create data that is due for retention. TEST ONLY.
+
+    Body: {"tenants": 2, "expired_days_ago": 1, "old_logins": 3, "prefix": "gone"}.
+    Each tenant is soft-deleted with its 30-day window already over and has one
+    member and one decision. Login rows are 120 days old.
+    """
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        tenant_count = max(0, min(int(data.get('tenants', 0)), 20))
+        login_count = max(0, min(int(data.get('old_logins', 0)), 500))
+        expired_days_ago = max(0, min(int(data.get('expired_days_ago', 1)), 3650))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'tenants, old_logins and expired_days_ago must be whole numbers'}), 400
+    prefix = ''.join(ch for ch in str(data.get('prefix', 'gone')).lower() if ch.isalnum())[:20] or 'gone'
+
+    now = retention.utcnow()
+    expires_at = now - timedelta(days=expired_days_ago, minutes=5)
+    deleted_at = expires_at - timedelta(days=30)
+    domains = []
+    try:
+        for _ in range(tenant_count):
+            domain = f'{prefix}-{secrets.token_hex(4)}.example'
+            tenant = Tenant(domain=domain, name=domain, status='deleted', deleted_at=deleted_at,
+                            deleted_by_admin='test', deletion_expires_at=expires_at)
+            db.session.add(tenant)
+            db.session.flush()
+            user = User(email=f'member@{domain}', sso_domain=domain, auth_type='local', email_verified=True)
+            user.set_name(first_name='Former', last_name='Member')
+            db.session.add(user)
+            db.session.flush()
+            db.session.add(TenantMembership(user_id=user.id, tenant_id=tenant.id, global_role=GlobalRole.ADMIN))
+            db.session.add(ArchitectureDecision(
+                title='A decision', context='Context', decision='Decision', consequences='Consequences',
+                status='accepted', domain=domain, tenant_id=tenant.id, decision_number=1,
+                created_by_id=user.id, deleted_at=deleted_at, deletion_expires_at=expires_at,
+            ))
+            domains.append(domain)
+        for index in range(login_count):
+            db.session.add(LoginHistory(
+                email=f'old-{index}@{prefix}.example', login_method=LoginHistory.METHOD_PASSWORD,
+                success=True, created_at=now - timedelta(days=120),
+            ))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Create retention backlog failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+    return jsonify({'message': 'Retention backlog created', 'tenants': domains, 'old_logins': login_count})
 
 
 @app.route('/api/test/set-tenant-maturity', methods=['POST'])

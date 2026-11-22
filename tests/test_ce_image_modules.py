@@ -83,11 +83,14 @@ class TestRealRepository:
             dockerignore_text=V2_1_0_DOCKERIGNORE,
         )
 
-        assert len(errors) == 1
-        assert errors[0].startswith(
+        # That Dockerfile listed root modules by hand, so it also lacks every
+        # module added since (retention.py). Each one is reported the same way.
+        assert sorted(error.split(" ", 1)[0] for error in errors) == ["decision_relationships.py", "retention.py"]
+        relationships_error = next(e for e in errors if e.startswith("decision_relationships.py"))
+        assert relationships_error.startswith(
             "decision_relationships.py is imported by models.py but Dockerfile.community does not ship it."
         )
-        assert "ModuleNotFoundError" in errors[0]
+        assert all("ModuleNotFoundError" in error for error in errors)
 
     def test_glob_copy_without_context_allowlist_would_ship_local_runner(self):
         """The Dockerfile-specific ignore file is what keeps run_local.py out."""

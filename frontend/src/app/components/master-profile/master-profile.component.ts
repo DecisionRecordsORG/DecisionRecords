@@ -189,6 +189,18 @@ import { MasterAccount } from '../../models/decision.model';
                   <span>Messages from the contact, get in touch and feedback forms, and what teams tell us about themselves</span>
                 </div>
               </a>
+              <a routerLink="/superadmin/retention" class="nav-link" data-testid="nav-retention">
+                <mat-icon>auto_delete</mat-icon>
+                <div>
+                  <strong>
+                    Data retention
+                    @if (retentionHeldBack > 0) {
+                      <em class="nav-count" data-testid="nav-retention-count">{{ retentionHeldBack }} held back</em>
+                    }
+                  </strong>
+                  <span>What is waiting to be erased, what was held back and the last runs</span>
+                </div>
+              </a>
             </div>
           </mat-card-content>
         </mat-card>
@@ -435,6 +447,7 @@ export class MasterProfileComponent implements OnInit {
   emailVerificationSuccess = false;
 
   unhandledInquiries = 0;
+  retentionHeldBack = 0;
 
   constructor(
     private fb: FormBuilder,
@@ -455,6 +468,19 @@ export class MasterProfileComponent implements OnInit {
     }
     this.loadEmailVerificationSetting();
     this.loadUnhandledInquiries();
+    this.loadRetentionHeldBack();
+  }
+
+  /** Number of retention categories the automatic run held back, shown next to the Data retention link. */
+  loadRetentionHeldBack(): void {
+    this.http.get<{ held_back: string[] }>('/api/superadmin/retention').subscribe({
+      next: (response) => {
+        this.retentionHeldBack = (response.held_back || []).length;
+      },
+      error: () => {
+        this.retentionHeldBack = 0;
+      }
+    });
   }
 
   /** Count of inquiries nobody has handled yet, shown next to the Inquiries link. */
