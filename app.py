@@ -9399,18 +9399,13 @@ def api_restore_tenant(domain):
                 decision.deletion_expires_at = None
                 restored_count += 1
 
-        # Log the restoration
-        log_admin_action(
-            tenant_id=tenant.id,
-            actor_user_id=None,
-            action_type='restore',
-            target_entity='tenant',
-            target_id=tenant.id,
-            details={
-                'domain': domain,
-                'actor': 'super_admin',
-                'decisions_restored': restored_count
-            }
+        # A tenant audit log entry needs a tenant user as its actor and a super
+        # admin is not one. Writing one with no actor failed on the NOT NULL
+        # column, so every restore answered 500. The application log records it,
+        # as it does for the delete.
+        app.logger.info(
+            f'Tenant {domain} restored by super admin '
+            f"{session.get('master_username', 'super_admin')}: {restored_count} decisions restored"
         )
 
         # Update domain approval

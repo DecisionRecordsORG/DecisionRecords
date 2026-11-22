@@ -407,6 +407,53 @@ class TestRequestHook:
         assert test_app.test_client().get('/api/health').status_code == 200
 
 
+# ==================== Restoring a tenant before it is erased ====================
+
+class TestRestoreBeforeErase:
+    """Restore is the only way back before the 30 days are over, so it has to work."""
+
+    def test_soft_deleted_tenant_can_be_restored_and_is_then_left_alone(self, master_client):
+        data = make_full_tenant('undo.example', 'und')
+        tenant_id = data['tenant'].id
+
+        deleted = master_client.delete('/api/tenants/undo.example', json={'confirm_delete': True})
+        assert deleted.status_code == 200, deleted.get_json()
+        assert db.session.get(Tenant, tenant_id).status == 'deleted'
+
+        restored = master_client.post('/api/tenants/undo.example/restore')
+
+        assert restored.status_code == 200, restored.get_json()
+        assert restored.get_json()['restored']['decisions_restored'] == 2
+        db.session.expire_all()
+        tenant = db.session.get(Tenant, tenant_id)
+        assert tenant.status == 'active' and tenant.deleted_at is None and tenant.deletion_expires_at is None
+
+        # Even a run far in the future finds nothing to erase
+        run = retention.run_retention(
+            RetentionRun.TRIGGER_AUTOMATIC, categories=['tenants', 'decisions'],
+            now=naive_now() + timedelta(days=400))
+        assert run['results']['tenants']['waiting'] == 0 and run['results']['decisions']['waiting'] == 0
+        assert db.session.get(Tenant, tenant_id) is not None
+
+    def test_restore_is_refused_once_the_window_is_over(self, master_client):
+        data = make_full_tenant('late.example', 'lat')
+        expire_tenant(data['tenant'])
+        response = master_client.post('/api/tenants/late.example/restore')
+        assert response.status_code == 400
+        assert response.get_json()['error'] == 'Retention window has expired'
+
+    def test_soft_delete_sets_what_retention_looks_for(self, master_client):
+        data = make_full_tenant('closing.example', 'clo')
+        master_client.delete('/api/tenants/closing.example', json={'confirm_delete': True})
+        db.session.expire_all()
+        tenant = db.session.get(Tenant, data['tenant'].id)
+        assert tenant.status == 'deleted' and tenant.deleted_at is not None
+
+        assert retention.preview_retention(now=naive_now() + timedelta(days=29))['tenants']['waiting'] == 0
+        due = retention.preview_retention(now=naive_now() + timedelta(days=30, minutes=1))['tenants']
+        assert due['waiting'] == 1 and due['items'][0]['label'] == 'closing.example'
+
+
 # ==================== Test-only seeding endpoint (used by the e2e specs) ====================
 
 class TestBacklogSeedEndpoint:
