@@ -21,6 +21,7 @@ from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMa
 from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, complete_setup_and_login, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
+from data_export import build_personal_data_export
 import retention
 from models import RetentionRun
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -4015,86 +4016,8 @@ def api_export_user_data():
 
     user = g.current_user
 
-    # Gather all personal data
-    export = {
-        'export_date': datetime.now(timezone.utc).isoformat(),
-        'data_subject': {
-            'id': user.id,
-            'email': user.email,
-            'name': user.get_full_name(),
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-        },
-        'profile': {
-            'auth_type': user.auth_type,
-            'email_verified': user.email_verified,
-            'created_at': user.created_at.isoformat(),
-            'last_login': user.last_login.isoformat() if user.last_login else None,
-            'sso_domain': user.sso_domain,
-        },
-        'decisions_authored': [],
-        'memberships': [],
-        'audit_trail': [],
-        'login_history': [],
-        'inquiries': [],
-    }
-
-    # Decisions authored
-    decisions = ArchitectureDecision.query.filter_by(created_by_id=user.id).all()
-    for d in decisions:
-        export['decisions_authored'].append({
-            'id': d.id,
-            'title': d.title,
-            'status': d.status,
-            'created_at': d.created_at.isoformat() if d.created_at else None,
-            'updated_at': d.updated_at.isoformat() if d.updated_at else None,
-        })
-
-    # Tenant memberships
-    memberships = TenantMembership.query.filter_by(user_id=user.id).all()
-    for m in memberships:
-        tenant = db.session.get(Tenant, m.tenant_id)
-        export['memberships'].append({
-            'tenant_name': tenant.name if tenant else None,
-            'tenant_domain': tenant.domain if tenant else None,
-            'role': m.global_role.value,
-            'joined_at': m.joined_at.isoformat() if m.joined_at else None,
-        })
-
-    # Audit trail (actions performed by this user)
-    audit_entries = AuditLog.query.filter_by(actor_user_id=user.id).order_by(AuditLog.created_at.desc()).limit(500).all()
-    for entry in audit_entries:
-        export['audit_trail'].append({
-            'action': entry.action_type,
-            'target': entry.target_entity,
-            'created_at': entry.created_at.isoformat(),
-        })
-
-    # Login history
-    login_entries = LoginHistory.query.filter_by(user_id=user.id).order_by(LoginHistory.created_at.desc()).limit(500).all()
-    for entry in login_entries:
-        export['login_history'].append({
-            'method': entry.login_method,
-            'success': entry.success,
-            'ip_address': entry.ip_address,
-            'created_at': entry.created_at.isoformat() if entry.created_at else None,
-        })
-
-    # Messages sent through the contact, sponsorship and feedback forms while signed in
-    sent_inquiries = Inquiry.query.filter_by(user_id=user.id).order_by(Inquiry.created_at.desc()).limit(500).all()
-    for inquiry in sent_inquiries:
-        export['inquiries'].append({
-            'source': inquiry.source,
-            'name': inquiry.name,
-            'email': inquiry.email,
-            'organisation': inquiry.organisation,
-            'area_of_interest': inquiry.area_of_interest,
-            'message': inquiry.message,
-            'team_focus': inquiry.team_focus,
-            'team_size': inquiry.team_size,
-            'contact_consent': inquiry.contact_consent,
-            'created_at': inquiry.created_at.isoformat() if inquiry.created_at else None,
-        })
+    # Everything held about this person and nothing about anyone else: see data_export.py
+    export = build_personal_data_export(user)
 
     # Log the export action
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
