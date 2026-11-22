@@ -1,7 +1,7 @@
 schema_version = 1
 id = "2026-11-22-app-privacy-stored-messages"
 title = "Say in the app that messages are stored and link to the data processing page"
-summary = "Adds a one-line notice above the send button of the in-app feedback dialog and the footer contact dialog (\"We store your message so we can reply to you. How we handle your data\") and a \"How we handle your data\" link next to the team profile questions in the onboarding dialog and organization settings. All links go to /dpa. Text only."
+summary = "Adds a one-line notice above the send button of the in-app feedback dialog and the footer contact dialog (\"We store your message so we can reply to you. How we handle your data\") and a \"How we handle your data\" link next to the team profile questions in the onboarding dialog and organization settings. All links go to /dpa. Text only. The in-app data processing page now describes the stored messages and optional organisation details, states that Decision Records is the Data Controller for them, and gives their purpose, legal basis and retention, with the same wording as the website."
 change_type = "docs"
 surfaces = ["shared_core"]
 

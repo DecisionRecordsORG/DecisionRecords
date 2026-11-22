@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Super admins see a tenant's team profile in the tenant details, and an Interest summary at the top of the Inquiries page: tenants and inquiries by team size, inquiries by form, and the distinct team focus answers as they were typed
 
 ### Changed
+- The in-app data processing page describes the messages people send us and the optional organisation details: what is stored, why, the legal basis, that they are deleted after 24 months or with the organisation, and that Decision Records is the Data Controller for them
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
 - The user limit counts every account that belongs to a tenant. Accounts admitted through access requests were not counted before, so a tenant could grow past its limit
 - Notification emails say "decision" and "decision record" and drop the "[ADR]" subject prefix: "New decision: <title>", "Decision updated: <title>", "Decision status changed: <title> is now <status>". They refer to a decision by the ID shown in the app

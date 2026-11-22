@@ -27,7 +27,7 @@ import { MatIconModule } from '@angular/material/icon';
       <main class="dpa-content">
         <div class="container">
           <article class="prose">
-            <p class="meta">Last updated: July 2026</p>
+            <p class="meta">Last updated: 22 November 2026</p>
             <p class="lead">
               This page summarizes the data processing position for the Decision Records hosted service. A signed Data Processing Addendum can be provided for paid hosted customers when commercial plans are introduced.
             </p>
@@ -39,12 +39,24 @@ import { MatIconModule } from '@angular/material/icon';
               <p>
                 Customer organisations control the decision records, user accounts, and related organisational content they add to the service. Decision Records processes that data to provide the hosted platform, maintain security, support users, and operate the service.
               </p>
+              <p>
+                The exception is the messages you send us and the optional organisation details described under Categories of Data. We use these for our own purposes, and for them we are the Data Controller.
+              </p>
             </section>
 
             <section class="dpa-section">
               <h2>Categories of Data</h2>
               <p>
                 The service may process account information, authentication metadata, decision records, audit events, tenant configuration, and support communications. The service is not intended for special-category personal data.
+              </p>
+              <p>
+                When you send us a message through the contact form, the Get in touch form or the feedback form in the app, we store your name, your email address, your organisation if you give it, the area of interest you select, your message and, if you answer the question, what your team makes decisions about and how large it is. For the feedback form we also record whether you agreed to be contacted. If you are signed in when you send the message, we also record which account and organisation it came from. We do not store your IP address or browser details with the message.
+              </p>
+              <p>
+                An administrator of your organisation can tell us what the team makes decisions about and how large the team is. Both answers are optional, describe the organisation rather than a person, and can be changed or removed in organisation settings.
+              </p>
+              <p>
+                We use these messages and organisation details to reply to messages you send us, and to understand which kinds of teams are interested in Decision Records. For the messages you send us and the optional organisation details, we rely on our legitimate interest in answering enquiries and improving the product.
               </p>
             </section>
 
@@ -66,6 +78,9 @@ import { MatIconModule } from '@angular/material/icon';
               <h2>Data Return and Deletion</h2>
               <p>
                 Customer organisations should be able to export their organisational records and request deletion or anonymisation of personal data according to the applicable hosted service terms.
+              </p>
+              <p>
+                Messages sent through the contact form, the Get in touch form or the feedback form are deleted 24 months after we receive them. When your account is deleted, we remove your name, email address and message from any messages you sent us. The optional answers about what the team makes decisions about and how large it is are deleted with the organisation. The export of your personal data includes the messages you sent us while signed in.
               </p>
             </section>
 
