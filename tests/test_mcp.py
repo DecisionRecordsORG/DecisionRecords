@@ -62,8 +62,7 @@ class TestGetTools:
     def test_get_tools_returns_correct_number(self, app, session):
         """get_tools returns all relationship-aware MCP tools."""
         tools = get_tools()
-        # 12 once the private module ships update_decision_status; 11 before that.
-        assert len(tools) in (11, 12)
+        assert len(tools) == 12
 
     def test_get_tools_returns_expected_tool_names(self, app, session):
         """get_tools returns tools with expected names."""
@@ -81,9 +80,9 @@ class TestGetTools:
             'list_decision_relationships',
             'link_decisions',
             'supersede_decision',
+            'update_decision_status',
         ]
-        assert tool_names[:len(expected_names)] == expected_names
-        assert set(tool_names[len(expected_names):]) <= {'update_decision_status'}
+        assert tool_names == expected_names
 
     def test_get_tools_each_tool_has_required_fields(self, app, session):
         """Each tool has name, description, and inputSchema."""
@@ -902,7 +901,7 @@ class TestHandleMCPRequest:
         assert response['id'] == 1
         assert 'result' in response
         assert 'tools' in response['result']
-        assert len(response['result']['tools']) in (11, 12)
+        assert len(response['result']['tools']) == 12
 
     def test_handle_request_server_discover(
         self, app, session, enable_mcp, valid_api_key
@@ -1220,7 +1219,7 @@ class TestMCPAPIEndpoint:
         data = response.get_json()
         assert 'result' in data
         assert 'tools' in data['result']
-        assert len(data['result']['tools']) in (11, 12)
+        assert len(data['result']['tools']) == 12
         assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
 
     def test_initialize_legacy_protocol_returns_session_header(self, mcp_client, mcp_tenant_and_key):

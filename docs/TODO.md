@@ -69,6 +69,11 @@ Update rules:
 - [ ] Audit the current git hooks and project rules periodically to ensure public/private artifact checks still cover new files and workflows.
 - [ ] Continue trimming public CE docs and examples so they do not carry Enterprise-only operational guidance.
 
+## Microsoft Teams
+
+- [ ] The Teams integration's state, its open security items and the work needed before a Teams store submission are tracked in the private repository at `docs/plans/teams-store-readiness.md`. Keep that document current; do not track Teams work here.
+- [ ] After the next Enterprise deploy, send one real message to the Teams bot to confirm the stricter webhook token check accepts Microsoft's tokens.
+
 ## MCP / Ecosystem
 
 - [ ] Harden MCP for external listing readiness: stable schemas, auth flow, pagination, error contracts, rate limits, and conformance coverage.
