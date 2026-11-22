@@ -125,6 +125,12 @@ Before building, deploying, or validating anything, identify which artifact is b
 - A deploy cannot be judged against a service that was already unhealthy, so the script checks production first and stops unless `deploy_when_unhealthy` is set. Do not cancel the deploy job once it has started publishing; a cancelled run cannot roll back.
 - Keep deploy logic that must not be skipped in one script with explicit control flow, and test it with stand-ins for `docker`, `az` and `curl` (`tests/test_deploy_enterprise_script.py`). Separate workflow steps joined by `if: failure()` conditions cannot be run before the day they are needed.
 
+## Sign-In Paths
+
+- A fallback sign-in path must meet the same bar as the main one. Every endpoint that issues a session or a token takes the identity from something the server has verified. The Teams tab had a second provisioning path beside the validated sign-in; it now requires the same validated Teams sign-in token. A path that cannot meet the bar is removed, not kept as a fallback.
+- A test that supplies a name the code under test does not define hides the defect it should find. The Teams sign-in endpoint called a function that existed nowhere; its only test patched that name in. Test sign-in endpoints through the real route with tokens signed by a key generated in the test and a stubbed key download (`tests/test_teams_tab_auth.py`), and include the refusals: wrong audience, wrong issuer, expired, unsigned, wrong key, missing claims.
+- Check a token's tenant binding on every read, not only when it is issued. Tab routes now resolve the tenant from the token, require the account to still belong to it, and filter every query by it; a record of another tenant is answered like a record that does not exist.
+
 ## Deployment Rule
 
 Normal production deployments go through GitHub Actions and GitHub Environments. Local Azure CLI deploys are break-glass only and must be documented in the deployment notes for that incident.

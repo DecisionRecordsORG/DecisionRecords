@@ -71,6 +71,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/api/sponsorship` answered 500 when an optional field was sent as JSON `null`, and `/api/feedback` answered 500 for `null` fields and for a body that was not JSON. All three form endpoints now treat missing, `null` and wrong-typed optional fields as not given and answer 400 for an invalid body
 - End-to-end tests: the sign-in helpers typed into the server-rendered form before the app was running, lost the text when it started, and timed out on a disabled button. They now fill the form until the app has taken the values
 - The first-admin onboarding dialog no longer opens on top of another dialog, such as a decision someone has started writing, and no longer takes the keyboard focus from it. It waits until that dialog is closed. Its buttons stay in view on short windows
+- Enterprise Edition: Teams sign-in from the tab (`POST /api/teams/sso/validate`) failed with a server error after the token had been validated, so it never returned a tab token. It now completes
+- Enterprise Edition: the Teams account-link redirect keeps its token inside one query parameter
+
+### Security
+- Enterprise Edition: Teams tab provisioning (`POST /api/teams/tab/provision`) requires a validated Teams sign-in token, sent as `Authorization: Bearer <token>`. The user and the organisation are taken from the token's claims; the request body is no longer read. A request without a valid token is answered with 401 and creates nothing
+- Enterprise Edition: a Teams sign-in token is accepted only when it was issued for this installation's Teams app (the application ID or its Application ID URI on the configured host), by the Microsoft tenant named in the token, and is within its validity period. The account is identified by the token's object ID, tenant ID and sign-in name; an email claim counts only when Microsoft marks its domain as verified
+- Enterprise Edition: an organisation that has connected Teams accepts Teams tab sign-ins only from the Microsoft 365 tenant it connected
+- Enterprise Edition: a Teams tab token is accepted only while its account exists and belongs to the organisation the token was issued for. Tab requests for a decision outside that organisation, or for a deleted decision, are answered with 404
 
 ## [2.1.1] - 2026-11-21
 

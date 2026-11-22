@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-teams-tab-validated-sign-in"
+title = "Require a validated Teams sign-in token for Teams tab provisioning"
+summary = "Teams tab provisioning now requires a validated Teams sign-in token and takes the user and organisation from the token's claims instead of the request body. Teams sign-in tokens are checked for this app's audience, an issuer matching the token's tenant, the validity period and the object ID, tenant ID and sign-in name claims, on top of the signature verification in the Enterprise module. The Teams tab sign-in endpoint, which failed after validating the token, now completes. Teams tab tokens are bound to their user and organisation and every tab route stays inside that organisation. The routes are Enterprise only but live in the shared core application."
+change_type = "security_fix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
