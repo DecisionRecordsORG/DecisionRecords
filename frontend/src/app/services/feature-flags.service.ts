@@ -28,6 +28,9 @@ export interface FeatureFlags {
   azure_keyvault: boolean;
   cloudflare_security: boolean;
   marketing_pages: boolean;
+  // Optional address of a support page for people who cannot sign in.
+  // See services/support-link.ts for how it is used.
+  support_url?: string;
 }
 
 const DEFAULT_FLAGS: FeatureFlags = {

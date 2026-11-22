@@ -78,7 +78,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
         @if (!authService.isMasterAccount) {
           <button mat-button class="feedback-btn" (click)="openFeedbackDialog()">
             <mat-icon>feedback</mat-icon>
-            <span>Feedback</span>
+            <span>Help and feedback</span>
           </button>
         }
 
@@ -158,11 +158,11 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
 
         <div class="dialog-header">
           <mat-icon class="dialog-icon">feedback</mat-icon>
-          <h2>Send Feedback</h2>
+          <h2>Help and feedback</h2>
         </div>
 
         <p class="dialog-intro">
-          Share your thoughts, suggestions, or report issues. Your email is used to create a support ticket and may be used to follow up with you.
+          Ask for help, report a problem or tell us what you think. We read every message and reply by email unless you ask us not to.
         </p>
 
         @if (feedbackSuccess) {
@@ -173,25 +173,25 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
         } @else {
           <form [formGroup]="feedbackForm" (ngSubmit)="submitFeedback()">
             <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Your Email</mat-label>
+              <mat-label>Your email</mat-label>
               <input matInput formControlName="email" type="email" readonly>
               <mat-icon matPrefix>email</mat-icon>
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Your Name</mat-label>
+              <mat-label>Your name</mat-label>
               <input matInput formControlName="name" placeholder="Your name">
               <mat-icon matPrefix>person</mat-icon>
             </mat-form-field>
 
             <mat-form-field appearance="outline" class="full-width">
-              <mat-label>Your Feedback</mat-label>
+              <mat-label>Your message</mat-label>
               <textarea matInput formControlName="feedback" rows="4"
-                        placeholder="Share your thoughts, suggestions, or report issues..."></textarea>
+                        placeholder="What do you need help with, or what would you like to tell us?"></textarea>
             </mat-form-field>
 
             <mat-checkbox formControlName="contactConsent" class="consent-checkbox">
-              It's okay to reach out to me about this feedback
+              You may reply to me by email
             </mat-checkbox>
 
             @if (feedbackError) {
@@ -208,7 +208,7 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
               <mat-spinner diameter="20" *ngIf="feedbackLoading"></mat-spinner>
               <ng-container *ngIf="!feedbackLoading">
                 <mat-icon>send</mat-icon>
-                <span>Send Feedback</span>
+                <span>Send message</span>
               </ng-container>
             </button>
           </form>
@@ -689,11 +689,11 @@ export class NavbarComponent {
     this.http.post<{ message?: string; error?: string }>('/api/feedback', formData).subscribe({
       next: (result) => {
         this.feedbackLoading = false;
-        this.feedbackSuccess = result.message || 'Thank you for your feedback!';
+        this.feedbackSuccess = result.message || 'Thank you. We have your message.';
       },
       error: (err) => {
         this.feedbackLoading = false;
-        this.feedbackError = err.error?.error || 'Failed to submit feedback. Please try again.';
+        this.feedbackError = err.error?.error || 'Your message could not be sent. Please try again.';
       }
     });
   }

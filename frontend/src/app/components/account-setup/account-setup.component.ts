@@ -11,6 +11,7 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../../services/auth.service';
+import { SupportLinkComponent } from '../shared/support-link.component';
 
 @Component({
   selector: 'app-account-setup',
@@ -26,7 +27,8 @@ import { AuthService } from '../../services/auth.service';
     MatProgressSpinnerModule,
     MatFormFieldModule,
     MatInputModule,
-    MatSnackBarModule
+    MatSnackBarModule,
+    SupportLinkComponent
   ],
   template: `
     <div class="setup-container">
@@ -124,6 +126,10 @@ import { AuthService } from '../../services/auth.service';
               </form>
             }
           </mat-card-content>
+        }
+
+        @if (!isLoading) {
+          <app-support-link [email]="user?.email" [org]="tenant"></app-support-link>
         }
       </mat-card>
     </div>
@@ -278,6 +284,7 @@ export class AccountSetupComponent implements OnInit {
   redirectLabel = 'Continue';
   user: { id: number; email: string; name: string; sso_domain: string } | null = null;
   token: string | null = null;
+  tenant = '';
   showPasswordForm = false;
   settingUp = false;
   passwordForm: FormGroup;
@@ -298,6 +305,7 @@ export class AccountSetupComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.tenant = this.route.snapshot.paramMap.get('tenant') || '';
     this.token = this.route.snapshot.queryParamMap.get('token');
     if (!this.token) {
       this.error = 'No setup token provided. Please use the link sent to you by your administrator.';

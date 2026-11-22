@@ -55,4 +55,22 @@ describe('NavbarComponent feedback dialog', () => {
     const button = document.querySelector('.feedback-dialog-container .submit-btn') as HTMLElement;
     expect(notice.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it('is offered as help and feedback and says what happens to a message', () => {
+    const entry = fixture.nativeElement.querySelector('.feedback-btn') as HTMLElement;
+    expect((entry.textContent || '').replace(/\s+/g, ' ').trim()).toMatch(/Help and feedback$/);
+
+    component.openFeedbackDialog();
+    fixture.detectChanges();
+
+    const dialog = document.querySelector('.feedback-dialog-container') as HTMLElement;
+    expect(dialog.querySelector('h2')!.textContent).toBe('Help and feedback');
+    expect((dialog.querySelector('.dialog-intro')!.textContent || '').replace(/\s+/g, ' ').trim()).toBe(
+      'Ask for help, report a problem or tell us what you think. ' +
+      'We read every message and reply by email unless you ask us not to.'
+    );
+    expect(dialog.textContent).not.toContain('support ticket');
+    expect((dialog.querySelector('.consent-checkbox')!.textContent || '').trim()).toBe('You may reply to me by email');
+    expect((dialog.querySelector('.submit-btn')!.textContent || '').replace(/\s+/g, ' ').trim()).toMatch(/Send message$/);
+  });
 });

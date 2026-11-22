@@ -1,7 +1,7 @@
 import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { isPlatformBrowser } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
+import { ActivatedRoute, RouterModule, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { MatButtonModule } from '@angular/material/button';
@@ -12,6 +12,30 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
 import { FeatureFlagsService } from '../../services/feature-flags.service';
+import { SupportLinkComponent } from '../shared/support-link.component';
+
+/**
+ * What to say when a sign-in or a verification link sends the person back
+ * here with `?error=<code>`. The server uses these codes; the text is ours.
+ */
+export function signInErrorMessage(code: string | null | undefined): string {
+  switch (code) {
+    case null:
+    case undefined:
+    case '':
+      return '';
+    case 'expired_token':
+      return 'This verification link has expired. Go to your organization\'s sign-in page and ask for a new one.';
+    case 'invalid_token':
+      return 'This verification link is not valid. It may have been used already, or part of it may be missing.';
+    case 'public_email':
+      return 'Please use your work email address. Personal email accounts cannot be used to sign in.';
+    case 'disposable_email':
+      return 'Disposable email addresses cannot be used to sign in. Please use your work email address.';
+    default:
+      return 'We could not sign you in. Please try again.';
+  }
+}
 
 interface SystemStatus {
   has_tenants: boolean;
@@ -40,7 +64,8 @@ interface TenantInfo {
     MatFormFieldModule,
     MatInputModule,
     MatIconModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    SupportLinkComponent
   ],
   template: `
     <div class="landing-container">
@@ -66,6 +91,10 @@ interface TenantInfo {
               GitHub
             </a>
           </div>
+
+          @if (signInError) {
+            <p class="sign-in-error" role="alert" data-testid="sign-in-error">{{ signInError }}</p>
+          }
 
           <!-- Loading State -->
           <div class="cta-section" *ngIf="loading">
@@ -133,6 +162,10 @@ interface TenantInfo {
               Already have an account? Enter your domain above and click Get Started.
             </p>
           </div>
+
+          @if (!loading && !publicSiteMode && !isLoggedIn && (hasTenants || !isCommunity || signInError)) {
+            <app-support-link [org]="tenantDomain"></app-support-link>
+          }
 
           <!-- Logged In State -->
           <div class="cta-section" *ngIf="!loading && isLoggedIn">
@@ -492,6 +525,16 @@ interface TenantInfo {
       opacity: 0.8;
     }
 
+    .sign-in-error {
+      max-width: 480px;
+      margin: 0 auto 24px;
+      padding: 12px 16px;
+      border-radius: 4px;
+      background-color: #ffebee;
+      color: #c62828;
+      font-size: 0.95rem;
+    }
+
     mat-spinner {
       margin: 20px auto;
     }
@@ -541,6 +584,7 @@ export class LandingComponent implements OnInit {
   private http = inject(HttpClient);
   private featureFlags = inject(FeatureFlagsService);
   private platformId = inject(PLATFORM_ID);
+  private route = inject(ActivatedRoute);
 
   domain = '';
   isLoggedIn = false;
@@ -550,8 +594,11 @@ export class LandingComponent implements OnInit {
   tenantDomain = '';
   tenantName = '';
   publicSiteMode = false;
+  signInError = '';
 
   ngOnInit() {
+    this.signInError = signInErrorMessage(this.route.snapshot.queryParamMap.get('error'));
+
     if (!isPlatformBrowser(this.platformId)) {
       this.publicSiteMode = true;
       this.isCommunity = true;

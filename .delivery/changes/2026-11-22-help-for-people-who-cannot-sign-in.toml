@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-help-for-people-who-cannot-sign-in"
+title = "Help for people who cannot sign in, and honest wording in the feedback dialog and the terms"
+summary = "Adds a \"Can't sign in? Get help\" link to the Community landing page, every step of the sign-in page, the setup and recovery link page and the domain approval page. It opens the public support page on the website in a new tab with the topic and, when known, the email address and organisation domain. The link is shown on the hosted service; a self-hosted installation shows none unless /api/features reports a support_url, which the server does not send yet. The landing page now explains expired or invalid verification links and failed provider sign-ins. The in-app feedback entry becomes \"Help and feedback\" and no longer claims a support ticket is created. Terms of Service section 6 states what messages and optional organisation details are used for and refers to the Data Processing Agreement; the data processing page gives contact@decisionrecords.org. Frontend only: no API, model or migration change."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "minor"
+marketing_website = "none"

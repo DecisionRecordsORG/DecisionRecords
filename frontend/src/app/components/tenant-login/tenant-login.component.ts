@@ -13,6 +13,8 @@ import { MatDividerModule } from '@angular/material/divider';
 import { MatTabsModule } from '@angular/material/tabs';
 import { WebAuthnService } from '../../services/webauthn.service';
 import { AuthService } from '../../services/auth.service';
+import { SupportTopic } from '../../services/support-link';
+import { SupportLinkComponent } from '../shared/support-link.component';
 
 interface TenantAuthConfig {
   domain: string;
@@ -50,7 +52,8 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
     MatIconModule,
     MatProgressSpinnerModule,
     MatDividerModule,
-    MatTabsModule
+    MatTabsModule,
+    SupportLinkComponent
   ],
   template: `
     <div class="login-container">
@@ -414,6 +417,8 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
             </a>
           </mat-card-actions>
         }
+
+        <app-support-link [topic]="helpTopic" [email]="helpEmail" [org]="tenant"></app-support-link>
       </mat-card>
     </div>
   `,
@@ -1174,6 +1179,26 @@ export class TenantLoginComponent implements OnInit {
           || err.error?.error || 'Failed to submit request. Please try again.';
       }
     });
+  }
+
+  /** What the help link asks about: a missing email on the screens that send one, signing in otherwise. */
+  get helpTopic(): SupportTopic {
+    return this.currentView === 'recovery' || this.currentView === 'resend-verification' || this.currentView === 'auto-approved'
+      ? 'email'
+      : 'signin';
+  }
+
+  /** The email address the person is working with on the current screen, when the page knows a complete one. */
+  get helpEmail(): string {
+    const form = this.currentView === 'initial' ? this.emailForm
+      : this.currentView === 'recovery' ? this.recoveryForm
+      : this.currentView === 'resend-verification' ? this.resendForm
+      : null;
+    if (form) {
+      const control = form.get('email');
+      return control?.valid ? control.value : '';
+    }
+    return this.currentEmail;
   }
 
   goBack(): void {

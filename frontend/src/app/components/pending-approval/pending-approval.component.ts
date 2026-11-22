@@ -8,6 +8,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { AuthService } from '../../services/auth.service';
 import { interval, Subscription } from 'rxjs';
+import { SupportLinkComponent } from '../shared/support-link.component';
 
 interface DomainStatus {
   domain: string;
@@ -26,7 +27,8 @@ interface DomainStatus {
     MatCardModule,
     MatButtonModule,
     MatIconModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    SupportLinkComponent
   ],
   template: `
     <div class="pending-container">
@@ -107,6 +109,8 @@ interface DomainStatus {
           <a [routerLink]="['/' + domain, 'profile']">Manage Passkeys</a>
         }
       </div>
+
+      <app-support-link class="on-dark" topic="account" label="Get help" [email]="email" [org]="domain"></app-support-link>
     </div>
   `,
   styles: [`
@@ -244,6 +248,10 @@ interface DomainStatus {
       text-decoration: underline;
     }
 
+    .on-dark {
+      color: white;
+    }
+
     button mat-icon {
       margin-right: 8px;
     }
@@ -256,6 +264,7 @@ export class PendingApprovalComponent implements OnInit, OnDestroy {
   isChecking = false;
   lastChecked = new Date();
   hasPasskey = false;
+  email = '';
 
   private checkSubscription?: Subscription;
 
@@ -272,6 +281,7 @@ export class PendingApprovalComponent implements OnInit, OnDestroy {
     // Check if user has passkey
     if (this.authService.currentUser?.user) {
       const user = this.authService.currentUser.user as any;
+      this.email = user.email || '';
       this.hasPasskey = user.webauthn_credentials?.length > 0;
     }
 
