@@ -24,6 +24,19 @@ from tests.retention_test_data import (
 RECORD_TABLES = ('retention_runs', 'retention_erasures')
 
 
+@pytest.fixture(autouse=True)
+def utc_database_session(request, monkeypatch):
+    """Run as on a database session set to UTC (what CI and the images use).
+
+    A PostgreSQL session in another zone makes retention wait some hours past
+    every due date (retention.safety_margin), which the to-the-second tests
+    below would trip over. Tests that ask for `real_session_offset` get the
+    real behaviour.
+    """
+    if 'real_session_offset' not in request.fixturenames:
+        monkeypatch.setattr(retention, '_session_utc_offset_seconds', lambda: 0)
+
+
 def run_tenants(**kwargs):
     return retention.run_retention(RetentionRun.TRIGGER_SUPER_ADMIN, categories=[retention.TENANTS], **kwargs)
 

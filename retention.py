@@ -52,6 +52,13 @@ Every DateTime column stores UTC without a timezone. All comparisons here use
 a naive UTC "now" so the result does not depend on the database session's
 time zone (PostgreSQL converts an aware value to the session zone before
 comparing it with a `timestamp` column).
+
+Much of the application writes aware datetimes. On a PostgreSQL session that
+is not set to UTC those are stored shifted by the session's offset, so a due
+date in the database can be up to that many hours early. Retention therefore
+waits the size of the offset plus an hour (for daylight saving changes) before
+it treats anything as due: see `due_time`. On a UTC session, and on SQLite,
+the wait is zero.
 """
 
 import logging
@@ -149,6 +156,24 @@ def to_naive_utc(value):
 
 def _iso(value):
     return value.isoformat() + 'Z' if value else None
+
+
+def _session_utc_offset_seconds():
+    """The database session's offset from UTC in seconds. 0 on SQLite."""
+    if db.engine.dialect.name != 'postgresql':
+        return 0
+    return int(db.session.execute(sa.text('SELECT EXTRACT(TIMEZONE FROM now())')).scalar() or 0)
+
+
+def safety_margin():
+    """How long to wait past a stored due date before trusting it (see "Times")."""
+    offset = abs(_session_utc_offset_seconds())
+    return timedelta(seconds=offset) + timedelta(hours=1) if offset else timedelta(0)
+
+
+def due_time(now=None):
+    """The moment everything is compared with: now, in naive UTC, minus the safety margin."""
+    return (to_naive_utc(now) or utcnow()) - safety_margin()
 
 
 def _short_error(exc):
@@ -414,7 +439,7 @@ def preview_retention(now=None, categories=None, include_items=True):
     cutoff, items, items_truncated}}. `would_hold` says what an automatic run
     would do; a super admin can still run the category deliberately.
     """
-    now = to_naive_utc(now) or utcnow()
+    now = due_time(now)
     limits = get_limits()
     backlog_days = get_backlog_days()
     preview = {}
@@ -982,7 +1007,7 @@ def _delete_older_than(model, category, cutoff, run_id):
 
 def purge_old_inquiries(now=None):
     """Delete inquiries older than Inquiry.RETENTION_DAYS (24 months). Returns how many."""
-    now = to_naive_utc(now) or utcnow()
+    now = due_time(now)
     purged = Inquiry.query.filter(Inquiry.created_at < _inquiries_cutoff(now)).delete(synchronize_session=False)
     if purged:
         db.session.commit()
@@ -1022,8 +1047,8 @@ def run_retention(trigger, categories=None, now=None, release=None, started_by=N
     itself and what was done before it stays done and recorded.
     """
     started = time.monotonic()
-    now = to_naive_utc(now) or utcnow()
     wanted = _normalise_categories(categories)
+    now = due_time(now)
     release = dict(release or {})
 
     if run is None:
@@ -1146,7 +1171,7 @@ def check_release(categories, confirm_counts, now=None):
     if not isinstance(confirm_counts, dict):
         return None, ('confirm_counts must give the number waiting for every category', 400, {})
 
-    now = to_naive_utc(now) or utcnow()
+    now = due_time(now)
     release, changed = {}, {}
     for category in categories:
         confirmed = _whole_number(confirm_counts.get(category), 10 ** 9)

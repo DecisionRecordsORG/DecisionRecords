@@ -24,6 +24,19 @@ from tests.retention_test_data import (
 RECORD_TABLES = ('retention_runs', 'retention_erasures')
 
 
+@pytest.fixture(autouse=True)
+def utc_database_session(request, monkeypatch):
+    """Run as on a database session set to UTC (what CI and the images use).
+
+    A PostgreSQL session in another zone makes retention wait some hours past
+    every due date (retention.safety_margin), which the to-the-second tests
+    below would trip over. Tests that ask for `real_session_offset` get the
+    real behaviour.
+    """
+    if 'real_session_offset' not in request.fixturenames:
+        monkeypatch.setattr(retention, '_session_utc_offset_seconds', lambda: 0)
+
+
 def run(categories=None, trigger=RetentionRun.TRIGGER_AUTOMATIC, **kwargs):
     return retention.run_retention(trigger, categories=categories, **kwargs)
 
@@ -686,3 +699,59 @@ class TestRunRecord:
         assert snapshot(exclude=RECORD_TABLES) == after_first
         assert RetentionErasure.query.count() == erasures
         assert RetentionRun.query.count() == 2
+
+
+# ==================== Database sessions that are not UTC ====================
+
+@pytest.fixture
+def real_session_offset():
+    """Ask for this to keep retention's real time zone handling."""
+
+
+class TestSessionTimeZone:
+    def test_utc_session_and_sqlite_wait_nothing(self, app, session, real_session_offset):
+        if db.engine.dialect.name == 'postgresql':
+            db.session.execute(db.text("SET TIME ZONE 'UTC'"))
+        assert retention._session_utc_offset_seconds() == 0
+        assert retention.safety_margin() == timedelta(0)
+        now = naive_now()
+        assert retention.due_time(now) == now
+
+    def test_postgresql_session_in_another_zone_is_measured(self, app, session, real_session_offset):
+        if db.engine.dialect.name != 'postgresql':
+            pytest.skip('SQLite has no session time zone')
+        try:
+            db.session.execute(db.text("SET TIME ZONE 'Asia/Kolkata'"))
+            assert retention._session_utc_offset_seconds() == 19800
+            assert retention.safety_margin() == timedelta(hours=6, minutes=30)
+            db.session.execute(db.text("SET TIME ZONE 'America/Phoenix'"))
+            assert retention._session_utc_offset_seconds() == -25200
+            assert retention.safety_margin() == timedelta(hours=8)
+        finally:
+            db.session.execute(db.text("SET TIME ZONE 'UTC'"))
+            db.session.commit()
+
+    def test_nothing_is_due_until_the_margin_has_passed(self, app, session, monkeypatch, real_session_offset):
+        """Eight hours west of UTC, a stored due date can be eight hours early."""
+        monkeypatch.setattr(retention, '_session_utc_offset_seconds', lambda: -8 * 3600)
+        early = make_user('team.example', 'early')
+        late = make_user('team.example', 'late')
+        early.deletion_scheduled_at = naive_now() - timedelta(hours=8, minutes=59)
+        late.deletion_scheduled_at = naive_now() - timedelta(hours=9, minutes=1)
+        data = make_full_tenant('gone.example', 'gon')
+        expire_tenant(data['tenant'], expired_ago=timedelta(hours=5))
+        old_login(90)
+        db.session.commit()
+        early_id, late_id = early.id, late.id
+
+        preview = retention.preview_retention()
+        results = run()['results']
+
+        assert preview['accounts']['waiting'] == 1 and preview['tenants']['waiting'] == 0
+        assert results['accounts']['affected'] == 1 and results['tenants']['affected'] == 0
+        assert results['login_history']['affected'] == 0
+        assert db.session.get(User, late_id).is_anonymized
+        assert not db.session.get(User, early_id).is_anonymized
+        assert db.session.get(Tenant, data['tenant'].id) is not None
+        release, problem = retention.check_release(['tenants'], {'tenants': 0})
+        assert problem is None and release == {'tenants': 0}
