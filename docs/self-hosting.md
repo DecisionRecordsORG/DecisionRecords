@@ -210,6 +210,8 @@ services:
 
 ## Backups
 
+Back up the database regularly. Data retention erases expired accounts, decisions and tenants for good (see [Data retention](#data-retention)); a backup is the only way to get them back.
+
 ### SQLite
 
 ```bash
@@ -305,56 +307,86 @@ docker-compose up -d
 
 Decision Records includes built-in GDPR features: account deletion with anonymisation, personal data export, and consent management. These work out of the box for user-initiated actions.
 
-### Automated GDPR Tasks
+### Data retention
 
-To enforce data retention policies automatically (purging expired soft-deleted records, cleaning up login history, completing account anonymisation after the grace period), you need to set up a cron job that calls the GDPR task execution endpoint.
+Decision Records keeps these deletion timelines by itself. There is nothing to install or schedule.
 
-#### 1. Set the cron secret
+| What | When | What happens |
+|------|------|--------------|
+| Accounts | 7 days after the owner asked for deletion | The account is anonymised. Its decisions stay, shown as written by "Former Member" |
+| Soft-deleted decisions | 30 days after deletion | The decision, its history, comments and links are erased |
+| Soft-deleted tenants | 30 days after deletion | The tenant, its decisions, spaces, settings, sign-in configuration, logs and the accounts of its members are erased |
+| Login history | After 90 days | The entries are deleted |
+| Messages from the contact, "Get in touch" and feedback forms | After 24 months | The messages are deleted |
 
-Add a shared secret to your environment:
+**Erasure cannot be undone.** The application keeps no copy of what it erases. A database backup is the only way to get erased data back, so take backups (see [Backups](#backups)) and decide how long you keep them.
+
+#### How the automatic run works
+
+Once a day (UTC) the application runs retention in the background. It starts about a minute after the application has started and served its first request, and after that it does not need traffic. With several workers or containers on one database, only one of them does a day's run: each run is claimed in the database first. A run never happens inside a user's request.
+
+If the application is stopped part way through a run, nothing is left half erased: every account, decision and tenant is handled in its own database transaction. The run is shown as "interrupted" and the next day's run carries on with what is left.
+
+Dates are stored in UTC. If your PostgreSQL server uses another time zone, some stored dates are off by that zone's offset, so retention waits the size of the offset plus one hour past each due date before it acts. Nothing is erased early; on such a server it happens a few hours late. Setting the database time zone to UTC avoids this.
+
+#### Limits: when the automatic run holds back
+
+An automatic run is deliberately cautious with the three things that cannot be put back. It leaves a whole category alone, and carries on with the others, when:
+
+- more items are waiting than the category's limit, or
+- the oldest waiting item is more than 7 days overdue. That only happens when retention has not been running, for example on the first start after an upgrade from a version that needed a cron job, or after the automatic run was turned off for a while.
+
+| Category | Default limit per run |
+|----------|-----------------------|
+| Accounts to anonymise | 10 |
+| Deleted decisions to erase | 50 |
+| Deleted tenants to erase | 1 |
+| Login history and stored messages | No limit. They are deleted by age alone |
+
+A limit of 0 means the automatic run never does that category by itself. Setting the "days overdue" check to 0 turns that check off. A super admin changes these under Super Admin > Data retention, or with `PUT /api/admin/settings/retention`.
+
+#### What you see when a category is held back
+
+- Super Admin > Data retention shows a notice naming the category, how many items are waiting and why, with the list of what would be erased. The dashboard link shows how many categories are held back.
+- The run is listed with the status "held back", and the application log has a warning line: `Retention: tenants held back (over_limit): 3 waiting, limit 1. A super admin must run it.`
+- Nothing in that category is erased until a super admin opens the page, checks the list and chooses "Run now". The confirmation states the number of items. If more items have become due since the page was loaded, the run is refused and the page shows the new number.
+- The same check runs every day, so a held back category stays held back, and stays visible, until someone releases it.
+
+A soft-deleted tenant whose status was changed by hand to something other than "deleted" is never erased, automatically or by a super admin. The page lists it under "needs review". Restore it properly or set its status back to "deleted".
+
+#### Turning the automatic run off
+
+- For one installation, without a restart: Super Admin > Data retention, turn off "Run automatically".
+- From the environment, for example before the first start of an upgraded installation: set `RETENTION_AUTO_RUN=false`. This wins over the setting and the page says so.
+
+With the automatic run off, nothing is erased until a super admin runs a category from the page or a cron job calls the endpoint below. Your deletion timelines are then not being kept.
+
+#### The record of what was erased
+
+Every run is stored (when, how it was started, how many items per category, what was held back, errors, how long it took) and shown on the Data retention page. For each erasure a record is written in the same database transaction: the kind of thing, its id, for a tenant its domain, and how many rows went from each table. It never holds names, email addresses or the content of a decision. These records are in the `retention_runs` and `retention_erasures` tables and are not deleted automatically.
+
+#### Optional: your own cron job
+
+Installations that already call the task endpoint from cron can keep doing so. It is no longer needed. The endpoint does the same work as the automatic run, under the same limits, and cannot release a held back category.
 
 ```bash
-# In your docker-compose.yml or .env file
+# In your docker-compose.yml or .env file. Generate with: openssl rand -hex 32
 GDPR_CRON_SECRET=your-secure-random-secret-here
 ```
 
-Generate a strong secret:
-
-```bash
-openssl rand -hex 32
-```
-
-#### 2. Configure the cron job
-
-Set up a cron job to call the endpoint (hourly recommended):
-
 ```bash
 # Add to your server's crontab (crontab -e)
-0 * * * * curl -s -X POST http://localhost:3000/api/admin/execute-gdpr-tasks \
-  -H "Content-Type: application/json" \
-  -H "X-Cron-Secret: your-secure-random-secret-here" \
-  > /var/log/gdpr-tasks.log 2>&1
-```
-
-Or using docker-compose:
-
-```bash
-0 * * * * docker exec decision-records curl -s -X POST http://localhost:8000/api/admin/execute-gdpr-tasks \
+0 3 * * * curl -s -X POST http://localhost:3000/api/admin/execute-gdpr-tasks \
   -H "Content-Type: application/json" \
   -H "X-Cron-Secret: your-secure-random-secret-here" \
   >> /var/log/gdpr-tasks.log 2>&1
 ```
 
-#### 3. What the automated tasks do
+The response keeps the counts it always had under `results` and adds `run_id`, `status`, `held_back` (categories that were left alone, with the number waiting) and `errors`.
 
-| Task | Frequency | Description |
-|------|-----------|-------------|
-| Account anonymisation | Hourly | Completes deletion for accounts past the 7-day grace period |
-| History cleanup | Hourly | Removes login history entries older than 90 days |
-| Record purge | Hourly | Permanently deletes soft-deleted decisions/tenants older than 30 days |
-| Inquiry purge | Hourly | Deletes messages from the contact, "Get in touch" and feedback forms that are older than 24 months |
+#### Upgrading an installation where retention never ran
 
-Without this cron job nothing deletes old inquiries: the 24 month limit is only applied when the task runs. A super admin can delete single inquiries at any time under Super Admin > Inquiries.
+If you never set up the cron job, expired data has been building up. On the first start of this version the automatic run will delete old login history and old stored messages, and it will hold back accounts, decisions and tenants that are more than 7 days overdue. Open Super Admin > Data retention, read what is waiting, take a database backup, then run each held back category. From then on the daily run keeps up by itself.
 
 ### Messages from the contact and feedback forms
 
