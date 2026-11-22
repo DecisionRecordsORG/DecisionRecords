@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-ee-deployed-state-pointer"
+title = "Advance ee for the website privacy text and updated private documentation"
+summary = "Advances the private ee submodule to the merged commit that pins the website with its data processing page, FAQ, Terms and form notices for stored messages and organisation details, and that carries the updated private documentation. Pointer change only; the website was deployed from that commit on 2026-11-22."
+change_type = "docs"
+surfaces = ["enterprise_only"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
