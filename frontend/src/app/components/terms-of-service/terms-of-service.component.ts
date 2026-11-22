@@ -31,7 +31,7 @@ import { MatIconModule } from '@angular/material/icon';
       <main class="terms-content">
         <div class="container">
           <article class="prose">
-            <p class="meta">Last updated: 21 November 2026</p>
+            <p class="meta">Last updated: 22 November 2026</p>
 
             <p class="lead">
               These Terms of Service govern your access to and use of the Decision Records platform, including the hosted cloud service, related websites, and documentation. By creating an account or using the service, you agree to these terms.
@@ -107,10 +107,10 @@ import { MatIconModule } from '@angular/material/icon';
                 You retain full ownership of all data and content you create or upload to the platform.
               </p>
               <p>
-                We do not sell user data, use it for advertising, or process it for purposes unrelated to operating and securing the service. Access to content is limited to what is necessary to provide the platform and to respond to support or security issues where appropriate.
+                We do not sell user data or use it for advertising. We process it to operate and secure the service. We also use the messages you send us and the optional details about your organisation to reply to you and to understand which kinds of teams use Decision Records, as described in our Data Processing Agreement. Access to content is limited to what is necessary to provide the platform and to respond to support or security issues where appropriate.
               </p>
               <p>
-                You may export your data at any time. Further details about data handling are described in our Privacy Policy and Data Processing Agreement.
+                You may export your data at any time. Further details about data handling are described in our <a routerLink="/dpa">Data Processing Agreement</a>.
               </p>
             </section>
 
@@ -326,12 +326,14 @@ import { MatIconModule } from '@angular/material/icon';
       font-weight: 500;
     }
 
-    .contact-email a {
+    .contact-email a,
+    .terms-section p a {
       color: #2563eb;
       text-decoration: none;
     }
 
-    .contact-email a:hover {
+    .contact-email a:hover,
+    .terms-section p a:hover {
       text-decoration: underline;
     }
 

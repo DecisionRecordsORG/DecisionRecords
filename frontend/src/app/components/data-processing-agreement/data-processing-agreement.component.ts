@@ -87,7 +87,7 @@ import { MatIconModule } from '@angular/material/icon';
             <section class="dpa-section">
               <h2>Contact</h2>
               <p>
-                For data protection questions or a hosted service DPA request, contact <a href="mailto:lawrence@decisionrecords.org">lawrence&#64;decisionrecords.org</a>.
+                For data protection questions or a hosted service DPA request, contact <a href="mailto:contact&#64;decisionrecords.org">contact&#64;decisionrecords.org</a>.
               </p>
             </section>
           </article>
