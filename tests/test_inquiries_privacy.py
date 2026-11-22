@@ -371,6 +371,7 @@ class TestOverHTTP:
         tenant.team_profile_answered_at = datetime.now(timezone.utc)
         tenant.deleted_at = datetime.now(timezone.utc) - timedelta(days=31)
         tenant.deletion_expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        tenant.status = 'deleted'  # what DELETE /api/tenants/<domain> sets; retention erases nothing else
         db.session.commit()
 
         response = api_app.test_client().post(
