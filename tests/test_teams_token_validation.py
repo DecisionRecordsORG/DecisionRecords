@@ -13,8 +13,10 @@ import os
 import sys
 import time
 
-import jwt
 import pytest
+
+# PyJWT is an Enterprise dependency: without it this whole module is skipped.
+jwt = pytest.importorskip('jwt')
 from flask import Flask
 from unittest.mock import Mock
 from cryptography.hazmat.primitives import serialization
