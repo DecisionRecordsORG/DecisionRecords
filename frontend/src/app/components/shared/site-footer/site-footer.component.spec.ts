@@ -122,6 +122,21 @@ describe('SiteFooterComponent contact form', () => {
     expect(textarea.value).toBe(FILLED.message);
   });
 
+  it('says above the send button that the message is stored and links to the data processing page', () => {
+    component.openContactDialog();
+    fixture.detectChanges();
+
+    const notice = document.querySelector('[data-testid="contact-data-notice"]') as HTMLElement;
+    expect((notice.textContent || '').replace(/\s+/g, ' ').trim())
+      .toBe('We store your message so we can reply to you. How we handle your data');
+    const link = notice.querySelector('a') as HTMLAnchorElement;
+    expect(link.textContent).toBe('How we handle your data');
+    expect(link.getAttribute('href')).toBe('/dpa');
+
+    const button = document.querySelector('.contact-form .submit-button') as HTMLElement;
+    expect(notice.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('starts with a clean form and no error each time the dialog is opened', () => {
     component.contactForm.setValue(FILLED);
     component.submitContact();

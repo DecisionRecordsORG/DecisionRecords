@@ -120,6 +120,11 @@ export function contactErrorMessage(err: unknown): string {
               <p class="contact-error" role="alert" data-testid="contact-error">{{ contactError }}</p>
             }
 
+            <p class="data-notice" data-testid="contact-data-notice">
+              We store your message so we can reply to you.
+              <a href="/dpa" target="_blank" rel="noopener">How we handle your data</a>
+            </p>
+
             <button mat-raised-button type="submit" class="submit-button"
                     [disabled]="!contactForm.valid || contactSubmitting">
               <ng-container *ngIf="contactSubmitting; else contactSubmitText">
@@ -299,6 +304,17 @@ export function contactErrorMessage(err: unknown): string {
       color: white !important;
       padding: 12px 24px !important;
       font-weight: 500 !important;
+    }
+
+    .data-notice {
+      margin: 0;
+      color: #64748b;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .data-notice a {
+      color: #2563eb;
     }
 
     .contact-error {

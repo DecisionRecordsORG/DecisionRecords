@@ -340,6 +340,7 @@ import {
               <h3>Two optional questions</h3>
               <p class="onboarding-team-profile-why">
                 It helps us build for teams like yours. You can skip this and answer later in organisation settings.
+                <a href="/dpa" target="_blank" rel="noopener" data-testid="onboarding-data-link">How we handle your data</a>
               </p>
               <mat-form-field appearance="outline" class="onboarding-field" subscriptSizing="dynamic">
                 <mat-label>{{ teamFocusQuestion }}</mat-label>
@@ -1019,6 +1020,10 @@ import {
       font-size: 0.9rem;
       color: #475569;
       line-height: 1.5;
+    }
+
+    .onboarding-team-profile-why a {
+      color: #2563eb;
     }
 
     .onboarding-field {

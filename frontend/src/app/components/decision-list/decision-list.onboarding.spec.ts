@@ -174,6 +174,11 @@ describe('DecisionListComponent onboarding dialog', () => {
     expect(sectionText).toContain('You can skip this and answer later in organisation settings.');
     expect(sectionText).toContain('What does your team make decisions about?');
     expect(sectionText).toContain('Team size');
+
+    const link = section.querySelector('[data-testid="onboarding-data-link"]') as HTMLAnchorElement;
+    expect(link.textContent).toBe('How we handle your data');
+    expect(link.getAttribute('href')).toBe('/dpa');
+    expect(link.closest('.onboarding-team-profile-why')).not.toBeNull();
     flush();
   }));
 

@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Super admins see a tenant's team profile in the tenant details, and an Interest summary at the top of the Inquiries page: tenants and inquiries by team size, inquiries by form, and the distinct team focus answers as they were typed
 
 ### Changed
+- The in-app data processing page describes the messages people send us and the optional organisation details: what is stored, why, the legal basis, that they are deleted after 24 months or with the organisation, and that Decision Records is the Data Controller for them
 - The default user limit per tenant is 25 instead of 5. Installations that never saved a limit follow the new default; a saved limit, including a saved 5, is kept. Super admins can still change it (0 = unlimited)
 - The user limit counts every account that belongs to a tenant. Accounts admitted through access requests were not counted before, so a tenant could grow past its limit
 - Notification emails say "decision" and "decision record" and drop the "[ADR]" subject prefix: "New decision: <title>", "Decision updated: <title>", "Decision status changed: <title> is now <status>". They refer to a decision by the ID shown in the app
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/api/contact`, `/api/sponsorship` and `/api/feedback` answer 200 with the usual thank-you message once the message is stored, also when email is not configured or the send fails. They used to answer 503 or 500 and drop the message. They still answer 503 or 500 when the message could be neither stored nor emailed
 - Personal data export includes the messages a user sent through the contact, "Get in touch" and feedback forms while signed in. Deleting an account removes the name, email address and message from that person's stored inquiries
 - The scheduled GDPR task (`/api/admin/execute-gdpr-tasks`) deletes inquiries older than 24 months and reports them as `purged_inquiries`. Installations that do not schedule the task keep inquiries until a super admin deletes them
+- The in-app feedback dialog and the footer contact dialog say above the send button that the message is stored so it can be answered, and the team profile questions in the onboarding dialog and in organization settings carry a "How we handle your data" link. Both point to the Data Processing Addendum page (`/dpa`)
 
 ### Fixed
 - The user limit is now enforced when an account is created by Slack, Google, Microsoft or Teams sign-in, by a tenant's own SSO provider, by the Teams tab sign-in and by an emailed sign-up link. A full tenant refuses the new account with the "User limit reached" error; existing members can still sign in and the first account of a new organization is never refused
