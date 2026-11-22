@@ -88,7 +88,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
           }
 
           @if (success) {
-            <div class="success-message">{{ success }}</div>
+            <div class="success-message" data-testid="success-message">{{ success }}</div>
           }
 
           <!-- Initial View: Email Entry -->
@@ -227,7 +227,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               </button>
 
               <p class="recovery-link">
-                <button mat-button (click)="showRecovery()">
+                <button mat-button (click)="showRecovery()" data-testid="forgot-credentials">
                   <mat-icon>lock_reset</mat-icon>
                   Forgot your credentials?
                 </button>
@@ -248,12 +248,12 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               <form [formGroup]="recoveryForm" (ngSubmit)="requestRecovery()">
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Email</mat-label>
-                  <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant">
+                  <input matInput formControlName="email" type="email" [placeholder]="'you@' + tenant" data-testid="recovery-email-input">
                   <mat-icon matPrefix>email</mat-icon>
                 </mat-form-field>
 
                 <button mat-raised-button color="primary" type="submit"
-                        [disabled]="recoveryForm.invalid || isLoading" class="full-width">
+                        [disabled]="recoveryForm.invalid || isLoading" class="full-width" data-testid="recovery-submit">
                   <mat-spinner diameter="20" *ngIf="isLoading"></mat-spinner>
                   <mat-icon *ngIf="!isLoading">send</mat-icon>
                   <span *ngIf="!isLoading">Send Recovery Link</span>

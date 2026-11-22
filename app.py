@@ -19,7 +19,7 @@ from models import db, User, MasterAccount, SSOConfig, EmailConfig, Subscription
 from models import SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, LLMProvider, AIChannel, AIAction
 # EE:END - EE Model Imports
 from datetime import datetime, timedelta, timezone
-from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
+from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, complete_setup_and_login, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 import retention
 from models import RetentionRun
@@ -6877,12 +6877,12 @@ def api_validate_setup_token():
     session['setup_expires'] = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
     session['setup_purpose'] = setup_token.purpose  # Track if this is recovery or initial setup
 
-    # Determine the redirect based on token purpose
+    # Setup and recovery share one page of the app (/<domain>/setup); the page
+    # reads `is_recovery` to word itself. There is no separate recovery page.
+    redirect_url = f'/{user.sso_domain}/setup?token={token}'
     if is_recovery:
-        redirect_url = f'/{user.sso_domain}/recover?token={token}'
         message = 'Recovery token validated. You can now reset your credentials.'
     else:
-        redirect_url = f'/{user.sso_domain}/setup?token={token}'
         message = 'Setup token validated. You can now set up your credentials.'
 
     return jsonify({
@@ -6978,8 +6978,10 @@ def api_setup_password():
 
     db.session.commit()
 
-    # Log the user in
-    start_user_session(user)
+    # Sign the user in and end the setup session. A recovery leaves the setup
+    # session valid for the rest of its 30 minutes otherwise, and the app
+    # would keep treating a signed-in person as still setting up credentials.
+    complete_setup_and_login(user)
     session['user_type'] = 'user'
 
     return jsonify({
@@ -10325,22 +10327,8 @@ def create_incomplete_test_user():
         )
         db.session.add(membership)
 
-        # Generate setup token
-        setup_token = secrets.token_urlsafe(32)
-        token_expires = datetime.now(timezone.utc) + timedelta(hours=48)
-
-        # Store token in SetupToken table if it exists, otherwise use session approach
-        try:
-            setup_token_record = SetupToken(
-                user_id=user.id,
-                token=setup_token,
-                expires_at=token_expires,
-                is_recovery=False
-            )
-            db.session.add(setup_token_record)
-        except Exception:
-            # If SetupToken model doesn't exist, we'll just return the token
-            pass
+        # A real setup token, as an administrator's setup link carries
+        setup_token = SetupToken.create_for_user(user)._token_string
 
         db.session.commit()
 
@@ -10365,6 +10353,34 @@ def create_incomplete_test_user():
         db.session.rollback()
         logger.error(f"Create incomplete test user failed: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/test/create-setup-token', methods=['POST'])
+def create_test_setup_token():
+    """Create a setup or recovery link for an existing user. TEST ONLY.
+
+    Stands in for the email a person would receive: the browser tests have no
+    mailbox to read the link from.
+    """
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+
+    data = request.get_json(silent=True) or {}
+    email = (data.get('email') or '').strip().lower()
+    purpose = data.get('purpose') or SetupToken.PURPOSE_INITIAL_SETUP
+    if purpose not in SetupToken.VALID_PURPOSES:
+        return jsonify({'error': 'Unknown purpose'}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    token = SetupToken.create_for_user(user, purpose=purpose)._token_string
+    return jsonify({
+        'setup_token': token,
+        'setup_url': f'/{user.sso_domain}/setup?token={token}',
+        'purpose': purpose,
+    })
 
 
 # EE:START - Slack Integration Endpoints

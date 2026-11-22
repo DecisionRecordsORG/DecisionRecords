@@ -237,9 +237,9 @@ class TestAccountEmailsUseProductName:
 
     def test_recovery_email_names_the_product(self, session, email_config, sent):
         notifications.send_account_recovery_email(
-            email_config, 'Pat', f'pat@{DOMAIN}', 'https://app.example.test/recover?token=abc', 2)
+            email_config, 'Pat', f'pat@{DOMAIN}', 'https://app.example.test/example.com/setup?token=abc', 2)
 
         message = sent[0]
         assert message['subject'] == 'Reset Your Decision Records Credentials'
-        assert 'https://app.example.test/recover?token=abc' in message['text']
+        assert 'https://app.example.test/example.com/setup?token=abc' in message['text']
         assert_no_old_wording(message)

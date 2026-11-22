@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Signing in through an organisation's own single sign-on provider answered 500 "Authentication failed" on every installation that serves the built frontend, after the account had been created or found. The redirect after sign-in named a page that exists only without a frontend build. The person is now signed in and sent to their organisation. The super admin sign-in form had the same fault
 - When an organisation is at its user limit, its own single sign-on provider now sends a newcomer to the sign-in page with the user limit message, like the other sign-in methods, instead of a bare error page
 - Tests no longer depend on whether a frontend build exists in the checkout, and one group of tests runs the app with a built frontend, as production does. A test fails when a redirect names a page that exists in only one of the two configurations
+- After recovering an account with a new password, the person was treated as still setting up their account for up to 30 minutes: signing in led to the profile page in setup mode instead of the organisation's decisions. Setting a password from a recovery link now ends the setup session, as setting up a passkey already did
+- The answer to a validated recovery link named a page, `/<domain>/recover`, that the app does not have. Recovery and first-time setup share the setup page, and the server now names that page for both. The emailed recovery link already pointed there
+- End-to-end tests: the helper that creates an account without credentials returned a setup token that was never stored, so the setup page could only be tested in its error state. It returns a working token, and a second test-only helper creates a setup or recovery link for an existing account
 
 ## [2.1.1] - 2026-11-21
 
