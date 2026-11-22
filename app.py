@@ -1157,6 +1157,12 @@ def _api_submit_sponsorship_impl():
         team_size=team_size,
     )
 
+    # Contact Form Email from super admin settings (fallback to default)
+    support_email = SystemConfig.get(
+        SystemConfig.KEY_SUPPORT_EMAIL,
+        SystemConfig.DEFAULT_SUPPORT_EMAIL
+    )
+
     return _deliver_inquiry(
         inquiry,
         Inquiry.SOURCE_SPONSORSHIP,
@@ -1165,7 +1171,8 @@ def _api_submit_sponsorship_impl():
             contact_name=contact_name,
             area_of_interest=area_of_interest,
             message=message,
-            team_focus=team_focus
+            team_focus=team_focus,
+            recipient_email=support_email
         ),
         success_message='Thank you for reaching out! We will be in touch shortly.',
         failure_message='Failed to submit inquiry. Please try again later.',
@@ -3776,7 +3783,12 @@ def api_dismiss_admin_onboarding():
         return jsonify({'error': 'Not applicable for master accounts'}), 400
 
     user = g.current_user
-    if not user.is_admin:
+    # The dialog is shown to whoever /api/user/me reports as is_admin: the role
+    # on the membership (admin, provisional admin or steward), or the legacy
+    # column for an account without a membership. The same people dismiss it.
+    membership = user.get_membership()
+    shown_as_admin = membership.is_admin if membership else bool(user.is_admin)
+    if not shown_as_admin:
         return jsonify({'error': 'Not an admin'}), 403
 
     user.has_seen_admin_onboarding = True
@@ -11685,6 +11697,24 @@ def api_get_tenant_ai_config():
     membership = get_current_membership()
     if not membership or membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
         return jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403
+
+    if not is_enterprise():
+        # Community Edition has no AI features. The organisation settings page
+        # asks on every visit, so answer in the shape it reads, with everything
+        # off, and say that the feature is not available.
+        return jsonify({
+            'available': False,
+            'system_ai_enabled': False,
+            'system_slack_bot_enabled': False,
+            'system_mcp_enabled': False,
+            'system_external_api_enabled': False,
+            'ai_features_enabled': False,
+            'ai_slack_queries_enabled': False,
+            'ai_assisted_creation_enabled': False,
+            'ai_external_access_enabled': False,
+            'ai_require_anonymization': False,
+            'ai_log_interactions': False,
+        })
 
     # Get both system and tenant config
     system_config = AIConfig.get_system_ai_config()

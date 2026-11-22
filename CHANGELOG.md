@@ -59,6 +59,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Startup migration `2.4.0` creates the `retention_runs` and `retention_erasures` tables on existing SQLite and PostgreSQL databases. It runs by itself when the new version starts
 - Upgrading an installation where the cron job was never set up: the first automatic run deletes old login history and old stored messages and holds back overdue accounts, decisions and tenants until a super admin has looked at them. See "Data retention" in `docs/self-hosting.md`. Erasure cannot be undone, so take a database backup first
 - Rejecting an access request still sends no email to the requester: the product has no rejection message
+- The contact form, the Get in touch (sponsorship) form and the feedback form all send to the Contact Form Email setting, and its default is `contact@decisionrecords.org`, the address the public pages give. Before, the default was `admin@decisionrecords.org` and sponsorship messages always went to `adr-admin@decisionrecords.org`, whatever the setting. A saved Contact Form Email keeps its value
+- An administrator whose role is on their membership only (for example a member promoted through a role request) is accepted by the administrator endpoints: users, access requests, sign-in, single sign-on and email settings, and the Slack and Teams settings. These endpoints looked only at an older per-account flag, so such an administrator saw the settings page and every request on it was refused. Anyone the flag admitted is still admitted. Stewards are not admitted by this change
 
 ### Fixed
 - On PostgreSQL the scheduled GDPR task failed with a foreign key error as soon as an expired tenant had a decision in a space, an audit log entry or a role request, or an expired decision had a relationship to another decision. The request answered 500 and everything after the failing step (tenants, login history) was skipped on every run. Each category now runs on its own and each account, decision and tenant in its own transaction, so one failure is rolled back, recorded and does not stop the rest
@@ -84,6 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Approving an access request now emails the requester their setup link when email is configured (the system email settings, or the organisation's own). The sign-in page said an email would come, and none was sent. The administrator is still shown the link, with a line saying whether the email was sent. When email is not set up or the send fails, the request is still approved and the administrator is told to pass the link on
 - The sign-in page promises an email after an access request only when one can be sent. With email it says the link arrives by email on approval and that the administrator gives it if the email cannot be sent. Without email it says the administrator gives the link. `/api/auth/tenant/<domain>` reports `email_available` and the access request answer reports `approval_email`
 - In the setup link dialog, "Send Email" showed the old link after sending, although sending replaces it. The dialog shows the link that works
+- Dismissing the first-admin onboarding dialog was refused for an administrator, provisional administrator or steward whose role is on their membership only, so the dialog came back on every visit
+- In Community Edition, `GET /api/tenant/ai/config` answered 500 each time organisation settings loaded. It answers with every AI setting off and `available: false`
 
 ## [2.1.1] - 2026-11-21
 

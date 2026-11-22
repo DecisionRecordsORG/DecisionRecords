@@ -329,7 +329,7 @@ interface SystemAISettings {
             <form [formGroup]="supportForm" (ngSubmit)="saveSupportSettings()">
               <div class="form-section">
                 <h3>Contact Form Email</h3>
-                <p class="hint">All submissions from the website contact form will be sent to this address</p>
+                <p class="hint">Messages from the contact form, the Get in touch form and the feedback form are sent to this address</p>
                 <mat-form-field appearance="outline" class="full-width">
                   <mat-label>Support Email Address</mat-label>
                   <input matInput type="email" formControlName="support_email" placeholder="admin@example.com">
@@ -1704,7 +1704,7 @@ export class SuperadminSettingsComponent implements OnInit {
   supportLoading = true;
   supportSaving = false;
   supportDefaults = {
-    support_email: 'admin@decisionrecords.org'
+    support_email: 'contact@decisionrecords.org'
   };
 
   // Help link settings

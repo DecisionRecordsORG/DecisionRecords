@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import (
     db, User, Tenant, TenantMembership, GlobalRole, MaturityState, MasterAccount,
     EmailConfig, Inquiry, DEFAULT_MASTER_PASSWORD, DEFAULT_MASTER_USERNAME,
-    TEAM_SIZE_CODES,
+    TEAM_SIZE_CODES, SystemConfig,
 )
 from tests.app_test_utils import load_test_app
 
@@ -893,3 +893,81 @@ class TestInterestSummary:
             '1 to 5 people', '6 to 25 people', '26 to 100 people', '101 to 500 people',
             'More than 500 people', 'Not answered',
         ]
+
+
+# ==================== Where the three forms are emailed ====================
+
+@pytest.mark.parametrize('url,payload,source', FORMS, ids=FORM_IDS)
+class TestFormsShareOneRecipient:
+    """All three forms go to the Contact Form Email setting, with one default."""
+
+    def _recipient(self, client, url, payload):
+        enable_email()
+        with patch('notifications.send_email', return_value=True) as send_email:
+            response = client.post(url, json=payload)
+        assert response.status_code == 200, response.get_json()
+        send_email.assert_called_once()
+        return send_email.call_args.args[1]
+
+    def test_default_is_the_address_the_public_pages_give(self, client, url, payload, source):
+        assert SystemConfig.DEFAULT_SUPPORT_EMAIL == 'contact@decisionrecords.org'
+        assert self._recipient(client, url, payload) == 'contact@decisionrecords.org'
+
+    def test_the_setting_is_used(self, client, url, payload, source):
+        SystemConfig.set(SystemConfig.KEY_SUPPORT_EMAIL, 'desk@example.org')
+
+        assert self._recipient(client, url, payload) == 'desk@example.org'
+
+    def test_a_setting_that_holds_the_old_default_keeps_its_value(self, client, url, payload, source):
+        """A super admin who saved the old address chose it; nothing rewrites it."""
+        SystemConfig.set(SystemConfig.KEY_SUPPORT_EMAIL, 'admin@decisionrecords.org')
+
+        assert self._recipient(client, url, payload) == 'admin@decisionrecords.org'
+        assert SystemConfig.get(SystemConfig.KEY_SUPPORT_EMAIL) == 'admin@decisionrecords.org'
+
+
+class TestNotificationDefaultsAgree:
+    """Called without a recipient, each email function falls back to the same address."""
+
+    def test_no_function_has_an_address_of_its_own(self, api_app):
+        import inspect
+        import notifications
+
+        for function in (notifications.send_feedback_email, notifications.send_contact_email,
+                         notifications.send_sponsorship_inquiry_email):
+            source = inspect.getsource(function)
+            assert '@decisionrecords.org' not in source, function.__name__
+            assert 'recipient_email' in inspect.signature(function).parameters, function.__name__
+
+    def test_each_falls_back_to_the_default(self, api_app):
+        import notifications
+
+        with patch('notifications.send_email', return_value=True) as send_email:
+            notifications.send_feedback_email(None, 'Ada', 'ada@example.org', 'Some feedback here')
+            notifications.send_contact_email(None, 'Ada', 'ada@example.org', 'A message')
+            notifications.send_sponsorship_inquiry_email(None, 'Example Org', 'ada@example.org')
+
+        assert [call.args[1] for call in send_email.call_args_list] == ['contact@decisionrecords.org'] * 3
+
+
+class TestStartingUpKeepsAStoredRecipient:
+
+    def test_init_database_does_not_touch_a_stored_contact_email(self, app_module, api_app):
+        SystemConfig.set(SystemConfig.KEY_SUPPORT_EMAIL, 'admin@decisionrecords.org')
+
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert SystemConfig.get(SystemConfig.KEY_SUPPORT_EMAIL) == 'admin@decisionrecords.org'
+
+    def test_super_admin_settings_report_the_new_default(self, api_app):
+        from models import DEFAULT_MASTER_PASSWORD, DEFAULT_MASTER_USERNAME
+        admin = api_app.test_client()
+        login = admin.post('/auth/local', json={
+            'username': DEFAULT_MASTER_USERNAME, 'password': DEFAULT_MASTER_PASSWORD})
+        assert login.status_code == 200
+
+        settings = admin.get('/api/admin/settings/support').get_json()
+
+        assert settings['support_email'] == 'contact@decisionrecords.org'
+        assert settings['defaults']['support_email'] == 'contact@decisionrecords.org'

@@ -246,8 +246,33 @@ def login_required(f):
 # The decorators below send a browser request that is refused to '/', by path.
 # The `index` view must not be named here: it exists only without a built frontend.
 
+def is_tenant_admin(user):
+    """Whether `user` is an administrator of their own organisation.
+
+    A person's role is on their membership of the organisation their account
+    belongs to: ADMIN, or PROVISIONAL_ADMIN (the first administrator of a new
+    organisation). The `users.is_admin` column is older. It is set for the
+    first account of an organisation and by the legacy admin switch, and it is
+    not changed when a member is promoted through a role request, so a
+    promoted administrator has the role on the membership only.
+
+    Either one is enough. The legacy column still counts so that nobody who
+    has access loses it, and it is all there is for an account without a
+    membership. A steward is not an administrator here, and a membership of
+    another organisation does not count.
+    """
+    from models import GlobalRole
+
+    if user is None:
+        return False
+    if getattr(user, 'is_admin', False):
+        return True
+    membership = user.get_membership()
+    return bool(membership) and membership.global_role in (GlobalRole.ADMIN, GlobalRole.PROVISIONAL_ADMIN)
+
+
 def admin_required(f):
-    """Decorator to require admin privileges for a route."""
+    """Decorator to require tenant administrator privileges for a route (see is_tenant_admin)."""
     @wraps(f)
     @login_required
     def decorated_function(*args, **kwargs):
@@ -255,7 +280,7 @@ def admin_required(f):
         if is_master_account():
             return f(*args, **kwargs)
 
-        if not g.current_user.is_admin:
+        if not is_tenant_admin(g.current_user):
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin access required'}), 403
             return redirect('/')
