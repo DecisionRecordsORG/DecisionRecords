@@ -56,6 +56,9 @@ test.describe('Team profile', () => {
     await expect(section).toContainText('Two optional questions');
     await expect(section).toContainText('It helps us build for teams like yours.');
     await expect(section).toContainText('You can skip this and answer later in organisation settings.');
+    const dataLink = section.locator('[data-testid="onboarding-data-link"]');
+    await expect(dataLink).toHaveText('How we handle your data');
+    await expect(dataLink).toHaveAttribute('href', '/dpa');
     await expect(section).toContainText('What does your team make decisions about?');
     await expect(section).toContainText('Team size');
 
@@ -170,6 +173,9 @@ test.describe('Team profile', () => {
     const card = page.locator('[data-testid="team-profile-card"]');
     await expect(card).toContainText('It helps us build for teams like yours.');
     await expect(card).toContainText('You can leave either one blank.');
+    const dataLink = card.locator('[data-testid="team-profile-data-link"]');
+    await expect(dataLink).toHaveText('How we handle your data');
+    await expect(dataLink).toHaveAttribute('href', '/dpa');
     await expect(page.locator('[data-testid="team-profile-focus"]')).toHaveValue('');
 
     await page.locator('[data-testid="team-profile-focus"]').fill('Clinical protocols');

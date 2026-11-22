@@ -198,6 +198,11 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
               <p class="error-message">{{ feedbackError }}</p>
             }
 
+            <p class="data-notice" data-testid="feedback-data-notice">
+              We store your message so we can reply to you.
+              <a href="/dpa" target="_blank" rel="noopener">How we handle your data</a>
+            </p>
+
             <button mat-raised-button color="primary" type="submit"
                     [disabled]="feedbackForm.invalid || feedbackLoading" class="full-width submit-btn">
               <mat-spinner diameter="20" *ngIf="feedbackLoading"></mat-spinner>
@@ -446,6 +451,17 @@ import { DecisionModalComponent, DecisionModalResult } from '../decision-modal/d
 
     ::ng-deep .consent-checkbox .mdc-form-field {
       color: #475569;
+    }
+
+    .data-notice {
+      margin: 0 0 8px;
+      color: #64748b;
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    .data-notice a {
+      color: #2563eb;
     }
 
     .submit-btn {

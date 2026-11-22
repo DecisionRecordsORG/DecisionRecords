@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/api/contact`, `/api/sponsorship` and `/api/feedback` answer 200 with the usual thank-you message once the message is stored, also when email is not configured or the send fails. They used to answer 503 or 500 and drop the message. They still answer 503 or 500 when the message could be neither stored nor emailed
 - Personal data export includes the messages a user sent through the contact, "Get in touch" and feedback forms while signed in. Deleting an account removes the name, email address and message from that person's stored inquiries
 - The scheduled GDPR task (`/api/admin/execute-gdpr-tasks`) deletes inquiries older than 24 months and reports them as `purged_inquiries`. Installations that do not schedule the task keep inquiries until a super admin deletes them
+- The in-app feedback dialog and the footer contact dialog say above the send button that the message is stored so it can be answered, and the team profile questions in the onboarding dialog and in organization settings carry a "How we handle your data" link. Both point to the Data Processing Addendum page (`/dpa`)
 
 ### Fixed
 - The user limit is now enforced when an account is created by Slack, Google, Microsoft or Teams sign-in, by a tenant's own SSO provider, by the Teams tab sign-in and by an emailed sign-up link. A full tenant refuses the new account with the "User limit reached" error; existing members can still sign in and the first account of a new organization is never refused

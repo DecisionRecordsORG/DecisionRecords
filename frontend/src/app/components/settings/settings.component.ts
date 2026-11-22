@@ -1638,6 +1638,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
               <mat-card-content>
                 <p class="team-profile-intro">
                   Two optional questions. It helps us build for teams like yours. You can leave either one blank.
+                  <a href="/dpa" target="_blank" rel="noopener" data-testid="team-profile-data-link">How we handle your data</a>
                 </p>
 
                 @if (loadingTeamProfile) {
@@ -2038,6 +2039,10 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     .team-profile-intro {
       color: #475569;
       margin: 8px 0 20px;
+    }
+
+    .team-profile-intro a {
+      color: #2563eb;
     }
 
     .team-size-field {
