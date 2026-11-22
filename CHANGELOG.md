@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Soft-deleted decisions of a soft-deleted tenant are erased with the tenant, not one by one
 - Startup migration `2.4.0` creates the `retention_runs` and `retention_erasures` tables on existing SQLite and PostgreSQL databases. It runs by itself when the new version starts
 - Upgrading an installation where the cron job was never set up: the first automatic run deletes old login history and old stored messages and holds back overdue accounts, decisions and tenants until a super admin has looked at them. See "Data retention" in `docs/self-hosting.md`. Erasure cannot be undone, so take a database backup first
+- Rejecting an access request still sends no email to the requester: the product has no rejection message
 
 ### Fixed
 - On PostgreSQL the scheduled GDPR task failed with a foreign key error as soon as an expired tenant had a decision in a space, an audit log entry or a role request, or an expired decision had a relationship to another decision. The request answered 500 and everything after the failing step (tenants, login history) was skipped on every run. Each category now runs on its own and each account, decision and tenant in its own transaction, so one failure is rolled back, recorded and does not stop the rest
@@ -77,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - After recovering an account with a new password, the person was treated as still setting up their account for up to 30 minutes: signing in led to the profile page in setup mode instead of the organisation's decisions. Setting a password from a recovery link now ends the setup session, as setting up a passkey already did
 - The answer to a validated recovery link named a page, `/<domain>/recover`, that the app does not have. Recovery and first-time setup share the setup page, and the server now names that page for both. The emailed recovery link already pointed there
 - End-to-end tests: the helper that creates an account without credentials returned a setup token that was never stored, so the setup page could only be tested in its error state. It returns a working token, and a second test-only helper creates a setup or recovery link for an existing account
+- Approving an access request now emails the requester their setup link when email is configured (the system email settings, or the organisation's own). The sign-in page said an email would come, and none was sent. The administrator is still shown the link, with a line saying whether the email was sent. When email is not set up or the send fails, the request is still approved and the administrator is told to pass the link on
+- The sign-in page promises an email after an access request only when one can be sent. With email it says the link arrives by email on approval and that the administrator gives it if the email cannot be sent. Without email it says the administrator gives the link. `/api/auth/tenant/<domain>` reports `email_available` and the access request answer reports `approval_email`
+- In the setup link dialog, "Send Email" showed the old link after sending, although sending replaces it. The dialog shows the link that works
 
 ## [2.1.1] - 2026-11-21
 

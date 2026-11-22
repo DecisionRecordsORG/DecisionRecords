@@ -5498,6 +5498,47 @@ def system_email_configured():
     return EmailConfig.query.filter_by(domain='system', enabled=True).first()
 
 
+def account_email_config(domain):
+    """The email configuration that sends an organisation's account emails, or None.
+
+    The system configuration when there is one, otherwise the organisation's
+    own. Never another organisation's.
+    """
+    return system_email_configured() or EmailConfig.query.filter_by(domain=domain, enabled=True).first()
+
+
+def email_setup_link_after_approval(access_request, setup_url):
+    """Email an approved requester their setup link.
+
+    Returns (email_sent, delivery_message). The message is one line for the
+    approving administrator: whether the email went out, or that they need to
+    pass the link on themselves.
+    """
+    from notifications import send_account_setup_email
+
+    recipient = access_request.email
+    email_config = account_email_config(access_request.domain)
+    if not email_config:
+        return False, f'Email is not set up, so no email was sent. Give this link to {recipient} yourself.'
+
+    try:
+        email_sent = bool(send_account_setup_email(
+            email_config,
+            access_request.name,
+            recipient,
+            setup_url,
+            SetupToken.TOKEN_VALIDITY_HOURS,
+            tenant_name=access_request.domain
+        ))
+    except Exception as e:
+        app.logger.warning(f"Failed to send setup email after approval of request {access_request.id}: {e}")
+        email_sent = False
+
+    if email_sent:
+        return True, f'The setup link was emailed to {recipient}.'
+    return False, f'The email to {recipient} could not be sent. Give this link to {recipient} yourself.'
+
+
 def can_tenant_accept_users(domain, count=1):
     """Check if a tenant can accept more users.
 
@@ -5805,6 +5846,9 @@ def _api_get_tenant_status_impl(domain):
         'sso_provider': sso_config.provider_name if sso_config else None,
         'sso_id': sso_config.id if sso_config else None,
         'email_verification_required': email_verification_required,
+        # Whether an approved requester can be emailed their setup link. Without
+        # it the approving administrator passes the link on.
+        'email_available': account_email_config(domain) is not None,
     })
 
 
@@ -6648,15 +6692,24 @@ def api_submit_access_request():
     # proves they control the address) or shown to an administrator who approves
     # the request. It is never returned in this response: the caller is anonymous.
     email_config = system_email_configured()
-    pending_message = 'Access request submitted successfully'
-
-    if not require_approval and not email_config:
-        # No way to deliver the link to the requester: an administrator admits them
-        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
+    # What happens on approval: the requester is emailed their setup link when
+    # email is available, otherwise the administrator passes the link on.
+    approval_email = account_email_config(domain) is not None
+    if approval_email:
+        pending_message = (
+            'Your request has been submitted. When an administrator of your organization approves it, '
+            'you will receive an email with a link to set up your sign-in. If the email cannot be sent, '
+            'the administrator will give you the link.'
+        )
+    else:
         pending_message = (
             'Your request has been submitted. An administrator of your organization '
             'will approve it and give you a link to set up your sign-in.'
         )
+
+    if not require_approval and not email_config:
+        # No way to deliver the link to the requester: an administrator admits them
+        logger.info(f"Access request for {domain} held for administrator approval - email is not configured")
 
     elif not require_approval:
         # Auto-approval enabled: create the account and email the setup link
@@ -6739,6 +6792,7 @@ def api_submit_access_request():
         'message': pending_message,
         'auto_approved': False,
         'email_sent': False,
+        'approval_email': approval_email,
         'request': access_request.to_dict()
     })
 
@@ -7169,17 +7223,21 @@ def api_approve_access_request(request_id):
         setup_token_str = None
         has_passkey = len(existing_user.webauthn_credentials) > 0 if existing_user.webauthn_credentials else False
         has_password = existing_user.has_password()
+        email_sent, delivery_message = False, None
         if not has_passkey and not has_password:
             setup_token = SetupToken.create_for_user(existing_user)
             setup_token_str = setup_token._token_string
             setup_url = f"{request.host_url.rstrip('/')}/{access_request.domain}/setup?token={setup_token_str}"
+            email_sent, delivery_message = email_setup_link_after_approval(access_request, setup_url)
 
         return jsonify({
             'message': 'User already exists, request marked as approved',
             'user': existing_user.to_dict(),
             'setup_url': setup_url,
             'setup_token': setup_token_str,
-            'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS if setup_token_str else None
+            'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS if setup_token_str else None,
+            'email_sent': email_sent,
+            'delivery_message': delivery_message
         })
 
     # Create the user account
@@ -7206,15 +7264,19 @@ def api_approve_access_request(request_id):
 
     db.session.commit()
 
-    # TODO: Send email to user informing them they've been approved
-    # notify_user_access_approved(access_request, new_user, setup_url)
+    # Tell the requester: the sign-in page said they would hear by email. The
+    # approval stands whether or not the email goes out; the administrator is
+    # shown the link either way and is told if they need to pass it on.
+    email_sent, delivery_message = email_setup_link_after_approval(access_request, setup_url)
 
     return jsonify({
         'message': 'Access request approved',
         'user': new_user.to_dict(),
         'setup_url': setup_url,
         'setup_token': setup_token_str,
-        'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS
+        'token_expires_in_hours': SetupToken.TOKEN_VALIDITY_HOURS,
+        'email_sent': email_sent,
+        'delivery_message': delivery_message
     })
 
 
@@ -7244,8 +7306,8 @@ def api_reject_access_request(request_id):
 
     db.session.commit()
 
-    # TODO: Send email to user informing them they've been rejected
-    # notify_user_access_rejected(access_request)
+    # The requester is not told: the product has no rejection email or wording
+    # for one. Adding it is a product decision, not a missing send.
 
     return jsonify({
         'message': 'Access request rejected',

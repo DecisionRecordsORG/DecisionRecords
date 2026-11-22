@@ -13,6 +13,10 @@ describe('TenantLoginComponent access requests', () => {
   const ADMIN_WILL_SHARE_LINK =
     'Your request has been submitted. An administrator of your organization ' +
     'will approve it and give you a link to set up your sign-in.';
+  const EMAIL_ON_APPROVAL =
+    'Your request has been submitted. When an administrator of your organization approves it, ' +
+    'you will receive an email with a link to set up your sign-in. If the email cannot be sent, ' +
+    'the administrator will give you the link.';
   const EMAIL_FAILED =
     'Your request was received, but the setup email could not be sent. ' +
     'An administrator of your organization can approve your request and give you ' +
@@ -96,12 +100,22 @@ describe('TenantLoginComponent access requests', () => {
     expect(fixture.nativeElement.textContent).not.toContain("You'll receive an email");
   });
 
-  it('keeps the default wording for a pending request from a server that sends no delivery flag', () => {
+  it('tells the requester an email will come on approval when the server says so', () => {
+    submitRequest({ message: EMAIL_ON_APPROVAL, auto_approved: false, email_sent: false, approval_email: true });
+
+    expect(component.currentView).toBe('request-sent');
+    expect(text('request-sent-message')).toBe(EMAIL_ON_APPROVAL);
+    expect(text('request-sent-default')).toBeNull();
+  });
+
+  it('promises no email for a pending request when the server does not say how the link arrives', () => {
     submitRequest({ message: 'Access request submitted successfully' });
 
     expect(component.currentView).toBe('request-sent');
     expect(text('request-sent-message')).toBeNull();
     expect(text('request-sent-default')).toContain('Your access request has been submitted');
+    expect(text('request-sent-default')).toContain('An administrator will review it.');
+    expect(fixture.nativeElement.textContent).not.toContain('receive an email');
   });
 
   it('shows the check-your-email view when the account was created and the link emailed', () => {

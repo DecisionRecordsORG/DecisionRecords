@@ -15,6 +15,10 @@ export interface SetupLinkDialogData {
   userEmail: string;
   setupUrl: string;
   expiresInHours: number;
+  /** Set after approving an access request: whether the requester was emailed the link. */
+  emailSent?: boolean;
+  /** One line from the server saying what happened to the email. */
+  deliveryMessage?: string | null;
 }
 
 @Component({
@@ -41,8 +45,19 @@ export interface SetupLinkDialogData {
         Account approved for <strong>{{ data.userName }}</strong> ({{ data.userEmail }})
       </p>
 
-      <p class="instruction">
-        Share this setup link with the user so they can set up their login credentials.
+      @if (data.deliveryMessage) {
+        <p class="delivery-message" [class.delivery-failed]="!data.emailSent" data-testid="delivery-message">
+          <mat-icon>{{ data.emailSent ? 'mark_email_read' : 'warning' }}</mat-icon>
+          <span>{{ data.deliveryMessage }}</span>
+        </p>
+      }
+
+      <p class="instruction" data-testid="setup-link-instruction">
+        @if (data.emailSent) {
+          You can also copy the link and send it yourself.
+        } @else {
+          Share this setup link with the user so they can set up their login credentials.
+        }
         The link expires in <strong>{{ data.expiresInHours }} hours</strong>.
       </p>
 
@@ -57,13 +72,13 @@ export interface SetupLinkDialogData {
       </div>
 
       <div class="action-buttons">
-        <button mat-raised-button color="primary" (click)="sendEmail()" [disabled]="sendingEmail">
+        <button mat-raised-button color="primary" (click)="sendEmail()" [disabled]="sendingEmail" data-testid="send-setup-email">
           @if (sendingEmail) {
             <mat-spinner diameter="20"></mat-spinner>
           } @else {
             <mat-icon>send</mat-icon>
           }
-          Send Email
+          {{ data.emailSent ? 'Send again' : 'Send Email' }}
         </button>
         <button mat-raised-button (click)="copyLink()">
           <mat-icon>content_copy</mat-icon>
@@ -129,6 +144,22 @@ export interface SetupLinkDialogData {
       margin-right: 4px;
     }
 
+    .delivery-message {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      background: #e3f2fd;
+      border-radius: 8px;
+      color: #1565c0;
+    }
+
+    .delivery-message.delivery-failed {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
     .email-sent-message {
       display: flex;
       align-items: center;
@@ -179,6 +210,10 @@ export class SetupLinkDialogComponent {
       next: (response) => {
         this.sendingEmail = false;
         this.emailSent = true;
+        // Sending makes a new link and ends the old one: show the one that works
+        if (response?.setup_url) {
+          this.data.setupUrl = response.setup_url;
+        }
         this.snackBar.open(`Setup email sent to ${this.data.userEmail}`, 'Close', { duration: 3000 });
       },
       error: (err) => {

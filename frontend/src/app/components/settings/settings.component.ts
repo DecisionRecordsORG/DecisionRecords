@@ -813,7 +813,7 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
                             <button mat-icon-button color="primary"
                                     (click)="approveRequest(request)"
                                     [disabled]="processingRequest === request.id"
-                                    matTooltip="Approve">
+                                    matTooltip="Approve" data-testid="approve-request">
                               <mat-spinner diameter="20" *ngIf="processingRequest === request.id"></mat-spinner>
                               <mat-icon *ngIf="processingRequest !== request.id">check_circle</mat-icon>
                             </button>
@@ -3661,7 +3661,9 @@ export class SettingsComponent implements OnInit {
                   userName: request.name,
                   userEmail: request.email,
                   setupUrl: response.setup_url,
-                  expiresInHours: response.token_expires_in_hours || 48
+                  expiresInHours: response.token_expires_in_hours || 48,
+                  emailSent: response.email_sent === true,
+                  deliveryMessage: response.delivery_message || null
                 },
                 width: '500px'
               });

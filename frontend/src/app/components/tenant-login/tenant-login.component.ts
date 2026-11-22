@@ -365,7 +365,7 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               } @else {
                 <p data-testid="request-sent-default">
                   Your access request has been submitted for <strong>{{ tenant }}</strong>.
-                  You'll receive an email once your request is approved.
+                  An administrator will review it.
                 </p>
               }
               <button mat-raised-button color="primary" routerLink="/">
@@ -398,8 +398,14 @@ type LoginView = 'initial' | 'login' | 'request-access' | 'request-sent' | 'auto
               <p>
                 Your email has been verified and your access request for <strong>{{ tenant }}</strong> has been submitted.
               </p>
-              <p class="pending-note">
-                An administrator will review your request. You'll receive an email once approved.
+              <p class="pending-note" data-testid="access-pending-note">
+                @if (approvalEmailAvailable === true) {
+                  An administrator will review your request. When it is approved, you will receive an email with a link to set up your sign-in. If the email cannot be sent, the administrator will give you the link.
+                } @else if (approvalEmailAvailable === false) {
+                  An administrator will review your request. When it is approved, the administrator will give you a link to set up your sign-in.
+                } @else {
+                  An administrator will review your request.
+                }
               </p>
               <button mat-raised-button color="primary" routerLink="/">
                 <mat-icon>home</mat-icon>
@@ -857,6 +863,10 @@ export class TenantLoginComponent implements OnInit {
   effectiveRequireApproval = true;
   // Server explanation shown after an access request that is waiting for an administrator
   requestSentMessage = '';
+  // Whether an approved requester can be emailed their setup link: true or
+  // false once the server has said, null while it is not known. The page
+  // promises an email only when it is true.
+  approvalEmailAvailable: boolean | null = null;
 
   constructor(
     private fb: FormBuilder,
@@ -925,6 +935,7 @@ export class TenantLoginComponent implements OnInit {
     // Check for access_requested param - show access pending view
     if (this.route.snapshot.queryParamMap.get('access_requested') === '1') {
       this.currentView = 'access-pending';
+      this.loadApprovalEmailAvailability();
     }
 
     // Check for OAuth auth errors
@@ -940,6 +951,17 @@ export class TenantLoginComponent implements OnInit {
     } else if (errorParam === 'user_limit') {
       this.error = 'This organization has reached its user limit, so a new account could not be created. Please contact your organization administrator.';
     }
+  }
+
+  private loadApprovalEmailAvailability(): void {
+    this.http.get<{ email_available?: boolean }>(`/api/auth/tenant/${this.tenant}`).subscribe({
+      next: (status) => {
+        this.approvalEmailAvailable = typeof status?.email_available === 'boolean' ? status.email_available : null;
+      },
+      error: () => {
+        this.approvalEmailAvailable = null;
+      }
+    });
   }
 
   private checkSlackOidcStatus(): void {
@@ -1165,10 +1187,12 @@ export class TenantLoginComponent implements OnInit {
           this.requestSentMessage = '';
           this.currentView = 'auto-approved';
         } else {
-          // Waiting for an administrator. When no email was sent the server says
-          // how the requester will get their setup link, so show that instead of
-          // promising an email.
-          this.requestSentMessage = response.email_sent === false ? (response.message || '') : '';
+          // Waiting for an administrator. The server says how the requester will
+          // get their setup link (by email on approval, or from the administrator),
+          // so its message is shown as it is. The old one-line confirmation said
+          // nothing about that and is replaced by the page's own neutral wording.
+          const message = response.message || '';
+          this.requestSentMessage = message === 'Access request submitted successfully' ? '' : message;
           this.currentView = 'request-sent';
         }
       },
