@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-release-2.2.0"
+title = "Prepare community release 2.2.0"
+summary = "Sets the version to 2.2.0 and moves the unreleased changelog entries under it: the 25-user limit enforced on every path that adds a user, decision records wording for any team, new relationship packs, stored inbound messages and the team profile, automatic data retention with limits and a preview, help for people who cannot sign in, Teams tab sign-in and tenant SSO fixes, account deletion and export fixes, fully pinned dependencies and PostgreSQL checks on the image."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"
