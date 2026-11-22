@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import session, redirect, url_for, request, jsonify, g
+from flask import session, redirect, request, jsonify, g
 from authlib.integrations.requests_client import OAuth2Session
 from datetime import datetime, timedelta, timezone
 import logging
@@ -243,6 +243,9 @@ def login_required(f):
     return decorated_function
 
 
+# The decorators below send a browser request that is refused to '/', by path.
+# The `index` view must not be named here: it exists only without a built frontend.
+
 def admin_required(f):
     """Decorator to require admin privileges for a route."""
     @wraps(f)
@@ -255,7 +258,7 @@ def admin_required(f):
         if not g.current_user.is_admin:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Admin access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -268,7 +271,7 @@ def master_required(f):
         if not is_master_account():
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Master account access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -289,19 +292,19 @@ def steward_or_admin_required(f):
         if not tenant:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Tenant not found'}), 404
-            return redirect(url_for('index'))
+            return redirect('/')
 
         membership = g.current_user.get_membership(tenant_id=tenant.id)
         if not membership:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Not a member of this tenant'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
 
         # Check if user is steward or admin (any admin level)
         if membership.global_role not in [GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN]:
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Steward or admin access required'}), 403
-            return redirect(url_for('index'))
+            return redirect('/')
 
         # Set tenant and membership in g for route handlers
         g.current_tenant = tenant

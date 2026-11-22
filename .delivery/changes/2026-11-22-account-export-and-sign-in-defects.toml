@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-account-export-and-sign-in-defects"
+title = "Account deletion, personal data export and sign-in defects"
+summary = "Fixes sign-in through a tenant's own OIDC provider answering 500 on installations that serve the built frontend, and removes every redirect that depended on a route registered only without a build. Account anonymisation now also clears the author name stored on comments and the other places a deleted person's name or email was kept as text. The personal data export gains comments, consent records, passkey, notification, request and API key details. Approving an access request emails the setup link to the requester when email is configured. Adds an optional SUPPORT_URL for self-hosted installations, one default contact address for the three message forms, a clean answer from the tenant AI settings endpoint in Community Edition, and a membership-based check when dismissing admin onboarding."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"

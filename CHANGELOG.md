@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/api/sponsorship` answered 500 when an optional field was sent as JSON `null`, and `/api/feedback` answered 500 for `null` fields and for a body that was not JSON. All three form endpoints now treat missing, `null` and wrong-typed optional fields as not given and answer 400 for an invalid body
 - End-to-end tests: the sign-in helpers typed into the server-rendered form before the app was running, lost the text when it started, and timed out on a disabled button. They now fill the form until the app has taken the values
 - The first-admin onboarding dialog no longer opens on top of another dialog, such as a decision someone has started writing, and no longer takes the keyboard focus from it. It waits until that dialog is closed. Its buttons stay in view on short windows
+- Signing in through an organisation's own single sign-on provider answered 500 "Authentication failed" on every installation that serves the built frontend, after the account had been created or found. The redirect after sign-in named a page that exists only without a frontend build. The person is now signed in and sent to their organisation. The super admin sign-in form had the same fault
+- When an organisation is at its user limit, its own single sign-on provider now sends a newcomer to the sign-in page with the user limit message, like the other sign-in methods, instead of a bare error page
+- Tests no longer depend on whether a frontend build exists in the checkout, and one group of tests runs the app with a built frontend, as production does. A test fails when a redirect names a page that exists in only one of the two configurations
 
 ## [2.1.1] - 2026-11-21
 

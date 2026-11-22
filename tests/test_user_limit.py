@@ -170,11 +170,11 @@ class TenantSso:
         return client.get('/auth/callback?code=abc&state=state')
 
     def refused(self, response, domain):
-        assert response.status_code == 403
-        assert f'maximum user limit of {LIMIT}' in response.get_data(as_text=True)
+        assert_limit_redirect(response, domain)
 
     def admitted(self, response):
         assert response.status_code == 302, response.get_data(as_text=True)
+        assert 'error=' not in response.headers['Location']
 
 
 class TeamsTabSignIn:
@@ -603,3 +603,139 @@ class TestDefaultLimit:
         assert response.status_code == 200, response.get_data(as_text=True)
         assert response.get_json() == {
             'max_users_per_tenant': 25, 'defaults': {'max_users_per_tenant': 25}}
+
+
+# ==================== With a built frontend, as in production ====================
+#
+# app.py registers the legacy template routes (`index` and friends) only when
+# there is no frontend build. Production always has one, CI never does, so a
+# redirect built with url_for('index') passes every other test and answers 500
+# in production. These tests load the app the way production runs it.
+
+@pytest.fixture
+def built_app(monkeypatch, tmp_path):
+    monkeypatch.setenv('APP_BASE_URL', 'https://app.example.test')
+    monkeypatch.delenv('OAUTH_BASE_URL', raising=False)
+    (tmp_path / 'index.html').write_text('<!doctype html><title>Decision Records</title><app-root></app-root>')
+    app_module, test_app = load_test_app(secret_key='test-secret-key-user-limit', built_frontend=tmp_path)
+
+    with test_app.app_context():
+        db.create_all()
+        app_module.init_database()
+        yield app_module, test_app
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+    # Leave the module as every other suite expects to find it
+    load_test_app(secret_key='test-secret-key-user-limit')
+
+
+class TestTenantSsoWithABuiltFrontend:
+
+    def test_the_fixture_runs_the_app_as_production_does(self, built_app):
+        app_module, test_app = built_app
+
+        assert app_module.SERVE_ANGULAR is True
+        assert 'index' not in test_app.view_functions
+        assert 'serve_angular' in test_app.view_functions
+        response = test_app.test_client().get('/acme.test/login')
+        assert response.status_code == 200
+        assert '<app-root>' in response.get_data(as_text=True)
+
+    def test_full_tenant_sends_the_newcomer_to_the_sign_in_page_with_the_limit_message(
+            self, built_app, monkeypatch):
+        set_limit(LIMIT)
+        make_tenant_with(LIMIT)
+        path = TenantSso()
+        path.prepare(built_app, monkeypatch, DOMAIN)
+
+        response = path.attempt(built_app, NEWCOMER)
+
+        assert_limit_redirect(response, DOMAIN)
+        assert not account_exists()
+
+    def test_new_account_is_signed_in_and_sent_to_the_organisation(self, built_app, monkeypatch):
+        _, test_app = built_app
+        set_limit(LIMIT)
+        make_tenant_with(LIMIT - 1)
+        path = TenantSso()
+        path.prepare(built_app, monkeypatch, DOMAIN)
+
+        response = path.attempt(built_app, NEWCOMER)
+
+        assert response.status_code == 302, response.get_data(as_text=True)
+        assert response.headers['Location'].endswith(f'/{DOMAIN}')
+        assert account_exists()
+
+    def test_existing_member_is_signed_in(self, built_app, monkeypatch):
+        set_limit(LIMIT)
+        make_tenant_with(LIMIT)
+        path = TenantSso()
+        path.prepare(built_app, monkeypatch, DOMAIN)
+
+        response = path.attempt(built_app, f'member0@{DOMAIN}')
+
+        assert response.status_code == 302, response.get_data(as_text=True)
+        assert response.headers['Location'].endswith(f'/{DOMAIN}')
+
+    def test_super_admin_form_sign_in_redirects_instead_of_failing(self, built_app):
+        from models import DEFAULT_MASTER_PASSWORD, DEFAULT_MASTER_USERNAME
+        _, test_app = built_app
+
+        response = test_app.test_client().post('/auth/local', data={
+            'username': DEFAULT_MASTER_USERNAME, 'password': DEFAULT_MASTER_PASSWORD})
+
+        assert response.status_code == 302, response.get_data(as_text=True)
+        assert response.headers['Location'].endswith('/superadmin/dashboard')
+
+
+class TestNoRedirectDependsOnALegacyRoute:
+    """Every view named in a url_for() call exists with and without a frontend build."""
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Templates that only the legacy routes render may name legacy views
+    LEGACY_ONLY_TEMPLATES = {'base.html', 'index.html', 'decision.html', 'settings.html',
+                             'profile.html', 'master_profile.html'}
+
+    def _named_views(self, legacy_block=False):
+        import re
+        pattern = re.compile(r"""url_for\(\s*['"]([A-Za-z_][\w.]*)['"]""")
+        names = {}
+        sources = [os.path.join(self.ROOT, name) for name in os.listdir(self.ROOT) if name.endswith('.py')]
+        templates = os.path.join(self.ROOT, 'templates')
+        sources += [os.path.join(templates, name) for name in os.listdir(templates)
+                    if name not in self.LEGACY_ONLY_TEMPLATES]
+        for source in sources:
+            with open(source, encoding='utf-8') as handle:
+                inside_legacy = False
+                for number, line in enumerate(handle, 1):
+                    if source.endswith('app.py'):
+                        # The body of `if not SERVE_ANGULAR:` is the legacy routes themselves
+                        if line.startswith('if not SERVE_ANGULAR:'):
+                            inside_legacy = True
+                        elif inside_legacy and line.strip() and not line.startswith((' ', '\t')):
+                            inside_legacy = False
+                    if inside_legacy:
+                        continue
+                    for name in pattern.findall(line):
+                        names.setdefault(name, []).append(f'{os.path.basename(source)}:{number}')
+        return names
+
+    def test_scan_finds_the_url_for_calls(self):
+        assert 'sso_callback' in self._named_views()
+
+    def test_every_named_view_is_registered_with_a_built_frontend(self, built_app):
+        _, test_app = built_app
+
+        missing = {name: where for name, where in self._named_views().items()
+                   if name not in test_app.view_functions}
+
+        assert not missing, f'url_for() names views that do not exist in production: {missing}'
+
+    def test_every_named_view_is_registered_without_a_built_frontend(self, real_app):
+        _, test_app = real_app
+
+        missing = {name: where for name, where in self._named_views().items()
+                   if name not in test_app.view_functions}
+
+        assert not missing, f'url_for() names views that do not exist without a build: {missing}'

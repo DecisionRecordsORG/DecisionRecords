@@ -1155,6 +1155,21 @@ def inject_user():
 
 # ==================== Auth Routes ====================
 
+def signed_in_home(domain=None, super_admin=False):
+    """Path a person is sent to after signing in through a server redirect.
+
+    The legacy `index` view must never be named in a redirect: it is one of the legacy template routes,
+    which are registered only when there is no built frontend. With the built
+    frontend (every production installation) the name does not exist and
+    building its URL raises.
+    """
+    if not SERVE_ANGULAR:
+        return '/'
+    if super_admin:
+        return '/superadmin/dashboard'
+    return f'/{domain}' if domain else '/'
+
+
 @app.route('/login')
 def login():
     """Legacy login route - redirect to Angular landing page."""
@@ -1232,7 +1247,7 @@ def local_login():
         set_session_expiry(is_admin=True)  # 1 hour default for super admin
         if request.is_json:
             return jsonify({'message': 'Login successful'}), 200
-        return redirect(url_for('index'))
+        return redirect(signed_in_home(super_admin=True))
     else:
         # Log failed master login
         log_login_attempt(
@@ -1513,7 +1528,7 @@ def sso_callback():
                 user_agent=user_agent,
                 failure_reason=USER_LIMIT_ERROR
             )
-            return render_template('error.html', message=limit_refusal['message']), 403
+            return user_limit_redirect(sso_config.domain)
 
         # Get or create user
         user = get_or_create_user(email, name, subject, sso_config.domain)
@@ -1532,7 +1547,7 @@ def sso_callback():
         # Set session
         start_user_session(user, is_admin=False)  # 8 hours default for regular users
 
-        return redirect(url_for('index'))
+        return redirect(signed_in_home(sso_config.domain))
 
     except Exception as e:
         app.logger.error(f"SSO callback error: {e}")
