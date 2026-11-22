@@ -107,6 +107,14 @@ Before building, deploying, or validating anything, identify which artifact is b
 - `/api/health` is a liveness route: it answers `{"status": "ok"}` with no database at all. `/health` is the route that reports the database (`"status": "healthy"`, `"database": "connected"`). Anything that decides whether a build or a deploy is good must read `/health`.
 - Test fixtures that drop tables must release their session first (`db.session.remove()`); on PostgreSQL an open transaction makes `DROP TABLE` wait forever. `TEST_DATABASE_URL` is refused unless the database name contains "test", because the fixtures drop every table.
 
+## Test Configuration Versus Production
+
+- The app has two shapes, decided when it is imported: with a built frontend (`frontend/dist`, every production installation) it serves the Angular app; without one it registers legacy template routes (`index`, `settings`, `profile`). CI has no build, so it only ever tested the second shape. A redirect built with `url_for('index')` passed every test and answered 500 in production: sign-in through a tenant's own OIDC provider failed after the account had been created or found.
+- Never name a view in `url_for()` that is registered conditionally. Redirect to a path. `tests/test_user_limit.py` reads every `url_for()` call in the Python modules and templates and fails when the view does not exist in both shapes.
+- `tests/app_test_utils.load_test_app()` loads the app the same way whether or not a build exists in the checkout, and `built_frontend=` loads it as production runs it. A test of a redirect, an error page or anything else that depends on which routes exist should run in that shape too.
+- The same mismatch hid a second defect: the browser tests create administrators with the role on their membership only, the way a promoted member has it, while the administrator endpoints looked at an older per-account flag. The settings page loaded and every request on it was refused. A test helper that creates data differently from the sign-up path is worth keeping when the difference is one real users can have.
+- In Community Edition the AI endpoints were reachable without the AI module and answered 500, two of them on every load of the organisation settings and profile pages. An endpoint that belongs to an optional module must answer cleanly when the module is absent, and a page that loads on every visit should be opened once in a real Community build while watching the server log for 500s.
+
 ## Data Retention
 
 - A promise that depends on an operator step is not kept where nobody took the step. The deletion timelines (7, 30 and 90 days, 24 months) ran only when something called `POST /api/admin/execute-gdpr-tasks`, the self-hosting guide left that to a cron job, and nothing in the repository scheduled it. Work the product promises must be started by the product. Retention now runs from a thread in each worker that claims the day's run in the database (`retention.py`).
@@ -115,6 +123,8 @@ Before building, deploying, or validating anything, identify which artifact is b
 - A first automatic run after a long gap is the dangerous one. Count limits alone would let a small backlog through, so a category is also held back when its oldest item is more than a few days overdue. A person looks at the list before a backlog is erased.
 - Compare stored dates with naive UTC values. The application writes aware datetimes into `timestamp` columns; on a PostgreSQL session that is not UTC they are stored shifted by the session's offset, and an aware value in a filter is converted the same way. On a server in `Europe/Stockholm` a deadline 30 minutes in the future already counted as passed.
 - When hard-deleting, list every table and decide. `retention.TENANT_ERASE_RULES` names each table and a test fails when a model is added without a rule.
+- Anonymising a row does not anonymise copies of it. A person's name was also written as text beside the reference (the author on a comment), into JSON (audit details, a stored Teams conversation), and into rows keyed by email address in another letter case. After an anonymisation the person was still named in 15 columns. `retention.ACCOUNT_TEXT_RULES` now names every text, JSON and binary column, and `tests/test_account_anonymise.py` reads every such column of every table after an anonymisation looking for the person. Prove an erasure by searching for the data, not by checking the fields the code is known to clear.
+- A published sentence about personal data is a test case. The export was said to include comments and consent preferences and had neither. `data_export.EXPORT_RULES` names every column that references a user, and a test fails when a new one has no rule.
 
 ## Enterprise Deploy Safety
 
