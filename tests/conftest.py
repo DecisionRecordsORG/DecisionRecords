@@ -51,10 +51,44 @@ def app():
     with app.app_context():
         db.create_all()
         yield app
-        # Release the session's connection first: on PostgreSQL an open
-        # transaction holds locks that make DROP TABLE wait forever.
-        db.session.remove()
-        db.drop_all()
+        drop_schema()
+
+
+def drop_schema():
+    """Drop every table of the current app's database, holding nothing while doing it.
+
+    The session's connection is released first: on PostgreSQL an open
+    transaction holds locks that make DROP TABLE wait forever. The engine's
+    pool is emptied before and after, so no connection this test opened (in
+    any thread) is left on the server. This protects the fixture from its own
+    connections only. It does not make a second writer safe, and it does not
+    retry: nothing else may be using the test database (see
+    `no_retention_thread_outlives_a_test` below).
+    """
+    db.session.remove()
+    db.engine.dispose()
+    db.drop_all()
+    db.session.remove()
+    db.engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def no_retention_thread_outlives_a_test():
+    """Fail the test that leaves a retention thread running.
+
+    The thread checks the database a minute after it starts and then again
+    and again. Left running, it queries the shared PostgreSQL test database
+    while later tests create and drop their tables, and CI fails far from the
+    test that caused it with a deadlock in some other test's teardown.
+    """
+    import retention
+    yield
+    alive = retention.scheduler_threads()
+    if alive:
+        retention.stop_scheduler()
+        for thread in alive:
+            thread.join(5)
+        pytest.fail(f'{len(alive)} retention scheduler thread(s) were left running by this test')
 
 
 @pytest.fixture

@@ -17,7 +17,7 @@ from flask import Flask
 
 import retention
 from models import db, LoginHistory, RetentionRun, RetentionErasure, SystemConfig
-from tests.conftest import fixture_database_url
+from tests.conftest import drop_schema, fixture_database_url
 from tests.retention_test_data import naive_now
 
 WORKERS = 8
@@ -51,8 +51,7 @@ def concurrent_app(tmp_path):
         db.create_all()
         yield app
         retention.stop_scheduler()
-        db.session.remove()
-        db.drop_all()
+        drop_schema()
 
 
 def in_parallel(app, work):
@@ -257,12 +256,56 @@ def test_thread_is_not_started_under_tests(concurrent_app):
     assert retention._scheduler_thread is None
 
 
-def test_thread_is_not_started_when_the_environment_turns_it_off(concurrent_app, monkeypatch):
-    concurrent_app.config['TESTING'] = False
+def not_under_tests(app, monkeypatch):
+    """Make the app look like a production one to the scheduler's own check."""
+    app.config['TESTING'] = False
     monkeypatch.delenv('FLASK_ENV', raising=False)
     monkeypatch.delenv('TESTING', raising=False)
+    monkeypatch.delenv('PYTEST_CURRENT_TEST', raising=False)
+
+
+def test_thread_is_not_started_when_the_environment_turns_it_off(concurrent_app, monkeypatch):
+    not_under_tests(concurrent_app, monkeypatch)
     monkeypatch.setenv('RETENTION_AUTO_RUN', 'off')
     assert retention.ensure_scheduler(concurrent_app) is None
+
+
+@pytest.mark.parametrize('flag', ['config', 'FLASK_ENV', 'TESTING', 'PYTEST_CURRENT_TEST'])
+def test_each_sign_of_a_test_run_keeps_the_thread_from_starting(concurrent_app, monkeypatch, flag):
+    """Any one of them is enough, so an app loaded in an unusual way is still inert."""
+    not_under_tests(concurrent_app, monkeypatch)
+    monkeypatch.delenv('RETENTION_AUTO_RUN', raising=False)
+    if flag == 'config':
+        concurrent_app.config['TESTING'] = True
+    elif flag == 'PYTEST_CURRENT_TEST':
+        monkeypatch.setenv(flag, 'tests/test_x.py::test_y (call)')
+    else:
+        monkeypatch.setenv(flag, 'testing' if flag == 'FLASK_ENV' else 'true')
+
+    assert retention.ensure_scheduler(concurrent_app) is None
+    assert retention.scheduler_threads() == []
+
+
+def test_pytest_marks_every_test_so_the_thread_cannot_start_by_accident(concurrent_app):
+    """The suite relies on this variable being set while a test runs."""
+    import os
+    concurrent_app.config['TESTING'] = False
+
+    assert os.environ.get('PYTEST_CURRENT_TEST')
+    assert retention._testing(concurrent_app) is True
+
+
+def test_outside_tests_the_thread_would_start(concurrent_app, monkeypatch):
+    """The check above is not simply always true: without any sign of a test run it starts."""
+    not_under_tests(concurrent_app, monkeypatch)
+    monkeypatch.delenv('RETENTION_AUTO_RUN', raising=False)
+    monkeypatch.setattr(retention, 'run_automatic_if_due', lambda: None)
+    try:
+        thread = retention.ensure_scheduler(concurrent_app, interval=60, first_delay=60)
+        assert thread is not None and thread.is_alive()
+    finally:
+        retention.stop_scheduler()
+    assert retention.scheduler_threads() == []
 
 
 def test_thread_does_the_days_run_once_and_keeps_checking(concurrent_app):
@@ -319,4 +362,8 @@ def test_a_new_process_starts_its_own_thread(concurrent_app, monkeypatch):
         assert second is not first and second.is_alive()
     finally:
         retention.stop_scheduler()
-        first.join(0)
+    # Both are stopped. The first one used to be left running: only the thread
+    # the module state pointed at was stopped, and a minute later the other
+    # one began querying the test database under whatever test was running.
+    assert not first.is_alive() and not second.is_alive()
+    assert retention.scheduler_threads() == []

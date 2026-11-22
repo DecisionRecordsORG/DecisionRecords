@@ -1527,6 +1527,7 @@ def retention_status(now=None):
 # a crash can never block the following day's run. Every item is erased in its
 # own transaction, so an interrupted run leaves nothing half done.
 
+SCHEDULER_THREAD_NAME = 'retention-scheduler'
 CHECK_INTERVAL_SECONDS = 15 * 60
 FIRST_CHECK_DELAY_SECONDS = 60
 
@@ -1534,6 +1535,11 @@ _scheduler_lock = threading.Lock()
 _scheduler_pid = None
 _scheduler_thread = None
 _scheduler_stop = None
+# Every thread this module started in this process, with the event that stops
+# it. A forked worker starts its own thread while the module state it
+# inherited still names the parent's; stop_scheduler() must be able to stop
+# whatever was started here, not only the one the globals point at.
+_scheduler_started = []
 
 
 def automatic_claim_key(now):
@@ -1606,11 +1612,26 @@ def _scheduler_loop(app, stop, interval, first_delay):
 
 
 def _testing(app):
+    """True under tests, however the app was created.
+
+    PYTEST_CURRENT_TEST is set by pytest in its own process for the length of
+    every test and is inherited by child processes a test starts, so an app
+    created without the TESTING flag, or in a subprocess whose environment was
+    cleaned, still never starts the thread. A thread that outlives its test
+    runs retention queries against the shared test database while another
+    test is dropping its tables.
+    """
     return bool(
         app.config.get('TESTING')
         or os.environ.get('FLASK_ENV') == 'testing'
         or os.environ.get('TESTING', '').lower() in ('1', 'true', 'yes')
+        or os.environ.get('PYTEST_CURRENT_TEST')
     )
+
+
+def scheduler_threads():
+    """The retention threads alive in this process."""
+    return [thread for thread in threading.enumerate() if thread.name == SCHEDULER_THREAD_NAME]
 
 
 def ensure_scheduler(app, force=False, interval=None, first_delay=None):
@@ -1636,21 +1657,24 @@ def ensure_scheduler(app, force=False, interval=None, first_delay=None):
         stop = threading.Event()
         thread = threading.Thread(
             target=_scheduler_loop, args=(app, stop, interval, first_delay),
-            name='retention-scheduler', daemon=True,
+            name=SCHEDULER_THREAD_NAME, daemon=True,
         )
         thread.start()
         _scheduler_pid, _scheduler_thread, _scheduler_stop = pid, thread, stop
+        _scheduler_started.append((thread, stop))
         logger.info('Retention: automatic run thread started in process %s', pid)
         return thread
 
 
 def stop_scheduler(timeout=5):
-    """Stop this process's retention thread (tests)."""
+    """Stop every retention thread this process started (tests)."""
     global _scheduler_pid, _scheduler_thread, _scheduler_stop
     with _scheduler_lock:
-        thread, stop = _scheduler_thread, _scheduler_stop
+        started = list(_scheduler_started)
+        del _scheduler_started[:]
         _scheduler_pid = _scheduler_thread = _scheduler_stop = None
-    if stop is not None:
+    for _thread, stop in started:
         stop.set()
-    if thread is not None:
-        thread.join(timeout)
+    for thread, _stop in started:
+        if thread.is_alive():
+            thread.join(timeout)
