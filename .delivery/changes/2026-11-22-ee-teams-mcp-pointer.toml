@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-ee-teams-mcp-pointer"
+title = "Advance ee for Teams tenant scoping, the MCP status tool and the website pointer"
+summary = "Advances the private ee submodule to the merged commit that scopes Teams bot actions to the workspace's tenant, signs the Teams tab in with single sign-on only, tightens Teams token validation, adds an MCP tool and REST operation to change a decision's status, and pins the website with self-hosted fonts and the support page. Adds the Enterprise-gated tests for those changes and requires the MCP tool list to contain the new tool."
+change_type = "security_fix"
+surfaces = ["enterprise_only"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
