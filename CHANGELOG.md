@@ -94,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A test searches every text, JSON and binary column of every table for the person after an anonymisation, and fails when a model gains a text column without a rule saying what anonymisation does with it (`retention.ACCOUNT_TEXT_RULES`)
 - The personal data export now contains what the published text says it does. It had no comments and no consent records. It adds the person's own comments, their consent records, the content of the decisions they wrote and the decisions they own, the changes they made to decisions, passkey names and dates, notification settings, role requests and access requests they made, team profile answers they gave, API key names and dates, their AI queries, linked Slack and Teams accounts and their account deletion status. Existing sections keep their names and fields. Nothing about another person is included, and no password hash, passkey key, API key, key hash or sign-in link
 - A test fails when a model gains a column that points at a person without a rule saying whether those rows belong in the export (`data_export.EXPORT_RULES`)
+- In Community Edition the other AI endpoints (`/api/user/ai/access`, which the profile page asks on every visit, and the AI preferences, API key, statistics and log endpoints) also answered 500. The profile check answers `available: false`; the others answer 404 "AI features are not available in this edition"
 
 ## [2.1.1] - 2026-11-21
 

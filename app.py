@@ -11476,23 +11476,41 @@ def slack_link_complete():
 if is_enterprise():
     from ee.backend.ai import AIConfig, AIApiKeyService, AIInteractionLogger
 else:
-    # Community Edition stubs
-    class AIConfig:
-        @staticmethod
-        def get_system_ai_config():
-            return {'enabled': False, 'edition': 'community'}
-        @staticmethod
-        def get_system_ai_enabled():
-            return False
-        @staticmethod
-        def get_system_mcp_server_enabled():
-            return False
+    # Community Edition has no AI module. These stand in for its services so
+    # the routes below can be defined once for both editions. The few answers
+    # a page needs are given here; anything else raises AIFeatureUnavailable,
+    # which is answered as a clean "not available" instead of a 500.
+    class AIFeatureUnavailable(Exception):
+        """An AI service was called in an edition that does not have it."""
 
-    class AIApiKeyService:
-        pass
+    class _CommunityAIService:
+        def __init__(self, name, **answers):
+            self._name = name
+            self._answers = answers
 
-    class AIInteractionLogger:
-        pass
+        def __getattr__(self, method):
+            if method.startswith('_'):
+                raise AttributeError(method)
+            if method in self._answers:
+                answer = self._answers[method]
+                return lambda *args, **kwargs: answer
+            def unavailable(*args, **kwargs):
+                raise AIFeatureUnavailable(f'{self._name}.{method}')
+            return unavailable
+
+    AIConfig = _CommunityAIService(
+        'AIConfig',
+        get_system_ai_config={'enabled': False, 'edition': 'community'},
+        get_system_ai_enabled=False,
+        get_system_mcp_server_enabled=False,
+        is_external_ai_available=False,
+    )
+    AIApiKeyService = _CommunityAIService('AIApiKeyService')
+    AIInteractionLogger = _CommunityAIService('AIInteractionLogger')
+
+    @app.errorhandler(AIFeatureUnavailable)
+    def handle_ai_feature_unavailable(e):
+        return jsonify({'error': 'AI features are not available in this edition'}), 404
 
 
 # --- Super Admin AI Configuration ---

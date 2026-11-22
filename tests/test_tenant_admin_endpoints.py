@@ -287,3 +287,80 @@ class TestTenantAiConfigInCommunity:
         assert response.status_code == 403
         assert response.get_json() == {'error': 'AI features are not enabled at system level'}
         assert Tenant.query.filter_by(domain=DOMAIN).first().ai_features_enabled is not True
+
+
+@community_only
+class TestNoAiEndpointFailsInCommunity:
+    """Community Edition has no AI features. Every AI endpoint says so; none answers 500."""
+
+    def test_profile_page_check_answers_not_available(self, real_app):
+        """The profile page asks this on every visit."""
+        _, test_app = real_app
+        make_member('pat', GlobalRole.USER)
+
+        response = sign_in(test_app, 'pat').get('/api/user/ai/access')
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json() == {'available': False}
+
+    @pytest.mark.parametrize('method, path, body', [
+        ('get', '/api/user/ai/preferences', None),
+        ('put', '/api/user/ai/preferences', {'ai_opt_out': True}),
+        ('get', '/api/user/ai/keys', None),
+        ('post', '/api/user/ai/keys', {'name': 'My key'}),
+        ('delete', '/api/user/ai/keys/1', None),
+        ('get', '/api/tenant/ai/stats', None),
+        ('get', '/api/tenant/ai/logs', None),
+    ])
+    def test_tenant_administrator_gets_a_clean_refusal(self, real_app, method, path, body):
+        _, test_app = real_app
+        make_member('pat', GlobalRole.ADMIN, legacy_admin=True)
+        client = sign_in(test_app, 'pat')
+
+        response = getattr(client, method)(path, json=body) if body is not None else getattr(client, method)(path)
+
+        assert response.status_code in (403, 404), (path, response.status_code, response.get_data(as_text=True))
+        assert 'error' in response.get_json()
+        assert 'internal server error' not in response.get_json()['error'].lower()
+
+    @pytest.mark.parametrize('method, path, body', [
+        ('get', '/api/admin/ai/config', None),
+        ('put', '/api/admin/ai/config', {'ai_features_enabled': True}),
+    ])
+    def test_super_admin_gets_a_clean_refusal(self, real_app, method, path, body):
+        _, test_app = real_app
+        client = super_admin(test_app)
+
+        response = getattr(client, method)(path, json=body) if body is not None else getattr(client, method)(path)
+
+        assert response.status_code in (403, 404), (path, response.status_code, response.get_data(as_text=True))
+        assert 'error' in response.get_json()
+
+    def test_usage_statistics_are_empty_rather_than_failing(self, real_app):
+        """Counts usage records straight from the database, so it works without the AI module."""
+        _, test_app = real_app
+
+        response = super_admin(test_app).get('/api/admin/ai/stats')
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()['total_interactions'] == 0
+
+    def test_anonymous_callers_are_still_asked_to_sign_in(self, real_app):
+        _, test_app = real_app
+        client = test_app.test_client()
+
+        for path in ('/api/user/ai/access', '/api/user/ai/keys', '/api/tenant/ai/logs', AI_CONFIG):
+            assert client.get(path).status_code == 401, path
+
+    def test_nothing_was_switched_on_by_trying(self, real_app):
+        _, test_app = real_app
+        make_member('pat', GlobalRole.ADMIN, legacy_admin=True)
+        client = sign_in(test_app, 'pat')
+
+        client.post('/api/user/ai/keys', json={'name': 'My key'})
+        client.put('/api/user/ai/preferences', json={'ai_opt_out': True})
+        super_admin(test_app).put('/api/admin/ai/config', json={'ai_features_enabled': True})
+
+        from models import AIApiKey, SystemConfig
+        assert AIApiKey.query.count() == 0
+        assert SystemConfig.get(SystemConfig.KEY_AI_FEATURES_ENABLED) is None
