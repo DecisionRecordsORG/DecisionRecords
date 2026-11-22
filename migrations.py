@@ -191,6 +191,11 @@ MIGRATIONS = [
         "description": "Add inquiries table and tenant team profile columns",
         "migrate": lambda db: migrate_2_3_0(db)
     },
+    {
+        "version": "2.4.0",
+        "description": "Add retention run history tables",
+        "migrate": lambda db: migrate_2_4_0(db)
+    },
 ]
 
 
@@ -558,6 +563,29 @@ def migrate_2_3_0(db):
         for column_name, column_type in team_profile_columns:
             if add_column(db, 'tenants', column_name, column_type):
                 changes += 1
+
+    return changes
+
+
+def migrate_2_4_0(db):
+    """Migration for v2.4.0 - run history of the data retention routine.
+
+    Two new tables: retention_runs (one row per run, with a unique claim key
+    that lets one worker claim the automatic run of a day) and
+    retention_erasures (what each run erased). They are created from the model
+    definitions, so the columns, the unique constraint and the indexes are the
+    same as on a fresh database, on SQLite and on PostgreSQL. Running it again
+    changes nothing.
+    """
+    from models import RetentionRun, RetentionErasure
+
+    changes = 0
+    for model in (RetentionRun, RetentionErasure):
+        if table_exists(db, model.__tablename__):
+            continue
+        model.__table__.create(bind=db.engine, checkfirst=True)
+        logger.info(f"Created {model.__tablename__} table")
+        changes += 1
 
     return changes
 

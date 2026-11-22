@@ -484,3 +484,93 @@ def test_migration_sql_for_postgresql_uses_no_sqlite_only_syntax() -> None:
         assert f"ALTER TABLE tenants ADD COLUMN {column} " in ddl
     assert "team_profile_answered_by_id INTEGER REFERENCES users(id) ON DELETE SET NULL" in ddl
     assert migrations.get_db_type(fake_db) == "postgresql"
+
+
+# ==================== Retention run history (2.4.0) ====================
+
+RETENTION_TABLES = {"retention_runs", "retention_erasures"}
+
+
+def test_startup_adds_retention_tables_to_an_existing_database(tmp_path: Path) -> None:
+    from migrations import migrate_2_4_0, run_migrations
+    from models import RetentionRun
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    assert not RETENTION_TABLES & _sqlite_tables(db_path)
+    app_module, test_app = load_test_app(
+        secret_key="migration-retention-legacy", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert RETENTION_TABLES <= _sqlite_tables(db_path)
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.4.0" in versions
+
+        db.session.add(RetentionRun(trigger="automatic", claim_key="auto:2026-01-01"))
+        db.session.commit()
+
+        # Starting again changes nothing and keeps the row
+        app_module._db_initialized = False
+        app_module.init_database()
+        assert run_migrations(db) == 0
+        assert migrate_2_4_0(db) == 0
+        assert RetentionRun.query.one().claim_key == "auto:2026-01-01"
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_fresh_database_initialises_with_retention_tables(tmp_path: Path) -> None:
+    from migrations import migrate_2_4_0
+
+    db_path = tmp_path / "fresh.db"
+    app_module, test_app = load_test_app(
+        secret_key="migration-retention-fresh", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert RETENTION_TABLES <= _sqlite_tables(db_path)
+        assert migrate_2_4_0(db) == 0
+
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+
+
+def test_retention_migration_creates_the_tables_itself_with_the_unique_claim_key(app) -> None:
+    """Without db.create_all(), on the fixture database (PostgreSQL in CI)."""
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+    from migrations import migrate_2_4_0, table_exists
+    from models import RetentionErasure, RetentionRun
+
+    db.session.remove()
+    RetentionErasure.__table__.drop(bind=db.engine)
+    RetentionRun.__table__.drop(bind=db.engine)
+    assert not table_exists(db, "retention_runs") and not table_exists(db, "retention_erasures")
+
+    assert migrate_2_4_0(db) == 2
+    assert table_exists(db, "retention_runs") and table_exists(db, "retention_erasures")
+    assert migrate_2_4_0(db) == 0
+
+    db.session.add(RetentionRun(trigger="automatic", claim_key="auto:2026-01-01"))
+    db.session.add(RetentionRun(trigger="cron"))
+    db.session.add(RetentionRun(trigger="super_admin"))
+    db.session.add(RetentionErasure(category="tenants", entity_type="tenant", entity_id=1, counts={"users": 2}))
+    db.session.commit()
+    assert RetentionErasure.query.one().counts == {"users": 2}
+
+    db.session.add(RetentionRun(trigger="automatic", claim_key="auto:2026-01-01"))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()

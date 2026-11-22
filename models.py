@@ -201,6 +201,22 @@ class SystemConfig(db.Model):
     DEFAULT_AI_ASSISTED_CREATION_ENABLED = False
     DEFAULT_AI_LLM_PROVIDER = 'none'
 
+    # Data retention configuration keys (automatic erasure of expired data)
+    KEY_RETENTION_AUTO_RUN_ENABLED = 'retention_auto_run_enabled'
+    KEY_RETENTION_LIMIT_ACCOUNTS = 'retention_limit_accounts'
+    KEY_RETENTION_LIMIT_DECISIONS = 'retention_limit_decisions'
+    KEY_RETENTION_LIMIT_TENANTS = 'retention_limit_tenants'
+    KEY_RETENTION_BACKLOG_DAYS = 'retention_backlog_days'
+
+    # Data retention defaults. A limit is the most items one automatic run may
+    # anonymise or erase in that category; above it the run holds the category
+    # back for a super admin. The reasoning is in retention.py.
+    DEFAULT_RETENTION_AUTO_RUN_ENABLED = True
+    DEFAULT_RETENTION_LIMIT_ACCOUNTS = 10
+    DEFAULT_RETENTION_LIMIT_DECISIONS = 50
+    DEFAULT_RETENTION_LIMIT_TENANTS = 1
+    DEFAULT_RETENTION_BACKLOG_DAYS = 7
+
     @staticmethod
     def get(key, default=None):
         """Get a configuration value."""
@@ -958,6 +974,96 @@ class Inquiry(db.Model):
             'handled_by': self.handled_by,
             'redacted': self.redacted_at is not None,
             'redacted_at': self.redacted_at.isoformat() if self.redacted_at else None,
+        }
+
+
+def _retention_utcnow():
+    """UTC without a timezone, the form every DateTime column here stores."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _retention_iso(value):
+    """ISO 8601 with a Z suffix so a browser reads the stored UTC value as UTC."""
+    return value.isoformat() + 'Z' if value else None
+
+
+class RetentionRun(db.Model):
+    """One run of the data retention routine (see retention.py).
+
+    A row is written when a run starts and updated after every category, so
+    an interrupted run still shows how far it got. Previews are not stored.
+    """
+
+    __tablename__ = 'retention_runs'
+
+    TRIGGER_AUTOMATIC = 'automatic'
+    TRIGGER_SUPER_ADMIN = 'super_admin'
+    TRIGGER_CRON = 'cron'
+
+    STATUS_RUNNING = 'running'
+    STATUS_COMPLETED = 'completed'
+    STATUS_HELD_BACK = 'held_back'  # finished, at least one category was held back
+    STATUS_ERRORS = 'completed_with_errors'
+    STATUS_INTERRUPTED = 'interrupted'  # never finished (the worker stopped mid-run)
+
+    id = db.Column(db.Integer, primary_key=True)
+    # 'auto:YYYY-MM-DD' for the automatic run of that UTC day, NULL otherwise.
+    # The unique constraint is what lets only one worker claim a day's run.
+    claim_key = db.Column(db.String(40), nullable=True, unique=True)
+    trigger = db.Column(db.String(20), nullable=False)
+    started_by = db.Column(db.String(255), nullable=True)  # super admin username
+    status = db.Column(db.String(30), nullable=False, default=STATUS_RUNNING, index=True)
+    started_at = db.Column(db.DateTime, nullable=False, default=_retention_utcnow, index=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+    duration_ms = db.Column(db.Integer, nullable=True)
+    categories = db.Column(db.JSON, nullable=True)  # the categories this run was asked to do
+    results = db.Column(db.JSON, nullable=True)  # per category: status, counts, errors
+    error = db.Column(db.Text, nullable=True)  # a failure outside any one category
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'trigger': self.trigger,
+            'started_by': self.started_by,
+            'status': self.status,
+            'started_at': _retention_iso(self.started_at),
+            'finished_at': _retention_iso(self.finished_at),
+            'duration_ms': self.duration_ms,
+            'categories': self.categories or [],
+            'results': self.results or {},
+            'error': self.error,
+        }
+
+
+class RetentionErasure(db.Model):
+    """What a retention run erased: kind, identifiers and counts, never content.
+
+    Written in the same transaction as the erasure it describes, before the
+    rows are deleted, so a record exists exactly when the erasure happened.
+    It has no foreign key to tenants or users because it must outlive them.
+    """
+
+    __tablename__ = 'retention_erasures'
+
+    id = db.Column(db.Integer, primary_key=True)
+    run_id = db.Column(db.Integer, nullable=True, index=True)
+    category = db.Column(db.String(30), nullable=False, index=True)
+    entity_type = db.Column(db.String(30), nullable=False)
+    entity_id = db.Column(db.Integer, nullable=True)
+    identifier = db.Column(db.String(255), nullable=True)
+    counts = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_retention_utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'run_id': self.run_id,
+            'category': self.category,
+            'entity_type': self.entity_type,
+            'entity_id': self.entity_id,
+            'identifier': self.identifier,
+            'counts': self.counts or {},
+            'created_at': _retention_iso(self.created_at),
         }
 
 

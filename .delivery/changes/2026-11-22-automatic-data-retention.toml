@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-22-automatic-data-retention"
+title = "Data retention runs by itself, with limits, a preview and a run history"
+summary = "The application now runs its own data retention once a day (anonymising accounts after the 7-day grace period, erasing soft-deleted decisions and tenants after 30 days, deleting login history after 90 days and stored messages after 24 months) from a small thread per worker that claims each day's run in the database, so no cron job, secret or extra service is needed. The work moved out of the route into retention.py with a preview mode, per-category isolation and per-item transactions. Automatic runs hold a category back when more items are waiting than its limit or when the oldest item is long overdue; a super admin releases it from a new Data retention page after confirming the count. Tenant erase now removes or detaches every table that refers to the tenant, its domain or its users, and no longer fails on PostgreSQL foreign keys. Every erasure is recorded (kind, identifiers, counts) and every run is stored. Startup migration 2.4.0 adds the retention_runs and retention_erasures tables on SQLite and PostgreSQL. POST /api/admin/execute-gdpr-tasks keeps its authentication and response keys and gains run_id, status, held_back and errors."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"
