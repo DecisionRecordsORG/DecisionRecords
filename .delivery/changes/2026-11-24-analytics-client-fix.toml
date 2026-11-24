@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-24-analytics-client-fix"
+title = "Fix the PostHog client start-up failure and pin the Enterprise requirements"
+summary = "Advances the private ee submodule to the commit that removes an argument posthog 8 no longer accepts (product analytics had recorded nothing in production since 2026-11-21) and pins every Enterprise requirement to an exact version. Adds Enterprise-only tests that build the real client and require exact pins, and records the lesson. No Community code changes."
+change_type = "bugfix"
+surfaces = ["enterprise_only"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "none"
+community_release_level = "none"
+marketing_website = "none"
