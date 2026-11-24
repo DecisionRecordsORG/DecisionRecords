@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Decision templates. An administrator or steward can choose how decisions are presented under Organisation Settings > Decision template: General (the default, unchanged wording), Software and technology, Controlled change, Governance and committee, or Investment and approval. A template sets the three section headings and their prompts, the example titles, a list of decision types and the relationship packs it suggests. The stored fields stay `context`, `decision` and `consequences`. Changing the template changes headings and prompts only: no decision is read or rewritten, and the previous template can be chosen again at any time. See `docs/decision-templates.md`
+- An optional industry answer that suggests a template. The list is the 22 sections of NACE Rev. 2.1 with their official titles (Industry sections: NACE Rev. 2.1, Eurostat, CC BY 4.0); only the section letter is stored, and it is not sent to analytics. Any template can be chosen whatever the industry
+- The first-admin onboarding dialog and the Community Edition setup wizard ask the optional industry question; skipping it means General. Administrators and stewards of organisations that existed before see one dismissible notice on the decision list pointing at the settings card
+- Decision type: an optional type on each decision, chosen in the decision form from the organisation's template. It is shown on the decision and its card and can be used to filter the decision list. A decision keeps its type when the organisation changes template
+- Administrators and stewards can set or clear the type of existing decisions in bulk from the settings card, with filters by search, status and current type. Only the type is changed; titles, text, status and the last-updated date stay as they are, and the change is written to the audit log
+- "Also switch on the suggested relationship packs" when saving a template (off by default). Packs are only added, never switched off
+- `GET /api/decision-templates/catalog`, `GET`/`PUT /api/tenant/decision-template`, `POST /api/tenant/decision-template/dismiss-notice` and `POST /api/tenant/decisions/bulk-type` (at most 200 decisions per request). `POST` and `PUT /api/decisions` accept an optional `decision_type`, and decisions and their history entries are returned with it
+- Startup migration `2.6.0` adds `tenants.industry`, `tenant_settings.decision_template_id`, `tenant_settings.decision_template_notice_dismissed_at`, `architecture_decisions.decision_type` and `decision_history.decision_type` on SQLite and PostgreSQL. All are empty for existing rows
+
 ## [2.2.0] - 2026-11-22
 
 ### Added
