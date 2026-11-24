@@ -395,7 +395,7 @@ Messages sent through `/api/contact`, `/api/sponsorship` and `/api/feedback` are
 
 #### 4. Existing installations
 
-If upgrading from a version before `v2.2.0`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
+If upgrading from a version before `v2.3.0`, start the new Community Edition image and let the built-in migrations complete before sending production traffic to it. No separate public `ee/` migration script is required for Community Edition upgrades.
 
 ## Pointing the help link at your own support page
 
