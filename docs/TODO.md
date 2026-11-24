@@ -89,4 +89,6 @@ Update rules:
 - [ ] MCP tools not yet offered: change a decision's text or its decision type (the web app can; there is only `update_decision_status`), and `outputSchema` for the tools (results already carry `structuredContent`).
 - [ ] MCP resources and prompts are not offered. Worth it only if clients start preferring them: a `record a decision` prompt built from the tenant's template, and decisions as resources for clients that attach context by URI.
 - [ ] The MCP endpoint has no per-key rate limit of its own; it relies on the app-wide limiter.
+- [ ] MCP decision results carry the whole user record for `created_by`, `updated_by` and `owner` (email, `auth_type`, `has_passkey`, `has_seen_admin_onboarding`), because they reuse `to_dict`. An agent needs a name at most. Trim to id and name; this changes the result shape, so do it with a note in the changelog. The same applies to `/api/ai`.
+- [ ] MCP was tested on 2026-11-24 with MCP Inspector CLI 2.16.0, the Python SDK 2.3.0, the TypeScript SDK 1.32.2 and Claude Code 2.1.331, on localhost. Not yet tested: claude.ai custom connectors, Cursor, VS Code, ChatGPT, and a real browser `Origin` through Cloudflare.
 - [ ] Prepare a ChatGPT plugin/app listing package for the MCP once the server contract is stable.
