@@ -21,7 +21,7 @@ Update rules:
 
 ## Decision templates
 
-- [ ] First follow-up: make the surfaces outside the web app use the organisation's template headings. Notification emails (`notifications.py`), Slack messages and modals, Teams cards, the MCP tool descriptions and exports still say Context, Decision and Consequences, and none of them shows or accepts the decision type. The Slack, Teams and MCP parts live in `ee/`; all of them can read `decision_templates.get_template(...)`.
+- [ ] First follow-up: make the surfaces outside the web app use the organisation's template headings. Notification emails (`notifications.py`), Slack messages and modals, Teams cards, the external AI REST API (`/api/ai`) and exports still say Context, Decision and Consequences, and none of them shows or accepts the decision type. The Slack, Teams and REST API parts live in `ee/`; all of them can read `decision_templates.get_template(...)`. The MCP tools are done (2026-11-24): `get_decision_template`, `decision_type` in results, on create and as a filter.
 - [ ] `GET /api/decisions` returns no spaces, so neither the decision list nor the bulk type list can filter by space (the list's "Filter by Space" select has never matched anything). Return spaces in the list, then add the space filter to the bulk type card.
 - [ ] Bulk type changes are written to the audit log only, not to each decision's change history. Decide whether the history of a decision should show them.
 - [ ] Decide whether the super admin should see a tenant's industry and template (as with the team profile). Today they are visible to the tenant only and are not sent to analytics; the privacy wording that covers the team profile does not mention the industry answer.
@@ -84,5 +84,9 @@ Update rules:
 
 ## MCP / Ecosystem
 
-- [ ] Harden MCP for external listing readiness: stable schemas, auth flow, pagination, error contracts, rate limits, and conformance coverage.
+- [ ] Harden MCP for external listing readiness: stable schemas, auth flow, pagination, error contracts, rate limits, and conformance coverage. Done on 2026-11-24 against specification revision 2026-07-28: version negotiation for both protocol eras, error contracts, pagination of results, tool titles and behaviour hints, conformance tests (`tests/test_mcp_spec_and_templates.py`). Still open: the items below.
+- [ ] MCP authorization by OAuth. The server takes an API key as a bearer token, which the specification allows (authorization is optional) but which is not the specification's OAuth model. Clients that only do OAuth cannot connect: claude.ai custom connectors without the "Request headers" beta, and directory listings. Needs an OAuth 2.1 authorization server (authorization code with PKCE, a consent page tied to the signed-in user and tenant, token and refresh endpoints, Client ID Metadata Documents and, for older clients, Dynamic Client Registration), protected resource metadata (RFC 9728) with a `resource_metadata` challenge on 401, audience-bound tokens (RFC 8707), and scopes mapped to read/search/write. The `/.well-known/oauth-*` routes that answer 404 today become the metadata documents.
+- [ ] MCP tools not yet offered: change a decision's text or its decision type (the web app can; there is only `update_decision_status`), and `outputSchema` for the tools (results already carry `structuredContent`).
+- [ ] MCP resources and prompts are not offered. Worth it only if clients start preferring them: a `record a decision` prompt built from the tenant's template, and decisions as resources for clients that attach context by URI.
+- [ ] The MCP endpoint has no per-key rate limit of its own; it relies on the app-wide limiter.
 - [ ] Prepare a ChatGPT plugin/app listing package for the MCP once the server contract is stable.

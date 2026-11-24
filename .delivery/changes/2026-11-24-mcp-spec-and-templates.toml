@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-24-mcp-spec-and-templates"
+title = "Bring the MCP server in line with specification revision 2026-07-28 and make its tools template-aware"
+summary = "Enterprise feature. The MCP endpoint is checked against the current MCP specification (2026-07-28) and corrected: stateless requests with per-request protocol metadata and header validation, a conformant server/discover, UnsupportedProtocolVersion and HeaderMismatch errors, tool execution errors returned as results with isError instead of JSON-RPC errors, structuredContent, tool titles and behaviour hints, 202 for notifications, ping and version negotiation for the handshake-based revisions (2025-11-25, 2025-06-18, 2025-03-26), 405 for GET and DELETE, Origin validation, and 401/403 instead of 400 for a missing key or a switched-off feature. The tools gain paging, word-by-word search, clearer errors and decision templates: a get_decision_template tool, decision_type in results, on create and as a filter. Most of the change is in the private ee submodule (pointer to be advanced after the ee pull request merges). The public side is the HTTP transport block for /api/mcp in app.py, which is Enterprise-only at run time: in the Community Edition the route now answers 404 instead of failing on a missing module, and /.well-known/oauth-protected-resource and /.well-known/oauth-authorization-server answer 404 as JSON instead of the web app's HTML. Adds Enterprise-gated tests and updates docs/TODO.md and docs/decision-templates.md."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

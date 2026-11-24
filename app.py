@@ -12361,98 +12361,133 @@ def api_get_tenant_ai_logs():
 
 # --- MCP Server Endpoint (Claude Code Compatible) ---
 
-# MCP protocol support: default to the current stateless transport while
-# keeping legacy initialize compatibility for older remote clients.
-MCP_LEGACY_PROTOCOL_VERSION = "2025-11-25"
-MCP_PROTOCOL_VERSION = "2026-07-28"
-MCP_SUPPORTED_PROTOCOL_VERSIONS = [
-    MCP_LEGACY_PROTOCOL_VERSION,
-    MCP_PROTOCOL_VERSION,
-]
+# The HTTP side of the MCP server (Streamable HTTP transport). The protocol
+# itself (revisions, JSON-RPC methods, tools) lives in ee/backend/ai/mcp.
+# Extra browser origins allowed to call the endpoint, comma separated. Clients
+# that are not browsers send no Origin header and are not affected.
+MCP_ALLOWED_ORIGINS_ENV = 'MCP_ALLOWED_ORIGINS'
+MCP_BEARER_CHALLENGE = 'Bearer realm="Decision Records MCP"'
 
-@app.route('/api/mcp', methods=['GET', 'POST'])
+
+@app.route('/api/mcp', methods=['GET', 'POST', 'DELETE'])
+@require_enterprise
 def api_mcp_handler():
     """
     MCP (Model Context Protocol) endpoint for developer tools.
 
-    Implements the Streamable HTTP transport for Claude Code, Cursor, and VS Code.
-    Supports both POST (client→server) and GET (SSE stream for server→client).
+    Implements the Streamable HTTP transport for Claude Code, Cursor, VS Code
+    and other MCP clients: one JSON-RPC message per POST, answered with one
+    JSON object. The server sends nothing on its own, so there is no GET
+    stream and no session; GET and DELETE are answered with 405.
 
     Authentication is via API key in the Authorization header.
-
-    Supported methods:
-    - initialize: Initialize the MCP session
-    - tools/list: List available tools
-    - tools/call: Execute a tool
     """
-    from ee.backend.ai.mcp import authenticate_mcp_request, handle_mcp_request
-    from ee.backend.ai.config import AIConfig
+    from ee.backend.ai.mcp.server import handle_mcp_message
 
-    # Check system-level MCP availability
-    if not AIConfig.get_system_ai_enabled():
-        return _mcp_error_response(None, -32600, 'AI features are not enabled'), 400
+    if not _mcp_origin_allowed():
+        return _mcp_error_response(None, 403, 'Origin not allowed'), 403
 
-    if not AIConfig.get_system_mcp_server_enabled():
-        return _mcp_error_response(None, -32600, 'MCP server is not enabled'), 400
+    if request.method != 'POST':
+        response = _mcp_error_response(None, -32600, 'Method not allowed: send JSON-RPC messages with POST')
+        response.headers['Allow'] = 'POST'
+        return response, 405
 
-    # Handle GET request (SSE stream for server-initiated messages)
-    if request.method == 'GET':
-        api_key, auth_error = _extract_mcp_api_key()
-        if auth_error:
-            return _mcp_error_response(None, -32600, auth_error), 401
-
-        success, _handler, error = authenticate_mcp_request(api_key)
-        if not success:
-            return _mcp_error_response(None, -32600, error), 401
-
-        return _mcp_sse_response()
-
-    # POST request handling
     # Get API key from Authorization header
     api_key, auth_error = _extract_mcp_api_key()
     if auth_error:
-        return _mcp_error_response(None, -32600, auth_error), 401
+        response = _mcp_error_response(None, 401, auth_error)
+        response.headers['WWW-Authenticate'] = MCP_BEARER_CHALLENGE
+        return response, 401
 
-    if not request.is_json:
-        return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
-
-    request_data = request.get_json(silent=True)
+    request_data = request.get_json(silent=True) if request.is_json else None
     if request_data is None:
         return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
 
     if isinstance(request_data, list):
-        if not request_data:
-            return _mcp_error_response(None, -32600, 'Invalid Request: batch cannot be empty'), 400
+        # JSON-RPC batches exist only in protocol revision 2025-03-26.
+        declared_version = request.headers.get('MCP-Protocol-Version')
+        if not request_data or declared_version not in (None, '', '2025-03-26'):
+            return _mcp_error_response(
+                None, -32600, 'Invalid Request: send one JSON-RPC message per POST (batches are not supported)'
+            ), 400
 
         batch_responses = []
-        status_code = 200
-        session_id = None
-        protocol_version = None
         for item in request_data:
-            response_data, item_status, item_session_id, item_protocol_version = _handle_mcp_post_message(item, api_key)
-            if item_session_id:
-                session_id = item_session_id
-            if item_protocol_version:
-                protocol_version = item_protocol_version
-            if item_status >= 400 and status_code < 400:
-                status_code = item_status
+            response_data, _item_status = handle_mcp_message(item, api_key, request.headers)
             if response_data is not None:
                 batch_responses.append(response_data)
 
         if not batch_responses:
             return '', 202
+        return jsonify(batch_responses), 200
 
-        response = jsonify(batch_responses)
-        _decorate_mcp_response(response, session_id=session_id, protocol_version=protocol_version)
-        return response, status_code
-
-    response_data, status_code, session_id, protocol_version = _handle_mcp_post_message(request_data, api_key)
+    response_data, status_code = handle_mcp_message(request_data, api_key, request.headers)
     if response_data is None:
         return '', status_code
 
     response = jsonify(response_data)
-    _decorate_mcp_response(response, session_id=session_id, protocol_version=protocol_version)
+    if status_code == 401:
+        response.headers['WWW-Authenticate'] = MCP_BEARER_CHALLENGE
     return response, status_code
+
+
+def _mcp_no_oauth_metadata():
+    return jsonify({
+        'error': 'not_found',
+        'error_description': (
+            'This server publishes no OAuth metadata. Its MCP endpoint takes a Decision Records API key: '
+            'Authorization: Bearer <api_key>'
+        ),
+    }), 404
+
+
+@app.route('/.well-known/oauth-protected-resource')
+@app.route('/.well-known/oauth-authorization-server')
+def api_mcp_no_oauth_metadata():
+    """
+    Say plainly that there is no OAuth metadata.
+
+    MCP clients look here after a 401 to find an OAuth authorization server.
+    The MCP endpoint takes an API key, not OAuth tokens, so the honest answer
+    is 404. Without these routes the single-page app's HTML would be served
+    with 200 and clients would try to read it as metadata.
+    """
+    return _mcp_no_oauth_metadata()
+
+
+@app.route('/.well-known/oauth-protected-resource/<path:resource_path>')
+@app.route('/.well-known/oauth-authorization-server/<path:resource_path>')
+def api_mcp_no_oauth_metadata_for_path(resource_path):
+    """The same answer for the per-resource form of the metadata address."""
+    return _mcp_no_oauth_metadata()
+
+
+def _mcp_origin_allowed():
+    """
+    Validate the Origin header, as the MCP transport requires of servers.
+
+    Only browsers send it. A page on another site must not be able to drive
+    the endpoint, so an origin is accepted only if it is this app itself, the
+    website, or one named in MCP_ALLOWED_ORIGINS.
+    """
+    origin = (request.headers.get('Origin') or '').strip().rstrip('/')
+    if not origin:
+        return True
+
+    from urllib.parse import urlparse
+
+    origin = origin.lower()
+    parsed = urlparse(origin)
+    if parsed.scheme in ('http', 'https') and parsed.netloc and parsed.netloc == (request.host or '').lower():
+        return True
+
+    allowed = {item.lower().rstrip('/') for item in MARKETING_ORIGINS}
+    allowed.update(
+        item.strip().lower().rstrip('/')
+        for item in os.environ.get(MCP_ALLOWED_ORIGINS_ENV, '').split(',')
+        if item.strip()
+    )
+    return origin in allowed
 
 
 def _extract_mcp_api_key():
@@ -12468,151 +12503,16 @@ def _extract_mcp_api_key():
     return api_key, None
 
 
-def _handle_mcp_post_message(message, api_key):
-    """Handle one JSON-RPC message from an MCP POST body."""
-    from ee.backend.ai.mcp import authenticate_mcp_request, handle_mcp_request
-    import uuid
-
-    if not isinstance(message, dict):
-        return _mcp_error_payload(None, -32600, 'Invalid Request: expected JSON-RPC object'), 400, None, None
-
-    request_id = message.get('id')
-    method = message.get('method', '')
-
-    if not method:
-        header_method = request.headers.get('Mcp-Method')
-        if header_method:
-            message = dict(message)
-            method = header_method
-            message['method'] = method
-
-    if method == 'tools/call' and request.headers.get('Mcp-Name'):
-        message = dict(message)
-        params = dict(message.get('params') or {})
-        params.setdefault('name', request.headers.get('Mcp-Name'))
-        message['params'] = params
-
-    protocol_version, protocol_error = _resolve_mcp_protocol_version(message)
-    if protocol_error:
-        return _mcp_error_payload(request_id, -32600, protocol_error), 400, None, None
-
-    if method == 'initialize':
-        success, _handler, error = authenticate_mcp_request(api_key)
-        if not success:
-            return _mcp_error_payload(request_id, -32600, error), 401, None, protocol_version
-
-        session_id = None
-        if protocol_version == MCP_LEGACY_PROTOCOL_VERSION:
-            session_id = str(uuid.uuid4())
-
-        return {
-            'jsonrpc': '2.0',
-            'id': request_id,
-            'result': {
-                'protocolVersion': protocol_version,
-                'capabilities': {
-                    'tools': {}
-                },
-                'serverInfo': {
-                    'name': 'decision-records',
-                    'version': '1.0.0'
-                }
-            }
-        }, 200, session_id, protocol_version
-
-    if method == 'notifications/initialized':
-        return None, 202, None, protocol_version
-
-    response_data = handle_mcp_request(message, api_key)
-    return response_data, _mcp_http_status(response_data), None, protocol_version
-
-
-def _resolve_mcp_protocol_version(message=None):
-    """Negotiate the requested MCP protocol version for a request."""
-    requested_version = request.headers.get('MCP-Protocol-Version')
-    if not requested_version and isinstance(message, dict):
-        params = message.get('params')
-        if isinstance(params, dict):
-            requested_version = params.get('protocolVersion')
-
-    if not requested_version:
-        return MCP_PROTOCOL_VERSION, None
-
-    requested_version = str(requested_version).strip()
-    if requested_version not in MCP_SUPPORTED_PROTOCOL_VERSIONS:
-        return None, f'Unsupported MCP protocol version: {requested_version}'
-
-    return requested_version, None
-
-
-def _mcp_http_status(response_data):
-    """Map JSON-RPC errors to HTTP status codes for MCP responses."""
-    if not isinstance(response_data, dict) or 'error' not in response_data:
-        return 200
-
-    error_code = response_data['error'].get('code', -32000)
-    if error_code == -32600:
-        return 400
-    if error_code == -32601:
-        return 404
-    return 200
-
-
-def _decorate_mcp_response(response, session_id=None, protocol_version=None):
-    """Apply shared MCP response headers."""
-    response.headers['Content-Type'] = 'application/json'
-    response.headers['MCP-Protocol-Version'] = protocol_version or _response_mcp_protocol_version()
-
-    session_id = session_id or request.headers.get('MCP-Session-Id')
-    if session_id and (protocol_version or _response_mcp_protocol_version()) == MCP_LEGACY_PROTOCOL_VERSION:
-        response.headers['MCP-Session-Id'] = session_id
-
-    return response
-
-
-def _mcp_sse_response():
-    """Return a lightweight SSE stream for Streamable HTTP clients that probe GET."""
-    def event_stream():
-        yield 'retry: 30000\n'
-        yield ': decision-records MCP stream ready\n\n'
-
-    response = Response(event_stream(), mimetype='text/event-stream')
-    response.headers['Cache-Control'] = 'no-cache'
-    response.headers['X-Accel-Buffering'] = 'no'
-    response.headers['MCP-Protocol-Version'] = _response_mcp_protocol_version()
-
-    session_id = request.headers.get('MCP-Session-Id')
-    if session_id and _response_mcp_protocol_version() == MCP_LEGACY_PROTOCOL_VERSION:
-        response.headers['MCP-Session-Id'] = session_id
-
-    return response
-
-
-def _response_mcp_protocol_version():
-    """Choose the protocol version to reflect in response headers."""
-    requested_version = request.headers.get('MCP-Protocol-Version')
-    if requested_version in MCP_SUPPORTED_PROTOCOL_VERSIONS:
-        return requested_version
-    return MCP_PROTOCOL_VERSION
-
-
-def _mcp_error_payload(request_id, code, message):
-    """Create an MCP JSON-RPC error payload."""
-    return {
+def _mcp_error_response(request_id, code, message):
+    """A JSON-RPC error response for a request refused before it reached the MCP server."""
+    return jsonify({
         'jsonrpc': '2.0',
         'id': request_id,
         'error': {
             'code': code,
             'message': message
         }
-    }
-
-
-def _mcp_error_response(request_id, code, message):
-    """Helper to create MCP error response."""
-    response = jsonify(_mcp_error_payload(request_id, code, message))
-    _decorate_mcp_response(response)
-    return response
+    })
 # EE:END - AI/LLM Integration
 
 

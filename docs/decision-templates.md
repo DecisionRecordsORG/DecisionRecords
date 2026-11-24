@@ -91,7 +91,9 @@ Each template suggests relationship packs (see Organisation Settings > Decision 
 
 ## Where the template is not used yet
 
-Notification emails, Slack and Teams messages, the AI tools and exports still say Context, Decision and Consequences. See `docs/TODO.md`.
+Notification emails, Slack and Teams messages, the external AI REST API and exports still say Context, Decision and Consequences. See `docs/TODO.md`.
+
+The MCP server (Enterprise Edition) does use it. Its tool `get_decision_template` returns the organisation's headings, guidance and decision types; decisions it returns carry `decision_type` and `section_headings`; `create_decision` accepts a `decision_type` under the same rule as the web app; `list_decisions` and `search_decisions` can filter by it. The field names stay `context`, `decision` and `consequences`.
 
 ## API
 
