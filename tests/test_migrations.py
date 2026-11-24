@@ -574,3 +574,237 @@ def test_retention_migration_creates_the_tables_itself_with_the_unique_claim_key
     with pytest.raises(IntegrityError):
         db.session.commit()
     db.session.rollback()
+
+
+# ==================== Decision templates, industry and decision type (2.6.0) ====================
+
+DECISION_TEMPLATE_COLUMNS = {
+    "tenants": {"industry"},
+    "tenant_settings": {"decision_template_id", "decision_template_notice_dismissed_at"},
+    "architecture_decisions": {"decision_type"},
+    "decision_history": {"decision_type"},
+}
+
+
+def _add_legacy_decisions(db_path: Path) -> None:
+    """Decisions and their history as an existing database has them: without a type column."""
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE architecture_decisions (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            context TEXT NOT NULL,
+            decision TEXT NOT NULL,
+            status VARCHAR(50) NOT NULL DEFAULT 'proposed',
+            consequences TEXT NOT NULL,
+            decision_number INTEGER,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            domain VARCHAR(255) NOT NULL,
+            tenant_id INTEGER
+        );
+        CREATE TABLE decision_history (
+            id INTEGER PRIMARY KEY,
+            decision_id INTEGER NOT NULL,
+            title VARCHAR(255) NOT NULL,
+            context TEXT NOT NULL,
+            decision_text TEXT NOT NULL,
+            status VARCHAR(50) NOT NULL,
+            consequences TEXT NOT NULL,
+            changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            change_reason VARCHAR(500),
+            changed_by_id INTEGER
+        );
+        INSERT INTO architecture_decisions
+            (id, title, context, decision, status, consequences, decision_number, updated_at, domain, tenant_id)
+        VALUES (1, 'Use PostgreSQL', 'We need a database', 'PostgreSQL', 'accepted', 'One more service',
+                1, '2025-03-04 05:06:07', 'example.com', 1);
+        INSERT INTO decision_history (id, decision_id, title, context, decision_text, status, consequences)
+        VALUES (1, 1, 'Use a database', 'Old context', 'Old decision', 'proposed', 'Old consequences');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _decision_row(db_path: Path) -> tuple:
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute(
+            "SELECT title, context, decision, status, consequences, updated_at FROM architecture_decisions WHERE id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def test_startup_adds_decision_template_columns_and_leaves_existing_rows_alone(tmp_path: Path) -> None:
+    from models import ArchitectureDecision, DecisionHistory, Tenant
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    _add_legacy_decisions(db_path)
+    for table, columns in DECISION_TEMPLATE_COLUMNS.items():
+        assert not columns & _sqlite_columns(db_path, table), table
+    before = _decision_row(db_path)
+
+    app_module, test_app = load_test_app(
+        secret_key="migration-decision-templates", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        for table, columns in DECISION_TEMPLATE_COLUMNS.items():
+            assert columns <= _sqlite_columns(db_path, table), table
+
+        # Nothing existing was read into a new value or rewritten
+        assert _decision_row(db_path) == before
+        assert db.session.query(ArchitectureDecision.decision_type).filter_by(id=1).scalar() is None
+        assert db.session.query(DecisionHistory.decision_type).filter_by(id=1).scalar() is None
+        assert db.session.query(Tenant.industry).filter(Tenant.id == 1).scalar() is None
+        settings = db.session.query(
+            TenantSettings.decision_template_id, TenantSettings.decision_template_notice_dismissed_at
+        ).filter(TenantSettings.tenant_id == 1).one()
+        assert tuple(settings) == (None, None)
+
+        # The columns are usable through the models straight away
+        ArchitectureDecision.query.filter_by(id=1).update({"decision_type": "Policy"}, synchronize_session=False)
+        TenantSettings.query.filter_by(tenant_id=1).update(
+            {"decision_template_id": "governance"}, synchronize_session=False)
+        Tenant.query.filter(Tenant.id == 1).update({"industry": "P"}, synchronize_session=False)
+        db.session.commit()
+        db.session.expire_all()
+        assert db.session.query(ArchitectureDecision.decision_type).filter_by(id=1).scalar() == "Policy"
+        assert db.session.query(Tenant.industry).filter(Tenant.id == 1).scalar() == "P"
+
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.6.0" in versions
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_decision_template_migration_changes_nothing_the_second_time(tmp_path: Path) -> None:
+    from migrations import migrate_2_6_0, run_migrations
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    _add_legacy_decisions(db_path)
+    app_module, test_app = load_test_app(
+        secret_key="migration-decision-templates-twice", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+        db.session.execute(db.text("UPDATE architecture_decisions SET decision_type = 'Policy' WHERE id = 1"))
+        db.session.commit()
+        columns_before = {table: _sqlite_columns(db_path, table) for table in DECISION_TEMPLATE_COLUMNS}
+
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert run_migrations(db) == 0
+        assert migrate_2_6_0(db) == 0
+        assert {table: _sqlite_columns(db_path, table) for table in DECISION_TEMPLATE_COLUMNS} == columns_before
+        kept = db.session.execute(db.text("SELECT decision_type FROM architecture_decisions WHERE id = 1")).scalar()
+        assert kept == "Policy"
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_decision_template_migration_skips_tables_that_do_not_exist() -> None:
+    """A database without the decision tables yet: only the tables that exist are altered."""
+    from types import SimpleNamespace
+
+    from migrations import migrate_2_6_0
+
+    statements: list[str] = []
+    fake_db = SimpleNamespace(
+        engine=SimpleNamespace(
+            dialect=SimpleNamespace(name="postgresql"),
+            # _RecordingConnection reports only tenants and users as existing
+            connect=lambda: _RecordingConnection(statements),
+        ),
+        text=lambda sql: sql,
+    )
+
+    assert migrate_2_6_0(fake_db) == 1
+    ddl = [s for s in statements if "information_schema" not in s]
+    assert ddl == ["ALTER TABLE tenants ADD COLUMN industry VARCHAR(8)"]
+
+
+def test_decision_template_migration_sql_for_postgresql() -> None:
+    """No PostgreSQL server here: check the statements the migration would send to one."""
+    from types import SimpleNamespace
+
+    from migrations import migrate_2_6_0
+
+    statements: list[str] = []
+
+    class EveryTableExists(_RecordingConnection):
+        def execute(self, statement, params=None):
+            if "information_schema.tables" in str(statement):
+                self.statements.append(str(statement))
+                return SimpleNamespace(fetchone=lambda: ("x",))
+            return super().execute(statement, params)
+
+    fake_db = SimpleNamespace(
+        engine=SimpleNamespace(
+            dialect=SimpleNamespace(name="postgresql"),
+            connect=lambda: EveryTableExists(statements),
+        ),
+        text=lambda sql: sql,
+    )
+
+    assert migrate_2_6_0(fake_db) == 5
+    ddl = [s for s in statements if "information_schema" not in s]
+    assert ddl == [
+        "ALTER TABLE tenants ADD COLUMN industry VARCHAR(8)",
+        "ALTER TABLE tenant_settings ADD COLUMN decision_template_id VARCHAR(64)",
+        "ALTER TABLE tenant_settings ADD COLUMN decision_template_notice_dismissed_at TIMESTAMP",
+        "ALTER TABLE architecture_decisions ADD COLUMN decision_type VARCHAR(100)",
+        "ALTER TABLE decision_history ADD COLUMN decision_type VARCHAR(100)",
+    ]
+    for sqlite_only in ("AUTOINCREMENT", "PRAGMA", "sqlite_master", "DATETIME"):
+        assert sqlite_only not in "\n".join(ddl)
+
+
+def test_decision_template_migration_on_the_fixture_database(app) -> None:
+    """On the fixture database (PostgreSQL in CI): a fresh one has the columns from the
+    models, and the migration's own ALTER TABLE statements put them back when they are missing."""
+    from migrations import column_exists, migrate_2_6_0
+    from models import ArchitectureDecision, Tenant
+
+    present = [(table, column) for table, columns in DECISION_TEMPLATE_COLUMNS.items() for column in sorted(columns)]
+    assert all(column_exists(db, table, column) for table, column in present)
+    assert migrate_2_6_0(db) == 0
+
+    db.session.remove()
+    with db.engine.connect() as conn:
+        for table, column in present:
+            conn.execute(db.text(f"ALTER TABLE {table} DROP COLUMN {column}"))
+        conn.commit()
+    assert not any(column_exists(db, table, column) for table, column in present)
+
+    assert migrate_2_6_0(db) == 5
+    assert all(column_exists(db, table, column) for table, column in present)
+    assert migrate_2_6_0(db) == 0
+
+    tenant = Tenant(domain="fixture.test", name="Fixture", industry="K")
+    db.session.add(tenant)
+    db.session.flush()
+    db.session.add(TenantSettings(tenant_id=tenant.id, decision_template_id="software"))
+    db.session.add(ArchitectureDecision(
+        title="Typed", context="c", decision="d", consequences="q", domain="fixture.test",
+        tenant_id=tenant.id, decision_type="Architecture"))
+    db.session.commit()
+    db.session.expire_all()
+    assert ArchitectureDecision.query.one().decision_type == "Architecture"
+    assert TenantSettings.query.one().decision_template_id == "software"

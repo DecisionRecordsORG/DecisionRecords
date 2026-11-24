@@ -559,16 +559,18 @@ def _account_text_rules():
         'user_consents': 'consent_type',
         # organisation, area of interest and the team answers describe an organisation; handled_by is a super admin
         'inquiries': 'source organisation area_of_interest team_focus team_size tenant_domain handled_by',
-        'architecture_decisions': 'status domain',
-        'decision_history': 'status',
+        # decision_type is one of a fixed list from the decision template, never free text
+        'architecture_decisions': 'status domain decision_type',
+        'decision_history': 'status decision_type',
         'decision_relationships': 'relationship_type target_previous_status',
         'it_infrastructure': 'type domain',
         'audit_logs': 'action_type target_entity',
         'ai_api_keys': 'key_hash key_prefix scopes',               # the key is revoked
         'ai_interaction_logs': 'decision_ids llm_provider llm_model error_message',
-        'tenants': 'domain name status deleted_by_admin team_focus team_size',
+        'tenants': 'domain name status deleted_by_admin team_focus team_size industry',
         'tenant_settings': 'auth_method rp_name tenant_prefix decision_relationship_pack_ids '
-                           'decision_relationship_enabled_types decision_relationship_custom_types',
+                           'decision_relationship_enabled_types decision_relationship_custom_types '
+                           'decision_template_id',
         'auth_configs': 'domain auth_method rp_name tenant_prefix',
         'sso_configs': 'domain provider_name client_id client_secret discovery_url',
         'email_configs': 'domain smtp_server smtp_username smtp_password from_email from_name',

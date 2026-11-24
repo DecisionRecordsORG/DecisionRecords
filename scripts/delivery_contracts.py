@@ -35,6 +35,7 @@ SHARED_CORE_PATTERNS = (
     "crypto.py",
     "data_export.py",
     "decision_relationships.py",
+    "decision_templates.py",
     "feature_flags.py",
     "governance.py",
     "migrations.py",
