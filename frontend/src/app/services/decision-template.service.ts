@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, shareReplay } from 'rxjs';
+import { Observable, retry, shareReplay } from 'rxjs';
 import { DECISION_FORM_COPY, DecisionFormCopy } from '../components/shared/decision-form-copy';
 
 /**
@@ -132,9 +132,15 @@ export class DecisionTemplateService {
     return this.catalog$;
   }
 
-  /** The signed-in member's tenant template. Not cached: an admin may have just changed it. */
+  /**
+   * The signed-in member's tenant template. Not cached: an admin may have just changed it.
+   * Tried up to three times: when it fails the forms fall back to the General headings,
+   * which would be the wrong headings for a tenant on another template.
+   */
   getTenantTemplate(): Observable<TenantDecisionTemplate> {
-    return this.http.get<TenantDecisionTemplate>('/api/tenant/decision-template');
+    return this.http
+      .get<TenantDecisionTemplate>('/api/tenant/decision-template')
+      .pipe(retry({ count: 2, delay: 400 }));
   }
 
   updateTenantTemplate(update: TenantDecisionTemplateUpdate): Observable<TenantDecisionTemplate> {

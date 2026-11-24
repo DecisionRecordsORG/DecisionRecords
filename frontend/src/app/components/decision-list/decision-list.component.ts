@@ -418,7 +418,7 @@ import {
               </p>
               <mat-form-field appearance="outline" class="onboarding-field" subscriptSizing="dynamic">
                 <mat-label>Industry</mat-label>
-                <mat-select data-testid="onboarding-industry" [(ngModel)]="onboardingIndustry">
+                <mat-select data-testid="onboarding-industry" class="industry-select" [(ngModel)]="onboardingIndustry">
                   <mat-option [value]="null">Prefer not to say</mat-option>
                   @for (industry of industries; track industry.code) {
                     <mat-option [value]="industry.code">{{ industry.title }}</mat-option>
@@ -1095,6 +1095,11 @@ import {
 
     .onboarding-team-profile-why a {
       color: #2563eb;
+    }
+
+    /* An official industry title can be long: show the chosen one in full, on as many lines as it needs */
+    :host ::ng-deep .industry-select .mat-mdc-select-value-text {
+      white-space: normal;
     }
 
     .onboarding-template-choice {

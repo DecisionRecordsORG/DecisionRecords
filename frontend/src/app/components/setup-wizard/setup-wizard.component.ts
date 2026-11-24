@@ -101,7 +101,7 @@ interface SetupResponse {
                   @if (templateCatalog) {
                     <mat-form-field appearance="outline" class="full-width" data-testid="setup-industry-field">
                       <mat-label>Industry (optional)</mat-label>
-                      <mat-select formControlName="industry" data-testid="setup-industry">
+                      <mat-select formControlName="industry" data-testid="setup-industry" class="industry-select">
                         <mat-option [value]="null">Prefer not to say</mat-option>
                         @for (industry of templateCatalog.industries; track industry.code) {
                           <mat-option [value]="industry.code">{{ industry.title }}</mat-option>
@@ -298,6 +298,11 @@ interface SetupResponse {
 
     .step-content {
       padding: 24px 0;
+    }
+
+    /* An official industry title can be long: show the chosen one in full, on as many lines as it needs */
+    :host ::ng-deep .industry-select .mat-mdc-select-value-text {
+      white-space: normal;
     }
 
     .industry-note {

@@ -237,7 +237,7 @@ export interface DecisionModalResult {
                   } @else {
                     <mat-form-field appearance="outline" class="full-width compact-field">
                       <mat-label>Type (optional)</mat-label>
-                      <mat-select data-testid="decision-type-select"
+                      <mat-select data-testid="decision-type-select" [panelWidth]="null"
                                   [(ngModel)]="selectedDecisionType" [ngModelOptions]="{standalone: true}"
                                   [disabled]="authService.isMasterAccount">
                         <mat-option [value]="null">-- None --</mat-option>

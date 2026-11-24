@@ -1,4 +1,4 @@
-import { TestBed } from '@angular/core/testing';
+import { TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { DECISION_FORM_COPY } from '../components/shared/decision-form-copy';
@@ -73,6 +73,31 @@ describe('DecisionTemplateService', () => {
     expect(requests.length).toBe(2);
     requests.forEach(request => request.flush(tenantTemplate()));
   });
+
+  it('tries the tenant template again before giving up, so a hiccup does not leave the General headings', fakeAsync(() => {
+    let answer: unknown;
+    let failed = false;
+    service.getTenantTemplate().subscribe({ next: value => (answer = value), error: () => (failed = true) });
+
+    httpMock.expectOne('/api/tenant/decision-template').flush('down', { status: 503, statusText: 'Unavailable' });
+    tick(400);
+    httpMock.expectOne('/api/tenant/decision-template').flush(tenantTemplate());
+
+    expect(answer).toEqual(tenantTemplate());
+    expect(failed).toBeFalse();
+  }));
+
+  it('gives up after three failed attempts', fakeAsync(() => {
+    let failed = false;
+    service.getTenantTemplate().subscribe({ error: () => (failed = true) });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      httpMock.expectOne('/api/tenant/decision-template').flush('down', { status: 503, statusText: 'Unavailable' });
+      tick(400);
+    }
+
+    expect(failed).toBeTrue();
+  }));
 
   it('saves the template choice with PUT', () => {
     service.updateTenantTemplate({ template_id: 'governance', industry: 'Q', enable_suggested_packs: true }).subscribe();

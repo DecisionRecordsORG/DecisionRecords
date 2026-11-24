@@ -81,17 +81,17 @@ const NO_TYPE = '__none__';
             <span>{{ catalog.guarantee }}</span>
           </p>
 
-          <mat-form-field appearance="outline" class="industry-field">
+          <mat-form-field appearance="outline" class="industry-field" subscriptSizing="dynamic">
             <mat-label>Industry (optional)</mat-label>
-            <mat-select data-testid="decision-template-industry"
+            <mat-select data-testid="decision-template-industry" class="industry-select"
                         [(ngModel)]="selectedIndustry" (selectionChange)="onIndustryChange()">
               <mat-option [value]="null">Not chosen</mat-option>
               @for (industry of catalog.industries; track industry.code) {
                 <mat-option [value]="industry.code">{{ industry.title }}</mat-option>
               }
             </mat-select>
-            <mat-hint>Your industry only suggests a template. You can pick any template below.</mat-hint>
           </mat-form-field>
+          <p class="industry-hint">Your industry only suggests a template. You can pick any template below.</p>
           <p class="industry-credit" data-testid="decision-template-credit">{{ catalog.industry_credit }}</p>
 
           <mat-radio-group class="template-options" aria-label="Decision template"
@@ -101,13 +101,17 @@ const NO_TYPE = '__none__';
                      [attr.data-testid]="'decision-template-option-' + template.id">
                 <mat-radio-button [value]="template.id">
                   <span class="template-option-label">{{ template.label }}</span>
-                  @if (template.id === suggestedTemplateId && selectedIndustry) {
-                    <span class="template-badge" data-testid="decision-template-suggested">Suggested for your industry</span>
-                  }
-                  @if (template.is_default) {
-                    <span class="template-badge neutral">Default</span>
-                  }
                 </mat-radio-button>
+                @if (template.is_default || (template.id === suggestedTemplateId && selectedIndustry)) {
+                  <div class="template-badges">
+                    @if (template.id === suggestedTemplateId && selectedIndustry) {
+                      <span class="template-badge" data-testid="decision-template-suggested">Suggested for your industry</span>
+                    }
+                    @if (template.is_default) {
+                      <span class="template-badge neutral">Default</span>
+                    }
+                  </div>
+                }
                 <p>{{ template.description }}</p>
               </label>
             }
@@ -337,6 +341,25 @@ const NO_TYPE = '__none__';
       max-width: 760px;
     }
 
+    /* An official industry title can be long: show the chosen one in full, on as many lines as it needs */
+    :host ::ng-deep .industry-select .mat-mdc-select-value-text {
+      white-space: normal;
+    }
+
+    .industry-hint {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.45;
+    }
+
+    .template-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 4px 8px;
+    }
+
     .industry-credit {
       margin: 4px 0 20px;
       font-size: 12px;
@@ -378,7 +401,6 @@ const NO_TYPE = '__none__';
     }
 
     .template-badge {
-      margin-left: 8px;
       padding: 2px 8px;
       border-radius: 10px;
       background: #fef3c7;
