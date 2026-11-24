@@ -16,7 +16,8 @@ import { SpaceService } from '../../services/space.service';
 import { Decision, DecisionReference, DecisionRelationship, DecisionRelationshipCatalog, Space, TenantMember } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
-import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
+import { DECISION_FORM_COPY, DecisionFormCopy } from '../shared/decision-form-copy';
+import { DecisionTemplate, DecisionTemplateService, decisionTypeOptions, formCopyFor } from '../../services/decision-template.service';
 import { forkJoin, of } from 'rxjs';
 import { catchError, filter } from 'rxjs/operators';
 
@@ -93,7 +94,7 @@ export interface DecisionModalResult {
               <!-- Title + Status Row -->
               <div class="form-row">
                 <mat-form-field appearance="outline" class="title-field">
-                  <mat-label>Title</mat-label>
+                  <mat-label>{{ copy.title.label }}</mat-label>
                   <input matInput formControlName="title"
                          [readonly]="mode === 'view'"
                          [placeholder]="copy.title.placeholder">
@@ -101,7 +102,7 @@ export interface DecisionModalResult {
                     <mat-hint>{{ copy.title.hint }}</mat-hint>
                   }
                   @if (form.get('title')?.hasError('required') && form.get('title')?.touched) {
-                    <mat-error>Title is required</mat-error>
+                    <mat-error>{{ copy.title.label }} is required</mat-error>
                   }
                 </mat-form-field>
 
@@ -126,7 +127,7 @@ export interface DecisionModalResult {
 
               <!-- Context -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Context</mat-label>
+                <mat-label>{{ copy.context.label }}</mat-label>
                 <textarea matInput formControlName="context" rows="5"
                           [readonly]="mode === 'view'"
                           [placeholder]="copy.context.placeholder"></textarea>
@@ -137,7 +138,7 @@ export interface DecisionModalResult {
 
               <!-- Decision -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Decision</mat-label>
+                <mat-label>{{ copy.decision.label }}</mat-label>
                 <textarea matInput formControlName="decision" rows="5"
                           [readonly]="mode === 'view'"
                           [placeholder]="copy.decision.placeholder"></textarea>
@@ -148,7 +149,7 @@ export interface DecisionModalResult {
 
               <!-- Consequences -->
               <mat-form-field appearance="outline" class="full-width">
-                <mat-label>Consequences</mat-label>
+                <mat-label>{{ copy.consequences.label }}</mat-label>
                 <textarea matInput formControlName="consequences" rows="5"
                           [readonly]="mode === 'view'"
                           [placeholder]="copy.consequences.placeholder"></textarea>
@@ -156,6 +157,13 @@ export interface DecisionModalResult {
                   <mat-hint>{{ copy.consequences.hint }}</mat-hint>
                 }
               </mat-form-field>
+
+              @if (mode !== 'view' && templateCaution) {
+                <p class="template-caution" data-testid="template-caution">
+                  <mat-icon>info</mat-icon>
+                  <span>{{ templateCaution }}</span>
+                </p>
+              }
 
               <!-- Change Reason (edit mode only) -->
               @if (mode === 'edit') {
@@ -211,6 +219,34 @@ export interface DecisionModalResult {
                       </mat-select>
                     </mat-form-field>
                     <p class="field-hint">Organize this decision in one or more spaces</p>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- Decision Type Card -->
+            @if (mode !== 'view' ? decisionTypeOptions.length > 0 : !!decision?.decision_type) {
+              <div class="meta-card" data-testid="decision-type-card">
+                <div class="meta-card-header">
+                  <mat-icon>label</mat-icon>
+                  <span>Decision Type</span>
+                </div>
+                <div class="meta-card-content">
+                  @if (mode === 'view') {
+                    <span class="decision-type-chip" data-testid="decision-type-value">{{ decision?.decision_type }}</span>
+                  } @else {
+                    <mat-form-field appearance="outline" class="full-width compact-field">
+                      <mat-label>Type (optional)</mat-label>
+                      <mat-select data-testid="decision-type-select"
+                                  [(ngModel)]="selectedDecisionType" [ngModelOptions]="{standalone: true}"
+                                  [disabled]="authService.isMasterAccount">
+                        <mat-option [value]="null">-- None --</mat-option>
+                        @for (type of decisionTypeOptions; track type) {
+                          <mat-option [value]="type">{{ type }}</mat-option>
+                        }
+                      </mat-select>
+                    </mat-form-field>
+                    <p class="field-hint">The kind of decision this is, from your organisation's decision template</p>
                   }
                 </div>
               </div>
@@ -442,6 +478,9 @@ export interface DecisionModalResult {
                             <div class="history-snapshot">
                               <div class="snapshot-header">
                                 <h4 class="snapshot-title">{{ item.title }}</h4>
+                                @if (item.decision_type) {
+                                  <span class="decision-type-chip">{{ item.decision_type }}</span>
+                                }
                                 <div class="status-chip" [ngClass]="'status-' + item.status">
                                   <mat-icon class="status-icon">{{ getStatusIcon(item.status) }}</mat-icon>
                                   {{ item.status | titlecase }}
@@ -451,7 +490,7 @@ export interface DecisionModalResult {
                               <div class="snapshot-field">
                                 <div class="snapshot-label">
                                   <mat-icon>description</mat-icon>
-                                  Context
+                                  {{ copy.context.label }}
                                 </div>
                                 <div class="snapshot-value">{{ item.context || '(empty)' }}</div>
                               </div>
@@ -459,7 +498,7 @@ export interface DecisionModalResult {
                               <div class="snapshot-field">
                                 <div class="snapshot-label">
                                   <mat-icon>gavel</mat-icon>
-                                  Decision
+                                  {{ copy.decision.label }}
                                 </div>
                                 <div class="snapshot-value">{{ item.decision || '(empty)' }}</div>
                               </div>
@@ -467,7 +506,7 @@ export interface DecisionModalResult {
                               <div class="snapshot-field">
                                 <div class="snapshot-label">
                                   <mat-icon>trending_up</mat-icon>
-                                  Consequences
+                                  {{ copy.consequences.label }}
                                 </div>
                                 <div class="snapshot-value">{{ item.consequences || '(empty)' }}</div>
                               </div>
@@ -1041,6 +1080,38 @@ export interface DecisionModalResult {
       color: #1565c0;
     }
 
+    .decision-type-chip {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .template-caution {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #78350f;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .template-caution mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      margin-top: 1px;
+    }
+
     .no-spaces, .no-owner {
       font-size: 13px;
       color: #888;
@@ -1157,7 +1228,10 @@ export interface DecisionModalResult {
   `]
 })
 export class DecisionModalComponent implements OnInit {
-  readonly copy = DECISION_FORM_COPY;
+  // Headings and prompts come from the tenant's decision template; General until it has loaded
+  copy: DecisionFormCopy = DECISION_FORM_COPY;
+  template: DecisionTemplate | null = null;
+  selectedDecisionType: string | null = null;
   mode: DecisionModalMode;
   decision: Decision | null = null;
   form: FormGroup;
@@ -1196,7 +1270,8 @@ export class DecisionModalComponent implements OnInit {
     public authService: AuthService,
     private spaceService: SpaceService,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private templateService: DecisionTemplateService
   ) {
     this.mode = data.mode;
     // Esc and backdrop clicks must not close the dialog directly: they go through
@@ -1220,9 +1295,32 @@ export class DecisionModalComponent implements OnInit {
     });
   }
 
+  /** The template's types, plus this decision's own type when the template does not list it. */
+  get decisionTypeOptions(): string[] {
+    return decisionTypeOptions(this.template, this.decision?.decision_type);
+  }
+
+  get templateCaution(): string | null {
+    return this.template?.caution || null;
+  }
+
+  /** The form works without it: on failure the General headings stay and no types are offered. */
+  private loadTemplate(): void {
+    this.templateService.getTenantTemplate().subscribe({
+      next: (tenantTemplate) => {
+        this.template = tenantTemplate.template;
+        this.copy = formCopyFor(tenantTemplate.template);
+      },
+      error: () => {}
+    });
+  }
+
   ngOnInit(): void {
     if (this.isView) {
       this.form.disable();
+    }
+    if (!this.authService.isMasterAccount) {
+      this.loadTemplate();
     }
 
     if (!this.isCreate && this.data.decisionId) {
@@ -1310,6 +1408,7 @@ export class DecisionModalComponent implements OnInit {
         // Load decision's owner
         this.selectedOwnerId = decision.owner_id || null;
         this.ownerEmail = decision.owner_email || '';
+        this.selectedDecisionType = decision.decision_type || null;
         this.editableRelationships = (decision.outgoing_relationships || []).map((relationship) => ({
           target_decision_id: relationship.counterpart?.id ?? null,
           relationship_type: relationship.relationship_type,
@@ -1459,6 +1558,7 @@ export class DecisionModalComponent implements OnInit {
       space_ids: this.selectedSpaceIds,
       owner_id: this.selectedOwnerId,
       owner_email: this.ownerEmail || undefined,
+      decision_type: this.selectedDecisionType || null,
       relationships: this.buildRelationshipPayload()
     };
 
@@ -1536,6 +1636,7 @@ export class DecisionModalComponent implements OnInit {
       space_ids: [...this.selectedSpaceIds].sort((a, b) => a - b),
       owner_id: this.selectedOwnerId ?? null,
       owner_email: this.ownerEmail || '',
+      decision_type: this.selectedDecisionType || null,
       // A row with no target and no notes holds nothing the user would miss
       relationships: this.editableRelationships
         .filter((relationship) => relationship.target_decision_id || relationship.notes)

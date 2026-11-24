@@ -172,6 +172,8 @@ export interface Decision {
   decision: string;
   status: DecisionStatus;
   consequences: string;
+  // Optional type from the tenant's decision template; kept as stored when the template changes
+  decision_type?: string | null;
   created_at: string;
   updated_at: string;
   domain?: string;
@@ -200,6 +202,7 @@ export interface DecisionHistory {
   decision: string;
   status: DecisionStatus;
   consequences: string;
+  decision_type?: string | null;
   changed_at: string;
   changed_by?: User;
   change_reason?: string;

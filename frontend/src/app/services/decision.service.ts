@@ -25,6 +25,7 @@ export interface CreateDecisionRequest {
   space_ids?: number[];
   owner_id?: number | null;
   owner_email?: string;
+  decision_type?: string | null;
   supersedes_decision_id?: number;
   relationships?: DecisionRelationshipInput[];
 }

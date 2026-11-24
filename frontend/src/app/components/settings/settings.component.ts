@@ -1,10 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
 import { MatDividerModule } from '@angular/material/divider';
-import { MatTabsModule } from '@angular/material/tabs';
+import { MatTabGroup, MatTabsModule } from '@angular/material/tabs';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
@@ -27,6 +27,7 @@ import { MatSelectModule } from '@angular/material/select';
 import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { getRoleBadge, RoleBadge } from '../../services/role.helper';
+import { DecisionTemplateSettingsComponent } from '../decision-template-settings/decision-template-settings.component';
 
 @Component({
   selector: 'app-settings',
@@ -53,7 +54,8 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
     MatRadioModule,
     MatTooltipModule,
     ConfirmDialogComponent,
-    SetupLinkDialogComponent
+    SetupLinkDialogComponent,
+    DecisionTemplateSettingsComponent
   ],
   template: `
     <div class="settings-container">
@@ -1691,6 +1693,16 @@ import { getRoleBadge, RoleBadge } from '../../services/role.helper';
           </div>
         </mat-tab>
         }
+
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="Decision template">
+          <div class="tab-content">
+            <ng-template matTabContent>
+              <app-decision-template-settings (packsChanged)="loadDecisionRelationshipSettings()"></app-decision-template-settings>
+            </ng-template>
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -3084,6 +3096,8 @@ export class SettingsComponent implements OnInit {
   savingTeamProfile = false;
 
   // Tab index for navigation
+  @ViewChild(MatTabGroup) tabGroup?: MatTabGroup;
+  private static readonly DECISION_TEMPLATE_TAB = 'Decision template';
   selectedTabIndex = 0;
   // Tab map matches actual tab order in template:
   // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*, 8: Teams*, 9: AI*, 10: Decision Relationships*
@@ -3101,6 +3115,20 @@ export class SettingsComponent implements OnInit {
     'ai': 9,
     'decision-relationships': 10
   };
+
+  /**
+   * Select a tab by its label. The position of a tab depends on which optional
+   * tabs (Slack, Teams, AI) the edition shows, so it is looked up, not fixed.
+   * The tabs may not be rendered yet when a link is followed: retry briefly.
+   */
+  private selectTabByLabel(label: string, attempts = 20): void {
+    const index = this.tabGroup?._tabs?.toArray().findIndex(tab => tab.textLabel === label) ?? -1;
+    if (index >= 0) {
+      this.selectedTabIndex = index;
+    } else if (attempts > 0) {
+      setTimeout(() => this.selectTabByLabel(label, attempts - 1), 100);
+    }
+  }
 
   /**
    * Check if current user is a provisional admin
@@ -3236,6 +3264,8 @@ export class SettingsComponent implements OnInit {
       const tab = params['tab'];
       if (tab && this.tabMap[tab] !== undefined) {
         this.selectedTabIndex = this.tabMap[tab];
+      } else if (tab === 'decision-template') {
+        this.selectTabByLabel(SettingsComponent.DECISION_TEMPLATE_TAB);
       }
 
       if (params['slack_success'] === 'true') {

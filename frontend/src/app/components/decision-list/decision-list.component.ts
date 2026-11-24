@@ -27,6 +27,13 @@ import {
   TEAM_SIZE_OPTIONS,
   teamProfileBody
 } from '../shared/team-profile';
+import {
+  DecisionTemplate,
+  DecisionTemplateCatalog,
+  DecisionTemplateService,
+  IndustrySection,
+  TenantDecisionTemplate
+} from '../../services/decision-template.service';
 
 @Component({
   selector: 'app-decision-list',
@@ -62,6 +69,26 @@ import {
           </button>
         }
       </div>
+
+      @if (showTemplateNotice) {
+        <div class="template-notice" data-testid="decision-template-notice" role="status">
+          <mat-icon>dashboard_customize</mat-icon>
+          <div class="template-notice-text">
+            <strong>Decision templates for different kinds of organisation are now available.</strong>
+            <span>A template changes the headings and prompts on your decisions. Your decisions are not altered.</span>
+          </div>
+          <div class="template-notice-actions">
+            <a mat-flat-button color="primary" data-testid="decision-template-notice-choose"
+               [routerLink]="['/' + userDomain + '/admin']" [queryParams]="{ tab: 'decision-template' }"
+               (click)="dismissTemplateNotice()">
+              Choose a template
+            </a>
+            <button mat-button data-testid="decision-template-notice-dismiss" (click)="dismissTemplateNotice()">
+              Not now
+            </button>
+          </div>
+        </div>
+      }
 
       <mat-card class="filter-card" appearance="outlined">
         <mat-card-content>
@@ -160,6 +187,22 @@ import {
               </mat-form-field>
             </div>
           }
+
+          @if (typeFilterOptions.length > 0) {
+            <div class="space-filter">
+              <mat-form-field appearance="outline" class="space-select">
+                <mat-label>Filter by type</mat-label>
+                <mat-select data-testid="type-filter" [(ngModel)]="typeFilter" (selectionChange)="filterDecisions()">
+                  <mat-option [value]="null">All types</mat-option>
+                  <mat-option [value]="noTypeFilter">No type</mat-option>
+                  @for (type of typeFilterOptions; track type) {
+                    <mat-option [value]="type">{{ type }}</mat-option>
+                  }
+                </mat-select>
+                <mat-icon matPrefix>label</mat-icon>
+              </mat-form-field>
+            </div>
+          }
         </mat-card-content>
       </mat-card>
 
@@ -224,6 +267,9 @@ import {
                     <mat-icon class="status-icon">{{ getStatusIcon(decision.status) }}</mat-icon>
                     {{ decision.status | titlecase }}
                   </div>
+                  @if (decision.decision_type) {
+                    <span class="decision-type-chip" data-testid="decision-card-type">{{ decision.decision_type }}</span>
+                  }
                   <div class="card-meta">
                     @if (decision.created_by) {
                       <span class="author">{{ decision.created_by.name || decision.created_by.email }}</span>
@@ -360,6 +406,31 @@ import {
                   }
                 </mat-select>
               </mat-form-field>
+            </div>
+          }
+
+          @if (showTemplateQuestion) {
+            <div class="onboarding-team-profile" data-testid="onboarding-decision-template">
+              <h3>What kind of organisation are you?</h3>
+              <p class="onboarding-team-profile-why">
+                Optional. Your answer suggests a decision template: the headings and prompts shown on your decisions.
+                Skip it and you get the General template. You can change this in organisation settings.
+              </p>
+              <mat-form-field appearance="outline" class="onboarding-field" subscriptSizing="dynamic">
+                <mat-label>Industry</mat-label>
+                <mat-select data-testid="onboarding-industry" [(ngModel)]="onboardingIndustry">
+                  <mat-option [value]="null">Prefer not to say</mat-option>
+                  @for (industry of industries; track industry.code) {
+                    <mat-option [value]="industry.code">{{ industry.title }}</mat-option>
+                  }
+                </mat-select>
+              </mat-form-field>
+              @if (onboardingSuggestedTemplate; as suggested) {
+                <p class="onboarding-template-choice" data-testid="onboarding-template-choice">
+                  We will use the <strong>{{ suggested.label }}</strong> template for your decisions.
+                </p>
+              }
+              <p class="onboarding-industry-credit">{{ industryCredit }}</p>
             </div>
           }
           </div>
@@ -1026,6 +1097,64 @@ import {
       color: #2563eb;
     }
 
+    .onboarding-template-choice {
+      margin: 0 0 8px;
+      font-size: 0.9rem;
+      color: #1e3a8a;
+    }
+
+    .onboarding-industry-credit {
+      margin: 0;
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+
+    .template-notice {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px 16px;
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      background: #eff6ff;
+      color: #1e3a8a;
+    }
+
+    .template-notice > mat-icon {
+      flex: 0 0 auto;
+    }
+
+    .template-notice-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1 1 280px;
+      font-size: 0.9rem;
+      line-height: 1.45;
+    }
+
+    .template-notice-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .decision-type-chip {
+      display: inline-block;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 3px 10px;
+      border-radius: 12px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
     .onboarding-field {
       display: block;
       width: 100%;
@@ -1103,6 +1232,15 @@ export class DecisionListComponent implements OnInit, OnDestroy {
   onboardingTeamSize: string | null = null;
   showTeamProfileQuestion = true;
 
+  // Decision template: the notice for existing tenants, the optional industry
+  // question in the onboarding dialog, and the type shown on each card
+  tenantTemplate: TenantDecisionTemplate | null = null;
+  templateCatalog: DecisionTemplateCatalog | null = null;
+  onboardingIndustry: string | null = null;
+  typeFilter: string | null = null;
+  readonly noTypeFilter = '__none__';
+  typeFilterOptions: string[] = [];
+
   // The onboarding dialog waits until no other dialog is open
   private onboardingTimer: ReturnType<typeof setTimeout> | null = null;
   private onboardingWaitSubscription: Subscription | null = null;
@@ -1115,7 +1253,8 @@ export class DecisionListComponent implements OnInit, OnDestroy {
     private route: ActivatedRoute,
     private router: Router,
     private http: HttpClient,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private templateService: DecisionTemplateService
   ) {}
 
   ngOnInit(): void {
@@ -1147,6 +1286,90 @@ export class DecisionListComponent implements OnInit, OnDestroy {
 
     // Check if admin needs to see onboarding modal
     this.checkAdminOnboarding();
+    this.loadTenantTemplate();
+  }
+
+  /** Nothing on this page depends on it: on failure there is no notice and no industry question. */
+  private loadTenantTemplate(): void {
+    if (this.authService.isMasterAccount) return;
+
+    this.templateService.getTenantTemplate().subscribe({
+      next: (tenantTemplate) => {
+        this.tenantTemplate = tenantTemplate;
+        if (tenantTemplate.can_manage && !tenantTemplate.template_chosen) {
+          this.templateService.getCatalog().subscribe({
+            next: (catalog) => { this.templateCatalog = catalog; },
+            error: () => {}
+          });
+        }
+      },
+      error: () => {}
+    });
+  }
+
+  private get onboardingPending(): boolean {
+    const currentUser = this.authService.currentUser;
+    if (!currentUser || currentUser.isMaster) return false;
+    const user = currentUser.user as User;
+    return !!user && !!user.is_admin && !user.has_seen_admin_onboarding;
+  }
+
+  /** One notice for admins of a tenant that has not looked at templates; not on top of the onboarding dialog. */
+  get showTemplateNotice(): boolean {
+    return !!this.tenantTemplate?.show_notice && !this.onboardingPending;
+  }
+
+  get industries(): IndustrySection[] {
+    return this.templateCatalog?.industries || [];
+  }
+
+  get industryCredit(): string {
+    return this.templateCatalog?.industry_credit || '';
+  }
+
+  /** The onboarding dialog asks about the industry only while the tenant has chosen nothing. */
+  get showTemplateQuestion(): boolean {
+    const tenantTemplate = this.tenantTemplate;
+    return !!tenantTemplate && tenantTemplate.can_manage && !tenantTemplate.template_chosen &&
+      !tenantTemplate.industry && this.industries.length > 0;
+  }
+
+  get onboardingSuggestedTemplate(): DecisionTemplate | null {
+    const industry = this.industries.find(item => item.code === this.onboardingIndustry);
+    if (!industry || !this.templateCatalog) return null;
+    return this.templateCatalog.templates.find(item => item.id === industry.suggested_template_id) || null;
+  }
+
+  /** "Choose a template" and "Not now" both end the notice for the whole tenant. */
+  dismissTemplateNotice(): void {
+    if (this.tenantTemplate) {
+      this.tenantTemplate = { ...this.tenantTemplate, show_notice: false };
+    }
+    this.templateService.dismissNotice().subscribe({
+      error: (err) => {
+        console.error('Failed to dismiss the decision template notice:', err);
+      }
+    });
+  }
+
+  /**
+   * Save the optional industry answer with the template it suggests, or, when
+   * it was skipped, record that the question was asked so the notice does not
+   * follow. Never blocks dismissing.
+   */
+  private saveOnboardingTemplateChoice(): void {
+    if (!this.showTemplateQuestion) return;
+
+    const suggested = this.onboardingSuggestedTemplate;
+    const request = this.onboardingIndustry && suggested
+      ? this.templateService.updateTenantTemplate({ industry: this.onboardingIndustry, template_id: suggested.id })
+      : this.templateService.dismissNotice();
+    request.subscribe({
+      next: (tenantTemplate) => { this.tenantTemplate = tenantTemplate; },
+      error: (err) => {
+        console.error('Failed to save the decision template choice:', err);
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -1274,6 +1497,7 @@ export class DecisionListComponent implements OnInit, OnDestroy {
 
   dismissOnboarding(): void {
     this.saveOnboardingTeamProfile();
+    this.saveOnboardingTemplateChoice();
 
     // Call API to mark onboarding as seen
     this.http.post('/api/user/dismiss-admin-onboarding', {}).subscribe({
@@ -1304,6 +1528,12 @@ export class DecisionListComponent implements OnInit, OnDestroy {
     this.decisionService.getDecisions().subscribe({
       next: (decisions) => {
         this.decisions = decisions;
+        this.typeFilterOptions = Array.from(
+          new Set(decisions.map(d => d.decision_type).filter((type): type is string => !!type))
+        ).sort((a, b) => a.localeCompare(b));
+        if (this.typeFilter && this.typeFilter !== this.noTypeFilter && !this.typeFilterOptions.includes(this.typeFilter)) {
+          this.typeFilter = null;
+        }
         this.filterDecisions();
         this.isLoading = false;
       },
@@ -1330,7 +1560,10 @@ export class DecisionListComponent implements OnInit, OnDestroy {
       const matchesMyDecisions = !this.showMyDecisionsOnly ||
         (d.created_by && d.created_by.id === currentUserId);
 
-      return matchesSearch && matchesStatus && matchesSpace && matchesMyDecisions;
+      const matchesType = this.typeFilter === null ||
+        (this.typeFilter === this.noTypeFilter ? !d.decision_type : d.decision_type === this.typeFilter);
+
+      return matchesSearch && matchesStatus && matchesSpace && matchesMyDecisions && matchesType;
     });
   }
 
@@ -1374,12 +1607,14 @@ export class DecisionListComponent implements OnInit, OnDestroy {
     this.searchTerm = '';
     this.statusFilter = '';
     this.spaceFilter = null;
+    this.typeFilter = null;
     this.showMyDecisionsOnly = false;
     this.filterDecisions();
   }
 
   hasActiveFilters(): boolean {
-    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null || this.showMyDecisionsOnly;
+    return !!this.searchTerm || !!this.statusFilter || this.spaceFilter !== null ||
+      this.typeFilter !== null || this.showMyDecisionsOnly;
   }
 
   // Decision Modal Methods

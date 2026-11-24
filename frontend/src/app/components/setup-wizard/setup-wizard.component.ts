@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators, AbstractControl, ValidationErrors } from '@angular/forms';
@@ -10,6 +10,8 @@ import { MatInputModule } from '@angular/material/input';
 import { MatIconModule } from '@angular/material/icon';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatStepperModule } from '@angular/material/stepper';
+import { MatSelectModule } from '@angular/material/select';
+import { DecisionTemplate, DecisionTemplateCatalog, DecisionTemplateService } from '../../services/decision-template.service';
 
 interface SetupResponse {
   message: string;
@@ -38,6 +40,7 @@ interface SetupResponse {
     MatInputModule,
     MatIconModule,
     MatProgressSpinnerModule,
+    MatSelectModule,
     MatStepperModule
   ],
   template: `
@@ -94,6 +97,29 @@ interface SetupResponse {
                       Domain is required
                     </mat-error>
                   </mat-form-field>
+
+                  @if (templateCatalog) {
+                    <mat-form-field appearance="outline" class="full-width" data-testid="setup-industry-field">
+                      <mat-label>Industry (optional)</mat-label>
+                      <mat-select formControlName="industry" data-testid="setup-industry">
+                        <mat-option [value]="null">Prefer not to say</mat-option>
+                        @for (industry of templateCatalog.industries; track industry.code) {
+                          <mat-option [value]="industry.code">{{ industry.title }}</mat-option>
+                        }
+                      </mat-select>
+                      <mat-hint>
+                        Suggests a decision template: the headings and prompts on your decisions. You can change it later in settings.
+                      </mat-hint>
+                    </mat-form-field>
+                    <p class="industry-note" data-testid="setup-template-choice">
+                      @if (suggestedTemplate; as suggested) {
+                        We will use the <strong>{{ suggested.label }}</strong> template for your decisions.
+                      } @else {
+                        Skip this and you get the General template.
+                      }
+                      <span class="industry-credit">{{ templateCatalog.industry_credit }}</span>
+                    </p>
+                  }
 
                   <div class="step-actions">
                     <button mat-raised-button class="primary-button" matStepperNext
@@ -274,6 +300,19 @@ interface SetupResponse {
       padding: 24px 0;
     }
 
+    .industry-note {
+      margin: 8px 0 16px;
+      font-size: 13px;
+      color: #475569;
+      line-height: 1.5;
+    }
+
+    .industry-credit {
+      display: block;
+      font-size: 12px;
+      color: #64748b;
+    }
+
     .step-description {
       font-family: 'Inter', sans-serif;
       color: #64748b;
@@ -445,10 +484,14 @@ interface SetupResponse {
     }
   `]
 })
-export class SetupWizardComponent {
+export class SetupWizardComponent implements OnInit {
   private router = inject(Router);
   private http = inject(HttpClient);
   private fb = inject(FormBuilder);
+  private templateService = inject(DecisionTemplateService);
+
+  // The optional industry question; the wizard works without it if the list cannot be loaded
+  templateCatalog: DecisionTemplateCatalog | null = null;
 
   setupForm: FormGroup;
   orgFormGroup: FormGroup;
@@ -470,6 +513,7 @@ export class SetupWizardComponent {
     this.setupForm = this.fb.group({
       organizationName: ['', Validators.required],
       domain: ['', Validators.required],
+      industry: [null],
       adminName: [''],
       adminEmail: ['', [Validators.required, Validators.email]],
       adminPassword: ['', [Validators.required, Validators.minLength(8)]],
@@ -492,6 +536,21 @@ export class SetupWizardComponent {
     }, {
       validators: SetupWizardComponent.passwordMatchValidator
     });
+  }
+
+  ngOnInit(): void {
+    this.templateService.getCatalog().subscribe({
+      next: (catalog) => { this.templateCatalog = catalog; },
+      error: () => {}
+    });
+  }
+
+  /** The template the chosen industry suggests, or null while none is chosen. */
+  get suggestedTemplate(): DecisionTemplate | null {
+    const code = this.setupForm.get('industry')?.value;
+    const industry = this.templateCatalog?.industries.find(item => item.code === code);
+    if (!industry || !this.templateCatalog) return null;
+    return this.templateCatalog.templates.find(item => item.id === industry.suggested_template_id) || null;
   }
 
   // Static validator for password matching - works with Angular's form validation
@@ -550,13 +609,18 @@ export class SetupWizardComponent {
     this.isSubmitting = true;
     this.errorMessage = '';
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       organization_name: this.setupForm.get('organizationName')?.value,
       domain: this.setupForm.get('domain')?.value,
       admin_name: this.setupForm.get('adminName')?.value,
       admin_email: this.setupForm.get('adminEmail')?.value,
       admin_password: this.setupForm.get('adminPassword')?.value
     };
+    const suggested = this.suggestedTemplate;
+    if (suggested) {
+      payload['industry'] = this.setupForm.get('industry')?.value;
+      payload['decision_template_id'] = suggested.id;
+    }
 
     this.http.post<SetupResponse>('/api/setup/initialize', payload).subscribe({
       next: (response) => {

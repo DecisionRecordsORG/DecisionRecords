@@ -8,6 +8,7 @@ import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { of } from 'rxjs';
 import { DecisionListComponent } from './decision-list.component';
 import { AuthService } from '../../services/auth.service';
+import { TEMPLATE_CATALOG, governanceTenantTemplate, tenantTemplate } from '../../services/decision-template.testing';
 
 /**
  * The first-admin onboarding dialog: when it opens, and the optional team
@@ -88,6 +89,164 @@ describe('DecisionListComponent onboarding dialog', () => {
   afterEach(() => {
     dialog.closeAll();
     httpMock.match(() => true);
+  });
+
+  /** Answer the two requests the list makes about the decision template. */
+  function flushTemplate(answer = tenantTemplate({ can_manage: true, show_notice: true })): void {
+    httpMock.expectOne('/api/tenant/decision-template').flush(answer);
+    httpMock.match('/api/decision-templates/catalog').forEach(request => request.flush(TEMPLATE_CATALOG));
+    fixture.detectChanges();
+  }
+
+  function notice(): HTMLElement | null {
+    return fixture.nativeElement.querySelector('[data-testid="decision-template-notice"]');
+  }
+
+  describe('decision template', () => {
+    it('asks the optional industry question with the official titles and the Eurostat credit', fakeAsync(() => {
+      createComponent();
+      flushTemplate();
+      tick(500);
+      fixture.detectChanges();
+
+      const section = document.querySelector('[data-testid="onboarding-decision-template"]') as HTMLElement;
+      const text = (section.textContent || '').replace(/\s+/g, ' ');
+      expect(text).toContain('What kind of organisation are you?');
+      expect(text).toContain('Optional.');
+      expect(text).toContain('Skip it and you get the General template.');
+      expect(text).toContain('Industry sections: NACE Rev. 2.1, Eurostat, CC BY 4.0');
+      expect(component.industries.map(industry => industry.title)).toEqual(['Manufacturing', 'Education']);
+      // The existing two questions are still there
+      expect(document.querySelector('[data-testid="onboarding-team-profile"]')).not.toBeNull();
+      // Not both at once: the notice waits until the dialog has been seen
+      expect(notice()).toBeNull();
+      flush();
+    }));
+
+    it('saves the industry with the template it suggests when the dialog is dismissed', fakeAsync(() => {
+      createComponent();
+      flushTemplate();
+      tick(500);
+      component.onboardingIndustry = 'Q';
+      fixture.detectChanges();
+
+      expect(document.querySelector('[data-testid="onboarding-template-choice"]')?.textContent)
+        .toContain('Governance and committee');
+      component.dismissOnboarding();
+
+      const save = httpMock.expectOne('/api/tenant/decision-template');
+      expect(save.request.method).toBe('PUT');
+      expect(save.request.body).toEqual({ industry: 'Q', template_id: 'governance' });
+      save.flush(governanceTenantTemplate({ industry: 'Q', can_manage: true }));
+      httpMock.expectNone('/api/tenant/decision-template/dismiss-notice');
+      httpMock.expectOne('/api/user/dismiss-admin-onboarding').flush({ message: 'Admin onboarding dismissed' });
+      tick(500);
+      fixture.detectChanges();
+
+      expect(notice()).toBeNull();
+      flush();
+    }));
+
+    it('skipping the question keeps General and ends the notice', fakeAsync(() => {
+      createComponent();
+      flushTemplate();
+      tick(500);
+      fixture.detectChanges();
+
+      component.dismissOnboarding();
+
+      const dismissNotice = httpMock.expectOne('/api/tenant/decision-template/dismiss-notice');
+      expect(dismissNotice.request.method).toBe('POST');
+      dismissNotice.flush(tenantTemplate({ can_manage: true, show_notice: false }));
+      httpMock.expectOne('/api/user/dismiss-admin-onboarding').flush({ message: 'Admin onboarding dismissed' });
+      tick(500);
+      fixture.detectChanges();
+
+      expect(notice()).toBeNull();
+      flush();
+    }));
+
+    it('does not ask a tenant that has already chosen a template', fakeAsync(() => {
+      createComponent();
+      flushTemplate(governanceTenantTemplate({ can_manage: true }));
+      tick(500);
+      fixture.detectChanges();
+
+      expect(onboardingIsOpen()).toBeTrue();
+      expect(document.querySelector('[data-testid="onboarding-decision-template"]')).toBeNull();
+      flush();
+    }));
+
+    it('shows one notice to an admin of an existing tenant, pointing at the settings card', fakeAsync(() => {
+      user.has_seen_admin_onboarding = true;
+      createComponent();
+      flushTemplate();
+
+      const text = (notice()?.textContent || '').replace(/\s+/g, ' ');
+      expect(text).toContain('Decision templates for different kinds of organisation are now available.');
+      expect(text).toContain('Your decisions are not altered.');
+      const link = notice()!.querySelector('[data-testid="decision-template-notice-choose"]') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('/acme.test/admin?tab=decision-template');
+      flush();
+    }));
+
+    it('"Not now" ends the notice for the tenant', fakeAsync(() => {
+      user.has_seen_admin_onboarding = true;
+      createComponent();
+      flushTemplate();
+
+      (notice()!.querySelector('[data-testid="decision-template-notice-dismiss"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+
+      expect(notice()).toBeNull();
+      const dismissNotice = httpMock.expectOne('/api/tenant/decision-template/dismiss-notice');
+      expect(dismissNotice.request.method).toBe('POST');
+      dismissNotice.flush(tenantTemplate({ can_manage: true }));
+      flush();
+    }));
+
+    it('shows no notice to a member, or once the tenant has dismissed it', fakeAsync(() => {
+      user.has_seen_admin_onboarding = true;
+      user.is_admin = false;
+      createComponent();
+      flushTemplate(tenantTemplate({ can_manage: false, show_notice: false }));
+
+      expect(notice()).toBeNull();
+      flush();
+    }));
+
+    it('filters the list by type and shows the type on a card', fakeAsync(() => {
+      user.has_seen_admin_onboarding = true;
+      fixture = TestBed.createComponent(DecisionListComponent);
+      component = fixture.componentInstance;
+      fixture.detectChanges();
+      const decision = (id: number, title: string, decision_type: string | null) => ({
+        id, title, context: 'c', decision: 'd', consequences: 'q', status: 'accepted', decision_type,
+        created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z'
+      });
+      httpMock.expectOne('/api/decisions').flush([
+        decision(1, 'Pay review', 'Policy'), decision(2, 'New laptop', 'Spending'), decision(3, 'Untyped', null)
+      ]);
+      httpMock.match('/api/spaces').forEach(request => request.flush([]));
+      fixture.detectChanges();
+
+      expect(component.typeFilterOptions).toEqual(['Policy', 'Spending']);
+      const chips = Array.from(fixture.nativeElement.querySelectorAll('[data-testid="decision-card-type"]'))
+        .map((chip: any) => chip.textContent.trim());
+      expect(chips).toEqual(['Policy', 'Spending']);
+
+      component.typeFilter = 'Policy';
+      component.filterDecisions();
+      expect(component.filteredDecisions.map(d => d.title)).toEqual(['Pay review']);
+
+      component.typeFilter = component.noTypeFilter;
+      component.filterDecisions();
+      expect(component.filteredDecisions.map(d => d.title)).toEqual(['Untyped']);
+
+      component.clearFilters();
+      expect(component.filteredDecisions.length).toBe(3);
+      flush();
+    }));
   });
 
   it('opens half a second after the list loads when nothing else is open', fakeAsync(() => {
