@@ -241,7 +241,7 @@ GET /api/version
 Response:
 ```json
 {
-  "version": "2.2.0",
+  "version": "2.3.0",
   "build_date": "2026-11-22",
   "git_commit": "abc1234",
   "environment": "production"

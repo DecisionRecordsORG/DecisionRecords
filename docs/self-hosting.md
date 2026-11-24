@@ -252,7 +252,7 @@ Database migrations run automatically on startup.
 If you pin explicit release tags instead of `latest`, pull the target version from GitHub Container Registry before restarting:
 
 ```bash
-docker pull ghcr.io/decisionrecordsorg/decisionrecords:v2.2.0
+docker pull ghcr.io/decisionrecordsorg/decisionrecords:v2.3.0
 ```
 
 ## Health Check

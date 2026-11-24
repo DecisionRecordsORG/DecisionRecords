@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-24-release-2.3.0"
+title = "Prepare community release 2.3.0"
+summary = "Sets the version to 2.3.0 and moves the unreleased changelog entries under it: decision templates chosen by an administrator or steward, the optional industry answer from the NACE Rev. 2.1 sections that suggests a template, an optional decision type with a list filter and bulk assignment, and startup migration 2.6.0."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"
