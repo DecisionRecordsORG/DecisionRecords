@@ -201,6 +201,11 @@ MIGRATIONS = [
         "description": "Finish the anonymisation of accounts anonymised by earlier versions",
         "migrate": lambda db: migrate_2_5_0(db)
     },
+    {
+        "version": "2.6.0",
+        "description": "Add decision template, industry and decision type columns",
+        "migrate": lambda db: migrate_2_6_0(db)
+    },
 ]
 
 
@@ -644,6 +649,32 @@ def migrate_2_5_0(db):
 
     if changes:
         logger.info(f"Finished the anonymisation of earlier deleted accounts ({changes} rows)")
+    return changes
+
+
+DECISION_TEMPLATE_COLUMNS = (
+    ('tenants', 'industry', 'VARCHAR(8)'),
+    ('tenant_settings', 'decision_template_id', 'VARCHAR(64)'),
+    ('tenant_settings', 'decision_template_notice_dismissed_at', 'TIMESTAMP'),
+    ('architecture_decisions', 'decision_type', 'VARCHAR(100)'),
+    ('decision_history', 'decision_type', 'VARCHAR(100)'),
+)
+
+
+def migrate_2_6_0(db):
+    """Migration for v2.6.0 - decision templates, industry and decision type.
+
+    Five nullable columns and nothing else: no existing row is read or
+    changed. A tenant without a template keeps the default (General) layout,
+    and a decision without a type is valid. The same ALTER TABLE statements
+    run on SQLite and PostgreSQL; a second run finds every column in place.
+    """
+    changes = 0
+    for table_name, column_name, column_type in DECISION_TEMPLATE_COLUMNS:
+        if not table_exists(db, table_name):
+            continue
+        if add_column(db, table_name, column_name, column_type):
+            changes += 1
     return changes
 
 

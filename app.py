@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from auth import login_required, admin_required, get_current_user, set_session_expiry, start_user_session, complete_setup_and_login, mark_social_sign_in, get_or_create_user, get_oidc_config, extract_domain_from_email, is_master_account, authenticate_master, master_required, steward_or_admin_required, get_current_tenant, get_current_membership
 from governance import log_admin_action
 from data_export import build_personal_data_export
+import decision_templates
 import retention
 from models import RetentionRun
 from notifications import notify_subscribers_new_decision, notify_subscribers_decision_updated
@@ -3132,6 +3133,247 @@ def api_update_tenant_decision_relationship_config():
     payload['message'] = 'Decision relationship settings updated'
     return jsonify(payload)
 
+
+# ==================== API Routes - Decision templates ====================
+# A template changes the headings, prompts, example titles and decision types
+# shown for a tenant's decisions. It never changes what is stored: switching
+# template reads and writes no decision. See decision_templates.py.
+
+TEMPLATE_ADMIN_ROLES = (GlobalRole.ADMIN, GlobalRole.STEWARD, GlobalRole.PROVISIONAL_ADMIN)
+BULK_DECISION_TYPE_MAX = 200
+
+
+def get_tenant_template_id(tenant):
+    """The template id stored for a tenant, or None when it has not chosen one."""
+    settings = tenant.settings if tenant else None
+    return settings.decision_template_id if settings else None
+
+
+def _decision_template_access(require_admin):
+    """(tenant, membership, None) for a tenant member, else (None, None, error response)."""
+    if is_master_account():
+        return None, None, (jsonify({'error': 'Super admin accounts cannot access tenant decision templates'}), 403)
+
+    tenant = get_current_tenant()
+    if not tenant:
+        return None, None, (jsonify({'error': 'Tenant not found'}), 404)
+
+    membership = get_current_membership()
+    if require_admin and (not membership or membership.global_role not in TEMPLATE_ADMIN_ROLES):
+        return None, None, (jsonify({'error': 'Permission denied. Admin or Steward role required.'}), 403)
+
+    return tenant, membership, None
+
+
+def _decision_template_payload(tenant, membership):
+    settings = tenant.settings
+    payload = decision_templates.build_tenant_template_payload(get_tenant_template_id(tenant), tenant.industry)
+    can_manage = bool(membership and membership.global_role in TEMPLATE_ADMIN_ROLES)
+    notice_dismissed = bool(settings and settings.decision_template_notice_dismissed_at)
+    payload['can_manage'] = can_manage
+    # One notice for administrators of a tenant that has not looked at templates yet
+    payload['show_notice'] = can_manage and not notice_dismissed and not payload['template_chosen']
+    return payload
+
+
+def _enable_suggested_relationship_packs(settings, template_id):
+    """Switch on the packs a template suggests. Never switches a pack or a class off.
+
+    Returns the ids of the packs that were added.
+    """
+    config, added = decision_templates.add_suggested_packs(
+        settings.get_decision_relationship_config(), template_id
+    )
+    if added:
+        settings.set_decision_relationship_config(config)
+    return added
+
+
+@app.route('/api/decision-templates/catalog', methods=['GET'])
+def api_get_decision_template_catalog():
+    """The templates and the industry list. Static, public data (the setup wizard reads it)."""
+    return jsonify(decision_templates.get_decision_template_catalog())
+
+
+@app.route('/api/tenant/decision-template', methods=['GET'])
+@login_required
+def api_get_tenant_decision_template():
+    """The tenant's template, for every member: the decision form and views read it."""
+    tenant, membership, error = _decision_template_access(require_admin=False)
+    if error:
+        return error
+    return jsonify(_decision_template_payload(tenant, membership))
+
+
+@app.route('/api/tenant/decision-template', methods=['PUT'])
+@login_required
+def api_update_tenant_decision_template():
+    """Choose the tenant's template and industry (tenant admins and stewards).
+
+    Body: {"template_id": id or null, "industry": NACE section letter or null,
+    "enable_suggested_packs": bool}. A field that is left out keeps its value;
+    null clears it (no template means the default one). No decision is read or
+    changed. Suggested relationship packs are only ever added.
+    """
+    tenant, membership, error = _decision_template_access(require_admin=True)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+
+    # Validate everything before changing anything
+    previous_template_id = get_tenant_template_id(tenant)
+    previous_industry = tenant.industry
+    template_id = previous_template_id
+    industry = previous_industry
+    try:
+        if 'template_id' in data:
+            template_id = decision_templates.normalize_template_id(data['template_id'])
+        if 'industry' in data:
+            industry = decision_templates.normalize_industry(data['industry'])
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    enable_packs = data.get('enable_suggested_packs', False)
+    if not isinstance(enable_packs, bool):
+        return jsonify({'error': 'enable_suggested_packs must be true or false'}), 400
+
+    settings = get_or_create_tenant_settings(tenant, persist=True)
+    settings.decision_template_id = template_id
+    tenant.industry = industry
+    if settings.decision_template_notice_dismissed_at is None:
+        settings.decision_template_notice_dismissed_at = datetime.now(timezone.utc)
+
+    added_pack_ids = _enable_suggested_relationship_packs(settings, template_id) if enable_packs else []
+
+    if template_id != previous_template_id or industry != previous_industry or added_pack_ids:
+        # The industry answer stays in the tenant's own audit log; it is not sent to analytics
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=g.current_user.id,
+            action_type='update_decision_template',
+            target_entity='tenant_settings',
+            target_id=settings.id,
+            details={
+                'template_id': template_id,
+                'previous_template_id': previous_template_id,
+                'industry': industry,
+                'previous_industry': previous_industry,
+                'added_pack_ids': added_pack_ids,
+            }
+        )
+    db.session.commit()
+
+    payload = _decision_template_payload(tenant, membership)
+    payload['added_pack_ids'] = added_pack_ids
+    payload['message'] = 'Decision template saved'
+    return jsonify(payload)
+
+
+@app.route('/api/tenant/decision-template/dismiss-notice', methods=['POST'])
+@login_required
+def api_dismiss_decision_template_notice():
+    """Close the notice about decision templates for the whole tenant (admins and stewards)."""
+    tenant, membership, error = _decision_template_access(require_admin=True)
+    if error:
+        return error
+
+    settings = get_or_create_tenant_settings(tenant, persist=True)
+    if settings.decision_template_notice_dismissed_at is None:
+        settings.decision_template_notice_dismissed_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+    payload = _decision_template_payload(tenant, membership)
+    payload['message'] = 'Notice dismissed'
+    return jsonify(payload)
+
+
+@app.route('/api/tenant/decisions/bulk-type', methods=['POST'])
+@login_required
+def api_bulk_set_decision_type():
+    """Set or clear the type of several decisions at once (tenant admins and stewards).
+
+    Body: {"decision_ids": [id, ...], "decision_type": text or null}. At most
+    BULK_DECISION_TYPE_MAX ids. The type must be one of the tenant's current
+    template; null clears it. Only the type column is written: titles, text,
+    status and the last-updated date of the decisions stay as they are. Ids
+    that are not live decisions of this tenant are skipped and reported.
+    """
+    tenant, _membership, error = _decision_template_access(require_admin=True)
+    if error:
+        return error
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+
+    raw_ids = data.get('decision_ids')
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return jsonify({'error': 'decision_ids must be a list with at least one id'}), 400
+    if any(isinstance(item, bool) or not isinstance(item, int) for item in raw_ids):
+        return jsonify({'error': 'decision_ids must be a list of numbers'}), 400
+    requested_ids = list(dict.fromkeys(raw_ids))
+    if len(requested_ids) > BULK_DECISION_TYPE_MAX:
+        return jsonify({'error': f'At most {BULK_DECISION_TYPE_MAX} decisions can be changed at once'}), 400
+
+    if 'decision_type' not in data:
+        return jsonify({'error': 'decision_type is required (null clears the type)'}), 400
+    try:
+        decision_type = decision_templates.normalize_decision_type(
+            data['decision_type'], get_tenant_template_id(tenant)
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    # SECURITY: only live decisions of the caller's own tenant are ever matched
+    own_decisions = db.session.query(ArchitectureDecision.id, ArchitectureDecision.decision_type).filter(
+        ArchitectureDecision.id.in_(requested_ids),
+        ArchitectureDecision.domain == tenant.domain,
+        ArchitectureDecision.deleted_at.is_(None)
+    ).all()
+    previous_types = {row.id: row.decision_type for row in own_decisions}
+    skipped_ids = [decision_id for decision_id in requested_ids if decision_id not in previous_types]
+    changed_ids = [
+        decision_id for decision_id in requested_ids
+        if decision_id in previous_types and previous_types[decision_id] != decision_type
+    ]
+
+    if changed_ids:
+        ArchitectureDecision.query.filter(
+            ArchitectureDecision.id.in_(changed_ids),
+            ArchitectureDecision.domain == tenant.domain,
+            ArchitectureDecision.deleted_at.is_(None)
+        ).update(
+            {
+                ArchitectureDecision.decision_type: decision_type,
+                # Assigning a type is not an edit of the decision: keep its last-updated date
+                ArchitectureDecision.updated_at: ArchitectureDecision.updated_at,
+            },
+            synchronize_session=False
+        )
+        log_admin_action(
+            tenant_id=tenant.id,
+            actor_user_id=g.current_user.id,
+            action_type='bulk_set_decision_type',
+            target_entity='decision',
+            details={
+                'decision_type': decision_type,
+                'decision_ids': changed_ids,
+                'previous_types': {str(decision_id): previous_types[decision_id] for decision_id in changed_ids},
+            }
+        )
+        db.session.commit()
+
+    return jsonify({
+        'message': 'Decision type cleared' if decision_type is None else 'Decision type set',
+        'decision_type': decision_type,
+        'updated': len(changed_ids),
+        'unchanged': len(previous_types) - len(changed_ids),
+        'skipped_ids': skipped_ids,
+    })
+
 @app.route('/api/decisions', methods=['GET'])
 @login_required
 @track_endpoint('api_decisions_list')
@@ -3193,6 +3435,14 @@ def api_create_decision():
     if errors:
         return jsonify({'error': errors[0]}), 400
 
+    # Optional type, from the tenant's current decision template
+    try:
+        decision_type = decision_templates.normalize_decision_type(
+            data.get('decision_type'), get_tenant_template_id(tenant)
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
     # Validate status if provided
     status = sanitized.get('status', 'proposed')
     if status not in ArchitectureDecision.VALID_STATUSES:
@@ -3233,7 +3483,8 @@ def api_create_decision():
         created_by_id=g.current_user.id,
         updated_by_id=g.current_user.id,
         owner_id=validated_owner_id,
-        owner_email=owner_email
+        owner_email=owner_email,
+        decision_type=decision_type
     )
 
     # Handle infrastructure associations
@@ -3361,8 +3612,22 @@ def api_update_decision(decision_id):
     if 'status' in sanitized and sanitized['status'] not in ArchitectureDecision.VALID_STATUSES:
         return jsonify({'error': f'Invalid status. Must be one of: {", ".join(ArchitectureDecision.VALID_STATUSES)}'}), 400
 
+    # Optional type: one of the tenant's current template, or the one already
+    # stored on this decision (a type kept from an earlier template stays valid)
+    decision_type_changed = False
+    if 'decision_type' in data:
+        try:
+            new_decision_type = decision_templates.normalize_decision_type(
+                data['decision_type'],
+                get_tenant_template_id(decision.tenant or get_current_tenant()),
+                stored_type=decision.decision_type
+            )
+        except ValueError as exc:
+            return jsonify({'error': str(exc)}), 400
+        decision_type_changed = new_decision_type != decision.decision_type
+
     # Check if there are actual changes
-    has_changes = False
+    has_changes = decision_type_changed
     status_changed = False
     old_status = decision.status
 
@@ -3405,6 +3670,8 @@ def api_update_decision(decision_id):
         decision.status = sanitized['status']
     if 'consequences' in sanitized:
         decision.consequences = sanitized['consequences']
+    if decision_type_changed:
+        decision.decision_type = new_decision_type
 
     # Handle owner updates
     if 'owner_id' in data:
@@ -8615,6 +8882,13 @@ def api_setup_initialize():
     admin_password = data.get('admin_password', '')
     admin_name = data.get('admin_name', '').strip()
 
+    # Optional: an industry section and a decision template (skipping means General)
+    try:
+        setup_industry = decision_templates.normalize_industry(data.get('industry'))
+        setup_template_id = decision_templates.normalize_template_id(data.get('decision_template_id'))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
     if not organization_name:
         return jsonify({'error': 'Organization name is required'}), 400
     if not domain:
@@ -8642,11 +8916,20 @@ def api_setup_initialize():
             domain=domain,
             name=organization_name,
             status='active',
-            maturity_state=MaturityState.BOOTSTRAP
+            maturity_state=MaturityState.BOOTSTRAP,
+            industry=setup_industry
         )
         db.session.add(tenant)
         db.session.flush()
         app.logger.info(f"Created tenant via setup wizard: {domain}")
+
+        # The wizard asked about the template (skipping means General), so the
+        # notice that points existing tenants at the setting is not needed here
+        db.session.add(TenantSettings(
+            tenant_id=tenant.id,
+            decision_template_id=setup_template_id,
+            decision_template_notice_dismissed_at=datetime.now(timezone.utc)
+        ))
 
         # Create default auth config for the tenant
         auth_config = AuthConfig(

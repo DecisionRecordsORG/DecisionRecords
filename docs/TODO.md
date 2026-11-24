@@ -19,6 +19,14 @@ Update rules:
 - [ ] Collapse duplicated Community CI and release validation steps into a reusable workflow once the tag-release hardening has proven stable.
 - [ ] Mirror the delivery-contract system into the private `ee` and `marketing` repositories so private-repo-local work can declare obligations before the public submodule pointer update stage.
 
+## Decision templates
+
+- [ ] First follow-up: make the surfaces outside the web app use the organisation's template headings. Notification emails (`notifications.py`), Slack messages and modals, Teams cards, the MCP tool descriptions and exports still say Context, Decision and Consequences, and none of them shows or accepts the decision type. The Slack, Teams and MCP parts live in `ee/`; all of them can read `decision_templates.get_template(...)`.
+- [ ] `GET /api/decisions` returns no spaces, so neither the decision list nor the bulk type list can filter by space (the list's "Filter by Space" select has never matched anything). Return spaces in the list, then add the space filter to the bulk type card.
+- [ ] Bulk type changes are written to the audit log only, not to each decision's change history. Decide whether the history of a decision should show them.
+- [ ] Decide whether the super admin should see a tenant's industry and template (as with the team profile). Today they are visible to the tenant only and are not sent to analytics; the privacy wording that covers the team profile does not mention the industry answer.
+- [ ] Not built, by decision: per-space templates, custom templates, translated templates, a guided rewrite of old decisions, example decisions created as records.
+
 ## Data Retention
 
 - [ ] After the first Enterprise deploy with automatic retention, open Super Admin > Data retention on production, read what is waiting and what was held back, take a database backup, and release the held back categories deliberately. Nothing has run there before.

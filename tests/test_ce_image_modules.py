@@ -72,7 +72,7 @@ class TestRealRepository:
     def test_entry_module_closure_includes_known_core_modules(self):
         closure = image_check.first_party_import_closure(REPO_ROOT)
 
-        assert {"app", "models", "decision_relationships", "crypto", "migrations"} <= set(closure)
+        assert {"app", "models", "decision_relationships", "decision_templates", "crypto", "migrations"} <= set(closure)
         assert closure["decision_relationships"] == "models.py"
         assert "ee" not in closure
 
@@ -84,9 +84,10 @@ class TestRealRepository:
         )
 
         # That Dockerfile listed root modules by hand, so it also lacks every
-        # module added since (retention.py, data_export.py). Each one is reported the same way.
+        # module added since (retention.py, data_export.py, decision_templates.py).
+        # Each one is reported the same way.
         assert sorted(error.split(" ", 1)[0] for error in errors) == [
-            "data_export.py", "decision_relationships.py", "retention.py"]
+            "data_export.py", "decision_relationships.py", "decision_templates.py", "retention.py"]
         relationships_error = next(e for e in errors if e.startswith("decision_relationships.py"))
         assert relationships_error.startswith(
             "decision_relationships.py is imported by models.py but Dockerfile.community does not ship it."

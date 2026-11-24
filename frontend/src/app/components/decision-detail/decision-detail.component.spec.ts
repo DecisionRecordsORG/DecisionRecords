@@ -9,6 +9,8 @@ import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
 import { DecisionService } from '../../services/decision.service';
 import { SpaceService } from '../../services/space.service';
 import { AuthService } from '../../services/auth.service';
+import { DecisionTemplateService } from '../../services/decision-template.service';
+import { governanceTenantTemplate, tenantTemplate } from '../../services/decision-template.testing';
 import { Decision, Space, TenantMember } from '../../models/decision.model';
 
 describe('DecisionDetailComponent', () => {
@@ -16,6 +18,7 @@ describe('DecisionDetailComponent', () => {
   let fixture: ComponentFixture<DecisionDetailComponent>;
   let decisionService: jasmine.SpyObj<DecisionService>;
   let spaceService: jasmine.SpyObj<SpaceService>;
+  let templateService: jasmine.SpyObj<DecisionTemplateService>;
   let router: Router;
   let spaces$: Subject<Space[]>;
   let authState: { isMasterAccount: boolean; canDeleteDecisions: boolean };
@@ -101,6 +104,8 @@ describe('DecisionDetailComponent', () => {
       'deleteDecision'
     ]);
     spaceService = jasmine.createSpyObj<SpaceService>('SpaceService', ['getSpaces']);
+    templateService = jasmine.createSpyObj<DecisionTemplateService>('DecisionTemplateService', ['getTenantTemplate']);
+    templateService.getTenantTemplate.and.returnValue(of(tenantTemplate()));
     authState = { isMasterAccount: false, canDeleteDecisions: true };
 
     decisionService.getDecision.and.returnValue(of(mockDecision));
@@ -116,6 +121,7 @@ describe('DecisionDetailComponent', () => {
         provideRouter([]),
         { provide: DecisionService, useValue: decisionService },
         { provide: SpaceService, useValue: spaceService },
+        { provide: DecisionTemplateService, useValue: templateService },
         { provide: AuthService, useValue: authState }
       ]
     }).compileComponents();
@@ -150,7 +156,9 @@ describe('DecisionDetailComponent', () => {
       for (const control of ['title', 'context', 'decision', 'consequences'] as const) {
         const input: HTMLElement = fixture.nativeElement.querySelector(`[formControlName="${control}"]`);
         const hint = input.closest('mat-form-field')?.querySelector('mat-hint')?.textContent?.trim();
-        expect({ placeholder: input.getAttribute('placeholder'), hint }).toEqual(DECISION_FORM_COPY[control]);
+        expect(DECISION_FORM_COPY[control]).toEqual(
+          jasmine.objectContaining({ placeholder: input.getAttribute('placeholder'), hint })
+        );
       }
     });
 
@@ -161,6 +169,60 @@ describe('DecisionDetailComponent', () => {
       const labels = Array.from(fixture.nativeElement.querySelectorAll('mat-label'))
         .map((label: any) => label.textContent.trim());
       expect(labels).toEqual(jasmine.arrayContaining(['Title', 'Context', 'Decision', 'Consequences']));
+    });
+  });
+
+  describe('decision template', () => {
+    function labels(): string[] {
+      return Array.from(fixture.nativeElement.querySelectorAll('mat-label'))
+        .map((label: any) => label.textContent.trim());
+    }
+
+    it('takes the three headings and the caution from the tenant template', () => {
+      templateService.getTenantTemplate.and.returnValue(of(governanceTenantTemplate()));
+      createPage();
+      fixture.detectChanges();
+
+      expect(labels()).toEqual(jasmine.arrayContaining([
+        'Title', 'Matter and background', 'Decision and reasons', 'Alternatives, interests and implications'
+      ]));
+      expect(labels()).not.toContain('Consequences');
+      expect(fixture.nativeElement.querySelector('[data-testid="template-caution"]').textContent)
+        .toContain('Do not record decisions about identifiable patients, pupils or service users here.');
+    });
+
+    it('keeps the General headings when the template cannot be loaded', () => {
+      templateService.getTenantTemplate.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 500, statusText: 'Server Error' }))
+      );
+      createPage();
+      fixture.detectChanges();
+
+      expect(labels()).toEqual(jasmine.arrayContaining(['Title', 'Context', 'Decision', 'Consequences']));
+      expect(fixture.nativeElement.querySelector('[data-testid="decision-type-select"]')).toBeNull();
+    });
+
+    it('sends the chosen type with a new decision and counts it as unsaved input', () => {
+      createPage();
+      decisionService.createDecision.and.returnValue(of({ ...mockDecision, id: 99 }));
+      component.form.patchValue({ title: 'Typed decision' });
+      const before = component.hasUnsavedChanges();
+      component.selectedDecisionType = 'Policy';
+
+      expect(before).toBeTrue();
+      component.onSubmit();
+
+      expect((decisionService.createDecision.calls.mostRecent().args[0] as any).decision_type).toBe('Policy');
+    });
+
+    it('keeps offering a type from an earlier template for the decision that has it', () => {
+      templateService.getTenantTemplate.and.returnValue(of(governanceTenantTemplate()));
+      decisionService.getDecision.and.returnValue(of({ ...mockDecision, decision_type: 'Architecture' }));
+      createPage('42');
+
+      expect(component.selectedDecisionType).toBe('Architecture');
+      expect(component.decisionTypeOptions).toEqual(['Appointment', 'Service change', 'Architecture']);
+      expect(component.hasUnsavedChanges()).toBeFalse();
     });
   });
 

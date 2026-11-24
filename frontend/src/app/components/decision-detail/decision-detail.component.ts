@@ -21,7 +21,8 @@ import { Decision, DecisionHistory, DecisionReference, DecisionRelationshipCatal
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { HasUnsavedChanges } from '../../guards/unsaved-changes.guard';
 import { buildDecisionDeleteMessage } from '../shared/decision-delete-message';
-import { DECISION_FORM_COPY } from '../shared/decision-form-copy';
+import { DECISION_FORM_COPY, DecisionFormCopy } from '../shared/decision-form-copy';
+import { DecisionTemplate, DecisionTemplateService, decisionTypeOptions, formCopyFor } from '../../services/decision-template.service';
 import { Observable, of } from 'rxjs';
 import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operators';
 
@@ -75,11 +76,11 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                 <div class="form-section">
                   <div class="form-row">
                     <mat-form-field appearance="outline" class="title-field">
-                      <mat-label>Title</mat-label>
+                      <mat-label>{{ copy.title.label }}</mat-label>
                       <input matInput formControlName="title" [placeholder]="copy.title.placeholder">
                       <mat-hint>{{ copy.title.hint }}</mat-hint>
                       @if (form.get('title')?.hasError('required')) {
-                        <mat-error>Title is required</mat-error>
+                        <mat-error>{{ copy.title.label }} is required</mat-error>
                       }
                     </mat-form-field>
 
@@ -104,34 +105,57 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                 </div>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Context</mat-label>
+                  <mat-label>{{ copy.context.label }}</mat-label>
                   <textarea matInput formControlName="context" rows="6"
                             [placeholder]="copy.context.placeholder"></textarea>
                   <mat-hint>{{ copy.context.hint }}</mat-hint>
                   @if (form.get('context')?.hasError('required')) {
-                    <mat-error>Context is required</mat-error>
+                    <mat-error>{{ copy.context.label }} is required</mat-error>
                   }
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Decision</mat-label>
+                  <mat-label>{{ copy.decision.label }}</mat-label>
                   <textarea matInput formControlName="decision" rows="6"
                             [placeholder]="copy.decision.placeholder"></textarea>
                   <mat-hint>{{ copy.decision.hint }}</mat-hint>
                   @if (form.get('decision')?.hasError('required')) {
-                    <mat-error>Decision is required</mat-error>
+                    <mat-error>{{ copy.decision.label }} is required</mat-error>
                   }
                 </mat-form-field>
 
                 <mat-form-field appearance="outline" class="full-width">
-                  <mat-label>Consequences</mat-label>
+                  <mat-label>{{ copy.consequences.label }}</mat-label>
                   <textarea matInput formControlName="consequences" rows="6"
                             [placeholder]="copy.consequences.placeholder"></textarea>
                   <mat-hint>{{ copy.consequences.hint }}</mat-hint>
                   @if (form.get('consequences')?.hasError('required')) {
-                    <mat-error>Consequences is required</mat-error>
+                    <mat-error>{{ copy.consequences.label }} is required</mat-error>
                   }
                 </mat-form-field>
+
+                @if (templateCaution) {
+                  <p class="template-caution" data-testid="template-caution">
+                    <mat-icon>info</mat-icon>
+                    <span>{{ templateCaution }}</span>
+                  </p>
+                }
+
+                @if (decisionTypeOptions.length > 0) {
+                  <mat-form-field appearance="outline" class="full-width">
+                    <mat-label>Decision type (optional)</mat-label>
+                    <mat-select data-testid="decision-type-select"
+                                [(ngModel)]="selectedDecisionType" [ngModelOptions]="{standalone: true}"
+                                [disabled]="authService.isMasterAccount">
+                      <mat-option [value]="null">-- None --</mat-option>
+                      @for (type of decisionTypeOptions; track type) {
+                        <mat-option [value]="type">{{ type }}</mat-option>
+                      }
+                    </mat-select>
+                    <mat-icon matPrefix>label</mat-icon>
+                    <mat-hint>The kind of decision this is, from your organisation's decision template</mat-hint>
+                  </mat-form-field>
+                }
 
                 <!-- Spaces Section -->
                 @if (spaces.length > 0) {
@@ -396,6 +420,9 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                               <div class="history-snapshot">
                                 <div class="snapshot-header">
                                   <h4 class="snapshot-title">{{ item.title }}</h4>
+                                  @if (item.decision_type) {
+                                    <span class="decision-type-chip">{{ item.decision_type }}</span>
+                                  }
                                   <div class="status-chip" [ngClass]="'status-' + item.status">
                                     <mat-icon class="status-icon">{{ getStatusIcon(item.status) }}</mat-icon>
                                     {{ item.status | titlecase }}
@@ -405,7 +432,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                                 <div class="snapshot-field">
                                   <div class="snapshot-label">
                                     <mat-icon>description</mat-icon>
-                                    Context
+                                    {{ copy.context.label }}
                                   </div>
                                   <div class="snapshot-value">{{ item.context }}</div>
                                 </div>
@@ -413,7 +440,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                                 <div class="snapshot-field">
                                   <div class="snapshot-label">
                                     <mat-icon>gavel</mat-icon>
-                                    Decision
+                                    {{ copy.decision.label }}
                                   </div>
                                   <div class="snapshot-value">{{ item.decision }}</div>
                                 </div>
@@ -421,7 +448,7 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
                                 <div class="snapshot-field">
                                   <div class="snapshot-label">
                                     <mat-icon>trending_up</mat-icon>
-                                    Consequences
+                                    {{ copy.consequences.label }}
                                   </div>
                                   <div class="snapshot-value">{{ item.consequences }}</div>
                                 </div>
@@ -890,6 +917,38 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
       font-weight: 500;
     }
 
+    .decision-type-chip {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .template-caution {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0 0 16px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      color: #78350f;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .template-caution mat-icon {
+      font-size: 18px;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 auto;
+      margin-top: 1px;
+    }
+
     .owner-hint {
       margin: 0 0 12px 0;
       font-size: 12px;
@@ -970,7 +1029,10 @@ import { map, startWith, debounceTime, switchMap, catchError } from 'rxjs/operat
   `]
 })
 export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
-  readonly copy = DECISION_FORM_COPY;
+  // Headings and prompts come from the tenant's decision template; General until it has loaded
+  copy: DecisionFormCopy = DECISION_FORM_COPY;
+  template: DecisionTemplate | null = null;
+  selectedDecisionType: string | null = null;
   decision: Decision | null = null;
   form: FormGroup;
   isNew = false;
@@ -1004,7 +1066,8 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
     public authService: AuthService,
     private spaceService: SpaceService,
     private snackBar: MatSnackBar,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private templateService: DecisionTemplateService
   ) {
     this.form = this.fb.group({
       title: ['', Validators.required],
@@ -1027,6 +1090,9 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
     this.loadTenantMembers();
     this.loadRelationshipCatalog();
     this.loadDecisionReferences();
+    if (!this.authService.isMasterAccount) {
+      this.loadTemplate();
+    }
 
     const id = this.route.snapshot.params['id'];
     // Check if this is a new decision - either no id param (route is /decision/new) or id is undefined
@@ -1041,6 +1107,26 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
     } else {
       this.loadDecision(+id);
     }
+  }
+
+  /** The template's types, plus this decision's own type when the template does not list it. */
+  get decisionTypeOptions(): string[] {
+    return decisionTypeOptions(this.template, this.decision?.decision_type);
+  }
+
+  get templateCaution(): string | null {
+    return this.template?.caution || null;
+  }
+
+  /** The form works without it: on failure the General headings stay and no types are offered. */
+  loadTemplate(): void {
+    this.templateService.getTenantTemplate().subscribe({
+      next: (tenantTemplate) => {
+        this.template = tenantTemplate.template;
+        this.copy = formCopyFor(tenantTemplate.template);
+      },
+      error: () => {}
+    });
   }
 
   loadTenantMembers(): void {
@@ -1193,6 +1279,7 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
       // Load decision's owner
       this.selectedOwnerId = (decision as any).owner_id || null;
       this.ownerEmail = (decision as any).owner_email || '';
+      this.selectedDecisionType = decision.decision_type || null;
       this.editableRelationships = (decision.outgoing_relationships || []).map((relationship) => ({
         target_decision_id: relationship.counterpart?.id ?? null,
         relationship_type: relationship.relationship_type,
@@ -1233,6 +1320,7 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
         space_ids: this.selectedSpaceIds,
         owner_id: this.selectedOwnerId,
         owner_email: this.ownerEmail || undefined,
+        decision_type: this.selectedDecisionType || null,
         relationships: this.buildRelationshipPayload()
       } as any).subscribe({
         next: (decision) => {
@@ -1256,6 +1344,7 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
         space_ids: this.selectedSpaceIds,
         owner_id: this.selectedOwnerId,
         owner_email: this.ownerEmail || undefined,
+        decision_type: this.selectedDecisionType || null,
         relationships: this.buildRelationshipPayload()
       };
       if (formValue.change_reason) {
@@ -1266,6 +1355,7 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
         next: (decision) => {
           this.decision = decision;
           this.selectedSpaceIds = decision.spaces?.map(s => s.id) || [];
+          this.selectedDecisionType = decision.decision_type || null;
           this.form.get('change_reason')?.reset();
           this.markSaved();
           this.isSaving = false;
@@ -1329,6 +1419,7 @@ export class DecisionDetailComponent implements OnInit, HasUnsavedChanges {
       space_ids: [...this.selectedSpaceIds].sort((a, b) => a - b),
       owner_id: this.selectedOwnerId ?? null,
       owner_email: this.ownerEmail || '',
+      decision_type: this.selectedDecisionType || null,
       // A row with no target and no notes holds nothing the user would miss
       relationships: this.editableRelationships
         .filter((relationship) => relationship.target_decision_id || relationship.notes)

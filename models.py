@@ -419,6 +419,10 @@ class Tenant(db.Model):
         db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True
     )
 
+    # Industry: an optional NACE Rev. 2.1 section letter (A to V) a tenant admin
+    # may choose. It only suggests a decision template. See decision_templates.py.
+    industry = db.Column(db.String(8), nullable=True)
+
     # Relationships (defined after related models exist)
     # memberships - backref from TenantMembership
     # spaces - backref from Space
@@ -636,6 +640,12 @@ class TenantSettings(db.Model):
     decision_relationship_pack_ids = db.Column(db.Text, nullable=True)
     decision_relationship_enabled_types = db.Column(db.Text, nullable=True)
     decision_relationship_custom_types = db.Column(db.Text, nullable=True)
+
+    # Decision template (see decision_templates.py). NULL means the tenant has
+    # not chosen one and is shown the default (General) template.
+    decision_template_id = db.Column(db.String(64), nullable=True)
+    # Set once an admin has chosen a template or closed the notice about them
+    decision_template_notice_dismissed_at = db.Column(db.DateTime, nullable=True)
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -1560,6 +1570,10 @@ class ArchitectureDecision(db.Model):
     owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     owner_email = db.Column(db.String(255), nullable=True)  # For external owners not in system
 
+    # Optional type, chosen from the tenant's decision template when it was set.
+    # Stored as the text shown; kept as it is when the tenant changes template.
+    decision_type = db.Column(db.String(100), nullable=True)
+
     # Relationships
     updated_by = db.relationship('User', foreign_keys=[updated_by_id])
     deleted_by = db.relationship('User', foreign_keys=[deleted_by_id])
@@ -1641,6 +1655,7 @@ class ArchitectureDecision(db.Model):
             'decision': self.decision,
             'status': self.status,
             'consequences': self.consequences,
+            'decision_type': self.decision_type,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
             'domain': self.domain,
@@ -2023,6 +2038,7 @@ class DecisionHistory(db.Model):
     decision_text = db.Column(db.Text, nullable=False)
     status = db.Column(db.String(50), nullable=False)
     consequences = db.Column(db.Text, nullable=False)
+    decision_type = db.Column(db.String(100), nullable=True)
 
     # Metadata about the change
     changed_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -2041,6 +2057,7 @@ class DecisionHistory(db.Model):
             'decision': self.decision_text,
             'status': self.status,
             'consequences': self.consequences,
+            'decision_type': self.decision_type,
             'changed_at': self.changed_at.isoformat(),
             'change_reason': self.change_reason,
             'changed_by': self.changed_by.to_dict() if self.changed_by else None,
@@ -2395,6 +2412,7 @@ def save_history(decision, change_reason=None, changed_by=None):
         decision_text=decision.decision,
         status=decision.status,
         consequences=decision.consequences,
+        decision_type=decision.decision_type,
         change_reason=change_reason,
         changed_by_id=changed_by.id if changed_by else None
     )

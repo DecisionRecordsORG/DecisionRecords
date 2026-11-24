@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-24-decision-templates"
+title = "Decision templates by industry, with an optional decision type and bulk type assignment"
+summary = "Adds five decision templates (General, Software and technology, Controlled change, Governance and committee, Investment and approval) as static data in decision_templates.py. A tenant admin or steward chooses one in organisation settings; it changes the three section headings, prompts, example titles and decision types shown in the web app, while the stored fields stay context, decision and consequences and no decision is read or rewritten. An optional industry answer (the 22 NACE Rev. 2.1 sections, Eurostat, CC BY 4.0; only the letter is stored, not sent to analytics) suggests a template and is asked in the first-admin onboarding dialog and the Community setup wizard. Adds an optional decision_type on decisions and history entries, kept when the template changes, a type filter on the decision list, and a bulk set/clear action for admins capped at 200 decisions per request and written to the audit log. Startup migration 2.6.0 adds five nullable columns on SQLite and PostgreSQL. Emails, Slack, Teams, MCP and exports keep the General headings for now (docs/TODO.md)."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "minor"
+marketing_website = "none"

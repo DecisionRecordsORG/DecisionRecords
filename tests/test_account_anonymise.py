@@ -413,4 +413,5 @@ class TestStartUpMigrationCleansEarlierAnonymisations:
         import migrations
 
         versions = [migration['version'] for migration in migrations.MIGRATIONS]
-        assert versions[-1] == '2.5.0'
+        assert '2.5.0' in versions
+        assert versions == sorted(versions, key=lambda v: tuple(int(part) for part in v.split('.')))
