@@ -62,7 +62,7 @@ class TestGetTools:
     def test_get_tools_returns_correct_number(self, app, session):
         """get_tools returns all relationship-aware MCP tools."""
         tools = get_tools()
-        assert len(tools) == 12
+        assert len(tools) == 13
 
     def test_get_tools_returns_expected_tool_names(self, app, session):
         """get_tools returns tools with expected names."""
@@ -77,6 +77,7 @@ class TestGetTools:
             'list_decision_comments',
             'add_decision_comment',
             'get_relationship_catalog',
+            'get_decision_template',
             'list_decision_relationships',
             'link_decisions',
             'supersede_decision',
@@ -524,7 +525,7 @@ class TestMCPToolHandlerExecuteTool:
         success, result = handler_read_only.execute_tool('get_decision', {
             'id': '99999'
         })
-        assert success is True  # Tool succeeded, but decision not found
+        assert success is False  # reported to the model as a tool error
         assert 'error' in result
         assert 'not found' in result['error']
 
@@ -616,7 +617,7 @@ class TestMCPToolHandlerExecuteTool:
         success, result = handler_read_only.execute_tool('get_decision_history', {
             'id': '99999'
         })
-        assert success is True  # Tool succeeded
+        assert success is False  # reported to the model as a tool error
         assert 'error' in result
         assert 'not found' in result['error']
 
@@ -901,22 +902,29 @@ class TestHandleMCPRequest:
         assert response['id'] == 1
         assert 'result' in response
         assert 'tools' in response['result']
-        assert len(response['result']['tools']) == 12
+        assert len(response['result']['tools']) == 13
 
     def test_handle_request_server_discover(
         self, app, session, enable_mcp, valid_api_key
     ):
-        """handle_mcp_request returns discovery metadata for server/discover."""
+        """server/discover (revision 2026-07-28) lists the supported revisions and capabilities."""
         response = handle_mcp_request(
-            {'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover'},
+            {
+                'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover',
+                'params': {'_meta': {
+                    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities': {},
+                }},
+            },
             valid_api_key
         )
         assert response['jsonrpc'] == '2.0'
         assert response['id'] == 1
-        assert 'result' in response
-        assert 'protocolVersions' in response['result']
-        assert '2025-11-25' in response['result']['protocolVersions']
-        assert response['result']['capabilities']['tools'] == {}
+        result = response['result']
+        assert result['resultType'] == 'complete'
+        assert result['supportedVersions'][0] == '2026-07-28'
+        assert '2025-11-25' in result['supportedVersions']
+        assert result['capabilities']['tools'] == {'listChanged': False}
 
     def test_handle_request_tools_call_success(
         self, app, session, enable_mcp, valid_api_key, sample_decision
@@ -943,7 +951,7 @@ class TestHandleMCPRequest:
     def test_handle_request_tools_call_error(
         self, app, session, enable_mcp, valid_api_key
     ):
-        """handle_mcp_request returns error for invalid tool call."""
+        """An unknown tool is a protocol error: Invalid params."""
         response = handle_mcp_request(
             {
                 'jsonrpc': '2.0',
@@ -958,8 +966,8 @@ class TestHandleMCPRequest:
         )
         assert response['jsonrpc'] == '2.0'
         assert response['id'] == 1
-        assert 'error' in response
-        assert response['error']['code'] == -32000
+        assert response['error']['code'] == -32602
+        assert response['error']['message'] == 'Unknown tool: unknown_tool'
 
     def test_handle_request_unknown_method(
         self, app, session, enable_mcp, valid_api_key
@@ -979,12 +987,25 @@ class TestHandleMCPRequest:
         self, app, session, enable_mcp, valid_api_key
     ):
         """handle_mcp_request preserves request ID in response."""
-        for request_id in [1, 'abc', 123, None]:
+        for request_id in [1, 'abc', 123, 0]:
             response = handle_mcp_request(
                 {'jsonrpc': '2.0', 'id': request_id, 'method': 'tools/list'},
                 valid_api_key
             )
             assert response['id'] == request_id
+            assert 'result' in response
+
+    def test_handle_request_refuses_a_null_id(
+        self, app, session, enable_mcp, valid_api_key
+    ):
+        """MCP does not allow a null request id."""
+        response = handle_mcp_request(
+            {'jsonrpc': '2.0', 'id': None, 'method': 'tools/list'},
+            valid_api_key
+        )
+        assert response['id'] is None
+        assert response['error']['code'] == -32600
+
 
 
 # ============================================================================
@@ -1125,38 +1146,34 @@ class TestMCPAPIEndpoint:
         assert 'Authorization header' in data['error']['message']
 
     def test_invalid_api_key(self, mcp_client, enable_mcp_system):
-        """Returns error when API key is invalid."""
+        """A wrong API key is 401 with a Bearer challenge, and the request id is echoed."""
         response = mcp_client.post(
             '/api/mcp',
             json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
             headers={'Authorization': 'Bearer adr_invalid_key_12345'}
         )
-        assert response.status_code == 400
-        data = response.get_json()
-        assert 'error' in data
-        assert 'Invalid' in data['error']['message'] or 'expired' in data['error']['message']
-
-    def test_get_sse_missing_authorization_header(self, mcp_client, enable_mcp_system):
-        """Authenticated SSE probe returns 401 when Authorization header is missing."""
-        response = mcp_client.get('/api/mcp', headers={'Accept': 'text/event-stream'})
         assert response.status_code == 401
+        assert response.headers['WWW-Authenticate'].startswith('Bearer')
         data = response.get_json()
-        assert 'Authorization header' in data['error']['message']
+        assert data['id'] == 1
+        assert data['error']['code'] == 401
+        assert 'Invalid or expired API key' in data['error']['message']
 
-    def test_get_sse_request_success(self, mcp_client, mcp_tenant_and_key):
-        """Authenticated GET returns an SSE stream for compatible MCP clients."""
+    def test_get_is_not_allowed(self, mcp_client, enable_mcp_system):
+        """The server sends nothing on its own, so there is no GET stream: 405."""
+        response = mcp_client.get('/api/mcp', headers={'Accept': 'text/event-stream'})
+        assert response.status_code == 405
+        assert response.headers['Allow'] == 'POST'
+
+    def test_get_and_delete_are_not_allowed_with_a_key(self, mcp_client, mcp_tenant_and_key):
+        """GET (stream) and DELETE (end session) are answered 405, as the transport allows."""
         _, _, api_key = mcp_tenant_and_key
-        response = mcp_client.get(
-            '/api/mcp',
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Accept': 'text/event-stream'
-            }
-        )
-        assert response.status_code == 200
-        assert response.content_type.startswith('text/event-stream')
-        assert b'decision-records MCP stream ready' in response.data
-        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
+        headers = {'Authorization': f'Bearer {api_key}', 'Accept': 'text/event-stream'}
+        for call in (mcp_client.get, mcp_client.delete):
+            response = call('/api/mcp', headers=headers)
+            assert response.status_code == 405
+            assert response.headers['Allow'] == 'POST'
+            assert not response.content_type.startswith('text/event-stream')
 
     def test_invalid_json_body(self, mcp_client, enable_mcp_system, mcp_tenant_and_key):
         """Returns 400 when request body is not valid JSON."""
@@ -1174,7 +1191,7 @@ class TestMCPAPIEndpoint:
         assert 'error' in data
 
     def test_ai_features_disabled(self, mcp_client, mcp_app):
-        """Returns 400 when AI features are disabled."""
+        """A switched-off installation is 403, and the message says who can switch it on."""
         with mcp_app.app_context():
             # Make sure AI is disabled
             SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'false')
@@ -1185,13 +1202,15 @@ class TestMCPAPIEndpoint:
             json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
             headers={'Authorization': 'Bearer adr_test_key'}
         )
-        assert response.status_code == 400
+        assert response.status_code == 403
         data = response.get_json()
-        assert 'error' in data
+        assert data['id'] == 1
+        assert data['error']['code'] == 403
         assert 'AI features are not enabled' in data['error']['message']
+        assert 'super admin' in data['error']['message']
 
     def test_mcp_server_disabled(self, mcp_client, mcp_app):
-        """Returns 400 when MCP server is disabled."""
+        """A switched-off MCP server is 403."""
         with mcp_app.app_context():
             SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
             SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'false')
@@ -1202,9 +1221,9 @@ class TestMCPAPIEndpoint:
             json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
             headers={'Authorization': 'Bearer adr_test_key'}
         )
-        assert response.status_code == 400
+        assert response.status_code == 403
         data = response.get_json()
-        assert 'error' in data
+        assert data['error']['code'] == 403
         assert 'MCP server is not enabled' in data['error']['message']
 
     def test_tools_list_request_success(self, mcp_client, mcp_tenant_and_key):
@@ -1219,11 +1238,12 @@ class TestMCPAPIEndpoint:
         data = response.get_json()
         assert 'result' in data
         assert 'tools' in data['result']
-        assert len(data['result']['tools']) == 12
-        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
+        assert len(data['result']['tools']) == 13
+        # A request without protocol metadata is served under the earlier revisions.
+        assert 'resultType' not in data['result']
 
-    def test_initialize_legacy_protocol_returns_session_header(self, mcp_client, mcp_tenant_and_key):
-        """Legacy initialize still negotiates a session header for older clients."""
+    def test_initialize_legacy_protocol_is_stateless(self, mcp_client, mcp_tenant_and_key):
+        """initialize negotiates the earlier revision and hands out no session."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
@@ -1240,23 +1260,32 @@ class TestMCPAPIEndpoint:
         assert response.status_code == 200
         data = response.get_json()
         assert data['result']['protocolVersion'] == '2025-11-25'
-        assert response.headers['MCP-Protocol-Version'] == '2025-11-25'
-        assert 'MCP-Session-Id' in response.headers
+        assert data['result']['capabilities'] == {'tools': {'listChanged': False}}
+        assert data['result']['serverInfo']['name'] == 'decision-records'
+        assert 'Mcp-Session-Id' not in response.headers
 
     def test_modern_protocol_does_not_emit_session_header(self, mcp_client, mcp_tenant_and_key):
         """Current stateless MCP requests should not receive a session header."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
-            json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
+            json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list',
+                'params': {'_meta': {
+                    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities': {},
+                }},
+            },
             headers={
                 'Authorization': f'Bearer {api_key}',
-                'MCP-Protocol-Version': '2026-07-28'
+                'MCP-Protocol-Version': '2026-07-28',
+                'Mcp-Method': 'tools/list',
+                'Mcp-Session-Id': 'left-over-from-an-older-client',
             }
         )
         assert response.status_code == 200
-        assert response.headers['MCP-Protocol-Version'] == '2026-07-28'
-        assert 'MCP-Session-Id' not in response.headers
+        assert response.get_json()['result']['resultType'] == 'complete'
+        assert 'Mcp-Session-Id' not in response.headers
 
     def test_unsupported_protocol_version_returns_400(self, mcp_client, mcp_tenant_and_key):
         """Unsupported protocol versions are rejected explicitly."""
@@ -1271,11 +1300,13 @@ class TestMCPAPIEndpoint:
         )
         assert response.status_code == 400
         data = response.get_json()
-        assert 'error' in data
-        assert 'Unsupported MCP protocol version' in data['error']['message']
+        assert data['error']['code'] == -32022
+        assert data['error']['data']['requested'] == '2099-01-01'
+        assert '2026-07-28' in data['error']['data']['supported']
+        assert '2025-11-25' in data['error']['data']['supported']
 
-    def test_mcp_method_header_routes_request(self, mcp_client, mcp_tenant_and_key):
-        """Mcp-Method header can supply the JSON-RPC method for newer clients."""
+    def test_mcp_method_header_does_not_replace_the_body_method(self, mcp_client, mcp_tenant_and_key):
+        """The body is the request; a header cannot supply a missing JSON-RPC method."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
@@ -1285,26 +1316,35 @@ class TestMCPAPIEndpoint:
                 'Mcp-Method': 'tools/list'
             }
         )
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'tools' in data['result']
+        assert response.status_code == 400
+        assert response.get_json()['error']['code'] == -32600
 
     def test_server_discover_request_success(self, mcp_client, mcp_tenant_and_key):
-        """Successfully returns server discovery metadata."""
+        """server/discover answers in the shape revision 2026-07-28 defines."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
-            json={'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover'},
-            headers={'Authorization': f'Bearer {api_key}'}
+            json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'server/discover',
+                'params': {'_meta': {
+                    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities': {},
+                }},
+            },
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'MCP-Protocol-Version': '2026-07-28',
+                'Mcp-Method': 'server/discover',
+            }
         )
         assert response.status_code == 200
-        data = response.get_json()
-        assert 'result' in data
-        assert data['result']['protocolVersion'] == '2026-07-28'
-        assert 'protocolVersions' in data['result']
-        assert '2026-07-28' in data['result']['protocolVersions']
-        assert data['result']['transport']['stateless'] is True
-        assert data['result']['documentationUrl'].endswith('/integrations/mcp')
+        result = response.get_json()['result']
+        assert result['resultType'] == 'complete'
+        assert result['supportedVersions'] == ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26']
+        assert result['capabilities'] == {'tools': {'listChanged': False}}
+        assert result['_meta']['io.modelcontextprotocol/serverInfo']['name'] == 'decision-records'
+        assert result['ttlMs'] >= 0
+        assert result['cacheScope'] in ('public', 'private')
 
     def test_tools_call_search_decisions(self, mcp_client, mcp_tenant_and_key):
         """Successfully calls search_decisions tool."""
@@ -1605,22 +1645,44 @@ class TestMCPAPIEndpoint:
         assert content['count'] == 1
         assert content['comments'][0]['body'] == 'Comment to list through MCP.'
 
-    def test_unknown_method_returns_404(self, mcp_client, mcp_tenant_and_key):
-        """Returns 404 for unknown MCP method."""
+    def test_unknown_method_is_a_json_rpc_error_for_earlier_revisions(self, mcp_client, mcp_tenant_and_key):
+        """Earlier revisions read HTTP 404 as "session ended", so the error travels with 200."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
             json={'jsonrpc': '2.0', 'id': 1, 'method': 'unknown/method'},
             headers={'Authorization': f'Bearer {api_key}'}
         )
-        assert response.status_code == 404
+        assert response.status_code == 200
         data = response.get_json()
-        assert 'error' in data
         assert data['error']['code'] == -32601
         assert 'Method not found' in data['error']['message']
 
-    def test_tool_validation_error_returns_200_with_error(self, mcp_client, mcp_tenant_and_key):
-        """Tool validation errors return 200 with JSON-RPC error."""
+    def test_unknown_method_returns_404_for_the_current_revision(self, mcp_client, mcp_tenant_and_key):
+        """Revision 2026-07-28: an unknown method is 404 with a JSON-RPC error body."""
+        _, _, api_key = mcp_tenant_and_key
+        response = mcp_client.post(
+            '/api/mcp',
+            json={
+                'jsonrpc': '2.0', 'id': 1, 'method': 'unknown/method',
+                'params': {'_meta': {
+                    'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities': {},
+                }},
+            },
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'MCP-Protocol-Version': '2026-07-28',
+                'Mcp-Method': 'unknown/method',
+            }
+        )
+        assert response.status_code == 404
+        data = response.get_json()
+        assert data['error']['code'] == -32601
+        assert 'Method not found' in data['error']['message']
+
+    def test_tool_validation_error_is_a_tool_result_with_is_error(self, mcp_client, mcp_tenant_and_key):
+        """A bad argument goes back as a result with isError, so the model can read and fix it."""
         _, _, api_key = mcp_tenant_and_key
         response = mcp_client.post(
             '/api/mcp',
@@ -1637,5 +1699,6 @@ class TestMCPAPIEndpoint:
         )
         assert response.status_code == 200
         data = response.get_json()
-        assert 'error' in data
-        assert 'Missing required field' in data['error']['message']
+        assert 'error' not in data
+        assert data['result']['isError'] is True
+        assert data['result']['content'][0]['text'] == 'Missing required field: query'

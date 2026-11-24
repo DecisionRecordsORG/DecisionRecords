@@ -148,8 +148,21 @@ class TestUpdateDecisionStatusToolDefinition:
             'link_decisions': {'source_decision_id', 'target_decision_id', 'relationship_type', 'notes'},
             'supersede_decision': {'source_decision_id', 'target_decision_id', 'notes'},
         }
+        added_properties = {
+            'search_decisions': {'decision_type', 'offset'},
+            'list_decisions': {'decision_type'},
+            'create_decision': {'decision_type'},
+            'get_decision_history': {'offset'},
+            'list_decision_comments': {'offset'},
+        }
         for name, properties in expected_properties.items():
-            assert set(tools[name]['inputSchema']['properties']) == properties, name
+            actual = set(tools[name]['inputSchema']['properties'])
+            assert actual == properties | added_properties.get(name, set()), name
+        # What was added is optional: a call that was valid before is still valid.
+        for name, added in added_properties.items():
+            assert not added & set(tools[name]['inputSchema'].get('required', [])), name
+        assert tools['search_decisions']['inputSchema']['required'] == ['query']
+        assert tools['create_decision']['inputSchema']['required'] == ['title', 'context', 'decision', 'consequences']
         assert tools['create_decision']['inputSchema']['properties']['status']['enum'] == ['proposed', 'accepted']
 
     def test_no_tool_description_limits_the_product_to_architecture(self, app, session):
@@ -406,14 +419,17 @@ class TestUpdateDecisionStatusHandler:
 
     def test_unknown_id_is_not_found(self, app, session, handler_with_write, sample_decision):
         success, result = handler_with_write.execute_tool(TOOL, {'id': '99999', 'status': 'accepted'})
-        # Same format as the other tools: a result whose body carries the error.
-        assert success is True
-        assert result == {'error': 'Decision not found: 99999'}
+        # Same format as the other tools: a refused call with a message for the model.
+        assert success is False
+        assert set(result) == {'error'}
+        assert result['error'].startswith('Decision not found: 99999. ')
+        assert 'search_decisions' in result['error']
         assert sample_decision.status == 'proposed'
 
     def test_id_without_a_number_is_not_found(self, app, session, handler_with_write, sample_decision):
         success, result = handler_with_write.execute_tool(TOOL, {'id': 'the pricing one', 'status': 'accepted'})
-        assert result == {'error': 'Decision not found: the pricing one'}
+        assert success is False
+        assert result['error'].startswith('Decision not found: the pricing one. ')
         assert sample_decision.status == 'proposed'
 
     def test_other_tenant_id_is_indistinguishable_from_unknown_and_changes_nothing(
@@ -427,11 +443,16 @@ class TestUpdateDecisionStatusHandler:
             foreign_outcome = handler_with_write.execute_tool(TOOL, {'id': str(foreign.id), 'status': 'archived'})
             unknown_outcome = handler_with_write.execute_tool(TOOL, {'id': '99999', 'status': 'archived'})
 
-        assert foreign_outcome == (True, {'error': f'Decision not found: {foreign.id}'})
-        assert unknown_outcome == (True, {'error': 'Decision not found: 99999'})
-        # Nothing about the other organization's decision is in the answer.
+        assert foreign_outcome[0] is False and unknown_outcome[0] is False
+        assert foreign_outcome[1]['error'].startswith(f'Decision not found: {foreign.id}. ')
+        # Nothing about the other organization's decision is in the answer: apart
+        # from the ID that was asked for, the two answers are the same text.
         assert 'Other org decision' not in json.dumps(foreign_outcome[1])
-        assert foreign_outcome[1].keys() == unknown_outcome[1].keys()
+        assert foreign_outcome[1].keys() == unknown_outcome[1].keys() == {'error'}
+        assert (
+            foreign_outcome[1]['error'].replace(f'Decision not found: {foreign.id}.', '')
+            == unknown_outcome[1]['error'].replace('Decision not found: 99999.', '')
+        )
 
         refreshed = db.session.get(ArchitectureDecision, foreign.id)
         assert refreshed.status == 'accepted'
@@ -459,8 +480,8 @@ class TestUpdateDecisionStatusHandler:
 
         for identifier in (str(sample_decision.id), 'ADR-1'):
             success, result = handler_with_write.execute_tool(TOOL, {'id': identifier, 'status': 'accepted'})
-            assert success is True
-            assert result == {'error': f'Decision not found: {identifier}'}
+            assert success is False
+            assert result['error'].startswith(f'Decision not found: {identifier}. ')
 
         assert db.session.get(ArchitectureDecision, sample_decision.id).status == 'proposed'
         assert _history(sample_decision.id) == []
@@ -472,7 +493,7 @@ class TestUpdateDecisionStatusHandler:
             success, result = handler_read_only.execute_tool(TOOL, {'id': 'ADR-1', 'status': 'accepted'})
 
         assert success is False
-        assert result['error'] == 'This API key does not have write permission'
+        assert result['error'].startswith('This API key does not have write permission')
         assert sample_decision.status == 'proposed'
         assert _history(sample_decision.id) == []
         slack.assert_not_called()
@@ -615,26 +636,32 @@ class TestUpdateDecisionStatusJsonRpc:
         assert content['previous_status'] == 'proposed'
         assert content['decision']['status'] == 'accepted'
 
-    def test_invalid_status_is_a_json_rpc_error(self, app, session, keys):
+    @staticmethod
+    def _tool_error(response):
+        """The text of a tool execution error: a result with isError, not a JSON-RPC error."""
+        assert 'error' not in response
+        assert response['result']['isError'] is True
+        assert 'structuredContent' not in response['result']
+        return response['result']['content'][0]['text']
+
+    def test_invalid_status_is_a_tool_error(self, app, session, keys):
         response = self._call(keys[0], {'id': 'ADR-1', 'status': 'done'})
-        assert response['error'] == {
-            'code': -32000,
-            'message': "Field 'status' must be one of: proposed, accepted, archived",
-        }
+        assert self._tool_error(response) == "Field 'status' must be one of: proposed, accepted, archived"
 
-    def test_superseded_is_a_json_rpc_error_naming_the_other_tool(self, app, session, keys):
+    def test_superseded_is_a_tool_error_naming_the_other_tool(self, app, session, keys):
         response = self._call(keys[0], {'id': 'ADR-1', 'status': 'superseded'})
-        assert response['error']['code'] == -32000
-        assert 'supersede_decision' in response['error']['message']
+        assert 'supersede_decision' in self._tool_error(response)
 
-    def test_read_only_key_is_a_json_rpc_error(self, app, session, keys, sample_decision):
+    def test_read_only_key_is_a_tool_error(self, app, session, keys, sample_decision):
         response = self._call(keys[1], {'id': 'ADR-1', 'status': 'accepted'})
-        assert response['error'] == {'code': -32000, 'message': 'This API key does not have write permission'}
+        message = self._tool_error(response)
+        assert message.startswith('This API key does not have write permission')
+        assert 'write scope' in message
         assert sample_decision.status == 'proposed'
 
     def test_invalid_key_is_refused(self, app, session, keys, sample_decision):
         response = self._call('adr_not_a_real_key', {'id': 'ADR-1', 'status': 'accepted'})
-        assert response['error']['code'] == -32600
+        assert response['error']['code'] == 401
         assert sample_decision.status == 'proposed'
 
     def test_not_found_matches_get_decision(self, app, session, keys):
@@ -645,7 +672,7 @@ class TestUpdateDecisionStatusJsonRpc:
             'params': {'name': 'get_decision', 'arguments': {'id': '99999'}},
         }, keys[0])
         assert mine == theirs
-        assert json.loads(mine['result']['content'][0]['text']) == {'error': 'Decision not found: 99999'}
+        assert self._tool_error(mine).startswith('Decision not found: 99999')
 
 
 # ============================================================================
@@ -756,7 +783,9 @@ class TestStatusChangeThroughTheRealApp:
 
     def test_mcp_endpoint_read_only_key_is_refused(self, client, setup):
         response = self._mcp(client, setup['read_key'], {'id': 'ADR-1', 'status': 'accepted'})
-        assert response.get_json()['error']['message'] == 'This API key does not have write permission'
+        result = response.get_json()['result']
+        assert result['isError'] is True
+        assert result['content'][0]['text'].startswith('This API key does not have write permission')
         assert db.session.get(ArchitectureDecision, setup['first'].id).status == 'proposed'
 
     # --- /api/ai -----------------------------------------------------------
