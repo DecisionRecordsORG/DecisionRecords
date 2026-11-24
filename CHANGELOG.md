@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-11-24
+
 ### Added
 - Decision templates. An administrator or steward can choose how decisions are presented under Organisation Settings > Decision template: General (the default, unchanged wording), Software and technology, Controlled change, Governance and committee, or Investment and approval. A template sets the three section headings and their prompts, the example titles, a list of decision types and the relationship packs it suggests. The stored fields stay `context`, `decision` and `consequences`. Changing the template changes headings and prompts only: no decision is read or rewritten, and the previous template can be chosen again at any time. See `docs/decision-templates.md`
 - An optional industry answer that suggests a template. The list is the 22 sections of NACE Rev. 2.1 with their official titles (Industry sections: NACE Rev. 2.1, Eurostat, CC BY 4.0); only the section letter is stored, and it is not sent to analytics. Any template can be chosen whatever the industry
@@ -231,7 +233,8 @@ Security-related changes and fixes
 
 ---
 
-[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.0.28...v2.1.0
