@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-startup-log-errors"
+title = "Set up log forwarding after the database is initialised"
+summary = "Enterprise-only at run time. app.py set up OpenTelemetry log forwarding while the module was imported, before db.init_app(app). The settings are database rows, so the read failed in every worker on every start (an ERROR line in the production start-up log), was taken for 'disabled', and forwarding stayed off until the settings were saved again. The call moves into init_database(), after the tables exist; it is a no-op in the Community Edition, which has no log forwarding, so a Community release gains nothing from it and can carry it whenever the next one is cut. The private half (same branch name in ee) stops caching a failed settings read, removes the legacy private DNS write from the container start script and starts gunicorn with --no-control-socket; it reaches production when the ee pointer is advanced. Adds Enterprise-gated tests that start the app in a fresh process, and records the lesson and three follow-ups."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

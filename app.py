@@ -276,17 +276,8 @@ if os.environ.get('FLASK_ENV') != 'testing':
 else:
     logger.info("TESTING MODE: Cloudflare security checks disabled")
 
-# ==================== Log Forwarding (OpenTelemetry) ====================
-# Forwards logs to configured OTLP endpoint (Grafana, Datadog, etc.) - Enterprise only
-
-if is_enterprise():
-    try:
-        from ee.backend.analytics.log_forwarding import setup_log_forwarding
-        setup_log_forwarding(app)
-    except ImportError as e:
-        logger.warning(f"Log forwarding module not available: {e}")
-    except Exception as e:
-        logger.error(f"Failed to initialize log forwarding: {e}")
+# Log forwarding (OpenTelemetry, Enterprise only) reads its settings from the
+# database, so it is set up by init_database() once the tables exist, not here.
 
 # ==================== Enterprise Edition Module Registration ====================
 # EE modules are packaged as Flask Blueprints for clean separation.
@@ -541,6 +532,26 @@ _db_init_lock = threading.Lock()
 # EE:END - Blog Module
 
 
+def setup_log_forwarding_from_settings():
+    """Attach the OTLP log handler when log forwarding is switched on (Enterprise only).
+
+    The settings are rows in system_config. This used to run while the module
+    was imported, before db.init_app(app): the read failed in every worker on
+    every start, the failure was taken for "disabled", and forwarding stayed
+    off until somebody saved the settings again. It must run after the
+    database is initialised, and it must never stop the app from starting.
+    """
+    if not is_enterprise():
+        return
+    try:
+        from ee.backend.analytics.log_forwarding import setup_log_forwarding
+        setup_log_forwarding(app)
+    except ImportError as e:
+        logger.warning(f"Log forwarding module not available: {e}")
+    except Exception as e:
+        logger.error(f"Failed to initialize log forwarding: {e}")
+
+
 def init_database():
     """Initialize database tables and master account on first request"""
     global _db_initialized, app_error_state
@@ -623,7 +634,9 @@ def init_database():
                 app_error_state['error'] = None
                 app_error_state['details'] = None
                 logger.info("Database initialization completed successfully")
-                
+
+                setup_log_forwarding_from_settings()
+
         except Exception as e:
             error_msg = f"Database initialization failed: {str(e)}"
             logger.error(error_msg)
