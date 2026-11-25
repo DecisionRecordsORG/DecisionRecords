@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-oauth-token-service"
+title = "Storage and token service for OAuth authorization of the MCP server, with no HTTP surface yet"
+summary = "Adds four tables (oauth_clients, oauth_grants, oauth_authorization_requests, oauth_tokens) to models.py and startup migration 2.7.0, which creates them empty on SQLite and PostgreSQL and touches nothing else. retention.py deletes their rows when an account or an organisation is erased and removes rows that can no longer be used once a day from the existing retention thread; data_export.py adds a connected_apps section. The code that writes the tables is Enterprise (ee/backend/oauth_server in the private submodule: token and grant service, PKCE, scopes, redirect URI matching, Client ID Metadata Documents with a fetcher that refuses private addresses) and is not reachable over HTTP in this change; the MCP authentication path is unchanged. In the Community Edition the tables are created and stay empty, which is why the Community release level is minor: a new migration and new tables appear in every database."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "minor"
+marketing_website = "none"

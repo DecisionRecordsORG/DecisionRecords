@@ -126,6 +126,7 @@ def make_full_tenant(domain, key):
                        key_prefix=key[:8], name='My key')
     db.session.add_all([slack, teams, api_key])
     db.session.flush()
+    add_connected_app(member, tenant, key)
     db.session.add_all([
         SlackUserMapping(slack_workspace_id=slack.id, slack_user_id=f'U{key}', slack_email=member.email,
                          user_id=member.id),
@@ -155,6 +156,57 @@ def expire_tenant(tenant, expired_ago=timedelta(hours=1), now=None):
     tenant.deletion_expires_at = expires_at
     tenant.status = 'deleted'
     db.session.commit()
+
+
+
+def add_connected_app(user, tenant, key):
+    """A connected application for `user` in `tenant`: client, grant, an access and a rotated refresh
+    token with its successor, and the consent request the grant came from. Nothing names the person."""
+    from datetime import datetime, timedelta, timezone
+    from models import OAuthClient, OAuthGrant, OAuthAuthorizationRequest, OAuthToken
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    client_id = 'https://client.example/oauth/client.json'
+    client = OAuthClient.query.filter_by(client_id=client_id).first()
+    if client is None:
+        client = OAuthClient(client_id=client_id, client_name='Example Client',
+                             client_uri='https://client.example',
+                             redirect_uris=['https://client.example/callback'],
+                             metadata_fetched_at=now, metadata_expires_at=now + timedelta(hours=1))
+        db.session.add(client)
+        db.session.flush()
+    resource = 'https://decisions.example/api/mcp'
+    grant = OAuthGrant(public_id=f'grant-{key}'[:36], user_id=user.id, tenant_id=tenant.id,
+                       oauth_client_id=client.id, resource=resource, scopes=['decisions:read'],
+                       expires_at=now + timedelta(days=180))
+    db.session.add(grant)
+    db.session.flush()
+    old_refresh = OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_REFRESH,
+                             token_hash=f'oauth-old-{key}'.ljust(64, '0')[:64],
+                             expires_at=now + timedelta(days=30), rotated_at=now)
+    db.session.add(old_refresh)
+    db.session.flush()
+    db.session.add_all([
+        OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_REFRESH, parent_id=old_refresh.id,
+                   token_hash=f'oauth-new-{key}'.ljust(64, '0')[:64], expires_at=now + timedelta(days=30)),
+        OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_ACCESS, parent_id=old_refresh.id,
+                   token_hash=f'oauth-access-{key}'.ljust(64, '0')[:64], expires_at=now + timedelta(hours=1)),
+        OAuthAuthorizationRequest(
+            public_id=f'request-{key}'[:64], client_identifier=client_id, oauth_client_id=client.id,
+            redirect_uri='https://client.example/callback', requested_scopes=['decisions:read'],
+            state=f'state-{key}', code_challenge='c' * 43, resource=resource,
+            expires_at=now + timedelta(minutes=10), user_id=user.id, tenant_id=tenant.id,
+            granted_scopes=['decisions:read'], decision=OAuthAuthorizationRequest.DECISION_APPROVED,
+            decided_at=now, code_hash=f'oauth-code-{key}'.ljust(64, '0')[:64],
+            code_expires_at=now + timedelta(minutes=2), code_used_at=now, grant_id=grant.id),
+        # A consent request still waiting for a decision
+        OAuthAuthorizationRequest(
+            public_id=f'open-request-{key}'[:64], client_identifier=client_id,
+            redirect_uri='https://client.example/callback', requested_scopes=['decisions:read'],
+            code_challenge='c' * 43, resource=resource, expires_at=now + timedelta(minutes=10),
+            user_id=user.id),
+    ])
+    db.session.flush()
+    return grant
 
 
 def snapshot(exclude=()):
