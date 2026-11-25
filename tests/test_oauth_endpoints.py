@@ -1825,7 +1825,7 @@ class TestRateLimits:
         url = '/oauth/authorize?' + urlencode(on.authorize_params())
 
         def start(address):
-            return client.get(url, headers={'CF-Connecting-IP': address}).status_code
+            return client.get(url, environ_overrides={'REMOTE_ADDR': address}).status_code
 
         # One IPv4 /24 shares an allowance; the next /24 has its own
         assert [start('198.51.100.7'), start('198.51.100.200'), start('198.51.100.9')] == [302, 302, 429]
@@ -1842,8 +1842,25 @@ class TestRateLimits:
         ('not-an-address', 'not-an-address'),
     ])
     def test_address_prefix(self, on, address, prefix):
-        with on.app.test_request_context('/', headers={'CF-Connecting-IP': address}):
+        with on.app.test_request_context('/', environ_overrides={'REMOTE_ADDR': address}):
             assert rate_limits.address_prefix() == prefix
+
+    def test_the_address_is_the_apps_own_and_a_header_anyone_can_send_is_not_believed(self, on):
+        """Limits are keyed on client_address.get_client_address(), not on a header read here."""
+        import client_address
+        forged = {'CF-Connecting-IP': '203.0.113.99', 'X-Forwarded-For': '203.0.113.99', 'X-Real-IP': '203.0.113.99'}
+        with on.app.test_request_context('/', headers=forged, environ_overrides={'REMOTE_ADDR': '198.51.100.7'}):
+            assert rate_limits.caller_address() == client_address.get_client_address() == '198.51.100.7'
+            assert rate_limits.address_prefix() == '198.51.100.0/24'
+
+    def test_a_forged_header_does_not_buy_a_fresh_allowance(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'authorize_prefix', '2 per 10 minutes')
+        client = on.anonymous()
+        url = '/oauth/authorize?' + urlencode(on.authorize_params())
+        statuses = [client.get(url, headers={'CF-Connecting-IP': f'203.0.113.{index}',
+                                             'X-Forwarded-For': f'203.0.{index}.1'}).status_code
+                    for index in range(4)]
+        assert statuses == [302, 302, 429, 429]
 
     def test_fetching_application_documents_is_limited_per_user(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'client_metadata_fetch', '2 per minute')
@@ -1881,7 +1898,7 @@ class TestRateLimits:
         ]
         for _ in range(10):
             for form in junk:
-                assert attacker.post('/oauth/token', data=form, headers={'CF-Connecting-IP': '203.0.113.9'}
+                assert attacker.post('/oauth/token', data=form, environ_overrides={'REMOTE_ADDR': '203.0.113.9'}
                                      ).status_code == 400
 
         real = on.exchange(code)
@@ -1922,15 +1939,17 @@ class TestRateLimits:
     def test_the_token_and_revoke_endpoints_are_limited_per_address(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'token_address', '2 per minute')
         on.monkeypatch.setitem(rate_limits.LIMITS, 'revoke_address', '2 per minute')
-        here = {'CF-Connecting-IP': '203.0.113.9'}
-        there = {'CF-Connecting-IP': '203.0.113.10'}
+        here = {'REMOTE_ADDR': '203.0.113.9'}
+        there = {'REMOTE_ADDR': '203.0.113.10'}
         client = on.anonymous()
         form = {'grant_type': 'refresh_token', 'refresh_token': 'dro_rt_x', 'client_id': CLIENT_ID}
-        assert [client.post('/oauth/token', data=form, headers=here).status_code for _ in range(3)] == [400, 400, 429]
-        assert client.post('/oauth/token', data=form, headers=there).status_code == 400
+        assert [client.post('/oauth/token', data=form, environ_overrides=here).status_code
+                for _ in range(3)] == [400, 400, 429]
+        assert client.post('/oauth/token', data=form, environ_overrides=there).status_code == 400
         form = {'token': 'dro_rt_x', 'client_id': CLIENT_ID}
-        assert [client.post('/oauth/revoke', data=form, headers=here).status_code for _ in range(3)] == [200, 200, 429]
-        assert client.post('/oauth/revoke', data=form, headers=there).status_code == 200
+        assert [client.post('/oauth/revoke', data=form, environ_overrides=here).status_code
+                for _ in range(3)] == [200, 200, 429]
+        assert client.post('/oauth/revoke', data=form, environ_overrides=there).status_code == 200
 
     def test_a_batch_counts_once_against_the_credential(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'mcp_credential', '3 per minute')
@@ -2149,7 +2168,7 @@ class TestAnonymousRequestsAreBounded:
     def test_one_network_cannot_pile_up_requests_by_changing_its_address(self, on):
         client = on.anonymous()
         url = '/oauth/authorize?' + urlencode(on.authorize_params(state='s' * 1024))
-        statuses = [client.get(url, headers={'CF-Connecting-IP': f'2001:db8::{index:x}'}).status_code
+        statuses = [client.get(url, environ_overrides={'REMOTE_ADDR': f'2001:db8::{index:x}'}).status_code
                     for index in range(90)]
         assert statuses.count(302) == 30 and statuses.count(429) == 60
         assert OAuthAuthorizationRequest.query.count() == 30
@@ -2159,7 +2178,7 @@ class TestAnonymousRequestsAreBounded:
         client = on.anonymous()
         url = '/oauth/authorize?' + urlencode(on.authorize_params())
 
-        statuses = [client.get(url, headers={'CF-Connecting-IP': f'198.51.{index}.7'}).status_code
+        statuses = [client.get(url, environ_overrides={'REMOTE_ADDR': f'198.51.{index}.7'}).status_code
                     for index in range(5)]
 
         assert statuses == [302, 302, 302, 503, 503]
@@ -2169,7 +2188,7 @@ class TestAnonymousRequestsAreBounded:
         public_id = OAuthAuthorizationRequest.query.first().public_id
         on.view(browser, public_id)
         on.decide(browser, public_id, decision='deny')
-        assert client.get(url, headers={'CF-Connecting-IP': '198.51.9.7'}).status_code == 302
+        assert client.get(url, environ_overrides={'REMOTE_ADDR': '198.51.9.7'}).status_code == 302
 
     def test_unanswered_requests_go_minutes_after_they_expire(self, on):
         import retention
