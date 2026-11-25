@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-rate-limit-client-address"
+title = "Count rate limits per visitor behind a reverse proxy"
+summary = "The rate limiter keyed on the connection's peer. Behind a reverse proxy that is the proxy for every visitor, so on the hosted service (Cloudflare, nginx, container) all visitors shared one allowance per endpoint and per worker, and anyone could use it up for everybody. Login history and the audit log took the address from a CF-Connecting-IP header without checking the sender. A new module, client_address.py, is the one place an address is established: the peer, or, when the peer is a proxy named in the new TRUSTED_PROXIES setting, the nearest address in X-Forwarded-For that is not a trusted proxy. The limiter, login history, the audit log and security log lines all use it. The default is empty (no header believed), so a Community installation behaves as before until the operator names a proxy; the self-hosting and configuration guides say how. IPv6 visitors are counted by /64 for rate limiting. The private half (same branch name in ee) adds Cloudflare's ranges to the trusted set, sets TRUSTED_PROXIES to the Docker bridge gateway in the production image, and documents the production proxy configuration and three proposed hardening changes that were not made; it reaches production when the ee pointer is advanced and Enterprise is deployed. Worth a Community patch release: self-hosted installations behind a proxy have the same shared allowance and a spoofable audit address."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

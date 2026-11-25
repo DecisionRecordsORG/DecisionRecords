@@ -84,8 +84,39 @@ Additional email settings (server, port, from address) are configured in the Adm
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SKIP_CLOUDFLARE_CHECK` | `false` | Set to `true` for self-hosted deployments not behind Cloudflare |
+| `TRUSTED_PROXIES` | - | Addresses or networks of your reverse proxies, comma-separated (`172.17.0.1, 10.0.0.0/8`). Empty by default: no forwarding header is believed. Set it when the application runs behind a reverse proxy. See [Behind a reverse proxy](#behind-a-reverse-proxy) |
 | `RETENTION_AUTO_RUN` | `true` | Set to `false` to turn off the daily automatic data retention run for this installation. It wins over the super admin setting. With it off, expired data is erased only when a super admin or a cron job starts a run |
 | `GDPR_CRON_SECRET` | - | Optional. Shared secret for an operator's own cron job that calls `/api/admin/execute-gdpr-tasks`. Not needed for the automatic run. Generate with: `openssl rand -hex 32` |
+
+### Behind a reverse proxy
+
+The application needs each visitor's address for two things: the rate limiter counts requests per address (200 a minute for each endpoint by default, fewer on sign-in and the public forms), and the login history and audit log record it.
+
+The only address the application can be sure of is the one that opened the connection. Behind a reverse proxy that is the proxy, for every visitor. The proxy passes the visitor's address on in the `X-Forwarded-For` header, but anyone can send that header, so the application believes it only when the connection comes from a proxy you have named:
+
+```bash
+# The address (or network) your proxy connects from, as the application sees it
+TRUSTED_PROXIES=172.17.0.1
+```
+
+| `TRUSTED_PROXIES` | Address used |
+|-------------------|--------------|
+| not set (default) | The address that opened the connection. No header is read. Right when visitors reach the application directly. Behind a proxy, all visitors count as one: they share one rate-limit allowance and the login history shows the proxy |
+| your proxy | The last address in `X-Forwarded-For` that is not one of your proxies. Entries further left were sent by the visitor and are ignored |
+
+With more than one proxy in a row (a load balancer or CDN in front of nginx), list all of them. The header is read from the right and stops at the first address that is not in the list.
+
+Rules:
+
+- List only proxies you run or trust. Whoever can connect from a listed address can choose the address the application records.
+- The proxy must append the address that connected to it to `X-Forwarded-For`. nginx does with `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`; Caddy and Traefik do by default.
+- Make sure visitors cannot reach the application around the proxy. With Docker, publish the port on the loopback address only (`127.0.0.1:3000:8000`).
+- An entry that is not an address or network is ignored and reported in the log at start-up. `X-Real-IP`, `Forwarded` and provider-specific headers are never read.
+- An IPv6 visitor is counted by `/64` block for rate limiting.
+
+To check: sign in, then open the login history in the super admin pages. It should show your own address, not the proxy's.
+
+**Rate limit counts and worker processes.** Each limit is counted per visitor and per endpoint, and each worker process keeps its own counts in memory. With the image's two workers a visitor can make up to twice the stated number of requests before being refused, and counts start again when the application restarts. That is acceptable for a single installation. The application can read a shared store from `REDIS_URL`, but the published image does not include a Redis client, so this needs an image of your own with the `redis` package added.
 
 ### Edition
 

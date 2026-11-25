@@ -32,6 +32,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{7,40}$")
 SHARED_CORE_PATTERNS = (
     "app.py",
     "auth.py",
+    "client_address.py",
     "crypto.py",
     "data_export.py",
     "decision_relationships.py",

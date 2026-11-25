@@ -10,6 +10,12 @@ Update rules:
 
 ## Deployment / CI-CD
 
+- [ ] After the Enterprise deploy that carries `client_address.py`: confirm the start-up log line `Rate limiting enabled, one bucket per visitor address (23 trusted proxy network(s))`, that two networks count down separately on `X-RateLimit-Remaining`, and that login history shows the visitor's address. Steps in `ee/docs/client-address-and-origin.md`.
+- [ ] Owner to decide on three production changes that were written up and not made (`ee/docs/client-address-and-origin.md`): publish the container port on the loopback address only; make nginx refuse host names that are not ours and pass the same headers on `/api/health`; Authenticated Origin Pulls with a certificate of our zone. Until the last one, any Cloudflare customer who learns the origin address can reach the application without our zone's rules.
+- [ ] The web app's hashed files are sent without a cache lifetime, and they all count against one rate-limit endpoint: about five cold loads a minute from one address (an office) use it up. Send long `Cache-Control` lifetimes for hashed files before raising any limit.
+- [ ] Rate limits are counted per gunicorn worker in memory, so a visitor gets up to twice each limit and counts restart on deploy. Accepted for one VM; needs a shared store (and the `redis` package in the image) before running more than one instance. Setting `REDIS_URL` without that package stops the app from starting.
+- [ ] `ee/backend/oauth_server/rate_limits.py` (branch `feat/oauth-endpoints`) reads a visitor address for itself; switch it to `client_address.get_client_address()` when that branch is next touched.
+- [ ] `validate_cloudflare_origin()` checks for a `CF-Ray` header only. Consider requiring that the address which connected to nginx is in Cloudflare's ranges, once the header chain has been observed in production for a while.
 - [ ] Watch the first CI run of the PostgreSQL smoke test and the first Enterprise deploy with the new pre-flight and rollback. Both were written without a Docker daemon or Azure access and have only run against stand-ins. Before that deploy, confirm `https://app.decisionrecords.org/health` answers with `"database": "connected"`; the deploy now depends on it.
 - [ ] Decide whether `Deploy Enterprise Edition` should remain manual-only or become gated auto-deploy after `CI` on `main`.
 - [ ] Re-run and verify the current enterprise deploy from `main` after the workflow fixes merged.

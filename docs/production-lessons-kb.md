@@ -160,6 +160,15 @@ Before building, deploying, or validating anything, identify which artifact is b
 - The start script still wrote a private DNS record that Azure Container Instances needed and the VM does not. The write was refused (`AuthorizationFailed`), which was the lucky outcome: inside Docker the address it would have published is the bridge address. When a permission error comes from a step nothing depends on, remove the step; do not grant the permission. When infrastructure is replaced, remove what served the old one from the start path in the same change.
 - The deploy pre-flight starts gunicorn itself and does not run the image's start script, so an argument gunicorn does not know would pass the pre-flight and stop production from starting (the deploy would then roll back). `tests/test_startup_log_errors.py` parses the script's arguments with the installed gunicorn.
 
+## Visitor Addresses Behind Proxies
+
+- Behind a reverse proxy the connection's peer is the proxy. The rate limiter counted by peer, so on the hosted service every visitor shared one allowance per endpoint and per worker: six sign-in attempts a minute from anyone could lock everyone out. Nobody noticed because traffic was low and the response headers looked normal. The two interleaved counters in the headers were read as a curiosity; they were the two workers each counting the whole world.
+- A limit has a subject. When adding or reviewing one, ask "per what?" and look at the key on the running system, not in the code: the code said "remote address" and was right about what it did.
+- A header is evidence only from a sender you have identified. `CF-Connecting-IP`, `X-Real-IP` and the first entry of `X-Forwarded-For` can be written by anyone who reaches the application. The address now comes from one function (`client_address.py`) that believes `X-Forwarded-For` only on a connection from a proxy named in `TRUSTED_PROXIES` and reads it from the right.
+- The safe default for trust is none, and a default nobody changes is the behaviour. Self-hosted installations behind a proxy keep the shared allowance until `TRUSTED_PROXIES` is set, so the setting is in the self-hosting guide beside the proxy configuration, not only in the reference.
+- Configuration that exists only on a server is not known. The hosted service's proxy configuration was in no repository; reading it took a shell on the machine. A sanitised copy now sits beside the other infrastructure notes, with the rule that both change together.
+- Check what a library counts before judging a number. The limiter keeps a default limit per visitor and per endpoint, so "200 a minute" is not one budget, and all files of the web app are one endpoint.
+
 ## Deployment Rule
 
 Normal production deployments go through GitHub Actions and GitHub Environments. Local Azure CLI deploys are break-glass only and must be documented in the deployment notes for that incident.
