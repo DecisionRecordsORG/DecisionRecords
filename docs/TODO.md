@@ -19,6 +19,10 @@ Update rules:
 - [ ] Collapse duplicated Community CI and release validation steps into a reusable workflow once the tag-release hardening has proven stable.
 - [ ] Mirror the delivery-contract system into the private `ee` and `marketing` repositories so private-repo-local work can declare obligations before the public submodule pointer update stage.
 
+- [ ] Make the deploy pre-flight start the Enterprise image with its own command. `scripts/smoke_test_ce_image.sh` starts gunicorn directly for the `enterprise` profile because `ee/deployment/startup.sh` used to call the Azure metadata service; it no longer does (2026-11-25), so the override can go once the `ee` pointer carries the new script. Needs a Docker daemon to try.
+- [ ] Log forwarding: saving the settings reconfigures only the gunicorn worker that served the request; the other worker keeps its old state until the next restart. Have each worker notice a changed setting (for example a version row checked with the five-minute cache).
+- [ ] Log forwarding attaches its handler to `app.logger` only, which is the logger named `app`. Records from other modules (`ee.backend.*`, `retention`, `migrations`, gunicorn) are not forwarded. Decide whether the handler belongs on the root logger.
+
 ## Decision templates
 
 - [ ] First follow-up: make the surfaces outside the web app use the organisation's template headings. Notification emails (`notifications.py`), Slack messages and modals, Teams cards, the external AI REST API (`/api/ai`) and exports still say Context, Decision and Consequences, and none of them shows or accepts the decision type. The Slack, Teams and REST API parts live in `ee/`; all of them can read `decision_templates.get_template(...)`. The MCP tools are done (2026-11-24): `get_decision_template`, `decision_type` in results, on create and as a filter.
