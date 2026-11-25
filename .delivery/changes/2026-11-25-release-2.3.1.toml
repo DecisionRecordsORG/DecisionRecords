@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-release-2.3.1"
+title = "Prepare community release 2.3.1"
+summary = "Sets the version to 2.3.1 and records the changes since 2.3.0 in the changelog: /api/mcp answers 404 in the Community Edition instead of failing on a missing module, the /.well-known/oauth-* paths answer 404 as JSON, and (Enterprise only) the /api/mcp transport follows MCP revision 2026-07-28. No database change. The enterprise app already runs this code; the version number reaches production with the next deploy."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "required"
+community_release_level = "patch"
+marketing_website = "none"
