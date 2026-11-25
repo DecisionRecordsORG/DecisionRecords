@@ -241,3 +241,60 @@ def test_a_refresh_and_a_revocation_at_once_never_leave_a_live_token_on_an_ended
         db.session.remove()
         with pytest.raises(OAuthError):
             service.refresh(results['refresh']['refresh_token'], CLIENT_ID)
+
+
+def test_many_requests_at_once_at_the_cap_are_all_accepted(concurrent_app, ids, monkeypatch):
+    """
+    Second review, F2. At the cap a new request replaces the oldest unopened
+    one. Several arriving together must each get in, without a deadlock and
+    without one of them being refused because the others hold the rows it
+    would have evicted.
+    """
+    cap = 3 * THREADS          # more old requests than newcomers, so no newcomer is the oldest
+    monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', cap)
+
+    def ask():
+        request = service.create_authorization_request(CLIENT_ID, REDIRECT, CHALLENGE, RESOURCE)
+        return request.public_id
+
+    before = [ask() for _ in range(cap)]
+    db.session.remove()
+
+    outcomes = _race(concurrent_app, ask)
+
+    assert [kind for kind, _result in outcomes] == ['ok'] * THREADS, outcomes
+    made = {result for _kind, result in outcomes}
+    assert len(made) == THREADS
+    waiting = {row.public_id for row in OAuthAuthorizationRequest.query.all()}
+    # Every new request is stored; what was evicted was older
+    assert made <= waiting
+    assert waiting - made <= set(before)
+    # Never more rows than the cap plus the requests that were in flight
+    assert cap <= len(waiting) <= cap + THREADS
+    db.session.remove()
+
+    # Settled again, it is one out for one in
+    count = OAuthAuthorizationRequest.query.count()
+    ask()
+    assert OAuthAuthorizationRequest.query.count() == count
+
+
+def test_requests_people_have_opened_survive_a_rush_at_the_cap(concurrent_app, ids, monkeypatch):
+    cap = 4
+    monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', cap)
+    user = db.session.get(User, ids['user'])
+    opened = []
+    for _ in range(2):
+        request = service.create_authorization_request(CLIENT_ID, REDIRECT, CHALLENGE, RESOURCE)
+        service.bind_user(request, user)
+        opened.append(request.public_id)
+    for _ in range(cap - 2):
+        service.create_authorization_request(CLIENT_ID, REDIRECT, CHALLENGE, RESOURCE)
+    db.session.remove()
+
+    outcomes = _race(concurrent_app, lambda: service.create_authorization_request(
+        CLIENT_ID, REDIRECT, CHALLENGE, RESOURCE).public_id)
+
+    assert [kind for kind, _result in outcomes] == ['ok'] * THREADS, outcomes
+    waiting = {row.public_id for row in OAuthAuthorizationRequest.query.all()}
+    assert set(opened) <= waiting

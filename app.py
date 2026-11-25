@@ -10565,6 +10565,8 @@ def setup_test_oauth():
         enabled               false switches OAuth off again (default true)
         system_ai, system_mcp false switches AI or the MCP server off for the
                               installation (default true); OAuth is then off
+        system_external_api   false switches external AI API access off for
+                              the installation (default true)
         clients               [{client_id, client_name, redirect_uris}]
         ai_enabled_domains    organisations whose AI features and external AI
                               access are switched on
@@ -10587,7 +10589,8 @@ def setup_test_oauth():
     try:
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true' if data.get('system_ai', True) else 'false')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true' if data.get('system_mcp', True) else 'false')
-        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED,
+                         'true' if data.get('system_external_api', True) else 'false')
 
         for domains, ai_features, external_access in (
                 (data.get('ai_enabled_domains') or [], True, True),
@@ -12518,6 +12521,12 @@ def api_get_tenant_ai_logs():
 # that are not browsers send no Origin header and are not affected.
 MCP_ALLOWED_ORIGINS_ENV = 'MCP_ALLOWED_ORIGINS'
 MCP_BEARER_CHALLENGE = 'Bearer realm="Decision Records MCP"'
+# The most JSON-RPC messages one POST may carry. A batch counts once against
+# the credential's rate limit and runs on one worker thread until it is done,
+# so without a ceiling one request could carry any number of tool calls.
+# Batches exist only in protocol revision 2025-03-26; later revisions send
+# one message per POST. No client is known to batch more than a handful.
+MCP_MAX_BATCH_MESSAGES = 50
 
 
 @app.route('/api/mcp', methods=['GET', 'POST', 'DELETE'])
@@ -12574,6 +12583,15 @@ def api_mcp_handler():
         if not request_data or declared_version not in (None, '', '2025-03-26'):
             return _mcp_error_response(
                 None, -32600, 'Invalid Request: send one JSON-RPC message per POST (batches are not supported)'
+            ), 400
+
+        if len(request_data) > MCP_MAX_BATCH_MESSAGES:
+            # Refused whole, before anything runs: answering some of the
+            # messages would leave the client guessing which ones.
+            return _mcp_error_response(
+                None, -32600,
+                f'Invalid Request: a batch may carry at most {MCP_MAX_BATCH_MESSAGES} messages '
+                f'(this one carries {len(request_data)}). Send the rest in further requests.'
             ), 400
 
         batch_responses = []

@@ -298,6 +298,7 @@ def world(monkeypatch):
     monkeypatch.setenv('OAUTH_ISSUER', ISSUER)
     app_module, app = load_test_app(secret_key='test-secret-key-oauth-endpoints')
     rate_limits.reset()
+    client_metadata.reset_fetch_state()
     with app.app_context():
         db.create_all()
         app_module.init_database()
@@ -903,8 +904,9 @@ class TestConsentView:
         response = on.view(on.signed_in(on.user), on.start())
         assert response.status_code == 503 and response.get_json()['code'] == 'client_unavailable'
 
+        # Another application: the first one's failure is remembered for a minute
         on.fetch_error = FetchError('The host resolves to an address that is not on the public internet')
-        response = on.view(on.signed_in(on.user), on.start())
+        response = on.view(on.signed_in(on.user), on.start(client_id='https://client.example.org/other.json'))
         assert response.status_code == 400 and response.get_json()['code'] == 'client_invalid'
         assert OAuthClient.query.count() == 0
 
@@ -1096,6 +1098,11 @@ class TestDecision:
         {}, {'decision': 'maybe'}, {'decision': 'approve'}, {'decision': 'approve', 'tenant_id': 'one'},
         {'decision': 'approve', 'tenant_id': True}, {'decision': 'approve', 'tenant_id': None},
         {'decision': ['approve']},
+        # Not an organisation id. Above 32 bits PostgreSQL refuses the number, above 64 bits
+        # SQLite cannot bind it: either way it answered 500 before it was bounded here.
+        {'decision': 'approve', 'tenant_id': 0}, {'decision': 'approve', 'tenant_id': -1},
+        {'decision': 'approve', 'tenant_id': 2 ** 31}, {'decision': 'approve', 'tenant_id': 2 ** 63},
+        {'decision': 'approve', 'tenant_id': 2 ** 64}, {'decision': 'approve', 'tenant_id': 2 ** 70},
     ])
     def test_malformed_decisions(self, on, body):
         client, public_id = self._viewed(on)
@@ -1750,7 +1757,7 @@ class TestOwnConnectedApps:
         assert {grant['organisation']['domain'] for grant in grants} == {'example.com', 'other.org'}
         first = [grant for grant in grants if grant['organisation']['domain'] == 'example.com'][0]
         assert first['application'] == {'host': 'client.example.org', 'claimed_name': 'Example Client',
-                                        'known': False, 'known_name': None}
+                                        'known': False, 'known_name': None, 'client_id': CLIENT_ID}
         assert first['scopes'] == ['decisions:read'] and first['can_write'] is False
         assert set(first) == {'id', 'application', 'organisation', 'scopes', 'can_write', 'connected_at',
                               'last_used_at', 'expires_at'}
@@ -1968,6 +1975,40 @@ class TestRateLimits:
         assert start('2001:db8:1:3::1') == 302
         assert OAuthAuthorizationRequest.query.count() == 6
 
+    def test_an_ipv6_site_prefix_has_one_allowance_over_all_its_networks(self, on):
+        """
+        Second review, F2. A /48 is one customer's allocation and holds 65,536
+        /64s; counting per /64 alone gave it 65,536 allowances.
+        """
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'authorize_prefix_wide', '3 per 10 minutes')
+        client = on.anonymous()
+        url = '/oauth/authorize?' + urlencode(on.authorize_params())
+
+        def start(address):
+            return client.get(url, environ_overrides={'REMOTE_ADDR': address}).status_code
+
+        # Four different /64s of 2001:db8:abcd::/48
+        assert [start(f'2001:db8:abcd:{subnet:x}::1') for subnet in range(4)] == [302, 302, 302, 429]
+        # The neighbouring /48 and IPv4 are not affected
+        assert start('2001:db8:abce::1') == 302
+        assert [start(f'198.51.{index}.7') for index in range(5)] == [302] * 5
+        # An IPv4 address written as IPv6 is IPv4: it has no wider bucket
+        assert [start(f'::ffff:203.0.{index}.7') for index in range(5)] == [302] * 5
+
+    def test_the_wider_allowance_is_four_times_the_networks(self, on):
+        assert rate_limits.LIMITS['authorize_prefix'] == '30 per 10 minutes'
+        assert rate_limits.LIMITS['authorize_prefix_wide'] == '120 per 10 minutes'
+
+    @pytest.mark.parametrize('address,prefix', [
+        ('2001:db8:abcd:12:3:4:5:6', '2001:db8:abcd::/48'),
+        ('198.51.100.7', None),
+        ('::ffff:198.51.100.7', None),
+        ('not-an-address', None),
+    ])
+    def test_wider_address_prefix(self, on, address, prefix):
+        with on.app.test_request_context('/', environ_overrides={'REMOTE_ADDR': address}):
+            assert rate_limits.wider_address_prefix() == prefix
+
     @pytest.mark.parametrize('address,prefix', [
         ('198.51.100.7', '198.51.100.0/24'),
         ('2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'),
@@ -2000,12 +2041,15 @@ class TestRateLimits:
         on.fetch_error = FetchError('The server answered 404')
         client = on.signed_in(on.user)
 
-        statuses = [on.view(client, on.start()).status_code for _ in range(3)]
+        # A different application each time: a failure is remembered per application
+        statuses = [on.view(client, on.start(client_id=f'https://client.example.org/app-{index}.json')).status_code
+                    for index in range(3)]
 
         assert statuses == [400, 400, 429]
         assert len(on.fetches) == 2
         # Another user has their own allowance
-        assert on.view(on.signed_in(on.colleague), on.start()).status_code == 400
+        other = on.start(client_id='https://client.example.org/app-9.json')
+        assert on.view(on.signed_in(on.colleague), other).status_code == 400
 
     def test_decisions_are_limited_per_user(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'consent_decision', '1 per minute')
@@ -2277,17 +2321,23 @@ class TestSessionHeadersStayOffSessionlessEndpoints:
 
 class TestApiKeyBatchesAreNotNewlyLimited:
 
-    def test_a_large_batch_with_an_api_key_is_one_request(self, world):
-        """Switch off, API key: a batch of 301 pings was answered with 200 before the per-credential limit existed."""
+    def test_a_full_batch_with_an_api_key_is_one_request(self, world):
+        """
+        Switch off, API key: a batch counts once against the credential, as
+        before the per-credential limit existed. (Until the second review a
+        batch could be of any size; it is 50 messages at most now, see
+        TestABatchHasACeiling.)
+        """
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        world.monkeypatch.setitem(rate_limits.LIMITS, 'mcp_credential', '2 per minute')
         key = world.api_key()
-        batch = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(301)]
+        batch = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(50)]
 
-        response = world.mcp(key, body=batch, headers={'MCP-Protocol-Version': '2025-03-26'})
+        responses = [world.mcp(key, body=batch, headers={'MCP-Protocol-Version': '2025-03-26'}) for _ in range(2)]
 
-        assert response.status_code == 200
-        assert len(response.get_json()) == 301
+        assert [response.status_code for response in responses] == [200, 200]
+        assert len(responses[0].get_json()) == 50
 
 
 class TestAnonymousRequestsAreBounded:
@@ -2307,6 +2357,7 @@ class TestAnonymousRequestsAreBounded:
         assert OAuthAuthorizationRequest.query.count() == 30
 
     def test_requests_waiting_for_an_answer_are_capped_over_the_whole_installation(self, on):
+        """The cap bounds what is stored. Reaching it refuses nobody: the oldest unopened request makes room."""
         on.monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 3)
         client = on.anonymous()
         url = '/oauth/authorize?' + urlencode(on.authorize_params())
@@ -2314,13 +2365,25 @@ class TestAnonymousRequestsAreBounded:
         statuses = [client.get(url, environ_overrides={'REMOTE_ADDR': f'198.51.{index}.7'}).status_code
                     for index in range(5)]
 
-        assert statuses == [302, 302, 302, 503, 503]
+        assert statuses == [302, 302, 302, 302, 302]
         assert OAuthAuthorizationRequest.query.count() == 3
-        # An answered request no longer counts
+
+    def test_only_a_cap_full_of_requests_people_are_looking_at_refuses(self, on):
+        on.monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 3)
+        client = on.anonymous()
+        url = '/oauth/authorize?' + urlencode(on.authorize_params())
         browser = on.signed_in(on.user)
-        public_id = OAuthAuthorizationRequest.query.first().public_id
-        on.view(browser, public_id)
-        on.decide(browser, public_id, decision='deny')
+        opened = [on.start() for _ in range(3)]
+        for public_id in opened:
+            assert on.view(browser, public_id).status_code == 200
+
+        refused = client.get(url, environ_overrides={'REMOTE_ADDR': '198.51.9.7'})
+
+        assert refused.status_code == 503
+        assert 'Too many connection requests are waiting' in refused.get_data(as_text=True)
+        assert sorted(row.public_id for row in OAuthAuthorizationRequest.query.all()) == sorted(opened)
+        # An answered request no longer counts
+        on.decide(browser, opened[0], decision='deny')
         assert client.get(url, environ_overrides={'REMOTE_ADDR': '198.51.9.7'}).status_code == 302
 
     def test_unanswered_requests_go_minutes_after_they_expire(self, on):
@@ -2422,6 +2485,30 @@ class TestAUsedCodeInAnotherClientsName:
         assert OAuthGrant.query.one().revoked_at is None
         assert on.mcp(tokens['access_token']).status_code == 200
 
+    @pytest.mark.parametrize('changes', [
+        {'redirect_uri': 'https://wrong.example/cb', 'code_verifier': 'x' * 43},
+        {'code_verifier': 'x' * 43},
+        {'code_verifier': None},
+        {'redirect_uri': 'https://wrong.example/cb'},
+        {'redirect_uri': None},
+    ])
+    def test_in_the_right_clients_name_without_its_verifier_or_redirect_it_does_not_either(self, on, changes):
+        """
+        Second review, F4. The client_id is public, so naming the right client
+        proves nothing. The observer of a code has the code; the application
+        has the PKCE verifier as well.
+        """
+        code = on.code()
+        tokens = on.exchange(code).get_json()
+
+        response = on.exchange(code, **changes)
+
+        assert response.status_code == 400 and response.get_json()['error'] == 'invalid_grant'
+        grant = OAuthGrant.query.one()
+        assert grant.revoked_at is None and grant.revoke_reason is None
+        assert on.call(tokens['access_token'], 'list_decisions').status_code == 200
+        assert AuditLog.query.filter_by(action_type='oauth_code_reuse_detected').count() == 0
+
     def test_the_same_client_presenting_it_again_still_does(self, on):
         code = on.code()
         tokens = on.exchange(code).get_json()
@@ -2458,80 +2545,130 @@ class TestDocumentTextIsNotEchoed:
 # 11. KNOWN APPS
 # ============================================================================
 
-CLAUDE_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
+# The one address listed: Claude Code's identity document, as a real connection presented it.
 CLAUDE_CODE_ID = 'https://claude.ai/oauth/claude-code-client-metadata'
+# Addresses claude.ai on the web and ChatGPT may present. Not listed: what they really present
+# is only known once they have connected (oauth-server.md, "Enabling in production").
+CLAUDE_WEB_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
 CHATGPT_ID = 'https://chatgpt.com/oauth/client.json'
 
 
 class TestKnownApps:
-    """A few hosts are shown by a name people recognise. The match is on the client_id host, exactly."""
+    """
+    A few applications are shown by a name people recognise. The match is on
+    the whole client_id, exactly. Second review, F5: it used to be on the
+    host, so any address on claude.ai or chatgpt.com was "known".
+    """
 
-    @pytest.mark.parametrize('client_id,name', [
-        (CLAUDE_ID, 'Claude (Anthropic)'),
-        (CLAUDE_CODE_ID, 'Claude (Anthropic)'),
-        (CHATGPT_ID, 'ChatGPT (OpenAI)'),
-        ('https://chatgpt.com/oauth/abc123/client.json', 'ChatGPT (OpenAI)'),
-        ('https://claude.ai:443/oauth/x', 'Claude (Anthropic)'),
-    ])
-    def test_known(self, client_id, name):
-        assert known_apps.known_app_name(client_id) == name
+    def test_known(self):
+        assert known_apps.known_app_name(CLAUDE_CODE_ID) == 'Claude Code (Anthropic)'
+
+    def test_the_list_is_short_and_exact(self):
+        assert known_apps.KNOWN_APPS == {CLAUDE_CODE_ID: 'Claude Code (Anthropic)'}
+        for client_id in known_apps.KNOWN_APPS:
+            # Each entry is a client_id this server would accept, written the one way it is compared
+            assert client_metadata.check_client_id_url(client_id) == client_id
+            assert client_id == client_id.strip() and '*' not in client_id and not client_id.endswith('/')
 
     @pytest.mark.parametrize('client_id', [
-        # look-alikes
-        'https://claude.ai.example.org/oauth/mcp-oauth-client-metadata',
-        'https://claude-ai.com/oauth/client.json',
-        'https://claudeai.com/client.json',
-        'https://www.claude.ai/oauth/client.json',
-        'https://oauth.claude.ai/client.json',
-        'https://claude.ai.evil.example/client.json',
-        'https://evil.example/claude.ai/client.json',
+        # other addresses on a listed application's host: pages the site's users can publish
+        'https://claude.ai/public/artifacts/11111111-2222-3333-4444-555555555555',
+        'https://claude.ai/share/anything.json',
+        'https://claude.ai/oauth/claude-code-client-metadata/',
+        'https://claude.ai/oauth/claude-code-client-metadata.json',
+        'https://claude.ai/oauth/claude-code-client-metadata/extra',
+        'https://claude.ai/oauth/Claude-Code-Client-Metadata',
+        'https://claude.ai/oauth/claude-code-client-metadata?x=1',
+        'https://claude.ai/oauth/claude-code-client-metadata#x',
+        'https://claude.ai/oauth/../oauth/claude-code-client-metadata',
+        'https://claude.ai/oauth/claude%2Dcode-client-metadata',
+        'https://claude.ai//oauth/claude-code-client-metadata',
+        'https://claude.ai:443/oauth/claude-code-client-metadata',
+        ' https://claude.ai/oauth/claude-code-client-metadata',
+        'https://claude.ai/',
+        'https://claude.ai',
+        # not listed until a real connection has shown what they present
+        CLAUDE_WEB_ID,
+        CHATGPT_ID,
+        'https://chatgpt.com/backend-api/whatever/user-controlled',
+        'https://chatgpt.com/oauth/abc123/client.json',
+        # look-alike hosts with the listed path
+        'https://claude.ai.example.org/oauth/claude-code-client-metadata',
+        'https://claude-ai.com/oauth/claude-code-client-metadata',
+        'https://www.claude.ai/oauth/claude-code-client-metadata',
+        'https://oauth.claude.ai/claude-code-client-metadata',
+        'https://evil.example/claude.ai/oauth/claude-code-client-metadata',
         'https://evil.example/client.json?host=claude.ai',
-        'https://evil.example/client.json#claude.ai',
-        'https://claude.ai@evil.example/client.json',
-        'https://evil.example\\@claude.ai/client.json',
-        'https://chatgpt.com.example.org/oauth/client.json',
-        'https://chat-gpt.com/oauth/client.json',
+        'https://claude.ai@evil.example/oauth/claude-code-client-metadata',
+        'https://evil.example\\@claude.ai/oauth/claude-code-client-metadata',
         # international look-alikes: a Cyrillic "а" and "с", and their encoded forms
-        'https://cl\u0430ude.ai/oauth/client.json',
-        'https://\u0441laude.ai/oauth/client.json',
-        'https://xn--clude-3ve.ai/oauth/client.json',
-        'https://xn--laude-xye.ai/oauth/client.json',
-        'https://claude.a\u0456/oauth/client.json',
-        'https://ｃｌａｕｄｅ.ａｉ/oauth/client.json',
+        'https://cl\u0430ude.ai/oauth/claude-code-client-metadata',
+        'https://\u0441laude.ai/oauth/claude-code-client-metadata',
+        'https://xn--clude-3ve.ai/oauth/claude-code-client-metadata',
+        'https://xn--laude-xye.ai/oauth/claude-code-client-metadata',
+        'https://ｃｌａｕｄｅ.ａｉ/oauth/claude-code-client-metadata',
         # case and form
-        'https://CLAUDE.AI/oauth/client.json',
-        'https://Claude.ai/oauth/client.json',
-        'https://claude.ai./oauth/client.json',
-        'https://claude.ai:8443/oauth/client.json',
-        'http://claude.ai/oauth/client.json',
-        'claude.ai', 'Claude (Anthropic)', '', None, 7,
+        'https://CLAUDE.AI/oauth/claude-code-client-metadata',
+        'https://Claude.ai/oauth/claude-code-client-metadata',
+        'https://claude.ai./oauth/claude-code-client-metadata',
+        'https://claude.ai:8443/oauth/claude-code-client-metadata',
+        'http://claude.ai/oauth/claude-code-client-metadata',
+        'claude.ai', 'Claude Code (Anthropic)', '', None, 7, b'https://claude.ai/oauth/claude-code-client-metadata',
+        ['https://claude.ai/oauth/claude-code-client-metadata'],
     ])
     def test_not_known(self, client_id):
         assert known_apps.known_app_name(client_id) is None
 
-    def test_the_list_is_short_and_exact(self):
-        assert known_apps.KNOWN_APPS == {'claude.ai': 'Claude (Anthropic)', 'chatgpt.com': 'ChatGPT (OpenAI)'}
-        for host in known_apps.KNOWN_APPS:
-            assert host == host.lower() and host.isascii() and '*' not in host and not host.startswith('.')
+    @pytest.mark.parametrize('client_id', [
+        'https://claude.ai/public/artifacts/11111111-2222-3333-4444-555555555555',
+        'https://claude.ai/share/anything.json',
+        'https://chatgpt.com/backend-api/whatever/user-controlled',
+    ])
+    def test_a_document_published_elsewhere_on_a_known_host_is_an_unverified_app(self, on, client_id):
+        """The reviewer's proof: these were shown as "Claude (Anthropic)" and "ChatGPT (OpenAI)"."""
+        on.document = _document(client_id=client_id, client_name='Claude',
+                                redirect_uris=['https://attacker.example/cb'])
+        public_id = on.start(client_id=client_id, redirect_uri='https://attacker.example/cb')
+
+        shown = on.view(on.signed_in(on.user), public_id).get_json()
+
+        assert shown['application']['known'] is False and shown['application']['known_name'] is None
+        assert shown['application']['host'] == urlsplit(client_id).hostname
+        assert shown['application']['claimed_name'] == 'Claude'
+        assert shown['redirect']['host'] == 'attacker.example'
 
     def _start_for(self, on, client_id, document, redirect):
         on.document = document
         return on.start(client_id=client_id, redirect_uri=redirect)
 
-    def test_the_consent_page_is_told_a_known_app_by_its_host(self, on):
-        document = {'client_id': CLAUDE_ID, 'client_name': 'Claude', 'redirect_uris': [
-            'https://claude.ai/api/mcp/auth_callback'], 'token_endpoint_auth_method': 'none'}
-        public_id = self._start_for(on, CLAUDE_ID, document, 'https://claude.ai/api/mcp/auth_callback')
+    def test_the_consent_page_is_told_a_known_app_by_its_client_id(self, on):
+        document = {'client_id': CLAUDE_CODE_ID, 'client_name': 'Claude Code', 'redirect_uris': [
+            'http://localhost/callback', 'http://127.0.0.1/callback'], 'token_endpoint_auth_method': 'none'}
+        public_id = self._start_for(on, CLAUDE_CODE_ID, document, 'http://localhost:49152/callback')
 
         application = on.view(on.signed_in(on.user), public_id).get_json()['application']
 
         assert application['host'] == 'claude.ai'
-        assert application['known'] is True and application['known_name'] == 'Claude (Anthropic)'
-        assert application['claimed_name'] == 'Claude'
+        assert application['known'] is True and application['known_name'] == 'Claude Code (Anthropic)'
+        assert application['claimed_name'] == 'Claude Code'
+
+    def test_claude_on_the_web_and_chatgpt_are_shown_honestly_until_they_are_listed(self, on):
+        """Their real client_id is not known yet. Until it is, they are an unverified app with their host."""
+        for client_id, redirect, host in (
+                (CLAUDE_WEB_ID, 'https://claude.ai/api/mcp/auth_callback', 'claude.ai'),
+                (CHATGPT_ID, 'https://chatgpt.com/connector_platform_oauth_redirect', 'chatgpt.com')):
+            document = {'client_id': client_id, 'client_name': 'Assistant', 'redirect_uris': [redirect],
+                        'token_endpoint_auth_method': 'none'}
+            public_id = self._start_for(on, client_id, document, redirect)
+
+            application = on.view(on.signed_in(on.user), public_id).get_json()['application']
+
+            assert application['host'] == host
+            assert application['known'] is False and application['known_name'] is None
 
     def test_calling_itself_claude_does_not_make_an_app_known(self, on):
         """The name in the document is the application's own claim and plays no part."""
-        for claimed in ('Claude', 'Claude (Anthropic)', 'ChatGPT (OpenAI)', 'claude.ai'):
+        for claimed in ('Claude', 'Claude Code (Anthropic)', 'ChatGPT (OpenAI)', 'claude.ai', CLAUDE_CODE_ID):
             on.document = _document(client_name=claimed)
             application = on.view(on.signed_in(on.user), on.start()).get_json()['application']
             assert application['host'] == 'client.example.org'
@@ -2541,7 +2678,7 @@ class TestKnownApps:
             db.session.commit()
 
     def test_a_known_app_on_this_computer_still_gets_the_loopback_flag(self, on):
-        """Claude Code: a known host, and a redirect to the person's own computer. The warning is not waived."""
+        """Claude Code: a known app, and a redirect to the person's own computer. The warning is not waived."""
         document = {'client_id': CLAUDE_CODE_ID, 'client_name': 'Claude Code', 'redirect_uris': [
             'http://localhost/callback', 'http://127.0.0.1/callback'], 'token_endpoint_auth_method': 'none'}
         public_id = self._start_for(on, CLAUDE_CODE_ID, document, 'http://localhost:49152/callback')
@@ -2552,21 +2689,32 @@ class TestKnownApps:
         assert body['redirect'] == {'host': 'localhost', 'is_loopback': True, 'loopback_only_client': True}
 
     def test_the_connected_apps_lists_say_the_same(self, on):
-        document = {'client_id': CHATGPT_ID, 'client_name': 'ChatGPT', 'redirect_uris': [
-            'https://chatgpt.com/connector_platform_oauth_redirect'], 'token_endpoint_auth_methods_supported': [
-            'none', 'private_key_jwt'], 'token_endpoint_auth_method': 'private_key_jwt'}
-        redirect = 'https://chatgpt.com/connector_platform_oauth_redirect'
+        """One known and one unlisted application on well-known hosts, in the user's list and the administrator's."""
         client = on.signed_in(on.user)
-        public_id = self._start_for(on, CHATGPT_ID, document, redirect)
-        on.view(client, public_id)
-        target = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id).get_json()['redirect_to']
-        code = parse_qs(urlsplit(target).query)['code'][0]
-        assert on.exchange(code, client_id=CHATGPT_ID, redirect_uri=redirect).status_code == 200
+        for client_id, name, redirect in (
+                (CLAUDE_CODE_ID, 'Claude Code', 'http://localhost/callback'),
+                (CHATGPT_ID, 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect')):
+            document = {'client_id': client_id, 'client_name': name, 'redirect_uris': [redirect],
+                        'token_endpoint_auth_methods_supported': ['none', 'private_key_jwt'],
+                        'token_endpoint_auth_method': 'private_key_jwt'}
+            public_id = self._start_for(on, client_id, document, redirect)
+            on.view(client, public_id)
+            target = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id).get_json()['redirect_to']
+            code = parse_qs(urlsplit(target).query)['code'][0]
+            assert on.exchange(code, client_id=client_id, redirect_uri=redirect).status_code == 200
 
-        own = client.get('/api/user/oauth/grants').get_json()[0]['application']
-        tenant = on.signed_in(on.admin).get('/api/tenant/oauth/grants').get_json()[0]['application']
+        own = sorted((item['application'] for item in client.get('/api/user/oauth/grants').get_json()),
+                     key=lambda application: application['host'])
+        tenant = sorted((item['application'] for item in on.signed_in(on.admin).get(
+            '/api/tenant/oauth/grants').get_json()), key=lambda application: application['host'])
 
-        expected = {'host': 'chatgpt.com', 'claimed_name': 'ChatGPT', 'known': True, 'known_name': 'ChatGPT (OpenAI)'}
+        expected = [
+            # client_id: where an operator reads the exact address before listing an application as known
+            {'host': 'chatgpt.com', 'claimed_name': 'ChatGPT', 'known': False, 'known_name': None,
+             'client_id': CHATGPT_ID},
+            {'host': 'claude.ai', 'claimed_name': 'Claude Code', 'known': True,
+             'known_name': 'Claude Code (Anthropic)', 'client_id': CLAUDE_CODE_ID},
+        ]
         assert own == expected and tenant == expected
 
 
@@ -2581,6 +2729,7 @@ class TestSuperAdminSwitch:
     def _ready(self, world):
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
 
     def test_it_is_for_the_super_admin_only(self, world):
         self._ready(world)
@@ -2633,6 +2782,7 @@ class TestSuperAdminSwitch:
     def test_it_cannot_be_switched_on_while_ai_or_mcp_is_off(self, world, ai, mcp, codes):
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, ai)
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, mcp)
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
         master = world.master()
 
         state = master.get(self.URL).get_json()
@@ -2644,6 +2794,39 @@ class TestSuperAdminSwitch:
         assert response.status_code == 409
         assert [blocker['code'] for blocker in response.get_json()['blockers']] == codes
         assert oauth_config.is_switched_on() is False
+
+    @pytest.mark.parametrize('setting', ['never set', 'false'])
+    def test_it_cannot_be_switched_on_while_external_api_access_is_off(self, world, setting):
+        """
+        Second review, F1. With the installation's "External AI API" switch off
+        no organisation can be chosen at consent and every connection is
+        refused, so OAuth cannot do anything. Off is the default.
+        """
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        if setting == 'false':
+            SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'false')
+        master = world.master()
+
+        state = master.get(self.URL).get_json()
+        assert state['can_switch_on'] is False and state['offered'] is False
+        assert state['blockers'] == [{
+            'code': 'external_api_off', 'message': 'External AI API access is switched off for this installation.'}]
+
+        response = master.put(self.URL, json={'enabled': True})
+        assert response.status_code == 409
+        assert [blocker['code'] for blocker in response.get_json()['blockers']] == ['external_api_off']
+        assert oauth_config.is_switched_on() is False
+
+    def test_external_api_access_switched_off_afterwards_is_shown_as_not_working(self, world):
+        world.enable()
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'false')
+        master = world.master()
+        state = master.get(self.URL).get_json()
+        assert state['switched_on'] is True and state['offered'] is False
+        assert [blocker['code'] for blocker in state['blockers']] == ['external_api_off']
+        # Switching off still works
+        assert master.put(self.URL, json={'enabled': False}).get_json()['switched_on'] is False
 
     @pytest.mark.parametrize('lost,word', [('MCP_RESOURCE_URL', 'resource'), ('OAUTH_ISSUER', 'issuer')])
     def test_it_cannot_be_switched_on_without_its_addresses(self, world, lost, word):
@@ -2734,3 +2917,423 @@ class TestIdsInPathsSurviveTheScannerFilter:
         client = on.signed_in(on.user)
         response = client.get('/api/oauth/requests/abcWP-def')
         assert response.status_code == 404 and response.get_data() == b''
+
+
+# ============================================================================
+# 14. FINDINGS OF THE SECOND SECURITY REVIEW
+# ============================================================================
+# Each test fails on the code as it was reviewed. F2 (the cap on waiting
+# requests, the IPv6 /48), F4 (a used code) and F5 (known apps) are with the
+# tests of the things they changed: TestAnonymousRequestsAreBounded,
+# TestRateLimits, TestAUsedCodeInAnotherClientsName, TestKnownApps, and
+# TestTheCapOnWaitingRequests in test_oauth_token_service.py.
+
+SYSTEM_EXTERNAL_API_ERROR = (
+    "External AI API access is switched off for this installation. A super admin can switch it on under "
+    "Super admin > Settings > AI Features: 'Enable External API Access'."
+)
+
+
+class TestTheInstallationsExternalApiSwitch:
+    """
+    F1. Access by tools outside the app has a switch for the whole
+    installation (super admin, "External AI API") above each organisation's
+    own. An API key cannot be created while it is off. OAuth ignored it.
+    """
+
+    def test_the_fixture_does_not_hide_the_switch(self, world):
+        """It is off unless switched on; `enable()` switches it on explicitly, and these tests switch it off."""
+        assert SystemConfig.DEFAULT_AI_EXTERNAL_API_ENABLED is False
+        assert SystemConfig.get_bool(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, default=False) is False
+        world.enable()
+        assert SystemConfig.get_bool(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, default=False) is True
+
+    @staticmethod
+    def _off():
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'false')
+
+    def test_an_api_key_cannot_be_created_while_it_is_off(self, on):
+        self._off()
+        assert on.signed_in(on.user).post('/api/user/ai/keys', json={'name': 'k'}).status_code == 403
+
+    def test_consent_lists_every_organisation_as_not_available(self, on):
+        on.join(on.user, on.other_tenant)
+        self._off()
+
+        body = on.view(on.signed_in(on.user), on.start()).get_json()
+
+        assert [(item['domain'], item['eligible'], item['reason']) for item in body['organisations']] == [
+            ('example.com', False, 'external_api_off'), ('other.org', False, 'external_api_off')]
+
+    def test_an_organisation_with_ai_off_is_told_that_first(self, on):
+        on.tenant.ai_features_enabled = False
+        db.session.commit()
+        self._off()
+        body = on.view(on.signed_in(on.user), on.start()).get_json()
+        assert body['organisations'][0]['reason'] == 'ai_disabled'
+
+    def test_consent_cannot_be_given_while_it_is_off(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        on.view(client, public_id)
+        self._off()
+
+        response = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id)
+
+        assert response.status_code == 403 and response.get_json()['code'] == 'external_api_off'
+        assert 'redirect_to' not in response.get_json()
+        stored = OAuthAuthorizationRequest.query.one()
+        assert stored.code_hash is None and stored.decision is None
+        # Refusing still tells the application
+        assert on.decide(client, public_id, decision='deny').status_code == 200
+
+    def test_switching_it_off_cuts_an_oauth_connection_at_once(self, on):
+        tokens = on.tokens()
+        access = tokens['access_token']
+        assert on.call(access, 'list_decisions').status_code == 200
+        self._off()
+
+        for response in (on.mcp(access), on.call(access, 'list_decisions'),
+                         on.call(access, 'create_decision', {
+                             'title': 'Written from outside', 'context': 'c', 'decision': 'd', 'consequences': 'e'})):
+            assert response.status_code == 403
+            assert response.get_json()['error']['message'] == SYSTEM_EXTERNAL_API_ERROR
+            # A switch, not a missing permission: the client must not ask the user to consent again
+            assert 'WWW-Authenticate' not in response.headers
+            assert 'Use PostgreSQL' not in response.get_data(as_text=True)
+        assert ArchitectureDecision.query.filter_by(title='Written from outside').count() == 0
+
+        # Switched on again, the connection works without a new consent
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
+        assert on.call(access, 'list_decisions').status_code == 200
+        assert OAuthGrant.query.one().revoked_at is None
+
+    def test_the_organisations_own_switch_keeps_its_own_message(self, on):
+        access = on.tokens()['access_token']
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+        assert on.mcp(access).get_json()['error']['message'] == EXTERNAL_ACCESS_ERROR
+
+    def test_an_existing_api_key_on_mcp_is_not_affected(self, on):
+        """
+        Deliberately unchanged: keys that work today keep working. Whether the
+        installation's switch should cut existing keys on MCP is recorded in
+        docs/TODO.md for the owner to decide. If that is decided, this test
+        is the one to change.
+        """
+        key = on.api_key(scopes=('read', 'search', 'write'))
+        self._off()
+        assert on.call(key, 'list_decisions').status_code == 200
+        with_oauth_off = on.master().put('/api/admin/settings/oauth', json={'enabled': False})
+        assert with_oauth_off.status_code == 200
+        assert on.call(key, 'list_decisions').status_code == 200
+
+
+class TestSlowApplicationHostsCannotHoldTheWorkers:
+    """
+    F3. Fetching an application's document can take the fetch's whole
+    deadline (5 seconds) on a worker thread. A failed fetch was repeated on
+    every look at the consent page, for every account, with nothing bounding
+    how many ran at once.
+    """
+
+    @pytest.fixture
+    def clock(self, on):
+        moment = {'now': 1000.0}
+        on.monkeypatch.setattr(client_metadata, '_monotonic', lambda: moment['now'])
+        return moment
+
+    def test_a_failed_fetch_is_remembered_for_a_minute_whoever_asks(self, on, clock):
+        """The reviewer's proof: 10 fetches per account per minute. Now one per application per minute."""
+        on.fetch_error = FetchError('timeout', transient=True)
+
+        for user in (on.user, on.colleague, on.admin):
+            client = on.signed_in(user)
+            public_id = on.start()
+            answers = [on.view(client, public_id) for _ in range(5)]
+            assert [answer.status_code for answer in answers] == [503] * 5
+            assert {answer.get_json()['code'] for answer in answers} == {'client_unavailable'}
+
+        assert on.fetches == [CLIENT_ID]
+
+    def test_a_document_that_is_refused_is_remembered_too(self, on, clock):
+        on.document = _document(client_secret='x')
+        client = on.signed_in(on.user)
+        statuses = [on.view(client, on.start()).status_code for _ in range(4)]
+        assert statuses == [400] * 4
+        assert on.fetches == [CLIENT_ID]
+
+    def test_it_is_fetched_again_after_the_minute_and_then_works(self, on, clock):
+        on.fetch_error = FetchError('timeout', transient=True)
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        assert on.view(client, public_id).status_code == 503
+
+        # The application's host is back at once; the answer is the remembered one until the minute is over
+        on.fetch_error = None
+        clock['now'] += 59
+        assert on.view(client, public_id).status_code == 503
+        assert on.fetches == [CLIENT_ID]
+
+        clock['now'] += 2
+        assert on.view(client, public_id).status_code == 200
+        assert on.fetches == [CLIENT_ID, CLIENT_ID]
+
+    def test_asking_again_does_not_keep_an_application_locked_out(self, on, clock):
+        """The minute runs from the failure. Nobody can extend it by asking, however often."""
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'client_metadata_fetch', '100 per minute')
+        on.fetch_error = FetchError('timeout', transient=True)
+        client = on.signed_in(on.colleague)
+        public_id = on.start()
+        on.view(client, public_id)
+        on.fetch_error = None
+
+        for _ in range(11):                      # every 5 seconds, for 55 seconds
+            clock['now'] += 5
+            assert on.view(client, public_id).status_code == 503
+        clock['now'] += 6
+
+        assert on.view(on.signed_in(on.user), on.start()).status_code == 200
+        assert len(on.fetches) == 2
+
+    def test_another_application_is_not_affected(self, on, clock):
+        on.fetch_error = FetchError('timeout', transient=True)
+        client = on.signed_in(on.user)
+        assert on.view(client, on.start()).status_code == 503
+        on.fetch_error = None
+        other = 'https://client.example.org/other.json'
+        on.document = _document(client_id=other)
+        assert on.view(client, on.start(client_id=other)).status_code == 200
+
+    def test_the_memory_is_bounded(self, on, clock):
+        on.monkeypatch.setattr(client_metadata, 'FAILED_FETCH_MEMORY_SIZE', 3)
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'client_metadata_fetch', '100 per minute')
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'consent_view', '100 per minute')
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'authorize_prefix', '100 per 10 minutes')
+        on.fetch_error = FetchError('The server answered 404')
+        client = on.signed_in(on.user)
+        ids = [f'https://client.example.org/app-{index}.json' for index in range(8)]
+
+        for client_id in ids:
+            on.view(client, on.start(client_id=client_id))
+
+        assert list(client_metadata._failed_fetches) == ids[-3:]
+        assert client_metadata.FAILED_FETCH_MEMORY == timedelta(seconds=60)
+
+    def test_no_more_than_two_fetches_run_at_one_time(self, on, clock):
+        """With both places taken a further fetch is refused at once: it does not wait, and it is not remembered."""
+        assert client_metadata.MAX_FETCHES_IN_FLIGHT == 2
+        places = client_metadata._fetch_places
+        assert places.acquire(blocking=False) and places.acquire(blocking=False)
+        try:
+            client = on.signed_in(on.user)
+            public_id = on.start()
+            busy = on.view(client, public_id)
+            assert busy.status_code == 503 and busy.get_json()['code'] == 'client_unavailable'
+            assert on.fetches == []
+        finally:
+            places.release()
+            places.release()
+
+        # A place is free again: the same request is fetched and answered, without waiting a minute
+        assert on.view(client, public_id).status_code == 200
+        assert on.fetches == [CLIENT_ID]
+
+    def test_a_fetch_gives_its_place_back_when_it_fails(self, on, clock):
+        on.fetch_error = FetchError('timeout', transient=True)
+        client = on.signed_in(on.user)
+        for index in range(4):
+            on.view(client, on.start(client_id=f'https://client.example.org/app-{index}.json'))
+        places = client_metadata._fetch_places
+        assert places.acquire(blocking=False) and places.acquire(blocking=False)
+        places.release()
+        places.release()
+
+    def test_a_last_good_copy_is_still_used_while_the_host_is_down_or_the_places_are_taken(self, on, clock):
+        client = on.signed_in(on.user)
+        assert on.view(client, on.start()).status_code == 200
+        stored = OAuthClient.query.one()
+        stored.metadata_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)
+        db.session.commit()
+
+        places = client_metadata._fetch_places
+        assert places.acquire(blocking=False) and places.acquire(blocking=False)
+        try:
+            assert on.view(client, on.start()).status_code == 200
+        finally:
+            places.release()
+            places.release()
+        assert on.fetches == [CLIENT_ID]
+
+        on.fetch_error = FetchError('timeout', transient=True)
+        assert on.view(client, on.start()).status_code == 200
+        assert on.view(on.signed_in(on.colleague), on.start()).status_code == 200
+        # One attempt, then the copy is used for five minutes without asking again
+        assert on.fetches == [CLIENT_ID, CLIENT_ID]
+
+
+class TestABatchHasACeiling:
+    """
+    F6. One POST could carry any number of tool calls, counted once against
+    the credential's limit and run on one worker thread until done. A batch
+    carries 50 messages at most, for API keys and OAuth tokens alike.
+    Batches exist only in protocol revision 2025-03-26.
+    """
+
+    HEADERS = {'MCP-Protocol-Version': '2025-03-26'}
+
+    @staticmethod
+    def _writes(count):
+        return [{'jsonrpc': '2.0', 'id': index, 'method': 'tools/call', 'params': {
+            'name': 'create_decision',
+            'arguments': {'title': f'Batch {index}', 'context': 'c', 'decision': 'd', 'consequences': 'e'},
+        }} for index in range(count)]
+
+    def _credentials(self, on):
+        return {'oauth': on.tokens()['access_token'], 'api key': on.api_key(scopes=('read', 'search', 'write'))}
+
+    def test_the_ceiling(self, on):
+        assert on.app_module.MCP_MAX_BATCH_MESSAGES == 50
+
+    @pytest.mark.parametrize('kind', ['oauth', 'api key'])
+    @pytest.mark.parametrize('headers', [HEADERS, {}])
+    def test_a_batch_above_it_is_refused_whole_and_nothing_runs(self, on, kind, headers):
+        bearer = self._credentials(on)[kind]
+        before = ArchitectureDecision.query.count()
+
+        response = on.mcp(bearer, body=self._writes(51), headers=headers)
+
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body['jsonrpc'] == '2.0' and body['id'] is None
+        assert body['error']['code'] == -32600
+        assert '50' in body['error']['message'] and '51' in body['error']['message']
+        assert ArchitectureDecision.query.count() == before
+
+    @pytest.mark.parametrize('kind', ['oauth', 'api key'])
+    def test_a_batch_at_it_is_served(self, on, kind):
+        bearer = self._credentials(on)[kind]
+        before = ArchitectureDecision.query.count()
+
+        response = on.mcp(bearer, body=self._writes(50), headers=self.HEADERS)
+
+        assert response.status_code == 200
+        assert len(response.get_json()) == 50
+        assert ArchitectureDecision.query.count() == before + 50
+
+    def test_the_reviewers_three_thousand_calls(self, on):
+        bearer = on.tokens()['access_token']
+        batch = [{'jsonrpc': '2.0', 'id': n, 'method': 'tools/call',
+                  'params': {'name': 'search_decisions', 'arguments': {'query': 'postgres'}}} for n in range(3000)]
+        response = on.mcp(bearer, body=batch)
+        assert response.status_code == 400
+        assert 'result' not in response.get_data(as_text=True)
+
+    def test_it_holds_with_oauth_switched_off(self, world):
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        key = world.api_key()
+        pings = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(51)]
+        assert world.mcp(key, body=pings, headers=self.HEADERS).status_code == 400
+        assert world.mcp(key, body=pings[:50], headers=self.HEADERS).status_code == 200
+
+    def test_a_refused_batch_still_counts_against_the_credential(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'mcp_credential', '2 per minute')
+        key = on.api_key()
+        pings = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(51)]
+        assert [on.mcp(key, body=pings, headers=self.HEADERS).status_code for _ in range(3)] == [400, 400, 429]
+
+    def test_a_later_revision_is_told_batches_are_not_supported_whatever_the_size(self, on):
+        key = on.api_key()
+        pings = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(2)]
+        response = on.mcp(key, body=pings, headers={'MCP-Protocol-Version': '2026-07-28'})
+        assert response.status_code == 400 and 'batches are not supported' in response.get_json()['error']['message']
+
+
+class TestNoSecretInLogsOrAnalytics:
+    """
+    The threat table's row "Tokens in addresses or logs". The consent decision
+    answers with the authorization code, and is both logged about and tracked
+    as an analytics event; the token endpoint handles the code, the verifier
+    and the tokens. None of them may reach a log line or an event.
+    """
+
+    @pytest.fixture
+    def recorded(self, on, caplog):
+        import logging
+        from ee.backend.analytics import analytics
+
+        events = []
+
+        class Recorder:
+            def capture(self, *args, **kwargs):
+                events.append(json.dumps({'args': args, 'kwargs': kwargs}, default=str, sort_keys=True))
+
+        config = {'enabled': True, 'posthog_client': Recorder(), 'person_profiling': False,
+                  'exception_capture': True, 'event_mappings': dict(analytics.DEFAULT_EVENT_MAPPINGS)}
+        on.monkeypatch.setattr(analytics, '_get_analytics_config', lambda: config)
+        caplog.set_level(logging.DEBUG)
+        return {'events': events, 'log': lambda: '\n'.join(
+            [record.getMessage() for record in caplog.records] + [str(record.args) for record in caplog.records])}
+
+    @staticmethod
+    def _assert_absent(secrets_, recorded):
+        logged = recorded['log']()
+        tracked = '\n'.join(recorded['events'])
+        for name, secret in secrets_.items():
+            for text, where in ((logged, 'a log line'), (tracked, 'an analytics event')):
+                assert secret not in text, f'the {name} appears in {where}'
+                if secret.startswith('dro_'):
+                    # ... nor the value without its prefix. Only for codes and tokens: a short
+                    # value cut this way ("23" of "state-123") turns up in any random id.
+                    assert secret[len('dro_xx_'):] not in text, f'the {name} appears in {where}'
+
+    def test_the_decision_endpoint_gives_the_code_to_the_page_only(self, on, recorded):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        on.view(client, public_id)
+
+        response = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id)
+
+        target = response.get_json()['redirect_to']
+        code = parse_qs(urlsplit(target).query)['code'][0]
+        assert code.startswith('dro_ac_')
+        # The capture works: the decision was tracked, and something was logged
+        assert any('oauth_consent_decided' in event for event in recorded['events'])
+        assert recorded['log']()
+        self._assert_absent({'code': code, 'state': 'state-123'}, recorded)
+        assert target not in recorded['log']() and target not in '\n'.join(recorded['events'])
+        # ... and the code is good, so it is the real one that was looked for
+        assert on.exchange(code).status_code == 200
+
+    def test_a_refusal_and_a_refused_approval_log_nothing_secret_either(self, on, recorded):
+        client = on.signed_in(on.user)
+        first, second = on.start(), on.start()
+        on.view(client, first)
+        on.view(client, second)
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+        assert on.decide(client, first, decision='approve', tenant_id=on.tenant.id).status_code == 403
+        assert on.decide(client, second, decision='deny').status_code == 200
+        self._assert_absent({'verifier': VERIFIER, 'challenge': CHALLENGE}, recorded)
+
+    def test_the_whole_flow(self, on, recorded):
+        code = on.code()
+        on.exchange(code, code_verifier='w' * 64)                 # a refused attempt
+        tokens = on.exchange(code).get_json()
+        on.exchange(code, redirect_uri='https://wrong.example/cb', code_verifier='x' * 43)   # a replay by an observer
+        refreshed = on.refresh(tokens['refresh_token']).get_json()
+        on.call(refreshed['access_token'], 'list_decisions')
+        on.mcp('dro_at_' + 'g' * 43)                              # a guess
+        on.anonymous().post('/oauth/revoke', data={'token': refreshed['refresh_token'], 'client_id': CLIENT_ID})
+        on.refresh(tokens['refresh_token'])                       # reuse: refused, logged
+        on.exchange(code)                                         # the code again: grant ended, logged
+
+        tracked = '\n'.join(recorded['events'])
+        assert 'oauth_token_requested' in tracked and 'oauth_consent_decided' in tracked
+        assert 'Token request refused' in recorded['log']()
+        self._assert_absent({
+            'code': code, 'verifier': VERIFIER, 'access token': tokens['access_token'],
+            'refresh token': tokens['refresh_token'], 'new access token': refreshed['access_token'],
+            'new refresh token': refreshed['refresh_token'], 'guessed token': 'dro_at_' + 'g' * 43,
+        }, recorded)
