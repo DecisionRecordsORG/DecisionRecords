@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-oauth-consent-ui"
+title = "Consent page and connected-apps lists for OAuth sign-in to the MCP server"
+summary = "Web app side of the Enterprise OAuth server, which stays switched off by default. Public code: the route /oauth/consent (the component is Enterprise, with a Community stub), a hook in the app shell that leads a signed-in person back to a pending consent request with a full page load (Enterprise only; it asks nothing in the Community Edition), no navigation bar or cookie notice on that page, the connected-apps card on the profile page and in organisation settings (a stub that shows nothing in the Community Edition), dev-server proxy entries for the OAuth endpoints, a test-only endpoint that prepares OAuth for end-to-end tests, and the end-to-end tests. Enterprise code in the private submodule: the consent and connected-apps components, and a rule that OAuth cannot be switched on unless the resource and issuer addresses are configured and https. No Community behaviour changes beyond the stubs."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

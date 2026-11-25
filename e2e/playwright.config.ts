@@ -43,7 +43,9 @@ export default defineConfig({
   // IMPORTANT: Uses port 5002 to avoid conflicts with development backend on 5001
   webServer: [
     {
-      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5002, debug=False)"',
+      // MCP_RESOURCE_URL and OAUTH_ISSUER: the addresses the Enterprise OAuth server needs
+      // before it can be switched on (tests/oauth-consent.spec.ts). They change nothing else.
+      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing MCP_RESOURCE_URL=http://localhost:4200/api/mcp OAUTH_ISSUER=http://localhost:4200 python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5002, debug=False)"',
       url: 'http://localhost:5002/api/version',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,

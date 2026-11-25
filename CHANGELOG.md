@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Enterprise, with OAuth sign-in for the MCP endpoint (still switched off by default): the page on which a person allows or refuses an app that asked to connect (`/oauth/consent`), being led back to it after signing in by any method, and lists of connected apps with Disconnect, on the profile page and for administrators under Organisation settings > AI & API. In the Community Edition these are stubs and nothing is shown
+- Enterprise: OAuth cannot be switched on unless the public addresses of the MCP endpoint and of the app are configured and https, so a request's Host header never decides them
 - Enterprise, switched off by default: the server side of sign-in by OAuth for the MCP endpoint, as the Model Context Protocol specification describes it (authorization code with PKCE, a consent step tied to the signed-in user and one organisation, access and refresh tokens, protected resource and authorization server metadata, Client ID Metadata Documents). A super admin setting, `oauth_server_enabled`, turns it on; until then every OAuth address answers 404 and the MCP endpoint behaves exactly as before. The consent page in the web app is not part of this change
 - `/.well-known/openid-configuration` (with or without a path after it) answers 404 as JSON instead of the web app's HTML page. This server is not an OpenID Provider
 - The MCP endpoint limits each credential to 300 HTTP requests per minute and answers 429 with `Retry-After` beyond that (Enterprise). A batch counts as one request. The app-wide limit of 200 per minute is unchanged, so this does not change what an API key could do before
