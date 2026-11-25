@@ -480,7 +480,7 @@ class TestMetadata:
         }
         assert response.headers['Access-Control-Allow-Origin'] == '*'
         assert 'Access-Control-Allow-Credentials' not in response.headers
-        assert response.headers['Cache-Control'] == 'public, max-age=300'
+        assert response.headers['Cache-Control'] == 'private, max-age=300'
 
     def test_authorization_server_metadata(self, on):
         response = on.anonymous().get('/.well-known/oauth-authorization-server')
@@ -618,7 +618,7 @@ class TestAuthorize:
         ({'resource': 'https://evil.example.net/api/mcp'}, 'invalid_target'),
         ({'resource': 'https://decisions.example.org/api/ai'}, 'invalid_target'),
         ({'resource': 'https://decisions.example.org'}, 'invalid_target'),
-        ({'state': 's' * 2049}, 'invalid_request'),
+        ({'state': 's' * 1025}, 'invalid_request'),
         # A parameter given twice
         ({'redirect_uri': [REDIRECT, 'https://evil.example.net/callback']}, 'invalid_request'),
         ({'client_id': [CLIENT_ID, 'https://evil.example.net/client.json']}, 'invalid_request'),
@@ -1448,8 +1448,12 @@ class TestMcpWithOAuthToken:
             on.membership(on.user).ai_opt_out = True
         def opt_in():
             on.membership(on.user).ai_opt_out = False
+        def external_off():
+            on.tenant.ai_external_access_enabled = False
+        def external_on():
+            on.tenant.ai_external_access_enabled = True
 
-        for change, undo in ((tenant_ai_off, tenant_ai_on), (opt_out, opt_in)):
+        for change, undo in ((tenant_ai_off, tenant_ai_on), (external_off, external_on), (opt_out, opt_in)):
             change()
             db.session.commit()
             by_token, by_key = on.mcp(access), on.mcp(key)
@@ -1457,7 +1461,7 @@ class TestMcpWithOAuthToken:
             assert by_token.get_json() == by_key.get_json()
             undo()
             db.session.commit()
-        assert states == [(403, 403), (403, 403)]
+        assert states == [(403, 403), (403, 403), (403, 403)]
 
     def test_gate_membership(self, on):
         access = on.tokens()['access_token']
@@ -1815,14 +1819,31 @@ class TestRateLimits:
         assert 'dro_at_secret' not in rate_limits.credential_key('dro_at_secret')
         assert rate_limits.credential_key('a') != rate_limits.credential_key('b')
 
-    def test_authorize_is_limited_by_address(self, on):
-        on.monkeypatch.setitem(rate_limits.LIMITS, 'authorize', '2 per minute')
-        here = {'CF-Connecting-IP': '198.51.100.7'}
+    def test_authorize_is_limited_per_network(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'authorize_prefix', '2 per 10 minutes')
         client = on.anonymous()
         url = '/oauth/authorize?' + urlencode(on.authorize_params())
-        assert [client.get(url, headers=here).status_code for _ in range(3)] == [302, 302, 429]
-        assert client.get(url, headers={'CF-Connecting-IP': '198.51.100.8'}).status_code == 302
-        assert OAuthAuthorizationRequest.query.count() == 3
+
+        def start(address):
+            return client.get(url, headers={'CF-Connecting-IP': address}).status_code
+
+        # One IPv4 /24 shares an allowance; the next /24 has its own
+        assert [start('198.51.100.7'), start('198.51.100.200'), start('198.51.100.9')] == [302, 302, 429]
+        assert start('198.51.101.7') == 302
+        # One IPv6 /64 shares an allowance however many addresses in it are used
+        assert [start('2001:db8:1:2::1'), start('2001:db8:1:2:ffff::9'), start('2001:db8:1:2::3')] == [302, 302, 429]
+        assert start('2001:db8:1:3::1') == 302
+        assert OAuthAuthorizationRequest.query.count() == 6
+
+    @pytest.mark.parametrize('address,prefix', [
+        ('198.51.100.7', '198.51.100.0/24'),
+        ('2001:db8:1:2:3:4:5:6', '2001:db8:1:2::/64'),
+        ('::ffff:198.51.100.7', '198.51.100.0/24'),
+        ('not-an-address', 'not-an-address'),
+    ])
+    def test_address_prefix(self, on, address, prefix):
+        with on.app.test_request_context('/', headers={'CF-Connecting-IP': address}):
+            assert rate_limits.address_prefix() == prefix
 
     def test_fetching_application_documents_is_limited_per_user(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'client_metadata_fetch', '2 per minute')
@@ -1846,14 +1867,78 @@ class TestRateLimits:
         assert on.decide(client, second, decision='deny').status_code == 429
         assert OAuthAuthorizationRequest.query.filter_by(public_id=second).one().decision is None
 
-    def test_the_token_endpoint_is_limited_per_client(self, on):
+    def test_naming_a_client_does_not_use_up_its_allowance(self, on):
+        """Anyone can send a client_id. Requests without a real code or token of that client count against the
+        caller's address only, so they cannot lock the client out for its users."""
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'token', '3 per minute')
+        code = on.code()
+        attacker = on.anonymous()
+        junk = [
+            {'client_id': CLIENT_ID, 'grant_type': 'x'},
+            {'client_id': CLIENT_ID, 'grant_type': 'refresh_token', 'refresh_token': 'dro_rt_guess'},
+            {'client_id': CLIENT_ID, 'grant_type': 'authorization_code', 'code': 'dro_ac_guess',
+             'redirect_uri': REDIRECT, 'code_verifier': VERIFIER},
+        ]
+        for _ in range(10):
+            for form in junk:
+                assert attacker.post('/oauth/token', data=form, headers={'CF-Connecting-IP': '203.0.113.9'}
+                                     ).status_code == 400
+
+        real = on.exchange(code)
+        assert real.status_code == 200, real.get_json()
+
+    def test_another_clients_name_on_a_real_credential_does_not_count_against_that_client(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'token', '1 per minute')
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'token_connection', '100 per minute')
+        first = on.tokens()                       # counts once against the real client
+        other = 'https://other.example.org/client.json'
+        for _ in range(5):
+            assert on.refresh(first['refresh_token'], client_id=other).status_code == 400
+        # The other client's allowance is untouched by requests that carried our client's token
+        assert rate_limits.hit('token', other) is None
+
+    def test_requests_with_a_real_credential_count_against_the_client(self, on):
         on.monkeypatch.setitem(rate_limits.LIMITS, 'token', '2 per minute')
-        statuses = [on.token_request(grant_type='refresh_token', refresh_token='dro_rt_x',
-                                     client_id=CLIENT_ID).status_code for _ in range(3)]
-        assert statuses == [400, 400, 429]
-        other = on.token_request(grant_type='refresh_token', refresh_token='dro_rt_x',
-                                 client_id='https://other.example.org/client.json')
-        assert other.status_code == 400
+        first = on.tokens()                                       # 1
+        second = on.refresh(first['refresh_token'])               # 2
+        assert second.status_code == 200
+        third = on.refresh(second.get_json()['refresh_token'])    # over
+        assert third.status_code == 429
+        assert third.get_json()['error'] == 'slow_down' and int(third.headers['Retry-After']) >= 1
+        # Refused before it was looked at: the token is still good afterwards
+        rate_limits.reset()
+        assert on.refresh(second.get_json()['refresh_token']).status_code == 200
+
+    def test_one_connection_cannot_use_up_the_clients_allowance(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'token_connection', '2 per minute')
+        mine = on.tokens()
+        theirs = on.tokens(user=on.colleague)
+        mine = on.refresh(mine['refresh_token']).get_json()
+        mine = on.refresh(mine['refresh_token']).get_json()
+        assert on.refresh(mine['refresh_token']).status_code == 429
+        # The colleague's connection, same client, is not held back
+        assert on.refresh(theirs['refresh_token']).status_code == 200
+
+    def test_the_token_and_revoke_endpoints_are_limited_per_address(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'token_address', '2 per minute')
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'revoke_address', '2 per minute')
+        here = {'CF-Connecting-IP': '203.0.113.9'}
+        there = {'CF-Connecting-IP': '203.0.113.10'}
+        client = on.anonymous()
+        form = {'grant_type': 'refresh_token', 'refresh_token': 'dro_rt_x', 'client_id': CLIENT_ID}
+        assert [client.post('/oauth/token', data=form, headers=here).status_code for _ in range(3)] == [400, 400, 429]
+        assert client.post('/oauth/token', data=form, headers=there).status_code == 400
+        form = {'token': 'dro_rt_x', 'client_id': CLIENT_ID}
+        assert [client.post('/oauth/revoke', data=form, headers=here).status_code for _ in range(3)] == [200, 200, 429]
+        assert client.post('/oauth/revoke', data=form, headers=there).status_code == 200
+
+    def test_a_batch_counts_once_against_the_credential(self, on):
+        on.monkeypatch.setitem(rate_limits.LIMITS, 'mcp_credential', '3 per minute')
+        key = on.api_key()
+        batch = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(10)]
+        headers = {'MCP-Protocol-Version': '2025-03-26'}
+        statuses = [on.mcp(key, body=batch, headers=headers).status_code for _ in range(4)]
+        assert statuses == [200, 200, 200, 429]
 
     def test_a_broken_counter_store_lets_requests_through(self, on):
         class Broken:
@@ -1861,3 +1946,357 @@ class TestRateLimits:
                 raise RuntimeError('storage down')
         on.monkeypatch.setattr(rate_limits, '_strategy', lambda: Broken())
         assert on.mcp(on.api_key()).status_code == 200
+
+
+# ============================================================================
+# 10. FINDINGS OF THE SECURITY REVIEW
+# ============================================================================
+# Each test fails on the code as it was reviewed.
+
+EXTERNAL_ACCESS_ERROR = (
+    "External AI access is not enabled for this organization. An organization admin can switch it on "
+    "in the organization's settings in Decision Records, under AI Features."
+)
+
+
+class TestExternalAccessSwitch:
+    """The organisation's "external AI access" switch gates OAuth as it gates API keys."""
+
+    def test_the_fixture_does_not_hide_the_switch(self, world):
+        """A new organisation has the switch off; the tests' organisations have it switched on explicitly."""
+        fresh = Tenant(domain='fresh.example', name='Fresh', status='active', maturity_state=MaturityState.BOOTSTRAP)
+        db.session.add(fresh)
+        db.session.commit()
+        assert not fresh.ai_external_access_enabled
+        assert world.tenant.ai_external_access_enabled is True
+
+    def test_an_api_key_cannot_be_created_without_it(self, on):
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+        response = on.signed_in(on.user).post('/api/user/ai/keys', json={'name': 'k'})
+        assert response.status_code == 403
+
+    def test_consent_lists_the_organisation_as_not_available(self, on):
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+        body = on.view(on.signed_in(on.user), on.start()).get_json()
+        assert body['organisations'] == [{
+            'id': on.tenant.id, 'name': 'Example', 'domain': 'example.com', 'eligible': False,
+            'reason': 'external_access_disabled', 'is_default': True,
+        }]
+
+    def test_consent_cannot_be_given_for_it(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        on.view(client, public_id)
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+
+        response = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id)
+
+        assert response.status_code == 403 and response.get_json()['code'] == 'external_access_disabled'
+        assert 'redirect_to' not in response.get_json()
+        assert OAuthAuthorizationRequest.query.one().code_hash is None
+
+    def test_switching_it_off_cuts_an_oauth_connection_at_once(self, on):
+        access = on.tokens()['access_token']
+        assert on.call(access, 'list_decisions').status_code == 200
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+
+        for response in (on.mcp(access), on.call(access, 'list_decisions'),
+                         on.call(access, 'create_decision', {
+                             'title': 'Written from outside', 'context': 'c', 'decision': 'd', 'consequences': 'e'})):
+            assert response.status_code == 403
+            assert response.get_json()['error']['message'] == EXTERNAL_ACCESS_ERROR
+            # A switch, not a missing permission: the client must not ask the user to consent again
+            assert 'WWW-Authenticate' not in response.headers
+            assert 'Use PostgreSQL' not in response.get_data(as_text=True)
+        assert ArchitectureDecision.query.filter_by(title='Written from outside').count() == 0
+
+        # Switched on again, the connection works without a new consent
+        on.tenant.ai_external_access_enabled = True
+        db.session.commit()
+        assert on.mcp(access).status_code == 200
+        assert OAuthGrant.query.one().revoked_at is None
+
+    def test_switching_it_off_cuts_an_api_key_at_once(self, on):
+        key = on.api_key(scopes=('read', 'search', 'write'))
+        assert on.call(key, 'list_decisions').status_code == 200
+        on.tenant.ai_external_access_enabled = False
+        db.session.commit()
+
+        response = on.call(key, 'list_decisions')
+
+        assert response.status_code == 403
+        assert response.get_json()['error']['message'] == EXTERNAL_ACCESS_ERROR
+        on.tenant.ai_external_access_enabled = True
+        db.session.commit()
+        assert on.call(key, 'list_decisions').status_code == 200
+
+    def test_it_holds_with_oauth_switched_off_too(self, world):
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        key = world.api_key()
+        world.tenant.ai_external_access_enabled = False
+        db.session.commit()
+        assert world.mcp(key).status_code == 403
+
+
+class TestGraceWindowDoesNotHideAThief:
+    """A copy of a refresh token replayed inside the 30 seconds cannot take the connection over unnoticed."""
+
+    def test_the_real_client_using_what_it_was_given_ends_the_connection_for_both(self, on):
+        first = on.tokens()
+        real = on.refresh(first['refresh_token']).get_json()        # the real client rotates and receives a pair
+        thief = on.refresh(first['refresh_token'])                  # a copy replayed inside the window
+        assert thief.status_code == 200                             # indistinguishable from a lost response, so far
+        thief = thief.get_json()
+        assert OAuthGrant.query.one().revoked_at is None
+
+        # The real client did receive its pair, and uses it
+        response = on.mcp(real['access_token'])
+
+        assert response.status_code == 401
+        grant = OAuthGrant.query.one()
+        assert grant.revoked_at is not None and grant.revoke_reason == 'refresh_reuse'
+        assert AuditLog.query.filter_by(action_type=service.AUDIT_REFRESH_REUSE).count() == 1
+        # ... which ends the thief's access as well
+        assert on.mcp(thief['access_token']).status_code == 401
+        assert on.refresh(thief['refresh_token']).status_code == 400
+
+    def test_the_withdrawn_refresh_token_ends_it_too(self, on):
+        first = on.tokens()
+        real = on.refresh(first['refresh_token']).get_json()
+        thief = on.refresh(first['refresh_token']).get_json()
+
+        assert on.refresh(real['refresh_token']).status_code == 400
+
+        assert OAuthGrant.query.one().revoke_reason == 'refresh_reuse'
+        assert AuditLog.query.filter_by(action_type=service.AUDIT_REFRESH_REUSE).count() == 1
+        assert on.mcp(thief['access_token']).status_code == 401
+
+    def test_a_third_presentation_of_the_original_ends_it(self, on):
+        first = on.tokens()
+        on.refresh(first['refresh_token'])
+        second = on.refresh(first['refresh_token'])
+        assert second.status_code == 200
+
+        third = on.refresh(first['refresh_token'])
+
+        assert third.status_code == 400
+        assert OAuthGrant.query.one().revoke_reason == 'refresh_reuse'
+        assert on.mcp(second.get_json()['access_token']).status_code == 401
+
+    def test_a_response_that_really_was_lost_costs_nothing(self, on):
+        first = on.tokens()
+        on.refresh(first['refresh_token'])                          # this response never arrived
+        retried = on.refresh(first['refresh_token']).get_json()     # the client asks again
+
+        assert on.mcp(retried['access_token']).status_code == 200
+        assert on.refresh(retried['refresh_token']).status_code == 200
+        assert OAuthGrant.query.one().revoked_at is None
+        assert AuditLog.query.filter_by(action_type=service.AUDIT_REFRESH_REUSE).count() == 0
+        # The withdrawn pair is still there to be recognised
+        assert OAuthToken.query.filter(OAuthToken.withdrawn_at.isnot(None)).count() == 2
+
+
+class TestSessionHeadersStayOffSessionlessEndpoints:
+
+    def test_no_csrf_token_on_metadata_token_revoke_or_mcp(self, on):
+        browser = on.signed_in(on.user)
+        assert browser.get('/api/user/me').headers.get('X-CSRF-Token') == CSRF     # where it belongs
+        responses = [
+            browser.get('/.well-known/oauth-authorization-server'),
+            browser.get('/.well-known/oauth-protected-resource'),
+            browser.get('/.well-known/openid-configuration'),
+            browser.post('/oauth/token', data={'grant_type': 'x', 'client_id': CLIENT_ID}),
+            browser.post('/oauth/revoke', data={'token': 'x', 'client_id': CLIENT_ID}),
+            browser.post('/api/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'}),
+        ]
+        for response in responses:
+            assert 'X-CSRF-Token' not in response.headers
+
+    def test_metadata_is_not_marked_for_shared_caches(self, on):
+        for path in ('/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource'):
+            cache = on.signed_in(on.user).get(path).headers['Cache-Control']
+            assert 'public' not in cache and 'private' in cache
+
+
+class TestApiKeyBatchesAreNotNewlyLimited:
+
+    def test_a_large_batch_with_an_api_key_is_one_request(self, world):
+        """Switch off, API key: a batch of 301 pings was answered with 200 before the per-credential limit existed."""
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        key = world.api_key()
+        batch = [{'jsonrpc': '2.0', 'id': index, 'method': 'ping'} for index in range(301)]
+
+        response = world.mcp(key, body=batch, headers={'MCP-Protocol-Version': '2025-03-26'})
+
+        assert response.status_code == 200
+        assert len(response.get_json()) == 301
+
+
+class TestAnonymousRequestsAreBounded:
+    """What visitors who are not signed in can make the server store."""
+
+    def test_state_is_limited_to_what_clients_need(self, on):
+        assert service.MAX_STATE_LENGTH == 1024
+        assert on.authorize(state='s' * 1024).status_code == 302
+        assert on.authorize(state='s' * 1025).status_code == 400
+
+    def test_one_network_cannot_pile_up_requests_by_changing_its_address(self, on):
+        client = on.anonymous()
+        url = '/oauth/authorize?' + urlencode(on.authorize_params(state='s' * 1024))
+        statuses = [client.get(url, headers={'CF-Connecting-IP': f'2001:db8::{index:x}'}).status_code
+                    for index in range(90)]
+        assert statuses.count(302) == 30 and statuses.count(429) == 60
+        assert OAuthAuthorizationRequest.query.count() == 30
+
+    def test_requests_waiting_for_an_answer_are_capped_over_the_whole_installation(self, on):
+        on.monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 3)
+        client = on.anonymous()
+        url = '/oauth/authorize?' + urlencode(on.authorize_params())
+
+        statuses = [client.get(url, headers={'CF-Connecting-IP': f'198.51.{index}.7'}).status_code
+                    for index in range(5)]
+
+        assert statuses == [302, 302, 302, 503, 503]
+        assert OAuthAuthorizationRequest.query.count() == 3
+        # An answered request no longer counts
+        browser = on.signed_in(on.user)
+        public_id = OAuthAuthorizationRequest.query.first().public_id
+        on.view(browser, public_id)
+        on.decide(browser, public_id, decision='deny')
+        assert client.get(url, headers={'CF-Connecting-IP': '198.51.9.7'}).status_code == 302
+
+    def test_unanswered_requests_go_minutes_after_they_expire(self, on):
+        import retention
+        on.start()
+        kept = on.start()
+        expired = OAuthAuthorizationRequest.query.order_by(OAuthAuthorizationRequest.id).first()
+        expired.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=6)
+        db.session.commit()
+
+        assert retention.purge_undecided_oauth_requests() == 1
+
+        assert [row.public_id for row in OAuthAuthorizationRequest.query.all()] == [kept]
+
+    def test_the_authorization_endpoint_clears_them_in_passing(self, on):
+        on.start()
+        stale = OAuthAuthorizationRequest.query.one()
+        stale.expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=6)
+        db.session.commit()
+        on.monkeypatch.setattr(endpoints, '_last_stale_request_purge', 0.0)
+
+        fresh = on.start()
+
+        assert [row.public_id for row in OAuthAuthorizationRequest.query.all()] == [fresh]
+
+    def test_answered_requests_and_recent_ones_are_not_cleared(self, on):
+        import retention
+        code = on.code()                                   # answered: its code must stay recognisable
+        waiting = on.start()                               # expired a minute ago: may still be on someone's screen
+        rows = {row.public_id: row for row in OAuthAuthorizationRequest.query.all()}
+        long_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+        for row in rows.values():
+            row.expires_at = long_ago if row.public_id != waiting else (
+                datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1))
+        db.session.commit()
+
+        assert retention.purge_undecided_oauth_requests() == 0
+        assert OAuthAuthorizationRequest.query.count() == 2
+        assert on.exchange(code).status_code == 200
+
+
+class TestALostMembershipEndsTheConnectionForGood:
+
+    def test_a_removed_member_who_is_added_back_does_not_get_the_connection_back(self, on):
+        tokens = on.tokens()
+        db.session.delete(on.membership(on.user))
+        db.session.commit()
+
+        assert on.mcp(tokens['access_token']).status_code == 401
+
+        grant = OAuthGrant.query.one()
+        assert grant.revoked_at is not None and grant.revoke_reason == 'owner_gone'
+        entry = AuditLog.query.filter_by(action_type=service.AUDIT_GRANT_REVOKED).one()
+        assert entry.details['reason'] == 'owner_gone'
+        on.join(on.user, on.tenant)
+        assert on.mcp(tokens['access_token']).status_code == 401
+        assert on.refresh(tokens['refresh_token']).status_code == 400
+
+    def test_the_same_for_a_deleted_and_restored_organisation(self, on):
+        tokens = on.tokens()
+        on.tenant.deleted_at = datetime.now(timezone.utc)
+        db.session.commit()
+        assert on.mcp(tokens['access_token']).status_code == 401
+        on.tenant.deleted_at = None
+        db.session.commit()
+        assert on.mcp(tokens['access_token']).status_code == 401
+        assert OAuthGrant.query.one().revoke_reason == 'owner_gone'
+
+    def test_the_same_for_an_anonymised_account(self, on):
+        tokens = on.tokens()
+        on.user.is_anonymized = True
+        db.session.commit()
+        assert on.mcp(tokens['access_token']).status_code == 401
+        on.user.is_anonymized = False
+        db.session.commit()
+        assert on.mcp(tokens['access_token']).status_code == 401
+
+    def test_erasing_an_account_removes_its_connections(self, on):
+        """The one path in the app that deletes memberships (retention) deletes the grants with them."""
+        import retention
+        tokens = on.tokens()
+        user_id = on.user.id
+        assert retention.anonymize_user(user_id) is True
+        assert OAuthGrant.query.filter_by(user_id=user_id).count() == 0
+        assert on.mcp(tokens['access_token']).status_code == 401
+
+
+class TestAUsedCodeInAnotherClientsName:
+
+    def test_it_does_not_end_the_connection(self, on):
+        code = on.code()
+        tokens = on.exchange(code).get_json()
+
+        response = on.anonymous().post('/oauth/token', data={
+            'grant_type': 'authorization_code', 'code': code, 'client_id': 'https://evil.example.net/c.json',
+            'redirect_uri': 'https://x.invalid/', 'code_verifier': 'w' * 43})
+
+        assert response.status_code == 400 and response.get_json()['error'] == 'invalid_grant'
+        assert OAuthGrant.query.one().revoked_at is None
+        assert on.mcp(tokens['access_token']).status_code == 200
+
+    def test_the_same_client_presenting_it_again_still_does(self, on):
+        code = on.code()
+        tokens = on.exchange(code).get_json()
+        assert on.exchange(code).status_code == 400
+        assert OAuthGrant.query.one().revoke_reason == 'code_reuse'
+        assert on.mcp(tokens['access_token']).status_code == 401
+
+
+class TestDocumentTextIsNotEchoed:
+
+    @pytest.mark.parametrize('field,value', [
+        ('token_endpoint_auth_method', 'private_key_jwt\n2026-11-25 [SECURITY:AUTH] forged line'),
+        ('token_endpoint_auth_method', 'x\r\nforged line'),
+        ('client_name', '\n\n'),
+        ('grant_types', ['implicit\nforged line']),
+        ('response_types', ['token\nforged line']),
+    ])
+    def test_values_from_the_document_reach_neither_the_log_nor_the_answer(self, on, caplog, field, value):
+        import logging
+        on.document = _document(**{field: value})
+        with caplog.at_level(logging.DEBUG):
+            response = on.view(on.signed_in(on.user), on.start())
+
+        assert response.status_code == 400
+        assert 'forged line' not in response.get_data(as_text=True)
+        for record in caplog.records:
+            message = record.getMessage()
+            if 'Client' in message or 'oauth' in message.lower():
+                assert 'forged line' not in message
+                assert 'private_key_jwt' not in message

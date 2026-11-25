@@ -246,6 +246,26 @@ def forbid_framing_of_consent_pages(response):
     return response
 
 
+# Endpoints that applications call without a session: OAuth metadata, the
+# token and revocation endpoints, and the MCP endpoint. Some of them may be
+# read from any origin.
+SESSIONLESS_PATH_PREFIXES = ('/.well-known/', '/oauth/token', '/oauth/revoke', '/api/mcp')
+
+
+@app.after_request
+def keep_session_token_off_sessionless_endpoints(response):
+    """Do not send the session's CSRF token on responses of endpoints that never use the session.
+
+    add_security_headers below puts X-CSRF-Token on every response of a
+    signed-in browser. On these endpoints it serves no purpose, and a
+    metadata document is the kind of response a cache may keep. Registered
+    before add_security_headers so that it runs after it.
+    """
+    if request.path.startswith(SESSIONLESS_PATH_PREFIXES):
+        response.headers.pop('X-CSRF-Token', None)
+    return response
+
+
 # Initialize Flask-Talisman for CSP (Content Security Policy)
 try:
     from flask_talisman import Talisman
@@ -12444,6 +12464,16 @@ def api_mcp_handler():
         response.headers['WWW-Authenticate'] = _mcp_bearer_challenge(mcp_server)
         return response, 401
 
+    # One HTTP request counts once against the credential's rate limit,
+    # whether it carries one JSON-RPC message or a batch.
+    rate_limit = getattr(mcp_server, 'mcp_rate_limit', None)
+    wait = rate_limit(api_key) if rate_limit is not None else None
+    if wait:
+        response = _mcp_error_response(
+            None, 429, 'Too many requests with this credential. Wait a moment and try again.')
+        response.headers['Retry-After'] = str(wait)
+        return response, 429
+
     request_data = request.get_json(silent=True) if request.is_json else None
     if request_data is None:
         return _mcp_error_response(None, -32700, 'Parse error: Request must be valid JSON'), 400
@@ -12462,11 +12492,11 @@ def api_mcp_handler():
             response_data, item_status, item_headers = _mcp_handle(mcp_server, item, api_key)
             if response_data is not None:
                 batch_responses.append(response_data)
-            # A refusal that carries a challenge or a retry time has to reach
-            # the client as an HTTP status: inside a 200 it would not be acted
-            # on. Only the Enterprise OAuth and rate-limit paths produce one;
-            # an API key refused in a batch is answered as before.
-            if refused is None and item_status in (403, 429) and item_headers:
+            # A refusal that carries a challenge has to reach the client as an
+            # HTTP status: inside a 200 it would not be acted on. Only the
+            # Enterprise OAuth path produces one; an API key refused in a
+            # batch is answered as before.
+            if refused is None and item_status == 403 and item_headers:
                 refused = (item_status, item_headers)
             elif refused is None and item_status == 401 and _mcp_oauth_challenges(item_headers):
                 refused = (item_status, item_headers)

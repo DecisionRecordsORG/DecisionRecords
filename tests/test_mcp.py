@@ -414,6 +414,7 @@ class TestMCPToolHandlerExecuteTool:
     def ai_enabled_tenant(self, session, sample_tenant):
         """Create a tenant with AI features enabled."""
         sample_tenant.ai_features_enabled = True
+        sample_tenant.ai_external_access_enabled = True
         sample_tenant.ai_log_interactions = False  # Disable logging for simpler tests
         session.commit()
         return sample_tenant
@@ -785,6 +786,7 @@ class TestAuthenticateMCPRequest:
     def ai_enabled_tenant(self, session, sample_tenant):
         """Create a tenant with AI features enabled."""
         sample_tenant.ai_features_enabled = True
+        sample_tenant.ai_external_access_enabled = True
         session.commit()
         return sample_tenant
 
@@ -867,6 +869,7 @@ class TestHandleMCPRequest:
     def ai_enabled_tenant(self, session, sample_tenant):
         """Create a tenant with AI features enabled."""
         sample_tenant.ai_features_enabled = True
+        sample_tenant.ai_external_access_enabled = True
         sample_tenant.ai_log_interactions = False
         session.commit()
         return sample_tenant
@@ -1076,7 +1079,7 @@ class TestMCPAPIEndpoint:
                 name='Test Corp',
                 status='active',
                 maturity_state=MaturityState.BOOTSTRAP,
-                ai_features_enabled=True,
+                ai_features_enabled=True, ai_external_access_enabled=True,
                 ai_log_interactions=False
             )
             db.session.add(tenant)

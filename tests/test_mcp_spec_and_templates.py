@@ -101,7 +101,7 @@ def _modern_headers(api_key, method, name=None, version='2026-07-28'):
 def _make_tenant(domain, name, template_id=None, ai_enabled=True):
     tenant = Tenant(
         domain=domain, name=name, status='active', maturity_state=MaturityState.BOOTSTRAP,
-        ai_features_enabled=ai_enabled, ai_log_interactions=False,
+        ai_features_enabled=ai_enabled, ai_external_access_enabled=True, ai_log_interactions=False,
     )
     db.session.add(tenant)
     db.session.flush()

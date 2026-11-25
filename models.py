@@ -3085,6 +3085,13 @@ class OAuthToken(db.Model):
     expires_at = db.Column(db.DateTime, nullable=False)
     rotated_at = db.Column(db.DateTime, nullable=True)
     last_used_at = db.Column(db.DateTime, nullable=True)
+    # Set when the token was taken back because the refresh token it was
+    # issued for was presented a second time. The row stays, so that anyone
+    # who then presents this token is recognised and ends the grant.
+    withdrawn_at = db.Column(db.DateTime, nullable=True)
+    # Set on a used refresh token when its one permitted repeat was answered
+    # (a client whose first answer was lost). A further repeat ends the grant.
+    repeat_answered_at = db.Column(db.DateTime, nullable=True)
 
     grant = db.relationship('OAuthGrant', foreign_keys=[grant_id],
                             backref=db.backref('tokens', lazy='dynamic'))
