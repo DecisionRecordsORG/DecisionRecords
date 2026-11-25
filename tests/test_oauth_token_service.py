@@ -234,22 +234,6 @@ class TestAuthorizationRequest:
         assert _error(excinfo) == error
         assert OAuthAuthorizationRequest.query.count() == 0
 
-    def test_requests_waiting_for_an_answer_are_capped(self, world, monkeypatch):
-        monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 2)
-        first = _request(world)
-        _request(world)
-        with pytest.raises(OAuthError) as excinfo:
-            _request(world)
-        assert _error(excinfo) == 'temporarily_unavailable' and excinfo.value.status == 503
-        assert OAuthAuthorizationRequest.query.count() == 2
-
-        # An answered request and an expired one no longer count
-        service.deny_request(first, world['user'], now=NOW)
-        _request(world)
-        with pytest.raises(OAuthError):
-            _request(world)
-        assert _request(world, now=NOW + settings.AUTHORIZATION_REQUEST_LIFETIME)
-
     def test_which_client_a_credential_belongs_to(self, world):
         _request_row, code = _code(world)
         assert service.client_of_credential('authorization_code', code) == CLIENT_ID
@@ -311,6 +295,81 @@ class TestAuthorizationRequest:
         assert db.session.get(OAuthAuthorizationRequest, request.id).decision is None
 
         assert service.approve_request(request, world['user'], world['tenant'], now=NOW)
+
+
+class TestTheCapOnWaitingRequests:
+    """
+    Second review, F2. The cap on waiting requests bounds storage. Reaching
+    it must not refuse people: the oldest request nobody has opened makes room.
+    These run on PostgreSQL in CI as well as on SQLite.
+    """
+
+    @pytest.fixture(autouse=True)
+    def small_cap(self, monkeypatch):
+        monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 3)
+
+    @staticmethod
+    def _waiting():
+        return [row.public_id for row in OAuthAuthorizationRequest.query.order_by(OAuthAuthorizationRequest.id)]
+
+    def test_at_the_cap_a_new_request_replaces_the_oldest_unopened_one(self, world):
+        first, second, third = (_request(world, bind=False).public_id for _ in range(3))
+
+        fourth = _request(world, bind=False).public_id
+
+        assert self._waiting() == [second, third, fourth]
+        fifth = _request(world, bind=False).public_id
+        assert self._waiting() == [third, fourth, fifth]
+        assert service.get_open_request(first, now=NOW) is None
+
+    def test_a_request_a_signed_in_user_has_opened_is_never_evicted(self, world):
+        opened = _request(world, bind=False)
+        service.bind_user(opened, world['user'])
+        second, third = (_request(world, bind=False).public_id for _ in range(2))
+
+        fourth = _request(world, bind=False).public_id
+
+        assert self._waiting() == [opened.public_id, third, fourth]
+        assert service.get_open_request(second, now=NOW) is None
+        # ... and it can still be answered
+        service.bind_client(opened, world['client'])
+        assert service.approve_request(opened, world['user'], world['tenant'], now=NOW)
+
+    def test_it_is_refused_only_when_every_waiting_request_has_been_opened(self, world):
+        opened = []
+        for user in (world['user'], world['colleague'], world['user']):
+            request = _request(world, bind=False)
+            service.bind_user(request, user)
+            opened.append(request.public_id)
+
+        with pytest.raises(OAuthError) as excinfo:
+            _request(world, bind=False)
+
+        assert _error(excinfo) == 'temporarily_unavailable' and excinfo.value.status == 503
+        assert self._waiting() == opened
+
+    def test_answered_and_expired_requests_neither_count_nor_are_evicted(self, world):
+        answered = _request(world)
+        service.bind_user(answered, world['user'])
+        code = service.approve_request(answered, world['user'], world['tenant'], now=NOW)
+        expired = _request(world, bind=False, now=NOW - timedelta(minutes=11)).public_id
+        waiting = [_request(world, bind=False).public_id for _ in range(3)]
+
+        newest = _request(world, bind=False).public_id
+
+        assert self._waiting() == [answered.public_id, expired] + waiting[1:] + [newest]
+        # The answered request's code is still good
+        assert service.exchange_code(code, CLIENT_ID, REDIRECT, VERIFIER, now=NOW)['access_token']
+
+    def test_below_the_cap_nothing_is_evicted(self, world):
+        made = [_request(world, bind=False).public_id for _ in range(3)]
+        assert self._waiting() == made
+
+    def test_eviction_is_one_row_for_one_new_request(self, world):
+        """The table does not shrink below the cap when it is hit: one out, one in."""
+        for _ in range(10):
+            _request(world, bind=False)
+        assert OAuthAuthorizationRequest.query.count() == 3
 
 
 class TestDecision:
@@ -492,6 +551,36 @@ class TestCodeExchange:
             service.refresh(first['refresh_token'], CLIENT_ID, now=NOW + timedelta(seconds=6))
         assert AuditLog.query.filter_by(action_type=service.AUDIT_CODE_REUSE).count() == 1
         assert OAuthGrant.query.count() == 1
+
+    @pytest.mark.parametrize('redirect_uri,verifier', [
+        ('https://wrong.example/cb', 'x' * 43),      # the observer has the code and nothing else
+        (REDIRECT, 'x' * 43),                        # ... or knows the redirect URI, which is published
+        (REDIRECT, None),
+        (REDIRECT, ''),
+        ('https://wrong.example/cb', VERIFIER),
+        (None, VERIFIER),
+    ])
+    def test_a_used_code_without_the_redirect_uri_and_verifier_changes_nothing(self, world, redirect_uri, verifier):
+        """
+        Second review, F4. The client_id is public and a code passes through
+        browser history, proxy logs and Referer headers. Whoever saw a used
+        code could present it in the right client's name and disconnect the
+        user. Only the application holds the PKCE verifier.
+        """
+        _request_row, code = _code(world)
+        first = service.exchange_code(code, CLIENT_ID, REDIRECT, VERIFIER, now=NOW)
+
+        with pytest.raises(OAuthError) as excinfo:
+            service.exchange_code(code, CLIENT_ID, redirect_uri, verifier, now=NOW + timedelta(seconds=5))
+
+        assert _error(excinfo) == 'invalid_grant'
+        assert _grant().revoked_at is None
+        assert service.validate_access_token(first['access_token'], RESOURCE, now=NOW + timedelta(seconds=6))
+        assert AuditLog.query.filter_by(action_type=service.AUDIT_CODE_REUSE).count() == 0
+        # The application itself presenting it again, with everything right, still ends the connection
+        with pytest.raises(OAuthError):
+            service.exchange_code(code, CLIENT_ID, REDIRECT, VERIFIER, now=NOW + timedelta(seconds=7))
+        assert _grant().revoke_reason == settings.REVOKED_CODE_REUSE
 
     def test_a_used_code_in_another_clients_name_changes_nothing(self, world):
         """Anyone who saw a used code could otherwise disconnect its user."""

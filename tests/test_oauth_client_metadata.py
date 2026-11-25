@@ -43,6 +43,16 @@ pytestmark = pytest.mark.skipif(
 NOW = datetime(2026, 11, 25, 12, 0, 0)
 CLIENT_ID = 'https://client.example.com/oauth/client.json'
 
+
+@pytest.fixture(autouse=True)
+def _no_remembered_fetch_failures():
+    """A failed fetch is remembered in the process for a minute; one test's failure is not another's."""
+    if client_metadata is not None:
+        client_metadata.reset_fetch_state()
+    yield
+    if client_metadata is not None:
+        client_metadata.reset_fetch_state()
+
 # The documents two real clients published on 2026-11-25
 CLAUDE_CODE = {
     "client_id": "https://claude.ai/oauth/claude-code-client-metadata", "client_name": "Claude Code",
@@ -993,18 +1003,101 @@ class TestResolveClient:
         assert fetch.calls == []
         assert OAuthClient.query.count() == 0
 
-    def test_a_failure_is_not_stored_and_the_next_request_tries_again(self, app):
+    def test_a_failure_is_not_stored_and_is_tried_again_after_a_minute(self, app, monkeypatch):
+        moment = {'now': 50.0}
+        monkeypatch.setattr(client_metadata, '_monotonic', lambda: moment['now'])
         failing = _fetch(error=FetchError('The server answered 404'))
-        with pytest.raises(ClientMetadataError):
+        with pytest.raises(ClientMetadataError) as first:
             client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=failing)
+        # Within the minute the same answer is given without fetching (second review, F3)
+        moment['now'] += 59.9
+        with pytest.raises(ClientMetadataError) as second:
+            client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=failing)
+        assert len(failing.calls) == 1
+        assert str(second.value) == str(first.value) and second.value.transient is first.value.transient
+        assert OAuthClient.query.count() == 0
+
+        moment['now'] += 0.2
         with pytest.raises(ClientMetadataError):
             client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=failing)
         assert len(failing.calls) == 2
-        assert OAuthClient.query.count() == 0
 
+        moment['now'] += 61
         with pytest.raises(ClientMetadataError):
             client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=_fetch(_document(client_name='')))
         assert OAuthClient.query.count() == 0
+
+    def test_a_success_ends_the_memory_of_a_failure(self, app, monkeypatch):
+        moment = {'now': 50.0}
+        monkeypatch.setattr(client_metadata, '_monotonic', lambda: moment['now'])
+        with pytest.raises(ClientMetadataError):
+            client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=_fetch(error=FetchError('timeout', transient=True)))
+        moment['now'] += 61
+        client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=_fetch())
+        assert CLIENT_ID not in client_metadata._failed_fetches
+
+    def test_a_transient_failure_is_remembered_as_transient(self, app):
+        fetch = _fetch(error=FetchError('timeout', transient=True))
+        for _ in range(3):
+            with pytest.raises(ClientMetadataError) as excinfo:
+                client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=fetch)
+            assert excinfo.value.transient is True
+            assert client_metadata.as_oauth_error(excinfo.value).status == 503
+        assert len(fetch.calls) == 1
+
+    def test_at_most_two_fetches_are_in_flight_and_a_third_is_refused_at_once(self, app):
+        """
+        Second review, F3. Three fetches "at the same time" without threads:
+        the first fetch asks for a second application while it is running,
+        and that one for a third.
+        """
+        ids = [f'https://client.example.com/app-{index}.json' for index in range(3)]
+        seen = []
+        outcome = {}
+
+        def fetch(url):
+            seen.append(url)
+            depth = ids.index(url)
+            if depth < 2:
+                try:
+                    client_metadata.resolve_client(ids[depth + 1], now=NOW, fetch=fetch)
+                except ClientMetadataError as exc:
+                    outcome[ids[depth + 1]] = exc
+            return FetchResult(_document(client_id=url), {})
+
+        client_metadata.resolve_client(ids[0], now=NOW, fetch=fetch)
+
+        assert seen == ids[:2]                                   # the third was never fetched
+        refused = outcome[ids[2]]
+        assert refused.transient is True and client_metadata.as_oauth_error(refused).status == 503
+        assert ids[1] not in outcome                             # the second had a place
+        # Being refused a place is not remembered: with the places free again it is fetched
+        client_metadata.resolve_client(ids[2], now=NOW, fetch=fetch)
+        assert seen == ids
+        assert OAuthClient.query.count() == 3
+
+    def test_a_place_is_given_back_however_the_fetch_ends(self, app):
+        def explode(url):
+            raise RuntimeError('unexpected')
+        for index in range(3):
+            with pytest.raises(RuntimeError):
+                client_metadata.resolve_client(f'https://client.example.com/x-{index}.json', now=NOW, fetch=explode)
+        for index in range(3):
+            with pytest.raises(ClientMetadataError):
+                client_metadata.resolve_client(f'https://client.example.com/y-{index}.json', now=NOW,
+                                               fetch=_fetch(error=FetchError('timeout', transient=True)))
+        client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=_fetch())
+        assert OAuthClient.query.count() == 1
+
+    def test_the_memory_of_failures_is_bounded(self, app, monkeypatch):
+        monkeypatch.setattr(client_metadata, 'FAILED_FETCH_MEMORY_SIZE', 5)
+        failing = _fetch(error=FetchError('The server answered 404'))
+        ids = [f'https://client.example.com/z-{index}.json' for index in range(12)]
+        for client_id in ids:
+            with pytest.raises(ClientMetadataError):
+                client_metadata.resolve_client(client_id, now=NOW, fetch=failing)
+        assert list(client_metadata._failed_fetches) == ids[-5:]
+        assert client_metadata.FAILED_FETCH_MEMORY_SIZE == 5 and client_metadata.FAILED_FETCH_MEMORY == timedelta(seconds=60)
 
     def test_a_document_that_became_invalid_ends_the_stored_copy(self, app):
         client_metadata.resolve_client(CLIENT_ID, now=NOW, fetch=_fetch())

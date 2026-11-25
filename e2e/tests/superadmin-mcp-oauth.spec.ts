@@ -128,6 +128,43 @@ test.describe('Super admin: letting apps connect by signing in', () => {
     await expect(page.getByTestId('mcp-oauth-blocker-mcp_off')).toBeVisible();
   });
 
+  test('it cannot be switched on while external API access is off for the installation', async ({ page, request }) => {
+    await setUp(request, { enabled: false, system_external_api: false });
+    await loginAsSuperAdmin(page);
+    await openPage(page);
+
+    const toggle = page.getByTestId('mcp-oauth-toggle').getByRole('switch');
+    await expect(toggle).not.toBeChecked();
+    await expect(toggle).toBeDisabled();
+    const blockers = page.getByTestId('mcp-oauth-blockers');
+    await expect(blockers).toContainText('It cannot be switched on yet, because:');
+    await expect(page.getByTestId('mcp-oauth-blocker-external_api_off'))
+      .toHaveText('External AI API access is switched off for this installation.');
+    await expect(page.getByTestId('mcp-oauth-blocker-mcp_off')).toHaveCount(0);
+    await expect(blockers.getByRole('link', { name: 'System settings' })).toBeVisible();
+    await shot(page, 'superadmin-switch-blocked-external-api');
+
+    const csrf = (await page.request.get('/api/auth/csrf-token')).headers()['x-csrf-token'];
+    const response = await page.request.put('/api/admin/settings/oauth', {
+      data: { enabled: true }, headers: { 'X-CSRF-Token': csrf },
+    });
+    expect(response.status()).toBe(409);
+    expect((await response.json()).blockers[0].code).toBe('external_api_off');
+  });
+
+  test('switched on with external API access off, it says it is not working', async ({ page, request }) => {
+    await setUp(request, { enabled: true, system_external_api: false });
+    await loginAsSuperAdmin(page);
+    await openPage(page);
+
+    await expect(page.getByTestId('mcp-oauth-blockers')).toContainText('It is switched on but not working, because:');
+    await expect(page.getByTestId('mcp-oauth-blocker-external_api_off')).toBeVisible();
+    // Switching off is always possible
+    const toggle = page.getByTestId('mcp-oauth-toggle').getByRole('switch');
+    await expect(toggle).toBeChecked();
+    await expect(toggle).toBeEnabled();
+  });
+
   test('someone who is not the super admin cannot read or change the setting', async ({ request }) => {
     expect((await request.get(`${API_URL}/api/admin/settings/oauth`)).status()).toBe(401);
     expect((await request.put(`${API_URL}/api/admin/settings/oauth`, { data: { enabled: true } })).status()).toBeGreaterThanOrEqual(401);

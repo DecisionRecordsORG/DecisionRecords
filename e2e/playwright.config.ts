@@ -47,7 +47,10 @@ export default defineConfig({
     {
       // MCP_RESOURCE_URL and OAUTH_ISSUER: the addresses the Enterprise OAuth server needs
       // before it can be switched on (tests/oauth-consent.spec.ts). They change nothing else.
-      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing MCP_RESOURCE_URL=http://localhost:4200/api/mcp OAUTH_ISSUER=http://localhost:4200 python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5002, debug=False)"',
+      // threaded=False, as the Enterprise CI starts it: the test backend keeps its data in
+      // in-memory SQLite on one connection, and two requests handled at once on that one
+      // connection fail now and then ("cannot commit transaction", rows that are not there).
+      command: 'cd .. && source .venv/bin/activate && FLASK_ENV=testing MCP_RESOURCE_URL=http://localhost:4200/api/mcp OAUTH_ISSUER=http://localhost:4200 python3 -c "from app import app; app.run(host=\'0.0.0.0\', port=5002, debug=False, threaded=False)"',
       url: 'http://localhost:5002/api/version',
       reuseExistingServer: !process.env.CI,
       timeout: 120000,
