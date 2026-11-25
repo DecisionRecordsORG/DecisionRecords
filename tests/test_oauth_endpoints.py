@@ -3283,7 +3283,10 @@ class TestNoSecretInLogsOrAnalytics:
         for name, secret in secrets_.items():
             for text, where in ((logged, 'a log line'), (tracked, 'an analytics event')):
                 assert secret not in text, f'the {name} appears in {where}'
-                assert secret[len('dro_xx_'):] not in text, f'the {name} appears in {where}'
+                if secret.startswith('dro_'):
+                    # ... nor the value without its prefix. Only for codes and tokens: a short
+                    # value cut this way ("23" of "state-123") turns up in any random id.
+                    assert secret[len('dro_xx_'):] not in text, f'the {name} appears in {where}'
 
     def test_the_decision_endpoint_gives_the_code_to_the_page_only(self, on, recorded):
         client = on.signed_in(on.user)
