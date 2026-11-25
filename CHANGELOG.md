@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-25
+
+### Fixed
+- `/api/mcp` answers 404 in the Community Edition. The MCP server is an Enterprise feature, and the route failed on a missing module instead of saying it is not there
+- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` (with or without a path after them) answer 404 as JSON instead of the web app's HTML page, so an MCP client that probes for OAuth gets a clear "not offered" and falls back cleanly
+
+### Changed
+- Enterprise Edition only: the `/api/mcp` transport follows Model Context Protocol revision 2026-07-28 and still serves the handshake-based revisions. It checks the `Origin` header (extra origins can be allowed with `MCP_ALLOWED_ORIGINS`), answers 405 to `GET` and `DELETE`, 401 with `WWW-Authenticate` for a missing or wrong key and 403 when the feature is switched off (these were 400). No database change
+
 ## [2.3.0] - 2026-11-24
 
 ### Added
@@ -233,7 +242,8 @@ Security-related changes and fixes
 
 ---
 
-[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/DecisionRecordsORG/DecisionRecords/compare/v2.1.0...v2.1.1
