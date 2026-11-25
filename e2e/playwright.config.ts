@@ -41,7 +41,9 @@ export default defineConfig({
 
   // Run backend and frontend before tests
   // IMPORTANT: Uses port 5002 to avoid conflicts with development backend on 5001
-  webServer: [
+  // E2E_SERVERS_STARTED=1: the caller has started both itself (the Enterprise CI does,
+  // to run the backend in Enterprise mode), so nothing is started or waited for here.
+  webServer: process.env.E2E_SERVERS_STARTED ? undefined : [
     {
       // MCP_RESOURCE_URL and OAUTH_ISSUER: the addresses the Enterprise OAuth server needs
       // before it can be switched on (tests/oauth-consent.spec.ts). They change nothing else.

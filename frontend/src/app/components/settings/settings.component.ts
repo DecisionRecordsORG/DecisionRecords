@@ -1350,8 +1350,10 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
                           data-testid="ai-external-access-toggle">
                           Enable External API Access
                         </mat-slide-toggle>
-                        <p class="toggle-description">
-                          Allow users to create API keys for MCP servers and Custom GPTs
+                        <p class="toggle-description" data-testid="ai-external-access-description">
+                          Let members connect outside apps, such as AI assistants, to this organisation's decision
+                          records: with a personal API key, or by signing in from the app where that is offered.
+                          Switching this off stops both.
                           @if (!aiSettings.system_external_api_enabled) {
                             <span class="system-disabled">(System-level disabled)</span>
                           }
@@ -1434,11 +1436,21 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
                       </mat-card-title>
                     </mat-card-header>
                     <mat-card-content>
-                      <p>External API access is enabled. Users can generate personal API keys from their profile to:</p>
+                      <p data-testid="api-access-summary">
+                        Members can connect outside apps to this organisation's decision records. An app can do
+                        only what the member who connected it can do.
+                      </p>
                       <ul>
-                        <li>Connect MCP-compatible tools (Claude Code, Cursor, VS Code)</li>
-                        <li>Build Custom GPTs with decision access</li>
-                        <li>Create custom integrations using the REST API</li>
+                        <li>
+                          <strong>By signing in.</strong> Where this is offered, a member adds the MCP address to
+                          an app such as Claude or ChatGPT, signs in and chooses what the app may do. The apps
+                          members connected are listed below, and you can disconnect any of them.
+                        </li>
+                        <li>
+                          <strong>With a personal API key.</strong> A member creates a key on their profile page
+                          and pastes it into a tool such as Claude Code, Cursor or VS Code, a Custom GPT, or
+                          their own integration.
+                        </li>
                       </ul>
                       <p class="api-links">
                         <a href="/integrations/mcp" target="_blank">

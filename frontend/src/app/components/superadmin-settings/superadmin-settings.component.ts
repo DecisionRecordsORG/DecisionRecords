@@ -1024,7 +1024,11 @@ interface SystemAISettings {
                                   (change)="onAiSettingChange()">
                   Enable MCP Server
                 </mat-slide-toggle>
-                <p class="toggle-hint">Allow development tools (Claude Code, Cursor, VS Code) to connect</p>
+                <p class="toggle-hint">
+                  Allow development tools (Claude Code, Cursor, VS Code) to connect.
+                  Letting apps connect by signing in instead of with an API key is switched on separately, on the
+                  <a routerLink="/superadmin/mcp" data-testid="mcp-oauth-link">MCP server page</a>.
+                </p>
               </div>
 
               <div class="toggle-group" [class.disabled]="!aiSettings.ai_features_enabled">

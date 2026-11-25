@@ -26,6 +26,13 @@ const CLIENT_NAME = 'Example Assistant';
 const REDIRECT = 'https://client.example.org/callback';
 const LOOPBACK_CLIENT_ID = 'https://desktop.example.org/oauth/client.json';
 const LOOPBACK_REDIRECT = 'http://localhost:49152/callback';
+// The two addresses Claude publishes its identity at: the web app, and Claude Code on someone's computer
+const CLAUDE_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+const CLAUDE_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+const CLAUDE_CODE_ID = 'https://claude.ai/oauth/claude-code-client-metadata';
+// An app on a look-alike address that gives itself Claude's name
+const LOOKALIKE_ID = 'https://claude.ai.example.org/oauth/client.json';
+const LOOKALIKE_REDIRECT = 'https://claude.ai.example.org/callback';
 const USER = { email: 'user@test-org.com', password: 'TestPass123' };
 const ADMIN = { email: 'admin@test-org.com', password: 'TestPass123' };
 // A member of two organisations in the test that needs one; kept apart so the other tests see one organisation
@@ -61,6 +68,10 @@ async function setUp(request: APIRequestContext, extra: Record<string, unknown> 
         { client_id: CLIENT_ID, client_name: CLIENT_NAME, redirect_uris: [REDIRECT] },
         { client_id: LOOPBACK_CLIENT_ID, client_name: 'Desktop Helper',
           redirect_uris: ['http://localhost/callback', 'http://127.0.0.1/callback'] },
+        { client_id: CLAUDE_ID, client_name: 'Claude', redirect_uris: [CLAUDE_REDIRECT] },
+        { client_id: CLAUDE_CODE_ID, client_name: 'Claude Code',
+          redirect_uris: ['http://localhost/callback', 'http://127.0.0.1/callback'] },
+        { client_id: LOOKALIKE_ID, client_name: 'Claude (Anthropic)', redirect_uris: [LOOKALIKE_REDIRECT] },
       ],
       ai_enabled_domains: ['test-org.com'],
       ...extra,
@@ -79,6 +90,8 @@ async function playTheApp(page: Page) {
     });
   };
   await page.route('https://client.example.org/callback**', handler);
+  await page.route(`${CLAUDE_REDIRECT}**`, handler);
+  await page.route(`${LOOKALIKE_REDIRECT}**`, handler);
   await page.route('http://localhost:49152/callback**', handler);
 }
 
@@ -332,6 +345,55 @@ test.describe('Connecting an app (OAuth consent)', () => {
     expect(await mcpStatus(request, tokens.access_token)).toBe(200);
   });
 
+  test('a known app is shown by its listed name, with a neutral label', async ({ page, request }) => {
+    await loginAsUser(page, USER.email, USER.password);
+    const { verifier, challenge } = pkce();
+    await page.goto(authorizeUrl(challenge, { clientId: CLAUDE_ID, redirect: CLAUDE_REDIRECT }));
+    await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+
+    await expect(page.getByTestId('consent-known-name')).toHaveText('Claude (Anthropic)');
+    await expect(page.getByTestId('consent-known')).toContainText('Known app');
+    await expect(page.getByTestId('consent-app-host')).toHaveText('claude.ai');
+    await expect(page.getByTestId('consent-unverified')).toHaveCount(0);
+    await expect(page.getByTestId('consent-claimed-name')).toHaveCount(0);
+    await expect(page.getByTestId('oauth-consent')).not.toContainText('It calls itself');
+    await expect(page.getByTestId('consent-redirect-host')).toHaveText('claude.ai');
+    await expect(page.getByTestId('consent-loopback-warning')).toHaveCount(0);
+    await shot(page, 'consent-known-app');
+
+    await page.getByTestId('consent-allow').click();
+    await page.waitForURL(`${CLAUDE_REDIRECT}**`);
+    const tokens = await exchange(request, broughtBack(page).get('code')!, verifier, CLAUDE_ID, CLAUDE_REDIRECT);
+    expect(await mcpStatus(request, tokens.access_token)).toBe(200);
+  });
+
+  test('a known app on this computer still gets the warning', async ({ page }) => {
+    await loginAsUser(page, USER.email, USER.password);
+    await page.goto(authorizeUrl(pkce().challenge, { clientId: CLAUDE_CODE_ID, redirect: LOOPBACK_REDIRECT }));
+    await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+
+    await expect(page.getByTestId('consent-known-name')).toHaveText('Claude (Anthropic)');
+    await expect(page.getByTestId('consent-known')).toBeVisible();
+    const warning = page.getByTestId('consent-loopback-warning');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('Any program on this computer');
+    await expect(page.getByTestId('consent-redirect')).toHaveCount(0);
+    await shot(page, 'consent-known-app-on-this-computer');
+  });
+
+  test('an app on a look-alike address that calls itself Claude stays unverified', async ({ page }) => {
+    await loginAsUser(page, USER.email, USER.password);
+    await page.goto(authorizeUrl(pkce().challenge, { clientId: LOOKALIKE_ID, redirect: LOOKALIKE_REDIRECT }));
+    await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+
+    await expect(page.getByTestId('consent-app-host')).toHaveText('claude.ai.example.org');
+    await expect(page.getByTestId('consent-unverified')).toContainText('Unverified app');
+    await expect(page.getByTestId('consent-claimed-name')).toHaveText('Claude (Anthropic)');
+    await expect(page.getByTestId('consent-known')).toHaveCount(0);
+    await expect(page.getByTestId('consent-known-name')).toHaveCount(0);
+    await shot(page, 'consent-look-alike-app');
+  });
+
   test('the page fits a narrow screen', async ({ page }) => {
     await page.setViewportSize({ width: 360, height: 760 });
     await loginAsUser(page, USER.email, USER.password);
@@ -464,6 +526,7 @@ test.describe('Connected apps', () => {
     const row = card.getByTestId('connected-app');
     await expect(row).toHaveCount(1);
     await expect(row.getByTestId('connected-app-host')).toHaveText('client.example.org');
+    await expect(row.getByTestId('connected-app-unverified')).toHaveText('Unverified app');
     await expect(row.getByTestId('connected-app-user')).toHaveText('Test User');
     await expect(row.getByTestId('connected-app-permission')).toHaveText('Can read records');
     // People are named, not shown by address
@@ -478,6 +541,55 @@ test.describe('Connected apps', () => {
 
     await expect(card.getByTestId('connected-apps-empty')).toBeVisible();
     expect(await mcpStatus(request, tokens.access_token)).toBe(401);
+  });
+
+  test('a known app is listed by its name, an unverified one by its address', async ({ page, request }) => {
+    await loginAsUser(page, USER.email, USER.password);
+    await disconnectEverything(page);
+    await connect(page, request);
+    const { verifier, challenge } = pkce();
+    await page.goto(authorizeUrl(challenge, { clientId: CLAUDE_ID, redirect: CLAUDE_REDIRECT }));
+    await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+    await page.getByTestId('consent-allow').click();
+    await page.waitForURL(`${CLAUDE_REDIRECT}**`);
+    await exchange(request, broughtBack(page).get('code')!, verifier, CLAUDE_ID, CLAUDE_REDIRECT);
+
+    await page.goto('/test-org.com/profile');
+    const card = page.getByTestId('connected-apps-user');
+    await expect(card.getByTestId('connected-app')).toHaveCount(2, { timeout: 20000 });
+    const known = card.getByTestId('connected-app').filter({ has: page.getByTestId('connected-app-known') });
+    await expect(known).toHaveCount(1);
+    await expect(known.getByTestId('connected-app-known-name')).toHaveText('Claude (Anthropic)');
+    await expect(known.getByTestId('connected-app-host')).toHaveText('claude.ai');
+    await expect(known).not.toContainText('calls itself');
+    await expect(known.getByTestId('connected-app-disconnect')).toHaveAccessibleName('Disconnect Claude (Anthropic)');
+    const other = card.getByTestId('connected-app').filter({ has: page.getByTestId('connected-app-unverified') });
+    await expect(other).toHaveCount(1);
+    await expect(other.getByTestId('connected-app-host')).toHaveText('client.example.org');
+    await card.scrollIntoViewIfNeeded();
+    await shot(page, 'connected-apps-known-and-unverified');
+    await disconnectEverything(page);
+  });
+
+  test('organisation settings say that outside access covers apps that sign in', async ({ page }) => {
+    await loginAsUser(page, ADMIN.email, ADMIN.password);
+    const description = page.getByTestId('ai-external-access-description');
+    await expect(async () => {
+      await page.goto('/test-org.com/admin');
+      await page.getByRole('tab', { name: 'AI & API' }).click();
+      await expect(description).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
+    await expect(description).toContainText('by signing in from the app');
+    await expect(description).toContainText('Switching this off stops both');
+    const summary = page.getByTestId('api-access-summary');
+    await expect(summary).toContainText('only what the member who connected it can do');
+    // The list the text points to is on the same tab, framed like the cards above it
+    const card = page.getByTestId('connected-apps-tenant');
+    await expect(card).toBeVisible({ timeout: 20000 });
+    await expect(card).toHaveCSS('border-radius', '12px');
+    await expect(card).toHaveCSS('border-top-color', 'rgb(226, 232, 240)');
+    await card.scrollIntoViewIfNeeded();
+    await shot(page, 'organisation-settings-api-access');
   });
 
   test('a member who is not an administrator does not see the organisation list', async ({ page }) => {

@@ -43,11 +43,13 @@ try:
     from ee.backend.ai import AIApiKeyService
     from ee.backend.ai.mcp import server as mcp_server
     from ee.backend.oauth_server import client_metadata, config as oauth_config, endpoints, rate_limits, service
+    from ee.backend.oauth_server import known_apps
     from ee.backend.oauth_server.safe_fetch import FetchError, FetchResult
     EE_AVAILABLE = True
 except ImportError:
     EE_AVAILABLE = False
     AIApiKeyService = mcp_server = client_metadata = oauth_config = endpoints = rate_limits = service = None
+    known_apps = None
     FetchError = Exception
     FetchResult = None
 
@@ -790,7 +792,7 @@ class TestConsentView:
         body = response.get_json()
         assert body['request'] == public_id
         assert body['application'] == {
-            'host': 'client.example.org', 'claimed_name': 'Example Client',
+            'host': 'client.example.org', 'claimed_name': 'Example Client', 'known': False, 'known_name': None,
             'client_id': CLIENT_ID, 'client_uri': 'https://client.example.org',
         }
         assert body['redirect'] == {'host': 'client.example.org', 'is_loopback': False,
@@ -1747,7 +1749,8 @@ class TestOwnConnectedApps:
         assert len(grants) == 2
         assert {grant['organisation']['domain'] for grant in grants} == {'example.com', 'other.org'}
         first = [grant for grant in grants if grant['organisation']['domain'] == 'example.com'][0]
-        assert first['application'] == {'host': 'client.example.org', 'claimed_name': 'Example Client'}
+        assert first['application'] == {'host': 'client.example.org', 'claimed_name': 'Example Client',
+                                        'known': False, 'known_name': None}
         assert first['scopes'] == ['decisions:read'] and first['can_write'] is False
         assert set(first) == {'id', 'application', 'organisation', 'scopes', 'can_write', 'connected_at',
                               'last_used_at', 'expires_at'}
@@ -2449,3 +2452,285 @@ class TestDocumentTextIsNotEchoed:
             if 'Client' in message or 'oauth' in message.lower():
                 assert 'forged line' not in message
                 assert 'private_key_jwt' not in message
+
+
+# ============================================================================
+# 11. KNOWN APPS
+# ============================================================================
+
+CLAUDE_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
+CLAUDE_CODE_ID = 'https://claude.ai/oauth/claude-code-client-metadata'
+CHATGPT_ID = 'https://chatgpt.com/oauth/client.json'
+
+
+class TestKnownApps:
+    """A few hosts are shown by a name people recognise. The match is on the client_id host, exactly."""
+
+    @pytest.mark.parametrize('client_id,name', [
+        (CLAUDE_ID, 'Claude (Anthropic)'),
+        (CLAUDE_CODE_ID, 'Claude (Anthropic)'),
+        (CHATGPT_ID, 'ChatGPT (OpenAI)'),
+        ('https://chatgpt.com/oauth/abc123/client.json', 'ChatGPT (OpenAI)'),
+        ('https://claude.ai:443/oauth/x', 'Claude (Anthropic)'),
+    ])
+    def test_known(self, client_id, name):
+        assert known_apps.known_app_name(client_id) == name
+
+    @pytest.mark.parametrize('client_id', [
+        # look-alikes
+        'https://claude.ai.example.org/oauth/mcp-oauth-client-metadata',
+        'https://claude-ai.com/oauth/client.json',
+        'https://claudeai.com/client.json',
+        'https://www.claude.ai/oauth/client.json',
+        'https://oauth.claude.ai/client.json',
+        'https://claude.ai.evil.example/client.json',
+        'https://evil.example/claude.ai/client.json',
+        'https://evil.example/client.json?host=claude.ai',
+        'https://evil.example/client.json#claude.ai',
+        'https://claude.ai@evil.example/client.json',
+        'https://evil.example\\@claude.ai/client.json',
+        'https://chatgpt.com.example.org/oauth/client.json',
+        'https://chat-gpt.com/oauth/client.json',
+        # international look-alikes: a Cyrillic "а" and "с", and their encoded forms
+        'https://cl\u0430ude.ai/oauth/client.json',
+        'https://\u0441laude.ai/oauth/client.json',
+        'https://xn--clude-3ve.ai/oauth/client.json',
+        'https://xn--laude-xye.ai/oauth/client.json',
+        'https://claude.a\u0456/oauth/client.json',
+        'https://ｃｌａｕｄｅ.ａｉ/oauth/client.json',
+        # case and form
+        'https://CLAUDE.AI/oauth/client.json',
+        'https://Claude.ai/oauth/client.json',
+        'https://claude.ai./oauth/client.json',
+        'https://claude.ai:8443/oauth/client.json',
+        'http://claude.ai/oauth/client.json',
+        'claude.ai', 'Claude (Anthropic)', '', None, 7,
+    ])
+    def test_not_known(self, client_id):
+        assert known_apps.known_app_name(client_id) is None
+
+    def test_the_list_is_short_and_exact(self):
+        assert known_apps.KNOWN_APPS == {'claude.ai': 'Claude (Anthropic)', 'chatgpt.com': 'ChatGPT (OpenAI)'}
+        for host in known_apps.KNOWN_APPS:
+            assert host == host.lower() and host.isascii() and '*' not in host and not host.startswith('.')
+
+    def _start_for(self, on, client_id, document, redirect):
+        on.document = document
+        return on.start(client_id=client_id, redirect_uri=redirect)
+
+    def test_the_consent_page_is_told_a_known_app_by_its_host(self, on):
+        document = {'client_id': CLAUDE_ID, 'client_name': 'Claude', 'redirect_uris': [
+            'https://claude.ai/api/mcp/auth_callback'], 'token_endpoint_auth_method': 'none'}
+        public_id = self._start_for(on, CLAUDE_ID, document, 'https://claude.ai/api/mcp/auth_callback')
+
+        application = on.view(on.signed_in(on.user), public_id).get_json()['application']
+
+        assert application['host'] == 'claude.ai'
+        assert application['known'] is True and application['known_name'] == 'Claude (Anthropic)'
+        assert application['claimed_name'] == 'Claude'
+
+    def test_calling_itself_claude_does_not_make_an_app_known(self, on):
+        """The name in the document is the application's own claim and plays no part."""
+        for claimed in ('Claude', 'Claude (Anthropic)', 'ChatGPT (OpenAI)', 'claude.ai'):
+            on.document = _document(client_name=claimed)
+            application = on.view(on.signed_in(on.user), on.start()).get_json()['application']
+            assert application['host'] == 'client.example.org'
+            assert application['known'] is False and application['known_name'] is None
+            assert application['claimed_name'] == claimed
+            OAuthClient.query.delete()
+            db.session.commit()
+
+    def test_a_known_app_on_this_computer_still_gets_the_loopback_flag(self, on):
+        """Claude Code: a known host, and a redirect to the person's own computer. The warning is not waived."""
+        document = {'client_id': CLAUDE_CODE_ID, 'client_name': 'Claude Code', 'redirect_uris': [
+            'http://localhost/callback', 'http://127.0.0.1/callback'], 'token_endpoint_auth_method': 'none'}
+        public_id = self._start_for(on, CLAUDE_CODE_ID, document, 'http://localhost:49152/callback')
+
+        body = on.view(on.signed_in(on.user), public_id).get_json()
+
+        assert body['application']['known'] is True
+        assert body['redirect'] == {'host': 'localhost', 'is_loopback': True, 'loopback_only_client': True}
+
+    def test_the_connected_apps_lists_say_the_same(self, on):
+        document = {'client_id': CHATGPT_ID, 'client_name': 'ChatGPT', 'redirect_uris': [
+            'https://chatgpt.com/connector_platform_oauth_redirect'], 'token_endpoint_auth_methods_supported': [
+            'none', 'private_key_jwt'], 'token_endpoint_auth_method': 'private_key_jwt'}
+        redirect = 'https://chatgpt.com/connector_platform_oauth_redirect'
+        client = on.signed_in(on.user)
+        public_id = self._start_for(on, CHATGPT_ID, document, redirect)
+        on.view(client, public_id)
+        target = on.decide(client, public_id, decision='approve', tenant_id=on.tenant.id).get_json()['redirect_to']
+        code = parse_qs(urlsplit(target).query)['code'][0]
+        assert on.exchange(code, client_id=CHATGPT_ID, redirect_uri=redirect).status_code == 200
+
+        own = client.get('/api/user/oauth/grants').get_json()[0]['application']
+        tenant = on.signed_in(on.admin).get('/api/tenant/oauth/grants').get_json()[0]['application']
+
+        expected = {'host': 'chatgpt.com', 'claimed_name': 'ChatGPT', 'known': True, 'known_name': 'ChatGPT (OpenAI)'}
+        assert own == expected and tenant == expected
+
+
+# ============================================================================
+# 12. THE SWITCH (SUPER ADMIN)
+# ============================================================================
+
+class TestSuperAdminSwitch:
+
+    URL = '/api/admin/settings/oauth'
+
+    def _ready(self, world):
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+
+    def test_it_is_for_the_super_admin_only(self, world):
+        self._ready(world)
+        assert world.anonymous().get(self.URL).status_code == 401
+        assert world.anonymous().put(self.URL, json={'enabled': True}).status_code == 401
+        for user in (world.user, world.admin):
+            assert world.signed_in(user).get(self.URL).status_code == 403
+            assert world.signed_in(user).put(self.URL, json={'enabled': True}).status_code == 403
+        assert oauth_config.is_switched_on() is False
+
+    def test_what_the_page_is_told_when_everything_is_ready(self, world):
+        self._ready(world)
+        response = world.master().get(self.URL)
+        assert response.status_code == 200
+        assert response.get_json() == {
+            'switched_on': False, 'offered': False, 'can_switch_on': True, 'blockers': [],
+            'resource': RESOURCE, 'issuer': ISSUER, 'connections': 0,
+        }
+        assert response.headers['Cache-Control'] == 'no-store'
+
+    def test_switching_on_and_off(self, world):
+        self._ready(world)
+        master = world.master()
+
+        on = master.put(self.URL, json={'enabled': True})
+        assert on.status_code == 200
+        assert on.get_json()['switched_on'] is True and on.get_json()['offered'] is True
+        assert world.anonymous().get('/.well-known/oauth-protected-resource').status_code == 200
+        tokens = world.tokens()
+        assert world.mcp(tokens['access_token']).status_code == 200
+        assert master.get(self.URL).get_json()['connections'] == 1
+
+        off = master.put(self.URL, json={'enabled': False})
+        assert off.status_code == 200
+        assert off.get_json()['switched_on'] is False and off.get_json()['offered'] is False
+        # Existing connections stop, and nothing is deleted
+        assert world.mcp(tokens['access_token']).status_code == 401
+        assert off.get_json()['connections'] == 1
+        assert OAuthGrant.query.one().revoked_at is None
+
+        # ... so they work again when it is back on
+        assert master.post(self.URL, json={'enabled': True}).status_code == 200
+        assert world.mcp(tokens['access_token']).status_code == 200
+
+    @pytest.mark.parametrize('ai,mcp,codes', [
+        ('false', 'true', ['ai_off']),
+        ('true', 'false', ['mcp_off']),
+        ('false', 'false', ['ai_off', 'mcp_off']),
+    ])
+    def test_it_cannot_be_switched_on_while_ai_or_mcp_is_off(self, world, ai, mcp, codes):
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, ai)
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, mcp)
+        master = world.master()
+
+        state = master.get(self.URL).get_json()
+        assert state['can_switch_on'] is False
+        assert [blocker['code'] for blocker in state['blockers']] == codes
+        assert all(blocker['message'].endswith('.') for blocker in state['blockers'])
+
+        response = master.put(self.URL, json={'enabled': True})
+        assert response.status_code == 409
+        assert [blocker['code'] for blocker in response.get_json()['blockers']] == codes
+        assert oauth_config.is_switched_on() is False
+
+    @pytest.mark.parametrize('lost,word', [('MCP_RESOURCE_URL', 'resource'), ('OAUTH_ISSUER', 'issuer')])
+    def test_it_cannot_be_switched_on_without_its_addresses(self, world, lost, word):
+        self._ready(world)
+        world.monkeypatch.delenv(lost)
+        master = world.master()
+
+        state = master.get(self.URL).get_json()
+        assert state['can_switch_on'] is False
+        assert [blocker['code'] for blocker in state['blockers']] == ['address']
+        assert word in state['blockers'][0]['message'] and lost in state['blockers'][0]['message']
+        assert state[word] is None
+
+        assert master.put(self.URL, json={'enabled': True}).status_code == 409
+        assert oauth_config.is_switched_on() is False
+
+    def test_an_address_that_is_not_https_is_named(self, world):
+        self._ready(world)
+        world.monkeypatch.setenv('OAUTH_ISSUER', 'http://app.decisions.example.org')
+        blockers = world.master().get(self.URL).get_json()['blockers']
+        assert blockers == [{'code': 'address', 'message': 'The issuer address must use https.'}]
+
+    def test_a_switch_left_on_while_something_is_in_the_way_is_shown_as_not_offered(self, world):
+        world.enable()
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'false')
+        state = world.master().get(self.URL).get_json()
+        assert state['switched_on'] is True and state['offered'] is False
+        assert [blocker['code'] for blocker in state['blockers']] == ['mcp_off']
+
+    def test_it_can_always_be_switched_off(self, world):
+        world.enable()
+        world.monkeypatch.delenv('OAUTH_ISSUER')
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'false')
+        response = world.master().put(self.URL, json={'enabled': False})
+        assert response.status_code == 200 and response.get_json()['switched_on'] is False
+
+    @pytest.mark.parametrize('body', [{}, {'enabled': 'true'}, {'enabled': 1}, {'enabled': None}, [True]])
+    def test_malformed_requests(self, world, body):
+        self._ready(world)
+        assert world.master().put(self.URL, json=body).status_code == 400
+        assert oauth_config.is_switched_on() is False
+
+    def test_it_needs_the_csrf_token(self, world):
+        self._ready(world)
+        master = world.master()
+        del master.environ_base['HTTP_X_CSRF_TOKEN']
+        assert master.put(self.URL, json={'enabled': True}).status_code == 403
+        assert oauth_config.is_switched_on() is False
+
+    def test_it_is_reachable_while_oauth_is_off(self, world):
+        """Unlike every other OAuth route, which answers 404 until this one has been used."""
+        self._ready(world)
+        assert world.master().get(self.URL).status_code == 200
+        assert world.signed_in(world.user).get('/api/user/oauth/grants').status_code == 404
+
+
+# ============================================================================
+# 13. IDS IN URL PATHS
+# ============================================================================
+
+class TestIdsInPathsSurviveTheScannerFilter:
+    """
+    The app answers 404 to any path containing a scanner pattern ("wp-",
+    "shell", "debug" and so on). An id that is part of a path must not be able
+    to spell one. Found in CI on 2026-11-25: a base64url request id containing
+    "WP-" made its own consent page answer 404.
+    """
+
+    def test_a_request_id_is_hex(self, on):
+        for _ in range(20):
+            public_id = on.start()
+            assert len(public_id) == 64 and set(public_id) <= set('0123456789abcdef')
+
+    def test_hex_and_uuids_cannot_spell_a_blocked_pattern(self):
+        from app import ATTACK_PATH_PATTERNS
+        alphabet = set('0123456789abcdef-')
+        for pattern in ATTACK_PATH_PATTERNS:
+            assert not set(pattern) <= alphabet, f'{pattern!r} could appear in an id'
+
+    def test_the_paths_the_ids_appear_in_are_not_blocked_themselves(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        assert on.view(client, public_id).status_code == 200
+        assert client.get('/api/user/oauth/grants').status_code == 200
+
+    def test_a_path_with_a_blocked_pattern_is_what_a_bad_id_would_have_met(self, on):
+        """Pins the filter's behaviour that made the rule above necessary."""
+        client = on.signed_in(on.user)
+        response = client.get('/api/oauth/requests/abcWP-def')
+        assert response.status_code == 404 and response.get_data() == b''
