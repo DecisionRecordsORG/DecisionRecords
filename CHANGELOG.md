@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Enterprise: results of the MCP server and the external AI API (`/api/ai`) name people by id and display name only. In MCP, a decision's `created_by`, `updated_by` and `owner` are now `{"id", "name"}` (they were the whole account record, including the email address and sign-in details, and `owner` was a string); `owner_email`, `tenant_id`, `domain` and the duplicate `creator` string are no longer returned. An owner who has no account is `{"id": null, "name": ...}`. Where a person has no name, the name is the part of their email address before the "@"; this also applies to `changed_by` in history, to comment authors, and to `creator` and `owner` in `/api/ai`, which stay strings. Clients that read an email address from these results must stop doing so
+
+### Fixed
+- Enterprise: an API key is refused (401, as an invalid key) when its owner's account was anonymised or deleted, when the organisation was deleted, including the 30 days in which the deletion can be undone, or when the owner is no longer a member of the organisation. Until now such a key kept working on the MCP server and on `/api/ai`, and a key with the write scope could add decisions to an organisation that had been deleted. Keys of current members work as before
+
 ## [2.3.1] - 2026-11-25
 
 ### Fixed
