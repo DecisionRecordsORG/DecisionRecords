@@ -218,6 +218,34 @@ else:
         RATE_LIMITING_ENABLED = False
         logger.warning("Flask-Limiter not installed, rate limiting disabled")
 
+# Pages and answers under these paths must never be shown inside another
+# site's frame: they are where a person allows an application to act for them
+# (OAuth consent), and a framed consent page can be clicked through unseen.
+NO_FRAMING_PATH_PREFIXES = ('/oauth/', '/api/oauth/')
+
+
+@app.after_request
+def forbid_framing_of_consent_pages(response):
+    """Replace the app-wide frame-ancestors (which admits Microsoft Teams) with 'none' for the consent paths.
+
+    Registered before Flask-Talisman on purpose: Flask runs after_request
+    functions in reverse order of registration, and Talisman overwrites the
+    Content-Security-Policy header, so this has to run after it.
+    """
+    if not request.path.startswith(NO_FRAMING_PATH_PREFIXES):
+        return response
+    policy = response.headers.get('Content-Security-Policy')
+    if policy:
+        directives = [part.strip() for part in policy.split(';') if part.strip()]
+        directives = [part for part in directives if not part.lower().startswith('frame-ancestors')]
+        directives.append("frame-ancestors 'none'")
+        response.headers['Content-Security-Policy'] = '; '.join(directives)
+    else:
+        response.headers['Content-Security-Policy'] = "frame-ancestors 'none'"
+    response.headers['X-Frame-Options'] = 'DENY'
+    return response
+
+
 # Initialize Flask-Talisman for CSP (Content Security Policy)
 try:
     from flask_talisman import Talisman
@@ -12393,9 +12421,13 @@ def api_mcp_handler():
     JSON object. The server sends nothing on its own, so there is no GET
     stream and no session; GET and DELETE are answered with 405.
 
-    Authentication is via API key in the Authorization header.
+    Authentication is a bearer credential in the Authorization header: a
+    Decision Records API key, or an OAuth access token while the Enterprise
+    OAuth server is switched on. The Enterprise module decides which it is,
+    applies the per-credential rate limit and supplies the WWW-Authenticate
+    challenge that goes with a refusal.
     """
-    from ee.backend.ai.mcp.server import handle_mcp_message
+    from ee.backend.ai.mcp import server as mcp_server
 
     if not _mcp_origin_allowed():
         return _mcp_error_response(None, 403, 'Origin not allowed'), 403
@@ -12409,7 +12441,7 @@ def api_mcp_handler():
     api_key, auth_error = _extract_mcp_api_key()
     if auth_error:
         response = _mcp_error_response(None, 401, auth_error)
-        response.headers['WWW-Authenticate'] = MCP_BEARER_CHALLENGE
+        response.headers['WWW-Authenticate'] = _mcp_bearer_challenge(mcp_server)
         return response, 401
 
     request_data = request.get_json(silent=True) if request.is_json else None
@@ -12425,23 +12457,56 @@ def api_mcp_handler():
             ), 400
 
         batch_responses = []
+        refused = None
         for item in request_data:
-            response_data, _item_status = handle_mcp_message(item, api_key, request.headers)
+            response_data, item_status, item_headers = _mcp_handle(mcp_server, item, api_key)
             if response_data is not None:
                 batch_responses.append(response_data)
+            # A refusal that carries a challenge or a retry time has to reach
+            # the client as an HTTP status: inside a 200 it would not be acted
+            # on. Only the Enterprise OAuth and rate-limit paths produce one;
+            # an API key refused in a batch is answered as before.
+            if refused is None and item_status in (403, 429) and item_headers:
+                refused = (item_status, item_headers)
+            elif refused is None and item_status == 401 and _mcp_oauth_challenges(item_headers):
+                refused = (item_status, item_headers)
 
+        if refused is not None:
+            response = jsonify(batch_responses)
+            response.headers.update(refused[1])
+            return response, refused[0]
         if not batch_responses:
             return '', 202
         return jsonify(batch_responses), 200
 
-    response_data, status_code = handle_mcp_message(request_data, api_key, request.headers)
+    response_data, status_code, extra_headers = _mcp_handle(mcp_server, request_data, api_key)
     if response_data is None:
         return '', status_code
 
     response = jsonify(response_data)
-    if status_code == 401:
-        response.headers['WWW-Authenticate'] = MCP_BEARER_CHALLENGE
+    response.headers.update(extra_headers)
     return response, status_code
+
+
+def _mcp_handle(mcp_server, message, bearer):
+    """One JSON-RPC message through the Enterprise MCP server: (payload, status, extra headers)."""
+    handle_http = getattr(mcp_server, 'handle_mcp_http', None)
+    if handle_http is not None:
+        return handle_http(message, bearer, request.headers)
+    # Enterprise module released before OAuth: API keys only
+    payload, status = mcp_server.handle_mcp_message(message, bearer, request.headers)
+    return payload, status, ({'WWW-Authenticate': MCP_BEARER_CHALLENGE} if status == 401 else {})
+
+
+def _mcp_bearer_challenge(mcp_server):
+    """WWW-Authenticate for a request without a usable Authorization header."""
+    challenge = getattr(mcp_server, 'bearer_challenge', None)
+    return challenge(credential_presented=False) if challenge is not None else MCP_BEARER_CHALLENGE
+
+
+def _mcp_oauth_challenges(headers):
+    """True when a 401's challenge names resource metadata, which only the OAuth server does."""
+    return 'resource_metadata=' in (headers or {}).get('WWW-Authenticate', '')
 
 
 def _mcp_no_oauth_metadata():
@@ -12454,25 +12519,58 @@ def _mcp_no_oauth_metadata():
     }), 404
 
 
+def _oauth_metadata(kind, resource_path=None):
+    """
+    The answer for an OAuth metadata address.
+
+    The Enterprise OAuth server supplies the document while it is switched
+    on. In every other case (Community Edition, switched off, an Enterprise
+    module without OAuth) the answer is the plain 404 above, as before.
+    """
+    if is_enterprise():
+        try:
+            from ee.backend.oauth_server.endpoints import metadata_response
+        except ImportError:
+            metadata_response = None
+        if metadata_response is not None:
+            response = metadata_response(kind, resource_path)
+            if response is not None:
+                return response
+    return _mcp_no_oauth_metadata()
+
+
 @app.route('/.well-known/oauth-protected-resource')
-@app.route('/.well-known/oauth-authorization-server')
-def api_mcp_no_oauth_metadata():
-    """
-    Say plainly that there is no OAuth metadata.
-
-    MCP clients look here after a 401 to find an OAuth authorization server.
-    The MCP endpoint takes an API key, not OAuth tokens, so the honest answer
-    is 404. Without these routes the single-page app's HTML would be served
-    with 200 and clients would try to read it as metadata.
-    """
-    return _mcp_no_oauth_metadata()
-
-
 @app.route('/.well-known/oauth-protected-resource/<path:resource_path>')
+def api_oauth_protected_resource_metadata(resource_path=None):
+    """
+    Protected resource metadata (RFC 9728) for the MCP endpoint.
+
+    MCP clients look here after a 401 to find the authorization server.
+    Without OAuth the honest answer is 404, in JSON: without this route the
+    single-page app's HTML would be served with 200 and clients would try to
+    read it as metadata.
+    """
+    return _oauth_metadata('protected-resource', resource_path)
+
+
+@app.route('/.well-known/oauth-authorization-server')
 @app.route('/.well-known/oauth-authorization-server/<path:resource_path>')
-def api_mcp_no_oauth_metadata_for_path(resource_path):
-    """The same answer for the per-resource form of the metadata address."""
-    return _mcp_no_oauth_metadata()
+def api_oauth_authorization_server_metadata(resource_path=None):
+    """Authorization server metadata (RFC 8414), or the same 404 without OAuth."""
+    return _oauth_metadata('authorization-server', resource_path)
+
+
+@app.route('/.well-known/openid-configuration')
+@app.route('/.well-known/openid-configuration/<path:resource_path>')
+def api_openid_configuration(resource_path=None):
+    """
+    This server is not an OpenID Provider: always 404, in JSON.
+
+    Clients try this address when looking for an authorization server, and
+    the website's worker sends it here, so it must not fall through to the
+    single-page app's HTML.
+    """
+    return _oauth_metadata('openid-configuration', resource_path)
 
 
 def _mcp_origin_allowed():

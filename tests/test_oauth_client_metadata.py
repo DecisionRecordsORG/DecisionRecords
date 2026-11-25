@@ -575,6 +575,12 @@ class TestClientIdUrl:
         'https://server.internal/client.json',
         'https://169.254.169.254/client.json',
         'https://client.example.com/client json',
+        'https://client.example.com/"><script>alert(1)</script>',
+        "https://client.example.com/client'.json",
+        'https://client.example.com/client<.json',
+        'https://client.example.com/{client}.json',
+        'https://client.example.com/client|.json',
+        'https://client.example.com/client`.json',
         'https://client.example.com/client.json\n',
         'https://client.example.com\\@evil.test/client.json',
         'https://clïent.example.com/client.json',
@@ -841,7 +847,15 @@ class TestResolveClient:
         error = client_metadata.as_oauth_error(excinfo.value)
         assert error.error == 'invalid_client' and error.status == 400
 
-    def test_the_default_fetch_is_the_safe_one(self):
-        import inspect
-        default = inspect.signature(client_metadata.resolve_client).parameters['fetch'].default
-        assert default is safe_fetch.fetch_json
+    def test_the_default_fetch_is_the_safe_one(self, app, monkeypatch):
+        """Without a fetcher passed in, the module's fetch_json is used, and that is safe_fetch's."""
+        assert client_metadata.fetch_json is safe_fetch.fetch_json
+        calls = []
+
+        def recording(url):
+            calls.append(url)
+            return FetchResult(_document(), {})
+        monkeypatch.setattr(client_metadata, 'fetch_json', recording)
+
+        client_metadata.resolve_client(CLIENT_ID, now=NOW)
+        assert calls == [CLIENT_ID]

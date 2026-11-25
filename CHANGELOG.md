@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Enterprise, switched off by default: the server side of sign-in by OAuth for the MCP endpoint, as the Model Context Protocol specification describes it (authorization code with PKCE, a consent step tied to the signed-in user and one organisation, access and refresh tokens, protected resource and authorization server metadata, Client ID Metadata Documents). A super admin setting, `oauth_server_enabled`, turns it on; until then every OAuth address answers 404 and the MCP endpoint behaves exactly as before. The consent page in the web app is not part of this change
+- `/.well-known/openid-configuration` (with or without a path after it) answers 404 as JSON instead of the web app's HTML page. This server is not an OpenID Provider
+- The MCP endpoint limits each credential to 300 requests per minute and answers 429 with `Retry-After` beyond that (Enterprise). The app-wide limit of 200 per minute is unchanged, so this does not change what an API key could do before
+- Responses under `/oauth/` and `/api/oauth/` are sent with `frame-ancestors 'none'` and `X-Frame-Options: DENY`, in every edition
 - Startup migration `2.7.0` creates four empty tables for OAuth authorization of the MCP server: `oauth_clients`, `oauth_grants`, `oauth_authorization_requests` and `oauth_tokens`, on SQLite and PostgreSQL. No existing table or row is changed. The tables are created in the Community Edition too, where nothing writes to them and they stay empty; the feature that uses them is Enterprise and is not switched on by this change
 - Erasing an account or an organisation deletes its rows in those tables, a person's data export gains a `connected_apps` section (empty until the feature exists), and the daily retention thread deletes OAuth rows that can no longer be used. That housekeeping does not depend on the automatic retention setting and does nothing on empty tables
 
