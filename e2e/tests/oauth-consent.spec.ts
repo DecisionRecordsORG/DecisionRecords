@@ -28,6 +28,8 @@ const LOOPBACK_CLIENT_ID = 'https://desktop.example.org/oauth/client.json';
 const LOOPBACK_REDIRECT = 'http://localhost:49152/callback';
 const USER = { email: 'user@test-org.com', password: 'TestPass123' };
 const ADMIN = { email: 'admin@test-org.com', password: 'TestPass123' };
+// A member of two organisations in the test that needs one; kept apart so the other tests see one organisation
+const MEMBER_OF_TWO = { email: 'steward@test-org.com', password: 'TestPass123' };
 const SHOTS = process.env.OAUTH_SHOTS_DIR;
 
 let available = false;
@@ -89,6 +91,8 @@ async function shot(page: Page, name: string) {
     return;
   }
   fs.mkdirSync(SHOTS, { recursive: true });
+  // Keep the app's cookie notice and passing messages out of the picture
+  await page.addStyleTag({ content: 'app-cookie-consent, .mat-mdc-snack-bar-container { display: none !important; }' });
   await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
 }
 
@@ -158,8 +162,9 @@ test.describe('Connecting an app (OAuth consent)', () => {
     await expect(page.getByTestId('consent-organisation')).toContainText('test-org.com');
     await expect(page.getByTestId('consent-read')).toContainText('Search and read');
     await expect(page.getByTestId('consent-write-switch').getByRole('switch')).toBeChecked();
-    // No navigation bar: one question on the page
+    // No navigation bar and no cookie notice: one question on the page
     await expect(page.locator('app-navbar')).toHaveCount(0);
+    await expect(page.locator('app-cookie-consent')).toHaveCount(0);
     // Words a person reads, not the protocol's
     const text = (await page.getByTestId('oauth-consent').innerText()).toLowerCase();
     for (const jargon of ['scope', 'grant', 'oauth', 'token', 'client_id', 'redirect']) {
@@ -262,11 +267,11 @@ test.describe('Connecting an app (OAuth consent)', () => {
 
   test('with several organisations the person chooses, and sees why one cannot be chosen', async ({ page, request }) => {
     await setUp(request, {
-      memberships: [{ email: USER.email, domain: 'new-org.com' }],
+      memberships: [{ email: MEMBER_OF_TWO.email, domain: 'new-org.com' }],
       ai_enabled_domains: ['test-org.com'],
       ai_disabled_domains: ['new-org.com'],
     });
-    await loginAsUser(page, USER.email, USER.password);
+    await loginAsUser(page, MEMBER_OF_TWO.email, MEMBER_OF_TWO.password);
     await page.goto(authorizeUrl(pkce().challenge));
     await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
 
@@ -418,7 +423,9 @@ test.describe('Connected apps', () => {
     await expect(row.getByTestId('connected-app-host')).toHaveText('client.example.org');
     await expect(row).toContainText(CLIENT_NAME);
     await expect(row.getByTestId('connected-app-permission')).toHaveText('Can read and change records');
-    await expect(row).toContainText('Not used yet');
+    await expect(row).toContainText('Connected');
+    await expect(row).toContainText('Last used');
+    await expect(row).toContainText('Asks again');
     await card.scrollIntoViewIfNeeded();
     await shot(page, 'connected-apps-profile');
 
@@ -446,10 +453,14 @@ test.describe('Connected apps', () => {
     const tokens = await connect(page, request, { write: false });
 
     await loginAsUser(page, ADMIN.email, ADMIN.password);
-    await page.goto('/test-org.com/admin');
-    await page.getByRole('tab', { name: 'AI & API' }).click();
     const card = page.getByTestId('connected-apps-tenant');
-    await expect(card).toBeVisible({ timeout: 20000 });
+    // The settings page asks for a dozen things at once, and the test backend's
+    // in-memory database sometimes fails one of them; load the page again if so.
+    await expect(async () => {
+      await page.goto('/test-org.com/admin');
+      await page.getByRole('tab', { name: 'AI & API' }).click();
+      await expect(card).toBeVisible({ timeout: 8000 });
+    }).toPass({ timeout: 60000 });
     const row = card.getByTestId('connected-app');
     await expect(row).toHaveCount(1);
     await expect(row.getByTestId('connected-app-host')).toHaveText('client.example.org');

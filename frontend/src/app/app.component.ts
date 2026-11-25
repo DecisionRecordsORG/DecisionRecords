@@ -47,7 +47,7 @@ import { CookieConsentComponent, CookieConsentStatus } from './components/shared
         </div>
       </footer>
     }
-    @if (featureFlags.analyticsEnabled) {
+    @if (featureFlags.analyticsEnabled && !isAppConsentPage) {
       <app-cookie-consent (consentChanged)="onCookieConsentChanged($event)"></app-cookie-consent>
     }
   `,
@@ -96,6 +96,10 @@ import { CookieConsentComponent, CookieConsentStatus } from './components/shared
 export class AppComponent implements OnInit {
   showAppNavbar = false;
   isLandingPage = false;
+  // The page that asks whether an app may be connected. The analytics cookie
+  // notice is not shown on it: it would lie over the Allow and Cancel buttons
+  // with an "Accept" button of its own.
+  isAppConsentPage = false;
 
   // Pages where we don't show the app navbar (landing, login, setup)
   // Note: Only exact matches for login pages, NOT all routes under them
@@ -211,6 +215,7 @@ export class AppComponent implements OnInit {
 
     // Check if this is the landing page
     this.isLandingPage = path === '/';
+    this.isAppConsentPage = path === '/oauth/consent';
 
     // Check if current path is a no-navbar route (prefix match)
     const isNoNavbarRoute = this.noNavbarRoutes.some(route => {

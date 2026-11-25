@@ -10577,6 +10577,7 @@ def setup_test_oauth():
     try:
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
 
         for domains, ai_features, external_access in (
                 (data.get('ai_enabled_domains') or [], True, True),
