@@ -533,6 +533,215 @@ class TestTheRealTransport:
         assert server['requests'] == []
 
 
+class TestOneDeadlineForTheWholeFetch:
+    """
+    A server that sends one byte just inside every socket timeout must not
+    hold the caller: resolving, connecting, the TLS handshake, the response
+    head and the body together get one deadline. Real TLS against a local
+    server; only the certificate trust and the connect address are stood in for.
+    """
+
+    HOST = 'slow.example.org'
+
+    @pytest.fixture
+    def tls_server(self, monkeypatch, tmp_path):
+        import ssl
+        import threading
+        from datetime import timezone as tz
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, self.HOST)])
+        now = datetime.now(tz.utc)
+        certificate = (
+            x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5)).not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(self.HOST)]), critical=False)
+            .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+            .sign(key, hashes.SHA256())
+        )
+        cert_path, key_path = tmp_path / 'c.pem', tmp_path / 'k.pem'
+        cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+
+        listener = socket.socket()
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(5)
+        port = listener.getsockname()[1]
+        server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server_context.load_cert_chain(str(cert_path), str(key_path))
+        state = {'behaviour': None, 'stop': threading.Event()}
+
+        def serve():
+            while not state['stop'].is_set():
+                try:
+                    listener.settimeout(0.2)
+                    connection, _ = listener.accept()
+                except OSError:
+                    continue
+                threading.Thread(target=handle, args=(connection,), daemon=True).start()
+
+        def handle(connection):
+            try:
+                if state['behaviour'] == 'no-handshake':
+                    state['stop'].wait(20)
+                    return
+                tls = server_context.wrap_socket(connection, server_side=True)
+                tls.recv(4096)
+                state['behaviour'](tls)
+            except OSError:
+                pass
+            finally:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+
+        threading.Thread(target=serve, daemon=True).start()
+
+        client_context = ssl.create_default_context(cafile=str(cert_path))
+        real_create_connection = socket.create_connection
+        monkeypatch.setattr(safe_fetch, '_tls_context', lambda: client_context)
+        monkeypatch.setattr(safe_fetch.socket, 'create_connection',
+                            lambda address, timeout=None, **kwargs: real_create_connection(
+                                ('127.0.0.1', port), timeout=timeout))
+        yield state
+        state['stop'].set()
+        listener.close()
+
+    @staticmethod
+    def _drip(data, pause=0.15):
+        def behaviour(tls):
+            import time
+            for index in range(len(data)):
+                tls.send(data[index:index + 1])
+                time.sleep(pause)
+        return behaviour
+
+    def _timed_get(self, seconds=0.8):
+        import time
+        started = time.monotonic()
+        with pytest.raises(OSError) as excinfo:
+            safe_fetch.https_get(self.HOST, '93.184.216.34', '/client.json', started + seconds)
+        return time.monotonic() - started, excinfo.value
+
+    BODY = json.dumps({'client_id': CLIENT_ID}).encode()
+
+    def test_a_dripped_status_line_is_cut_off_at_the_deadline(self, tls_server):
+        """The reviewer's case: one byte every moment, each inside the socket timeout, for as long as it likes."""
+        tls_server['behaviour'] = self._drip(b'HTTP/1.1 200 ' + b'A' * 60000)
+        elapsed, error = self._timed_get()
+        assert elapsed < 1.6, elapsed
+        assert isinstance(error, socket.timeout)
+
+    def test_dripped_headers_are_cut_off_at_the_deadline(self, tls_server):
+        tls_server['behaviour'] = self._drip(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nX-Pad: '
+                                             + b'a' * 60000)
+        elapsed, _error = self._timed_get()
+        assert elapsed < 1.6, elapsed
+
+    def test_a_dripped_body_is_cut_off_at_the_deadline(self, tls_server):
+        head = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 5000\r\n\r\n'
+
+        def behaviour(tls):
+            tls.sendall(head)
+            self._drip(b'{' + b' ' * 4999)(tls)
+        tls_server['behaviour'] = behaviour
+        elapsed, _error = self._timed_get()
+        assert elapsed < 1.6, elapsed
+
+    def test_a_stalled_tls_handshake_is_cut_off_at_the_deadline(self, tls_server):
+        tls_server['behaviour'] = 'no-handshake'
+        elapsed, _error = self._timed_get()
+        assert elapsed < 1.6, elapsed
+
+    def test_the_whole_fetch_reports_it_as_temporary(self, tls_server, monkeypatch):
+        import time
+        monkeypatch.setattr(safe_fetch, 'TOTAL_TIMEOUT_SECONDS', 0.8)
+        tls_server['behaviour'] = self._drip(b'HTTP/1.1 200 ' + b'A' * 60000)
+        started = time.monotonic()
+        with pytest.raises(FetchError) as excinfo:
+            safe_fetch.fetch_json(f'https://{self.HOST}/client.json', resolver=_resolver('93.184.216.34'))
+        assert excinfo.value.transient is True
+        # Not once per address either: the deadline is for the fetch, and there is one address here
+        assert time.monotonic() - started < 1.6
+
+    def test_a_slow_name_lookup_counts_against_the_same_deadline(self, monkeypatch):
+        import time
+        monkeypatch.setattr(safe_fetch, 'TOTAL_TIMEOUT_SECONDS', 0.3)
+        transport = _transport()
+
+        def slow_resolver(host):
+            time.sleep(2)
+            return ['93.184.216.34']
+
+        started = time.monotonic()
+        with pytest.raises(FetchError) as excinfo:
+            safe_fetch.fetch_json(CLIENT_ID, resolver=slow_resolver, transport=transport)
+        assert time.monotonic() - started < 1.0
+        assert excinfo.value.transient is True
+        assert transport.calls == []
+
+    def test_an_oversized_head_is_refused(self, tls_server):
+        def behaviour(tls):
+            tls.sendall(b'HTTP/1.1 200 OK\r\nX-Pad: ' + b'a' * (safe_fetch.MAX_HEAD_BYTES + 100) + b'\r\n\r\n{}')
+        tls_server['behaviour'] = behaviour
+        import http.client
+        import time
+        with pytest.raises(http.client.HTTPException):
+            safe_fetch.https_get(self.HOST, '93.184.216.34', '/client.json', time.monotonic() + 3)
+        with pytest.raises(FetchError):
+            safe_fetch.fetch_json(f'https://{self.HOST}/client.json', resolver=_resolver('93.184.216.34'))
+
+    @pytest.mark.parametrize('framing', ['content-length', 'chunked', 'until-close'])
+    def test_ordinary_responses_are_read_whichever_way_they_are_framed(self, tls_server, framing):
+        import time
+        body = self.BODY
+        head = b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n'
+        response = {
+            'content-length': head + b'Content-Length: %d\r\n\r\n' % len(body) + body,
+            'chunked': head + b'Transfer-Encoding: chunked\r\n\r\n%x\r\n' % len(body) + body + b'\r\n0\r\n\r\n',
+            'until-close': head + b'Connection: close\r\n\r\n' + body,
+        }[framing]
+        tls_server['behaviour'] = lambda tls: tls.sendall(response)
+
+        status, headers, received = safe_fetch.https_get(
+            self.HOST, '93.184.216.34', '/client.json', time.monotonic() + 3)
+
+        assert status == 200
+        assert headers['content-type'] == 'application/json'
+        assert json.loads(received) == {'client_id': CLIENT_ID}
+
+    def test_a_server_that_keeps_the_connection_open_does_not_cost_the_whole_deadline(self, tls_server):
+        """The response is complete; the caller does not wait for a close that never comes."""
+        import time
+        body = self.BODY
+
+        def behaviour(tls):
+            tls.sendall(b'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s'
+                        % (len(body), body))
+            time.sleep(3)
+        tls_server['behaviour'] = behaviour
+
+        started = time.monotonic()
+        status, _headers, received = safe_fetch.https_get(
+            self.HOST, '93.184.216.34', '/client.json', started + 3)
+        assert status == 200 and json.loads(received) == {'client_id': CLIENT_ID}
+        assert time.monotonic() - started < 1.5
+
+    def test_the_certificate_must_be_for_the_name(self, tls_server):
+        import ssl
+        import time
+        tls_server['behaviour'] = lambda tls: None
+        with pytest.raises(ssl.SSLCertVerificationError):
+            safe_fetch.https_get('other.example.org', '93.184.216.34', '/client.json', time.monotonic() + 3)
+
+
 # ============================================================================
 # THE CLIENT_ID URL
 # ============================================================================
@@ -575,6 +784,12 @@ class TestClientIdUrl:
         'https://server.internal/client.json',
         'https://169.254.169.254/client.json',
         'https://client.example.com/client json',
+        'https://client.example.com/"><script>alert(1)</script>',
+        "https://client.example.com/client'.json",
+        'https://client.example.com/client<.json',
+        'https://client.example.com/{client}.json',
+        'https://client.example.com/client|.json',
+        'https://client.example.com/client`.json',
         'https://client.example.com/client.json\n',
         'https://client.example.com\\@evil.test/client.json',
         'https://clïent.example.com/client.json',
@@ -643,6 +858,19 @@ class TestDocumentValidation:
         with pytest.raises(ClientMetadataError) as excinfo:
             client_metadata.validate_document(CLIENT_ID, document)
         assert excinfo.value.transient is False
+
+    @pytest.mark.parametrize('document', [
+        _document(token_endpoint_auth_method='private_key_jwt\n2026-11-25 [SECURITY:AUTH] forged line'),
+        _document(token_endpoint_auth_method='tls_client_auth forged line'),
+        _document(grant_types=['implicit forged line']),
+        _document(response_types=['token forged line']),
+    ])
+    def test_refusals_do_not_repeat_what_the_document_said(self, document):
+        """The message goes to the security log and to the consent page; the document is whatever its author wrote."""
+        with pytest.raises(ClientMetadataError) as excinfo:
+            client_metadata.validate_document(CLIENT_ID, document)
+        message = str(excinfo.value)
+        assert 'forged line' not in message and '\n' not in message and '\r' not in message
 
     def test_a_missing_auth_method_is_taken_as_a_public_client(self):
         assert client_metadata.validate_document(CLIENT_ID, _document(token_endpoint_auth_method=...))
@@ -841,7 +1069,15 @@ class TestResolveClient:
         error = client_metadata.as_oauth_error(excinfo.value)
         assert error.error == 'invalid_client' and error.status == 400
 
-    def test_the_default_fetch_is_the_safe_one(self):
-        import inspect
-        default = inspect.signature(client_metadata.resolve_client).parameters['fetch'].default
-        assert default is safe_fetch.fetch_json
+    def test_the_default_fetch_is_the_safe_one(self, app, monkeypatch):
+        """Without a fetcher passed in, the module's fetch_json is used, and that is safe_fetch's."""
+        assert client_metadata.fetch_json is safe_fetch.fetch_json
+        calls = []
+
+        def recording(url):
+            calls.append(url)
+            return FetchResult(_document(), {})
+        monkeypatch.setattr(client_metadata, 'fetch_json', recording)
+
+        client_metadata.resolve_client(CLIENT_ID, now=NOW)
+        assert calls == [CLIENT_ID]

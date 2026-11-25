@@ -135,6 +135,12 @@ CSRF_SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
 CSRF_SESSION_EXEMPT_PATHS = {
     '/logout',
     '/api/auth/logout',
+    # OAuth token and revocation endpoints (Enterprise). They are called by
+    # applications, authenticate by what is in the request body (a code with
+    # its PKCE verifier, or a token) and never read the session, so a session
+    # cookie that happens to arrive with the request gives it nothing to forge.
+    '/oauth/token',
+    '/oauth/revoke',
 }
 CSRF_SESSION_EXEMPT_PREFIXES = (
     '/api/test/',

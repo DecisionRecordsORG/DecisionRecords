@@ -1308,6 +1308,9 @@ def purge_old_inquiries(now=None):
 # it again should still end the connection, which is until it would have
 # expired anyway.
 OAUTH_EXPIRED_ROW_GRACE = timedelta(days=1)
+# A consent request nobody answered is of no use once it has expired, and
+# anyone can create one without signing in: it goes after a few minutes.
+OAUTH_UNDECIDED_REQUEST_GRACE = timedelta(minutes=5)
 # An ended connection stays visible to its user and their admin for a while.
 OAUTH_ENDED_GRANT_GRACE = timedelta(days=30)
 # A client nobody is connected to is forgotten; its metadata is fetched again when needed.
@@ -1336,6 +1339,24 @@ def delete_oauth_grants(grant_filter, request_filter=None):
     counts['oauth_authorization_requests'] = db.session.execute(requests.delete().where(request_where)).rowcount
     counts['oauth_grants'] = db.session.execute(grants.delete().where(grant_filter)).rowcount
     return counts
+
+
+def purge_undecided_oauth_requests(now=None):
+    """Delete consent requests that expired without an answer. Commits. Returns how many.
+
+    These rows are written for anonymous visitors, so they are removed
+    minutes after they expire and not with the daily purge alone: the
+    authorization endpoint calls this in passing.
+    """
+    now = to_naive_utc(now) or utcnow()
+    requests = OAuthAuthorizationRequest.__table__
+    removed = db.session.execute(requests.delete().where(
+        requests.c.decision.is_(None),
+        requests.c.code_hash.is_(None),
+        requests.c.expires_at < now - OAUTH_UNDECIDED_REQUEST_GRACE,
+    )).rowcount
+    db.session.commit()
+    return removed
 
 
 def purge_expired_oauth_rows(now=None):
@@ -1367,8 +1388,10 @@ def purge_expired_oauth_rows(now=None):
     counts['oauth_tokens'] += db.session.execute(
         tokens.delete().where(tokens.c.expires_at < expired_before)).rowcount
 
-    # A request stays while its code could still be presented, so that a second
-    # use of the code is recognised for as long as that matters
+    counts['oauth_authorization_requests'] += purge_undecided_oauth_requests(now)
+
+    # An answered request stays while its code could still be presented, so that
+    # a second use of the code is recognised for as long as that matters
     counts['oauth_authorization_requests'] += db.session.execute(requests.delete().where(
         requests.c.expires_at < expired_before,
         sa.or_(requests.c.code_expires_at.is_(None), requests.c.code_expires_at < expired_before),

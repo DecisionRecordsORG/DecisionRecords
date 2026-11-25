@@ -223,7 +223,7 @@ class TestAuthorizationRequest:
         ({'redirect_uri': 'javascript:alert(1)'}, 'invalid_request'),
         ({'redirect_uri': ''}, 'invalid_request'),
         ({'resource': 'not a url'}, 'invalid_target'),
-        ({'state': 's' * 2049}, 'invalid_request'),
+        ({'state': 's' * 1025}, 'invalid_request'),
     ])
     def test_malformed_requests_are_refused_and_not_stored(self, world, fields, error):
         values = dict(client_identifier=CLIENT_ID, redirect_uri=REDIRECT, code_challenge=CHALLENGE,
@@ -233,6 +233,35 @@ class TestAuthorizationRequest:
             service.create_authorization_request(**values)
         assert _error(excinfo) == error
         assert OAuthAuthorizationRequest.query.count() == 0
+
+    def test_requests_waiting_for_an_answer_are_capped(self, world, monkeypatch):
+        monkeypatch.setattr(service, 'MAX_OPEN_REQUESTS', 2)
+        first = _request(world)
+        _request(world)
+        with pytest.raises(OAuthError) as excinfo:
+            _request(world)
+        assert _error(excinfo) == 'temporarily_unavailable' and excinfo.value.status == 503
+        assert OAuthAuthorizationRequest.query.count() == 2
+
+        # An answered request and an expired one no longer count
+        service.deny_request(first, world['user'], now=NOW)
+        _request(world)
+        with pytest.raises(OAuthError):
+            _request(world)
+        assert _request(world, now=NOW + settings.AUTHORIZATION_REQUEST_LIFETIME)
+
+    def test_which_client_a_credential_belongs_to(self, world):
+        _request_row, code = _code(world)
+        assert service.client_of_credential('authorization_code', code) == CLIENT_ID
+        assert service.credential_owner_key('authorization_code', code).startswith('request:')
+        tokens = service.exchange_code(code, CLIENT_ID, REDIRECT, VERIFIER, now=NOW)
+        assert service.client_of_credential('refresh_token', tokens['refresh_token']) == CLIENT_ID
+        assert service.credential_owner_key('refresh_token', tokens['refresh_token']) == f'grant:{_grant().id}'
+        for grant_type, value in (('refresh_token', tokens['access_token']), ('refresh_token', 'dro_rt_x'),
+                                  ('authorization_code', 'dro_ac_x'), ('authorization_code', None),
+                                  ('client_credentials', code), (None, code), ('refresh_token', '')):
+            assert service.client_of_credential(grant_type, value) is None
+            assert service.credential_owner_key(grant_type, value) is None
 
     def test_open_request_lookup(self, world):
         request = _request(world)
@@ -464,6 +493,20 @@ class TestCodeExchange:
         assert AuditLog.query.filter_by(action_type=service.AUDIT_CODE_REUSE).count() == 1
         assert OAuthGrant.query.count() == 1
 
+    def test_a_used_code_in_another_clients_name_changes_nothing(self, world):
+        """Anyone who saw a used code could otherwise disconnect its user."""
+        _request_row, code = _code(world)
+        first = service.exchange_code(code, CLIENT_ID, REDIRECT, VERIFIER, now=NOW)
+
+        for other in ('https://other.example/client.json', 'https://evil.example/c.json', None, ''):
+            with pytest.raises(OAuthError) as excinfo:
+                service.exchange_code(code, other, REDIRECT, VERIFIER, now=NOW + timedelta(seconds=5))
+            assert _error(excinfo) == 'invalid_grant'
+
+        assert _grant().revoked_at is None
+        assert service.validate_access_token(first['access_token'], RESOURCE, now=NOW + timedelta(seconds=6))
+        assert AuditLog.query.filter_by(action_type=service.AUDIT_CODE_REUSE).count() == 0
+
     def test_a_denied_request_has_nothing_to_exchange(self, world):
         request = _request(world)
         service.deny_request(request, world['user'], now=NOW)
@@ -555,29 +598,53 @@ class TestAccessTokenValidation:
         assert service.validate_access_token(
             response['access_token'], RESOURCE, now=NOW + timedelta(minutes=30)) is None
 
-    def test_removed_member_is_refused(self, world):
+    def test_removed_member_is_refused_and_the_connection_ended_for_good(self, world):
         response = _tokens(world)
         db.session.delete(world['membership'])
         db.session.commit()
+
         assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
 
-    def test_anonymised_or_deleted_user_is_refused(self, world):
+        grant = _grant()
+        assert grant.revoked_at == NOW and grant.revoke_reason == settings.REVOKED_OWNER_GONE
+        entry = AuditLog.query.filter_by(action_type=service.AUDIT_GRANT_REVOKED).one()
+        assert entry.details['reason'] == settings.REVOKED_OWNER_GONE
+        # Added back, the same token does not work again: that takes a new consent
+        db.session.add(TenantMembership(user_id=world['user'].id, tenant_id=world['tenant'].id,
+                                        global_role=GlobalRole.USER))
+        db.session.commit()
+        assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
+        with pytest.raises(OAuthError):
+            service.refresh(response['refresh_token'], CLIENT_ID, now=NOW)
+
+    @pytest.mark.parametrize('state', ['anonymised', 'deleted'])
+    def test_anonymised_or_deleted_user_is_refused(self, world, state):
         response = _tokens(world)
-        world['user'].is_anonymized = True
+        if state == 'anonymised':
+            world['user'].is_anonymized = True
+        else:
+            world['user'].deleted_at = NOW
         db.session.commit()
-        assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
 
-        world['user'].is_anonymized = False
-        world['user'].deleted_at = NOW
-        db.session.commit()
         assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
+        assert _grant().revoke_reason == settings.REVOKED_OWNER_GONE
 
-    def test_deleted_tenant_is_refused_and_served_again_when_restored(self, world):
+    def test_deleted_tenant_is_refused_and_restoring_it_does_not_bring_the_connection_back(self, world):
         response = _tokens(world)
         world['tenant'].deleted_at = NOW
         db.session.commit()
         assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
 
+        world['tenant'].deleted_at = None
+        db.session.commit()
+        assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is None
+        assert _grant().revoke_reason == settings.REVOKED_OWNER_GONE
+
+    def test_a_connection_nobody_used_while_the_organisation_was_deleted_survives_its_restoring(self, world):
+        """Ending the connection happens when a token is presented; a deletion that is undone unnoticed changes nothing."""
+        response = _tokens(world)
+        world['tenant'].deleted_at = NOW
+        db.session.commit()
         world['tenant'].deleted_at = None
         db.session.commit()
         assert service.validate_access_token(response['access_token'], RESOURCE, now=NOW) is not None
@@ -707,13 +774,60 @@ class TestRefresh:
         assert _grant().revoked_at is None
         assert retried['refresh_token'] != lost['refresh_token']
         assert service.validate_access_token(retried['access_token'], RESOURCE, now=moment + timedelta(seconds=11))
-        # What the lost response carried is withdrawn
-        assert service.validate_access_token(lost['access_token'], RESOURCE, now=moment + timedelta(seconds=11)) is None
-        with pytest.raises(OAuthError):
-            service.refresh(lost['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=12))
-        assert _grant().revoked_at is None  # an unknown token is refused without ending anything
+        # What the lost response carried is taken back, not forgotten: the rows stay, marked
+        withdrawn = OAuthToken.query.filter(OAuthToken.withdrawn_at.isnot(None)).all()
+        assert sorted(token.kind for token in withdrawn) == ['access', 'refresh']
+        assert {token.token_hash for token in withdrawn} == {
+            hashlib.sha256(lost[name].encode()).hexdigest() for name in ('access_token', 'refresh_token')}
         # ... and the retried pair carries on
         assert service.refresh(retried['refresh_token'], CLIENT_ID, now=moment + timedelta(minutes=30))
+        assert _grant().revoked_at is None
+
+    @pytest.mark.parametrize('which', ['access_token', 'refresh_token'])
+    def test_using_a_withdrawn_token_ends_the_connection(self, world, which):
+        """If the "lost" response did arrive, two parties hold tokens. The first use of the withdrawn pair shows it."""
+        first = _tokens(world)
+        moment = NOW + timedelta(minutes=10)
+        withdrawn = service.refresh(first['refresh_token'], CLIENT_ID, now=moment)
+        replayed = service.refresh(first['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=10))
+        later = moment + timedelta(seconds=20)
+
+        if which == 'access_token':
+            assert service.validate_access_token(withdrawn['access_token'], RESOURCE, now=later) is None
+        else:
+            with pytest.raises(OAuthError) as excinfo:
+                service.refresh(withdrawn['refresh_token'], CLIENT_ID, now=later)
+            assert _error(excinfo) == 'invalid_grant'
+
+        grant = _grant()
+        assert grant.revoked_at == later and grant.revoke_reason == settings.REVOKED_REFRESH_REUSE
+        entry = AuditLog.query.filter_by(action_type=service.AUDIT_REFRESH_REUSE).one()
+        assert entry.tenant_id == world['tenant'].id
+        assert service.validate_access_token(replayed['access_token'], RESOURCE, now=later) is None
+        with pytest.raises(OAuthError):
+            service.refresh(replayed['refresh_token'], CLIENT_ID, now=later)
+
+    def test_the_grace_is_given_once_per_token(self, world):
+        first = _tokens(world)
+        moment = NOW + timedelta(minutes=10)
+        service.refresh(first['refresh_token'], CLIENT_ID, now=moment)
+        second = service.refresh(first['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=5))
+
+        with pytest.raises(OAuthError):
+            service.refresh(first['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=10))
+
+        assert _grant().revoke_reason == settings.REVOKED_REFRESH_REUSE
+        assert service.validate_access_token(
+            second['access_token'], RESOURCE, now=moment + timedelta(seconds=11)) is None
+
+    def test_a_withdrawn_token_does_not_get_a_grace_of_its_own(self, world):
+        first = _tokens(world)
+        moment = NOW + timedelta(minutes=10)
+        withdrawn = service.refresh(first['refresh_token'], CLIENT_ID, now=moment)
+        service.refresh(first['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=1))
+        with pytest.raises(OAuthError):
+            service.refresh(withdrawn['refresh_token'], CLIENT_ID, now=moment + timedelta(seconds=2))
+        assert _grant().revoked_at is not None
 
     def test_no_grace_once_the_new_access_token_was_used(self, world):
         first = _tokens(world)

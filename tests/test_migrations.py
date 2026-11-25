@@ -944,3 +944,100 @@ def test_oauth_migration_creates_the_tables_itself_with_their_constraints(app) -
         with pytest.raises(IntegrityError):
             db.session.commit()
         db.session.rollback()
+
+
+# ==================== oauth_tokens.withdrawn_at and repeat_answered_at (2.8.0) ====================
+
+OAUTH_REUSE_COLUMNS = ("withdrawn_at", "repeat_answered_at")
+
+def test_startup_adds_the_withdrawn_column_to_a_database_that_has_the_2_7_0_tables(tmp_path: Path) -> None:
+    from migrations import column_exists, migrate_2_8_0, run_migrations
+
+    db_path = tmp_path / "fresh.db"
+    app_module, test_app = load_test_app(
+        secret_key="migration-oauth-withdrawn", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+        assert all(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+
+        # As 2.7.0 left it: the table without the columns, and 2.8.0 not recorded
+        db.session.remove()
+        with db.engine.connect() as conn:
+            for name in OAUTH_REUSE_COLUMNS:
+                conn.execute(db.text(f"ALTER TABLE oauth_tokens DROP COLUMN {name}"))
+            conn.execute(db.text("DELETE FROM schema_migrations WHERE version = '2.8.0'"))
+            conn.commit()
+        assert not any(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert all(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.8.0" in versions
+        assert run_migrations(db) == 0
+        assert migrate_2_8_0(db) == 0
+
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+
+
+def test_withdrawn_column_migration_on_the_fixture_database(app) -> None:
+    """On the fixture database (PostgreSQL in CI): add, add again, and use the column."""
+    from datetime import datetime, timedelta
+    from migrations import column_exists, migrate_2_8_0
+    from models import OAuthClient, OAuthGrant, OAuthToken, Tenant, User
+
+    assert all(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+    assert migrate_2_8_0(db) == 0
+
+    db.session.remove()
+    with db.engine.connect() as conn:
+        for name in OAUTH_REUSE_COLUMNS:
+            conn.execute(db.text(f"ALTER TABLE oauth_tokens DROP COLUMN {name}"))
+        conn.commit()
+    assert not any(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+
+    assert migrate_2_8_0(db) == 2
+    assert all(column_exists(db, "oauth_tokens", name) for name in OAUTH_REUSE_COLUMNS)
+    assert migrate_2_8_0(db) == 0
+
+    # One of the two already there: only the other is added
+    db.session.remove()
+    with db.engine.connect() as conn:
+        conn.execute(db.text("ALTER TABLE oauth_tokens DROP COLUMN repeat_answered_at"))
+        conn.commit()
+    assert migrate_2_8_0(db) == 1
+
+    now = datetime(2026, 11, 25, 12, 0, 0)
+    tenant = Tenant(domain="fixture.test", name="Fixture")
+    user = User(email="person@fixture.test", sso_domain="fixture.test", auth_type="local")
+    client = OAuthClient(client_id="https://client.example/client.json", client_name="Client", redirect_uris=[])
+    db.session.add_all([tenant, user, client])
+    db.session.flush()
+    grant = OAuthGrant(public_id="grant-1", user_id=user.id, tenant_id=tenant.id, oauth_client_id=client.id,
+                       resource="https://decisions.example/api/mcp", expires_at=now + timedelta(days=180))
+    db.session.add(grant)
+    db.session.flush()
+    db.session.add(OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_ACCESS, token_hash="a" * 64,
+                              expires_at=now + timedelta(hours=1), withdrawn_at=now, repeat_answered_at=now))
+    db.session.commit()
+    db.session.expire_all()
+    assert OAuthToken.query.one().withdrawn_at == now
+    assert OAuthToken.query.one().repeat_answered_at == now
+
+
+def test_withdrawn_column_migration_does_nothing_without_the_table() -> None:
+    from unittest.mock import MagicMock, patch
+    from migrations import migrate_2_8_0
+
+    with patch("migrations.table_exists", return_value=False), patch("migrations.add_column") as add_column:
+        assert migrate_2_8_0(MagicMock()) == 0
+    add_column.assert_not_called()
