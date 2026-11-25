@@ -155,6 +155,11 @@
               "src/styles.scss"
             ],
             "scripts": []
+          },
+          "configurations": {
+            "community": {
+              "tsConfig": "tsconfig.spec.ce.json"
+            }
           }
         }
       }

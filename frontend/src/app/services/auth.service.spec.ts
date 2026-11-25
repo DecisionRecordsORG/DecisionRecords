@@ -197,8 +197,9 @@ describe('AuthService', () => {
 
       service.logout().subscribe();
 
-      const req = httpMock.expectOne('/logout');
-      expect(req.request.method).toBe('GET');
+      // The JSON endpoint, not the /logout page that answers with a redirect
+      const req = httpMock.expectOne('/api/auth/logout');
+      expect(req.request.method).toBe('POST');
       req.flush({});
       tick();
 

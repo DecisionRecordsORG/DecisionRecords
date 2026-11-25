@@ -1,0 +1,22 @@
+/**
+ * TypeScript Spec Configuration for Community Edition
+ *
+ * Extends tsconfig.ce.json (which remaps @ee/* to stubs) and includes the same
+ * files as tsconfig.spec.json, so the unit tests compile without the ee/
+ * directory. CI runs them this way.
+ *
+ * Usage: ng test --configuration=community
+ */
+{
+  "extends": "./tsconfig.ce.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/spec",
+    "types": [
+      "jasmine"
+    ]
+  },
+  "include": [
+    "src/**/*.spec.ts",
+    "src/**/*.d.ts"
+  ]
+}

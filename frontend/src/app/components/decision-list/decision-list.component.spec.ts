@@ -7,6 +7,7 @@ import { DecisionListComponent } from './decision-list.component';
 import { DecisionService } from '../../services/decision.service';
 import { AuthService } from '../../services/auth.service';
 import { Decision } from '../../models/decision.model';
+import { tenantTemplate } from '../../services/decision-template.testing';
 
 describe('DecisionListComponent', () => {
   let component: DecisionListComponent;
@@ -80,18 +81,28 @@ describe('DecisionListComponent', () => {
     httpMock.verify();
   });
 
-  it('should create', () => {
+  /**
+   * Answer everything the page asks for when it opens: who is signed in, the
+   * decisions, the spaces for the space filter, and the tenant's decision
+   * template. The verify() above fails a spec that leaves any of them open,
+   * so a new request added to the page has to be answered here.
+   */
+  function loadPage(decisions: Decision[]): void {
     httpMock.expectOne('/api/user/me').flush(mockUser);
     fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    httpMock.expectOne('/api/decisions').flush(decisions);
+    httpMock.expectOne('/api/spaces').flush([]);
+    httpMock.expectOne('/api/tenant/decision-template').flush(tenantTemplate());
+  }
+
+  it('should create', () => {
+    loadPage(mockDecisions);
 
     expect(component).toBeTruthy();
   });
 
   it('should load decisions on init', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     expect(component.decisions.length).toBe(3);
@@ -100,9 +111,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should filter decisions by search term', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.searchTerm = 'Angular';
@@ -113,9 +122,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should filter decisions by status', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.filterByStatus('accepted');
@@ -126,9 +133,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should clear status filter when empty string passed', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.filterByStatus('accepted');
@@ -139,9 +144,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should combine search and status filters', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.searchTerm = 'Use';
@@ -153,9 +156,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should search in context field', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.searchTerm = 'framework';
@@ -166,9 +167,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should search case-insensitively', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.searchTerm = 'ANGULAR';
@@ -178,9 +177,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should show empty state when no decisions', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush([]);
+    loadPage([]);
     tick();
 
     expect(component.decisions.length).toBe(0);
@@ -188,9 +185,7 @@ describe('DecisionListComponent', () => {
   }));
 
   it('should show empty filtered state when no matches', fakeAsync(() => {
-    httpMock.expectOne('/api/user/me').flush(mockUser);
-    fixture.detectChanges();
-    httpMock.expectOne('/api/decisions').flush(mockDecisions);
+    loadPage(mockDecisions);
     tick();
 
     component.searchTerm = 'nonexistent';

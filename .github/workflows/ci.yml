@@ -323,6 +323,36 @@ jobs:
           path: frontend/dist/
           retention-days: 7
 
+  # Frontend Unit Tests
+  # The Karma suite, once, in headless Chrome, compiled the way the Community
+  # build is: @ee/* imports resolve to the stubs, because the private ee
+  # submodule is not checked out here. It was not run in CI before and 16 specs
+  # went stale unnoticed; the Quality Gate requires it now.
+  test-frontend:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Run unit tests (Community Edition)
+        run: |
+          cd frontend
+          npm test -- --configuration=community --watch=false --browsers=ChromeHeadless --progress=false
+
   # Docker Build (Community Edition)
   # Building is not enough: the image is started and must answer /api/health.
   # A build never imports the app, so a module missing from the image only
@@ -387,7 +417,7 @@ jobs:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Quality Gate (Manual)' || 'Quality Gate' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [delivery-contract, release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, test-backend-postgres, build-frontend, build-docker]
+    needs: [delivery-contract, release-metadata, public-artifact-check, boundary-check, private-submodule-lineage, python-syntax, test-backend, test-backend-postgres, build-frontend, test-frontend, build-docker]
     if: always()
 
     steps:
@@ -402,4 +432,5 @@ jobs:
           if [ "${{ needs.test-backend.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.test-backend-postgres.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.build-frontend.result }}" != "success" ]; then exit 1; fi
+          if [ "${{ needs.test-frontend.result }}" != "success" ]; then exit 1; fi
           if [ "${{ needs.build-docker.result }}" != "success" ]; then exit 1; fi

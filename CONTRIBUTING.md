@@ -105,9 +105,9 @@ uv run python scripts/qa_check.py --mode commit
 # Full local QA before release/deploy
 uv run python scripts/qa_check.py --mode full
 
-# Frontend tests
+# Frontend unit tests (once, headless, as CI runs them)
 cd frontend
-npm test
+npm test -- --configuration=community --watch=false --browsers=ChromeHeadless
 
 # E2E tests
 npx playwright test

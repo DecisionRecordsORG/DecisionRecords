@@ -15,8 +15,7 @@ import { TEMPLATE_CATALOG, governanceTenantTemplate, tenantTemplate } from '../.
  * profile questions in it.
  *
  * Kept apart from decision-list.component.spec.ts, whose specs use the real
- * AuthService and already fail on main; these use a stand-in so they do not
- * depend on that.
+ * AuthService; these use a stand-in so each spec can choose who is signed in.
  */
 
 @Component({
