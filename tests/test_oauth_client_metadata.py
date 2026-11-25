@@ -530,9 +530,15 @@ class TestTheRealTransport:
 
     def test_a_slow_server_is_given_up_on(self, server):
         import time
+        import http.client
         server['delay'] = 1.5
         started = time.monotonic()
-        with pytest.raises(OSError):
+        # Giving up is what is tested, and in time. It surfaces as a timeout
+        # (OSError) or, when the connection ends before any response head
+        # arrived, as an incomplete response (HTTPException): on a loaded CI
+        # runner the second happens now and then. fetch_json turns both into
+        # FetchError.
+        with pytest.raises((OSError, http.client.HTTPException)):
             safe_fetch.https_get('client.example.com', '93.184.216.34', '/slow.json', time.monotonic() + 0.3)
         assert time.monotonic() - started < 1.4
 
