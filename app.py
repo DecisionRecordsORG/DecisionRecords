@@ -10536,8 +10536,12 @@ def setup_test_oauth():
 
         enabled               false switches OAuth off again (default true)
         clients               [{client_id, client_name, redirect_uris}]
-        ai_enabled_domains    organisations whose AI features are switched on
+        ai_enabled_domains    organisations whose AI features and external AI
+                              access are switched on
         ai_disabled_domains   organisations whose AI features are switched off
+        external_access_disabled_domains
+                              organisations with AI features on and external
+                              AI access off
         memberships           [{email, domain}] extra organisations for a user
     """
     if os.environ.get('FLASK_ENV') != 'testing':
@@ -10554,13 +10558,16 @@ def setup_test_oauth():
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
 
-        for domains, value in ((data.get('ai_enabled_domains') or [], True),
-                               (data.get('ai_disabled_domains') or [], False)):
+        for domains, ai_features, external_access in (
+                (data.get('ai_enabled_domains') or [], True, True),
+                (data.get('ai_disabled_domains') or [], False, False),
+                (data.get('external_access_disabled_domains') or [], True, False)):
             for domain in domains:
                 tenant = Tenant.query.filter_by(domain=domain).first()
                 if tenant is None:
                     return jsonify({'error': f'No organisation {domain}'}), 400
-                tenant.ai_features_enabled = value
+                tenant.ai_features_enabled = ai_features
+                tenant.ai_external_access_enabled = external_access
 
         for entry in data.get('memberships') or []:
             user = User.query.filter_by(email=entry.get('email')).first()

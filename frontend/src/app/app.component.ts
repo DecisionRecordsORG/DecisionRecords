@@ -188,12 +188,21 @@ export class AppComponent implements OnInit {
       this.http.get<{ request: string | null }>('/api/oauth/pending').subscribe({
         next: answer => {
           if (answer?.request) {
-            this.router.navigate(['/oauth/consent'], { queryParams: { request: answer.request } });
+            // A full page load, not a route change inside the app: the server
+            // sends the consent page with a header that forbids showing it in
+            // a frame, and a header only applies to a document the browser
+            // loads from that address.
+            this.loadPage('/oauth/consent?request=' + encodeURIComponent(answer.request));
           }
         },
         error: () => { /* not offered here, or nothing pending */ }
       });
     });
+  }
+
+  /** Leave the app for another address with a full page load. Separate so tests can watch it. */
+  loadPage(address: string): void {
+    window.location.assign(address);
   }
 
   private updateNavbarVisibility(url: string): void {
