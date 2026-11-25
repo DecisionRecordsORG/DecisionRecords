@@ -174,6 +174,23 @@ server {
 }
 ```
 
+The application has to be told about the proxy, or it sees every visitor as the proxy: all visitors then share one rate-limit allowance (200 requests a minute between them) and the login history records the proxy's address. Name the proxy in `TRUSTED_PROXIES`, and publish the container's port on the loopback address so nobody can reach the application around the proxy:
+
+```yaml
+# docker-compose.yml
+services:
+  app:
+    ports:
+      - "127.0.0.1:3000:8000"
+    environment:
+      # The address the proxy connects from, as the container sees it.
+      # For a proxy on the Docker host this is the network's gateway:
+      #   docker network inspect <network> --format '{{(index .IPAM.Config 0).Gateway}}'
+      - TRUSTED_PROXIES=172.18.0.1
+```
+
+If the proxy is another container on the same Docker network, use that network's subnet instead (for example `172.18.0.0/16`). Leave `TRUSTED_PROXIES` unset when there is no proxy. Details and the rules for choosing the value: [Behind a reverse proxy](configuration.md#behind-a-reverse-proxy).
+
 ### Caddy
 
 ```caddyfile
@@ -299,10 +316,11 @@ docker-compose up -d
 ## Security Recommendations
 
 1. **Use HTTPS** - Always run behind a reverse proxy with TLS
-2. **Strong SECRET_KEY** - Use at least 32 random characters
-3. **Database security** - Use strong passwords, enable SSL
-4. **Regular backups** - Automate daily backups
-5. **Keep updated** - Pull new images regularly
+2. **Name your proxy** - Set `TRUSTED_PROXIES` to the proxy's address so rate limits apply per visitor and the login history records real addresses; never list an address visitors can connect from
+3. **Strong SECRET_KEY** - Use at least 32 random characters
+4. **Database security** - Use strong passwords, enable SSL
+5. **Regular backups** - Automate daily backups
+6. **Keep updated** - Pull new images regularly
 
 ## GDPR Compliance
 
