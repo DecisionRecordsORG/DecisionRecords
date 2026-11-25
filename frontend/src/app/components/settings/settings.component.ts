@@ -28,6 +28,7 @@ import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 import { DecisionTemplateSettingsComponent } from '../decision-template-settings/decision-template-settings.component';
+import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/connected-apps.component';
 
 @Component({
   selector: 'app-settings',
@@ -55,7 +56,8 @@ import { DecisionTemplateSettingsComponent } from '../decision-template-settings
     MatTooltipModule,
     ConfirmDialogComponent,
     SetupLinkDialogComponent,
-    DecisionTemplateSettingsComponent
+    DecisionTemplateSettingsComponent,
+    ConnectedAppsComponent
   ],
   template: `
     <div class="settings-container">
@@ -1452,6 +1454,11 @@ import { DecisionTemplateSettingsComponent } from '../decision-template-settings
                   </mat-card>
                 }
               }
+            }
+
+            <!-- Apps that members connected through the consent page (Enterprise; shows nothing where that is not offered) -->
+            @if (!authService.isMasterAccount) {
+              <app-connected-apps mode="tenant"></app-connected-apps>
             }
           </div>
         </mat-tab>

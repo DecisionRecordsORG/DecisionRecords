@@ -7,7 +7,8 @@ import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
 import { SeoService } from './services/seo.service';
-import { filter } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { filter, take } from 'rxjs/operators';
 import { CookieConsentComponent, CookieConsentStatus } from './components/shared/cookie-consent.component';
 
 /**
@@ -46,7 +47,7 @@ import { CookieConsentComponent, CookieConsentStatus } from './components/shared
         </div>
       </footer>
     }
-    @if (featureFlags.analyticsEnabled) {
+    @if (featureFlags.analyticsEnabled && !isAppConsentPage) {
       <app-cookie-consent (consentChanged)="onCookieConsentChanged($event)"></app-cookie-consent>
     }
   `,
@@ -95,13 +96,18 @@ import { CookieConsentComponent, CookieConsentStatus } from './components/shared
 export class AppComponent implements OnInit {
   showAppNavbar = false;
   isLandingPage = false;
+  // The page that asks whether an app may be connected. The analytics cookie
+  // notice is not shown on it: it would lie over the Allow and Cancel buttons
+  // with an "Accept" button of its own.
+  isAppConsentPage = false;
 
   // Pages where we don't show the app navbar (landing, login, setup)
   // Note: Only exact matches for login pages, NOT all routes under them
   private noNavbarRoutes = [
     '/',
     '/license',
-    '/setup'
+    '/setup',
+    '/oauth'  // The consent page for connecting an app: one question, nothing else to click
   ];
 
   // Exact match routes (login pages only, not their sub-routes)
@@ -115,7 +121,8 @@ export class AppComponent implements OnInit {
     public featureFlags: FeatureFlagsService,
     private router: Router,
     private postHogService: PostHogService,
-    private seoService: SeoService
+    private seoService: SeoService,
+    private http: HttpClient
   ) {
     this.seoService.init();
 
@@ -140,6 +147,66 @@ export class AppComponent implements OnInit {
     ).subscribe((event: NavigationEnd) => {
       this.updateNavbarVisibility(event.urlAfterRedirects);
     });
+
+    // Whenever someone becomes signed in (a page load with a session, or a
+    // sign-in inside the app), pick up a request to connect an app that this
+    // browser was in the middle of.
+    this.authService.currentUser$.subscribe(current => {
+      const signedInUserId = current?.user && !current.isMaster ? current.user.id : null;
+      if (signedInUserId !== null && signedInUserId !== this.resumeCheckedForUserId) {
+        this.resumeCheckedForUserId = signedInUserId;
+        this.resumePendingAppConnection();
+      } else if (signedInUserId === null) {
+        this.resumeCheckedForUserId = null;
+      }
+    });
+  }
+
+  private resumeCheckedForUserId: number | null = null;
+
+  /**
+   * Lead a person back to the consent page they were sent away from to sign in.
+   *
+   * An app that wants to be connected sends the browser to the server, which
+   * remembers the request in a short-lived cookie and shows the consent page.
+   * Someone who was not signed in then signs in, by whichever method (password,
+   * passkey, single sign-on, Google or Microsoft: all of them end with the app
+   * loading for a signed-in user), and would otherwise land on their decision
+   * list with the request forgotten. The server answers once per request.
+   *
+   * Enterprise Edition only; the Community Edition has no such requests.
+   */
+  private resumePendingAppConnection(): void {
+    // The flags start as "community" and change once when the server has
+    // answered, so in the Community Edition this never asks anything.
+    this.featureFlags.flags$.pipe(
+      filter(flags => flags.is_enterprise),
+      take(1)
+    ).subscribe(() => {
+      if (!this.authService.isAuthenticated || this.authService.isMasterAccount) {
+        return;
+      }
+      if (this.router.url.split('?')[0] === '/oauth/consent') {
+        return;
+      }
+      this.http.get<{ request: string | null }>('/api/oauth/pending').subscribe({
+        next: answer => {
+          if (answer?.request) {
+            // A full page load, not a route change inside the app: the server
+            // sends the consent page with a header that forbids showing it in
+            // a frame, and a header only applies to a document the browser
+            // loads from that address.
+            this.loadPage('/oauth/consent?request=' + encodeURIComponent(answer.request));
+          }
+        },
+        error: () => { /* not offered here, or nothing pending */ }
+      });
+    });
+  }
+
+  /** Leave the app for another address with a full page load. Separate so tests can watch it. */
+  loadPage(address: string): void {
+    window.location.assign(address);
   }
 
   private updateNavbarVisibility(url: string): void {
@@ -148,6 +215,7 @@ export class AppComponent implements OnInit {
 
     // Check if this is the landing page
     this.isLandingPage = path === '/';
+    this.isAppConsentPage = path === '/oauth/consent';
 
     // Check if current path is a no-navbar route (prefix match)
     const isNoNavbarRoute = this.noNavbarRoutes.some(route => {

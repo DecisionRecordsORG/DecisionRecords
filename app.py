@@ -10554,6 +10554,84 @@ def reset_test_database():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/test/oauth-setup', methods=['POST'])
+def setup_test_oauth():
+    """Prepare the Enterprise OAuth server for an end-to-end test. TEST ONLY.
+
+    Switches on AI, the MCP server and OAuth, and stores the application the
+    test plays as an already validated client, so that the server does not
+    try to fetch its metadata document from the internet. Body (all optional):
+
+        enabled               false switches OAuth off again (default true)
+        clients               [{client_id, client_name, redirect_uris}]
+        ai_enabled_domains    organisations whose AI features and external AI
+                              access are switched on
+        ai_disabled_domains   organisations whose AI features are switched off
+        external_access_disabled_domains
+                              organisations with AI features on and external
+                              AI access off
+        memberships           [{email, domain}] extra organisations for a user
+    """
+    if os.environ.get('FLASK_ENV') != 'testing':
+        return jsonify({'error': 'Not available'}), 403
+    if not is_enterprise():
+        return jsonify({'error': 'Enterprise Edition only'}), 404
+
+    from models import OAuthClient
+    from ee.backend.oauth_server import config as oauth_config, rate_limits as oauth_rate_limits
+
+    data = request.get_json(force=True, silent=True) or {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
+
+        for domains, ai_features, external_access in (
+                (data.get('ai_enabled_domains') or [], True, True),
+                (data.get('ai_disabled_domains') or [], False, False),
+                (data.get('external_access_disabled_domains') or [], True, False)):
+            for domain in domains:
+                tenant = Tenant.query.filter_by(domain=domain).first()
+                if tenant is None:
+                    return jsonify({'error': f'No organisation {domain}'}), 400
+                tenant.ai_features_enabled = ai_features
+                tenant.ai_external_access_enabled = external_access
+
+        for entry in data.get('memberships') or []:
+            user = User.query.filter_by(email=entry.get('email')).first()
+            tenant = Tenant.query.filter_by(domain=entry.get('domain')).first()
+            if user is None or tenant is None:
+                return jsonify({'error': f'Unknown user or organisation in {entry}'}), 400
+            if not TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first():
+                db.session.add(TenantMembership(user_id=user.id, tenant_id=tenant.id, global_role=GlobalRole.USER))
+
+        for entry in data.get('clients') or []:
+            client = OAuthClient.query.filter_by(client_id=entry['client_id']).first()
+            if client is None:
+                client = OAuthClient(client_id=entry['client_id'], created_at=now)
+                db.session.add(client)
+            client.client_name = entry.get('client_name') or 'Test Client'
+            client.redirect_uris = list(entry.get('redirect_uris') or [])
+            client.metadata_fetched_at = now
+            client.metadata_expires_at = now + timedelta(days=1)
+            client.disabled_at = None
+        db.session.commit()
+
+        oauth_config.set_enabled(bool(data.get('enabled', True)))
+        oauth_rate_limits.reset()
+        return jsonify({
+            'message': 'OAuth test setup complete',
+            'enabled': oauth_config.is_enabled(),
+            'resource': oauth_config.resource_url(),
+            'issuer': oauth_config.issuer(),
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"OAuth test setup failed: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/test/create-user', methods=['POST'])
 def create_test_user():
     """Create a user with specified role. TEST ONLY."""
