@@ -39,6 +39,7 @@ from security import (
     sanitize_title, sanitize_text_field, sanitize_name, sanitize_email,
     sanitize_request_data, sanitize_string
 )
+from client_address import get_client_address, rate_limit_key, trusted_proxy_networks
 from feature_flags import (
     require_slack, require_teams, require_enterprise, require_feature,
     get_enabled_features, is_slack_enabled, is_teams_enabled, is_enterprise,
@@ -203,16 +204,23 @@ else:
     # Initialize rate limiter (if available)
     try:
         from flask_limiter import Limiter
-        from flask_limiter.util import get_remote_address
 
+        # One bucket per visitor. The key is the visitor's address as
+        # client_address.py establishes it: the connection's peer, or behind
+        # proxies named in TRUSTED_PROXIES the address they report. Keyed on
+        # the peer alone, every visitor behind a reverse proxy shared one
+        # bucket and anyone could use it up for everybody.
         limiter = Limiter(
-            key_func=get_remote_address,
+            key_func=rate_limit_key,
             app=app,
             default_limits=["200 per minute"],
             storage_uri=app.config['RATELIMIT_STORAGE_URL'],
         )
         RATE_LIMITING_ENABLED = True
-        logger.info("Rate limiting enabled")
+        logger.info(
+            "Rate limiting enabled, one bucket per visitor address (%d trusted proxy network(s))",
+            len(trusted_proxy_networks()),
+        )
     except ImportError:
         limiter = None
         RATE_LIMITING_ENABLED = False
@@ -1306,7 +1314,7 @@ def local_login():
     log_security_event('auth', f"Master login attempt for user", severity='INFO')
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     # Support both form data and JSON
@@ -1395,7 +1403,7 @@ def api_tenant_login():
     log_security_event('auth', f"Tenant login attempt", severity='INFO')
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     data = request.get_json() or {}
@@ -1561,7 +1569,7 @@ def sso_login(config_id):
 def sso_callback():
     """Handle SSO callback."""
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     config_id = session.pop('sso_config_id', None)
@@ -1833,7 +1841,7 @@ def slack_oidc_callback():
     )
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     # Get callback parameters
@@ -2176,7 +2184,7 @@ def google_oauth_callback():
     )
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     # Get callback parameters
@@ -2516,7 +2524,7 @@ def microsoft_oauth_callback():
     )
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     # Get callback parameters
@@ -2930,7 +2938,7 @@ def _teams_sso_sign_in(token):
         success=True,
         user_id=user.id,
         tenant_domain=domain,
-        ip_address=request.headers.get('CF-Connecting-IP', request.remote_addr),
+        ip_address=get_client_address(),
         user_agent=request.headers.get('User-Agent')
     )
 
@@ -4493,7 +4501,7 @@ def api_update_user_consent():
         return jsonify({'error': 'granted must be a boolean'}), 400
 
     user = g.current_user
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
 
     consent = UserConsent.query.filter_by(user_id=user.id, consent_type=consent_type).first()
 
@@ -8491,7 +8499,7 @@ def api_webauthn_auth_options():
 def api_webauthn_auth_verify():
     """Verify WebAuthn authentication and log in user."""
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     data = request.get_json() or {}
@@ -13482,7 +13490,7 @@ def teams_oidc_callback():
     )
 
     # Capture request metadata for login history
-    ip_address = request.headers.get('CF-Connecting-IP', request.remote_addr)
+    ip_address = get_client_address()
     user_agent = request.headers.get('User-Agent')
 
     error = request.args.get('error')
