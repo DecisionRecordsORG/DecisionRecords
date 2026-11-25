@@ -2698,3 +2698,39 @@ class TestSuperAdminSwitch:
         self._ready(world)
         assert world.master().get(self.URL).status_code == 200
         assert world.signed_in(world.user).get('/api/user/oauth/grants').status_code == 404
+
+
+# ============================================================================
+# 13. IDS IN URL PATHS
+# ============================================================================
+
+class TestIdsInPathsSurviveTheScannerFilter:
+    """
+    The app answers 404 to any path containing a scanner pattern ("wp-",
+    "shell", "debug" and so on). An id that is part of a path must not be able
+    to spell one. Found in CI on 2026-11-25: a base64url request id containing
+    "WP-" made its own consent page answer 404.
+    """
+
+    def test_a_request_id_is_hex(self, on):
+        for _ in range(20):
+            public_id = on.start()
+            assert len(public_id) == 64 and set(public_id) <= set('0123456789abcdef')
+
+    def test_hex_and_uuids_cannot_spell_a_blocked_pattern(self):
+        from app import ATTACK_PATH_PATTERNS
+        alphabet = set('0123456789abcdef-')
+        for pattern in ATTACK_PATH_PATTERNS:
+            assert not set(pattern) <= alphabet, f'{pattern!r} could appear in an id'
+
+    def test_the_paths_the_ids_appear_in_are_not_blocked_themselves(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        assert on.view(client, public_id).status_code == 200
+        assert client.get('/api/user/oauth/grants').status_code == 200
+
+    def test_a_path_with_a_blocked_pattern_is_what_a_bad_id_would_have_met(self, on):
+        """Pins the filter's behaviour that made the rule above necessary."""
+        client = on.signed_in(on.user)
+        response = client.get('/api/oauth/requests/abcWP-def')
+        assert response.status_code == 404 and response.get_data() == b''
