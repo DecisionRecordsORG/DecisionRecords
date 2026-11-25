@@ -10563,6 +10563,8 @@ def setup_test_oauth():
     try to fetch its metadata document from the internet. Body (all optional):
 
         enabled               false switches OAuth off again (default true)
+        system_ai, system_mcp false switches AI or the MCP server off for the
+                              installation (default true); OAuth is then off
         clients               [{client_id, client_name, redirect_uris}]
         ai_enabled_domains    organisations whose AI features and external AI
                               access are switched on
@@ -10583,8 +10585,8 @@ def setup_test_oauth():
     data = request.get_json(force=True, silent=True) or {}
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     try:
-        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
-        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true' if data.get('system_ai', True) else 'false')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true' if data.get('system_mcp', True) else 'false')
         SystemConfig.set(SystemConfig.KEY_AI_EXTERNAL_API_ENABLED, 'true')
 
         for domains, ai_features, external_access in (
@@ -10618,7 +10620,9 @@ def setup_test_oauth():
             client.disabled_at = None
         db.session.commit()
 
-        oauth_config.set_enabled(bool(data.get('enabled', True)))
+        # With AI or the MCP server off the switch cannot be on, as in the real setting
+        wanted = bool(data.get('enabled', True)) and data.get('system_ai', True) and data.get('system_mcp', True)
+        oauth_config.set_enabled(bool(wanted))
         oauth_rate_limits.reset()
         return jsonify({
             'message': 'OAuth test setup complete',
