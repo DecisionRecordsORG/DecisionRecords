@@ -675,24 +675,33 @@ class TestDocumentValidation:
     def test_an_unusable_client_uri_is_dropped_not_fatal(self, client_uri):
         assert client_metadata.validate_document(CLIENT_ID, _document(client_uri=client_uri)).client_uri is None
 
+    # 'default', 'min' and 'max' stand for the module's bounds, so that the table
+    # can be built when the Enterprise modules are absent and the tests are skipped
     @pytest.mark.parametrize('header,expected', [
-        (None, client_metadata.DEFAULT_CACHE),
-        ('', client_metadata.DEFAULT_CACHE),
-        ('public', client_metadata.DEFAULT_CACHE),
+        (None, 'default'),
+        ('', 'default'),
+        ('public', 'default'),
         ('max-age=3600', timedelta(hours=1)),
         ('public, max-age=7200', timedelta(hours=2)),
         ('Max-Age=600', timedelta(minutes=10)),
-        ('max-age=1', client_metadata.MIN_CACHE),
-        ('max-age=0', client_metadata.MIN_CACHE),
-        ('max-age=31536000', client_metadata.MAX_CACHE),
-        ('no-store', client_metadata.MIN_CACHE),
-        ('no-cache, max-age=86400', client_metadata.MIN_CACHE),
-        ('s-maxage=99999', client_metadata.DEFAULT_CACHE),
-        ('max-age=abc', client_metadata.DEFAULT_CACHE),
+        ('max-age=1', 'min'),
+        ('max-age=0', 'min'),
+        ('max-age=31536000', 'max'),
+        ('no-store', 'min'),
+        ('no-cache, max-age=86400', 'min'),
+        ('s-maxage=99999', 'default'),
+        ('max-age=abc', 'default'),
     ])
     def test_cache_lifetime(self, header, expected):
+        bounds = {'default': client_metadata.DEFAULT_CACHE, 'min': client_metadata.MIN_CACHE,
+                  'max': client_metadata.MAX_CACHE}
         headers = {} if header is None else {'cache-control': header}
-        assert client_metadata.cache_lifetime(headers) == expected
+        assert client_metadata.cache_lifetime(headers) == bounds.get(expected, expected)
+
+    def test_cache_bounds(self):
+        assert client_metadata.MIN_CACHE == timedelta(minutes=5)
+        assert client_metadata.DEFAULT_CACHE == timedelta(hours=1)
+        assert client_metadata.MAX_CACHE == timedelta(hours=24)
 
 
 # ============================================================================
