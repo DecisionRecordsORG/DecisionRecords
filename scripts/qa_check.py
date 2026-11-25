@@ -51,6 +51,8 @@ FRONTEND_QA_FILES = (
     "frontend/tsconfig.app.json",
     "frontend/tsconfig.app.ce.json",
     "frontend/tsconfig.ce.json",
+    "frontend/tsconfig.spec.json",
+    "frontend/tsconfig.spec.ce.json",
 )
 
 COMMUNITY_TEST_ENV = {
@@ -178,6 +180,10 @@ def run_full_checks() -> None:
     run(["uv", "run", "python", "scripts/check_release_metadata.py"])
     run(["uv", "run", "pytest", "tests/", "-q", "--tb=short"], env=COMMUNITY_TEST_ENV)
     run(["npx", "tsc", "-p", "tsconfig.app.ce.json", "--noEmit"], cwd=FRONTEND_ROOT)
+    run(
+        ["npm", "test", "--", "--configuration=community", "--watch=false", "--browsers=ChromeHeadless", "--progress=false"],
+        cwd=FRONTEND_ROOT,
+    )
     run(["npm", "run", "build", "--", "--configuration=community", "--progress=false"], cwd=FRONTEND_ROOT)
 
 

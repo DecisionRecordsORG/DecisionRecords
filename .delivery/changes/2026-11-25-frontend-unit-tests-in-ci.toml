@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-frontend-unit-tests-in-ci"
+title = "Repair the stale frontend unit tests and run the suite in CI"
+summary = "Sixteen frontend unit tests failed on main because CI never ran the suite. All sixteen were stale specs; no application code was wrong and none is changed. The AppComponent specs did not answer the version and feature-flag requests the app shell has made since December 2025 and January 2026, and looked for the navbar and a footer About link on the landing page, where the shell has shown neither since January 2026. The DecisionListComponent specs did not answer the spaces request (December 2025) or the decision template request (November 2026). The AuthService logout spec expected GET /logout; the service has posted to /api/auth/logout since December 2025. The specs now describe the intended behaviour, with two added for the landing page. CI gets a required Frontend Unit Tests job (headless Chrome, single run) and the Quality Gate waits for it. A new community test configuration compiles the specs with @ee/* resolved to the stubs, so the suite does not depend on the private submodule. Tests, CI and documentation only: nothing in the shipped app or the Community image changes, so the next Enterprise deploy and Community release carry it without any step of their own."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

@@ -21,6 +21,7 @@ Decision Records is a Flask backend with an Angular frontend. The public reposit
 - Run Enterprise backend tests with `DECISION_RECORDS_EDITION=enterprise AZURE_KEYVAULT_URL= uv run pytest tests/ -q --tb=short`.
 - Install frontend dependencies from `frontend/` with `npm ci`.
 - Build the Community frontend with `npm run build -- --configuration=community`.
+- Run the frontend unit tests from `frontend/` with `npm test -- --configuration=community --watch=false --browsers=ChromeHeadless`. The `community` configuration resolves `@ee/*` to the stubs, as CI does; CI requires the suite to pass. Without `--configuration=community` the specs compile against the private `ee/` checkout.
 - For Enterprise frontend typechecks, create the ignored local symlink `ln -sfn ../../frontend/node_modules ee/frontend/node_modules`, then run `npx tsc -p tsconfig.app.json --noEmit` from `frontend/`.
 - The private marketing site under `ee/marketing` expects Node 20 (`.nvmrc` / `package.json` engines). Its Angular workspace keeps the persistent disk cache off for local builds and keeps Google Fonts inlining off for production builds so macOS local builds do not crash in LMDB native cache code or depend on live font fetches.
 - Run local CE backend with `python run_local.py --community`.
