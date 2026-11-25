@@ -7,7 +7,8 @@ import { VersionService } from './services/version.service';
 import { PostHogService } from './services/posthog.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
 import { SeoService } from './services/seo.service';
-import { filter } from 'rxjs/operators';
+import { HttpClient } from '@angular/common/http';
+import { filter, take } from 'rxjs/operators';
 import { CookieConsentComponent, CookieConsentStatus } from './components/shared/cookie-consent.component';
 
 /**
@@ -101,7 +102,8 @@ export class AppComponent implements OnInit {
   private noNavbarRoutes = [
     '/',
     '/license',
-    '/setup'
+    '/setup',
+    '/oauth'  // The consent page for connecting an app: one question, nothing else to click
   ];
 
   // Exact match routes (login pages only, not their sub-routes)
@@ -115,7 +117,8 @@ export class AppComponent implements OnInit {
     public featureFlags: FeatureFlagsService,
     private router: Router,
     private postHogService: PostHogService,
-    private seoService: SeoService
+    private seoService: SeoService,
+    private http: HttpClient
   ) {
     this.seoService.init();
 
@@ -139,6 +142,57 @@ export class AppComponent implements OnInit {
       filter(event => event instanceof NavigationEnd)
     ).subscribe((event: NavigationEnd) => {
       this.updateNavbarVisibility(event.urlAfterRedirects);
+    });
+
+    // Whenever someone becomes signed in (a page load with a session, or a
+    // sign-in inside the app), pick up a request to connect an app that this
+    // browser was in the middle of.
+    this.authService.currentUser$.subscribe(current => {
+      const signedInUserId = current?.user && !current.isMaster ? current.user.id : null;
+      if (signedInUserId !== null && signedInUserId !== this.resumeCheckedForUserId) {
+        this.resumeCheckedForUserId = signedInUserId;
+        this.resumePendingAppConnection();
+      } else if (signedInUserId === null) {
+        this.resumeCheckedForUserId = null;
+      }
+    });
+  }
+
+  private resumeCheckedForUserId: number | null = null;
+
+  /**
+   * Lead a person back to the consent page they were sent away from to sign in.
+   *
+   * An app that wants to be connected sends the browser to the server, which
+   * remembers the request in a short-lived cookie and shows the consent page.
+   * Someone who was not signed in then signs in, by whichever method (password,
+   * passkey, single sign-on, Google or Microsoft: all of them end with the app
+   * loading for a signed-in user), and would otherwise land on their decision
+   * list with the request forgotten. The server answers once per request.
+   *
+   * Enterprise Edition only; the Community Edition has no such requests.
+   */
+  private resumePendingAppConnection(): void {
+    // The flags start as "community" and change once when the server has
+    // answered, so in the Community Edition this never asks anything.
+    this.featureFlags.flags$.pipe(
+      filter(flags => flags.is_enterprise),
+      take(1)
+    ).subscribe(() => {
+      if (!this.authService.isAuthenticated || this.authService.isMasterAccount) {
+        return;
+      }
+      if (this.router.url.split('?')[0] === '/oauth/consent') {
+        return;
+      }
+      this.http.get<{ request: string | null }>('/api/oauth/pending').subscribe({
+        next: answer => {
+          if (answer?.request) {
+            this.router.navigate(['/oauth/consent'], { queryParams: { request: answer.request } });
+          }
+        },
+        error: () => { /* not offered here, or nothing pending */ }
+      });
     });
   }
 

@@ -24,6 +24,7 @@ import { AdminService } from '../../services/admin.service';
 import { Subscription, User, WebAuthnCredential, GlobalRole } from '../../models/decision.model';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { RoleRequestDialogComponent } from '../shared/role-request-dialog.component';
+import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/connected-apps.component';
 
 // API Key interface
 interface AIApiKey {
@@ -67,7 +68,8 @@ const PASSWORD_REQUIRES_NUMBER = true;
     MatCheckboxModule,
     ClipboardModule,
     RoleRequestDialogComponent,
-    RouterLink
+    RouterLink,
+    ConnectedAppsComponent
   ],
   template: `
     <div class="profile-container">
@@ -549,6 +551,11 @@ const PASSWORD_REQUIRES_NUMBER = true;
           </mat-card>
         }
       }
+
+        <!-- Apps connected through the consent page (Enterprise; shows nothing where that is not offered) -->
+        @if (!setupMode && !authService.isMasterAccount) {
+          <app-connected-apps mode="user"></app-connected-apps>
+        }
 
         <!-- Privacy & Data Section (hidden during setup mode) -->
         @if (!setupMode && !authService.isMasterAccount) {

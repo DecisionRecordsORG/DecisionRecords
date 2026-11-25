@@ -206,6 +206,18 @@ export const routes: Routes = [
     canActivate: [masterGuard]
   },
 
+  // Connecting an app by OAuth (Enterprise Edition): the page on which a
+  // person allows or refuses an app that asked for access. No guard: the page
+  // itself asks a visitor who is not signed in to sign in, and is led back to
+  // afterwards (see resumePendingAppConnection in app.component.ts).
+  {
+    path: 'oauth/consent',
+    loadComponent: () =>
+      import('@ee/components/oauth/oauth-consent/oauth-consent.component')
+        .then(m => m.OAuthConsentComponent)
+        .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent))
+  },
+
   // Slack integration (Enterprise Edition)
   {
     path: 'slack/installed',

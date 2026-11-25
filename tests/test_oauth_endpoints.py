@@ -458,6 +458,125 @@ class TestSwitchedOff:
         assert off.mcp(off.api_key()).status_code == 200
 
 
+class TestAddressesMustBeConfigured:
+    """
+    OAuth cannot be switched on, and is not offered, unless the resource and
+    the issuer are configured and https. Otherwise the Host header of a
+    request would decide where clients are sent and what tokens are for.
+    """
+
+    ADDRESS_SETTINGS = ('MCP_RESOURCE_URL', 'OAUTH_ISSUER', 'OAUTH_BASE_URL', 'APP_BASE_URL')
+
+    def _only(self, world, **settings):
+        for name in self.ADDRESS_SETTINGS:
+            world.monkeypatch.delenv(name, raising=False)
+        for name, value in settings.items():
+            world.monkeypatch.setenv(name, value)
+        SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
+        SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
+
+    @pytest.mark.parametrize('settings', [
+        {},
+        {'MCP_RESOURCE_URL': RESOURCE},                                   # no issuer
+        {'OAUTH_ISSUER': ISSUER},                                         # no resource
+        {'OAUTH_BASE_URL': 'https://public.example.net'},
+        {'APP_BASE_URL': 'https://app.example.net'},
+        {'MCP_RESOURCE_URL': 'http://decisions.example.org/api/mcp', 'OAUTH_ISSUER': ISSUER},
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': 'http://app.decisions.example.org'},
+        {'OAUTH_BASE_URL': 'http://public.example.net', 'APP_BASE_URL': 'https://app.example.net'},
+        {'OAUTH_BASE_URL': 'https://public.example.net', 'APP_BASE_URL': 'http://app.example.net'},
+        {'MCP_RESOURCE_URL': 'decisions.example.org/api/mcp', 'OAUTH_ISSUER': ISSUER},
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': 'ftp://app.decisions.example.org'},
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': 'https://user@app.decisions.example.org'},
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': 'https://app.decisions.example.org?x=1'},
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': '   '},
+        # http is for a developer's own machine only
+        {'MCP_RESOURCE_URL': 'http://192.168.1.10/api/mcp', 'OAUTH_ISSUER': 'http://192.168.1.10'},
+        {'MCP_RESOURCE_URL': 'http://localhost.example.net/api/mcp', 'OAUTH_ISSUER': ISSUER},
+    ])
+    def test_it_cannot_be_switched_on(self, world, settings):
+        self._only(world, **settings)
+
+        with pytest.raises(oauth_config.AddressesNotConfigured):
+            oauth_config.set_enabled(True)
+
+        assert SystemConfig.get(oauth_config.SWITCH_KEY) is None
+        assert oauth_config.is_enabled() is False
+
+    @pytest.mark.parametrize('settings', [
+        {'MCP_RESOURCE_URL': RESOURCE, 'OAUTH_ISSUER': ISSUER},
+        {'OAUTH_BASE_URL': 'https://public.example.net', 'APP_BASE_URL': 'https://app.example.net'},
+        {'OAUTH_BASE_URL': 'https://public.example.net/', 'OAUTH_ISSUER': ISSUER},
+        {'MCP_RESOURCE_URL': 'http://localhost:4200/api/mcp', 'OAUTH_ISSUER': 'http://localhost:4200'},
+        {'MCP_RESOURCE_URL': 'http://127.0.0.1:5002/api/mcp', 'OAUTH_ISSUER': 'http://127.0.0.1:5002'},
+    ])
+    def test_it_can_be_switched_on(self, world, settings):
+        self._only(world, **settings)
+        oauth_config.set_enabled(True)
+        assert oauth_config.is_enabled() is True
+        assert world.anonymous().get('/.well-known/oauth-protected-resource').status_code == 200
+
+    def test_it_can_always_be_switched_off(self, world):
+        self._only(world)
+        oauth_config.set_enabled(False)
+        assert SystemConfig.get(oauth_config.SWITCH_KEY) == 'false'
+
+    @pytest.mark.parametrize('lost', ['MCP_RESOURCE_URL', 'OAUTH_ISSUER'])
+    def test_a_switch_left_on_without_its_addresses_counts_as_off(self, world, lost):
+        """The setting says on (it was on, then the configuration lost an address): everything answers as off."""
+        world.enable()
+        access = world.tokens()['access_token']
+        assert world.mcp(access).status_code == 200
+        world.monkeypatch.delenv(lost)
+
+        assert oauth_config.is_switched_on() is True
+        assert oauth_config.is_enabled() is False
+        response = world.mcp()
+        assert response.status_code == 401 and response.headers['WWW-Authenticate'] == LEGACY_CHALLENGE
+        response = world.mcp(access)
+        assert response.status_code == 401 and response.headers['WWW-Authenticate'] == LEGACY_CHALLENGE
+        assert world.anonymous().get('/.well-known/oauth-protected-resource').get_json() == LEGACY_NO_METADATA
+        assert world.anonymous().get('/.well-known/oauth-authorization-server').get_json() == LEGACY_NO_METADATA
+        assert world.authorize().status_code == 404
+        assert world.token_request(grant_type='refresh_token', client_id=CLIENT_ID).status_code == 404
+        assert world.signed_in(world.user).get('/api/user/oauth/grants').status_code == 404
+
+    @pytest.mark.parametrize('host', ['evil.example.net', 'evil.example.net:8443', 'localhost'])
+    def test_the_host_header_decides_nothing(self, on, host):
+        headers = {'Host': host, 'X-Forwarded-Host': host}
+        client = on.anonymous()
+
+        resource = client.get('/.well-known/oauth-protected-resource', headers=headers).get_json()
+        server = client.get('/.well-known/oauth-authorization-server', headers=headers).get_json()
+        challenge = client.post('/api/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
+                                headers=headers).headers['WWW-Authenticate']
+        redirect = client.get('/oauth/authorize?' + urlencode(on.authorize_params()), headers=headers)
+
+        assert resource['resource'] == RESOURCE and resource['authorization_servers'] == [ISSUER]
+        assert server['issuer'] == ISSUER and server['token_endpoint'] == ISSUER + '/oauth/token'
+        assert challenge == FULL_CHALLENGE
+        assert redirect.headers['Location'].startswith(ISSUER + '/oauth/consent?request=')
+        for text in (json.dumps(resource), json.dumps(server), challenge, redirect.headers['Location']):
+            assert 'evil.example.net' not in text
+
+    def test_a_token_for_this_resource_is_not_accepted_under_another_host_name(self, on):
+        """The audience is the configured resource, whatever host a request names."""
+        access = on.tokens()['access_token']
+        response = on.anonymous().post(
+            '/api/mcp', json={'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'},
+            headers={'Authorization': f'Bearer {access}', 'Host': 'evil.example.net'})
+        assert response.status_code == 200          # same server, same resource: the Host header is not consulted
+        assert OAuthGrant.query.one().resource == RESOURCE
+
+    def test_the_consent_decision_accepts_the_issuers_origin_only(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start()
+        on.view(client, public_id)
+        response = client.post(f'/api/oauth/requests/{public_id}/decision',
+                               json={'decision': 'deny'}, headers={'Origin': 'http://localhost', 'Host': 'localhost'})
+        assert response.status_code == 403
+
+
 # ============================================================================
 # 2. METADATA
 # ============================================================================
@@ -803,6 +922,17 @@ class TestPendingRequest:
         browser = on.signed_in(on.user)
         public_id = on.start(browser)
         assert browser.get('/api/oauth/pending').get_json() == {'request': public_id}
+
+    def test_it_is_led_back_once(self, on):
+        """Someone who walks away from the consent page is not sent back to it on every later visit."""
+        browser = on.signed_in(on.user)
+        public_id = on.start(browser)
+        first = browser.get('/api/oauth/pending')
+        assert first.get_json() == {'request': public_id}
+        assert any(value.startswith(endpoints.PENDING_COOKIE + '=;') for value in first.headers.getlist('Set-Cookie'))
+        assert browser.get('/api/oauth/pending').get_json() == {'request': None}
+        # The request itself is untouched: the page that was opened still works
+        assert on.view(browser, public_id).status_code == 200
 
     def test_another_browser_has_nothing_pending(self, on):
         on.start()

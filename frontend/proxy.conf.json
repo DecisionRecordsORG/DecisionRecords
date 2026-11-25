@@ -8,5 +8,25 @@
     "target": "http://localhost:5001",
     "secure": false,
     "changeOrigin": true
+  },
+  "/oauth/authorize": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/oauth/token": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/oauth/revoke": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/.well-known": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "changeOrigin": true
   }
 }
