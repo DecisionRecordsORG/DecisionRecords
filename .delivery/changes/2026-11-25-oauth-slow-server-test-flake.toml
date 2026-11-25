@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-25-oauth-slow-server-test-flake"
+title = "Stop the slow-server fetch test failing at random in CI"
+summary = "The test that a slow client-document server is given up on expected a timeout only. On a loaded CI runner the connection sometimes ends before any response head arrives, which the fetch reports as an incomplete response instead; the application treats both the same way (a failed fetch). The test now accepts either and still checks that giving up happens in time. Test only: nothing in the shipped app changes and no deploy or release step is needed for it."
+change_type = "bugfix"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"
