@@ -1,12 +1,12 @@
 schema_version = 1
 id = "2026-11-25-mcp-user-fields-and-stale-keys"
 title = "Name people by id and display name in AI results, and refuse API keys whose owner no longer belongs"
-summary = "Enterprise code in the private ee submodule: MCP and /api/ai results give people as id and display name instead of the account record or an email address, and an API key is refused when its owner was anonymised or deleted, the organisation was deleted, or the owner is no longer a member. The public repository gets the tests, the changelog entry and the tracker update; the ee pointer is advanced separately after the private pull request merges. This pull request changes tests and documents only, so it carries no artifact obligation; the pull request that advances the ee pointer declares the Enterprise deploy."
+summary = "Enterprise code in the private ee submodule: MCP and /api/ai results give people as id and display name instead of the account record or an email address, and an API key is refused when its owner was anonymised or deleted, the organisation was deleted, or the owner is no longer a member. The public repository gets the tests, the changelog entry, the tracker update and the ee pointer. No public application code changes, so a Community release is not needed for it; it is declared a candidate only because the pointer counts as shared core. The Enterprise deploy carries the change. Before that deploy, count the API keys whose owner has no membership row for the key's organisation (query in docs/TODO.md): those keys stop working."
 change_type = "bugfix"
-surfaces = ["ops_docs_only"]
+surfaces = ["shared_core"]
 
 [artifacts]
-enterprise_app = "none"
-community_release = "none"
-community_release_level = "none"
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
 marketing_website = "none"
