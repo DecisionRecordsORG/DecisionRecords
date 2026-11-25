@@ -140,13 +140,13 @@ class TestPurgeOfExpiredOAuthRows:
 
     def test_requests_go_once_neither_they_nor_their_code_can_be_used(self, world):
         waiting = _request(world['client'], NOW + timedelta(minutes=1))
-        abandoned = _request(world['client'], NOW - timedelta(days=2))
+        abandoned = _request(world['client'], NOW - timedelta(days=2), decision='denied')
         grant = _grant(world['user'], world['tenant'], world['client'])
         exchanged = _request(world['client'], NOW - timedelta(days=2), code_hash='e' * 64,
                              code_expires_at=NOW - timedelta(days=2), code_used_at=NOW - timedelta(days=2),
                              grant_id=grant.id)
         recent_code = _request(world['client'], NOW - timedelta(days=2), code_hash='f' * 64,
-                               code_expires_at=NOW - timedelta(hours=2))
+                               code_expires_at=NOW - timedelta(hours=2), decision='approved')
         ids = (waiting.id, abandoned.id, exchanged.id, recent_code.id)
         db.session.commit()
 
@@ -156,6 +156,38 @@ class TestPurgeOfExpiredOAuthRows:
         remaining = {row.id for row in OAuthAuthorizationRequest.query.all()}
         assert remaining == {ids[0], ids[3]}
         assert OAuthGrant.query.count() == 1  # the grant does not depend on its request
+
+    def test_unanswered_requests_go_five_minutes_after_they_expire(self, world):
+        """Anyone can create one without signing in, so they are not kept for a day."""
+        waiting = _request(world['client'], NOW + timedelta(minutes=1))
+        just_expired = _request(world['client'], NOW - timedelta(minutes=4))
+        stale = _request(world['client'], NOW - timedelta(minutes=6))
+        answered = _request(world['client'], NOW - timedelta(minutes=6), decision='approved', code_hash='h' * 64,
+                            code_expires_at=NOW - timedelta(minutes=4))
+        refused = _request(world['client'], NOW - timedelta(minutes=6), decision='denied')
+        ids = (waiting.id, just_expired.id, stale.id, answered.id, refused.id)
+        db.session.commit()
+
+        assert retention.purge_undecided_oauth_requests(NOW) == 1
+
+        assert {row.id for row in OAuthAuthorizationRequest.query.all()} == {ids[0], ids[1], ids[3], ids[4]}
+        assert retention.purge_undecided_oauth_requests(NOW) == 0
+        # The daily purge does the same
+        _request(world['client'], NOW - timedelta(minutes=6))
+        db.session.commit()
+        assert retention.purge_expired_oauth_rows(NOW)['oauth_authorization_requests'] == 1
+
+    def test_withdrawn_tokens_stay_until_they_expire(self, world):
+        grant = _grant(world['user'], world['tenant'], world['client'])
+        withdrawn = _token(grant, OAuthToken.KIND_REFRESH, expires_at=NOW + timedelta(days=3), withdrawn_at=NOW)
+        withdrawn_id = withdrawn.id
+        db.session.commit()
+
+        retention.purge_expired_oauth_rows(NOW)
+        assert db.session.get(OAuthToken, withdrawn_id).withdrawn_at == NOW
+
+        retention.purge_expired_oauth_rows(NOW + timedelta(days=5))
+        assert db.session.get(OAuthToken, withdrawn_id) is None
 
     def test_ended_grants_go_after_thirty_days_with_everything_of_theirs(self, world):
         user, tenant, client = world['user'], world['tenant'], world['client']

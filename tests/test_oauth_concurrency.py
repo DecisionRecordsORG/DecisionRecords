@@ -137,7 +137,42 @@ def test_one_code_presented_many_times_at_once_gives_tokens_once(concurrent_app,
     assert service.validate_access_token(succeeded[0]['access_token'], RESOURCE) is None
 
 
-def test_one_refresh_token_presented_many_times_at_once_leaves_one_working_pair(concurrent_app, ids):
+def test_one_refresh_token_presented_twice_at_once_leaves_one_working_pair(concurrent_app, ids):
+    """The retry of a request whose answer may have been lost, arriving while the first is still being handled."""
+    first = service.exchange_code(_code(ids), CLIENT_ID, REDIRECT, VERIFIER)
+    db.session.remove()
+
+    outcomes = _race(concurrent_app, lambda: service.refresh(first['refresh_token'], CLIENT_ID), count=2)
+
+    succeeded = [result for kind, result in outcomes if kind == 'ok']
+    refused = [result for kind, result in outcomes if kind == 'refused']
+    assert succeeded, outcomes
+    assert set(refused) <= {'invalid_grant'}
+
+    # One presentation again within the grace window is not theft: the connection is still there ...
+    grant = OAuthGrant.query.one()
+    assert grant.revoked_at is None
+    # ... and however the two interleaved, exactly one refresh token is usable
+    # afterwards, and it is one that was handed out
+    now = _now()
+    usable = OAuthToken.query.filter(
+        OAuthToken.kind == OAuthToken.KIND_REFRESH, OAuthToken.rotated_at.is_(None),
+        OAuthToken.withdrawn_at.is_(None), OAuthToken.expires_at > now).all()
+    assert len(usable) == 1
+    handed_out = {hashlib.sha256(result['refresh_token'].encode()).hexdigest(): result for result in succeeded}
+    assert usable[0].token_hash in handed_out
+    winner = handed_out[usable[0].token_hash]
+    assert len({result['refresh_token'] for result in succeeded}) == len(succeeded)
+    # The surviving pair works, and the original token is spent
+    assert service.validate_access_token(winner['access_token'], RESOURCE) is not None
+    db.session.remove()
+    assert service.refresh(winner['refresh_token'], CLIENT_ID, now=now + timedelta(minutes=5))['access_token']
+    assert OAuthToken.query.filter_by(
+        token_hash=hashlib.sha256(first['refresh_token'].encode()).hexdigest()).one().rotated_at is not None
+
+
+def test_one_refresh_token_presented_many_times_at_once_ends_the_connection(concurrent_app, ids):
+    """More than one repeat of a used refresh token is not a lost response. Nothing usable may be left behind."""
     first = service.exchange_code(_code(ids), CLIENT_ID, REDIRECT, VERIFIER)
     db.session.remove()
 
@@ -145,32 +180,19 @@ def test_one_refresh_token_presented_many_times_at_once_leaves_one_working_pair(
 
     succeeded = [result for kind, result in outcomes if kind == 'ok']
     refused = [result for kind, result in outcomes if kind == 'refused']
-    assert succeeded, outcomes
-    assert set(refused) <= {'invalid_grant'}
-
-    # Presentations within the grace window are a retry of a lost response, not
-    # theft: the connection is still there ...
-    grant = OAuthGrant.query.one()
-    assert grant.revoked_at is None
-    # ... and however the threads interleaved, exactly one refresh token is
-    # usable afterwards, and it is one that was handed out
-    now = _now()
-    usable = OAuthToken.query.filter(
-        OAuthToken.kind == OAuthToken.KIND_REFRESH, OAuthToken.rotated_at.is_(None),
-        OAuthToken.expires_at > now).all()
-    assert len(usable) == 1
-    handed_out = {hashlib.sha256(result['refresh_token'].encode()).hexdigest(): result for result in succeeded}
-    assert usable[0].token_hash in handed_out
-    winner = handed_out[usable[0].token_hash]
-    # Every token that was handed out is distinct
+    assert set(refused) == {'invalid_grant'}
+    # The first use and at most one repeat are answered; the third presentation ends the connection
+    assert 1 <= len(succeeded) <= 2, outcomes
     assert len({result['refresh_token'] for result in succeeded}) == len(succeeded)
-    assert len({result['access_token'] for result in succeeded}) == len(succeeded)
-    # The surviving pair works, and the original token is spent
-    assert service.validate_access_token(winner['access_token'], RESOURCE) is not None
-    db.session.remove()
-    assert service.refresh(winner['refresh_token'], CLIENT_ID, now=now + timedelta(minutes=5))['access_token']
-    assert OAuthToken.query.filter_by(
-        token_hash=hashlib.sha256(first['refresh_token'].encode()).hexdigest()).one().rotated_at is not None
+
+    grant = OAuthGrant.query.one()
+    assert grant.revoked_at is not None and grant.revoke_reason == settings.REVOKED_REFRESH_REUSE
+    for result in succeeded:
+        assert service.validate_access_token(result['access_token'], RESOURCE) is None
+        db.session.remove()
+        with pytest.raises(OAuthError):
+            service.refresh(result['refresh_token'], CLIENT_ID)
+        db.session.remove()
 
 
 def test_a_refresh_and_a_revocation_at_once_never_leave_a_live_token_on_an_ended_grant(concurrent_app, ids):

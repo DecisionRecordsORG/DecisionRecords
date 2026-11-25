@@ -83,7 +83,7 @@ def _make_other_tenant():
     """A second organization with its own user and one accepted decision."""
     tenant = Tenant(
         domain='other.org', name='Other Org', status='active',
-        maturity_state=MaturityState.BOOTSTRAP, ai_features_enabled=True,
+        maturity_state=MaturityState.BOOTSTRAP, ai_features_enabled=True, ai_external_access_enabled=True,
         ai_log_interactions=False,
     )
     db.session.add(tenant)
@@ -196,6 +196,7 @@ class TestUpdateDecisionStatusHandler:
     @pytest.fixture
     def ai_enabled_tenant(self, session, sample_tenant):
         sample_tenant.ai_features_enabled = True
+        sample_tenant.ai_external_access_enabled = True
         sample_tenant.ai_log_interactions = False
         session.commit()
         return sample_tenant
@@ -607,6 +608,7 @@ class TestUpdateDecisionStatusJsonRpc:
         SystemConfig.set(SystemConfig.KEY_AI_FEATURES_ENABLED, 'true')
         SystemConfig.set(SystemConfig.KEY_AI_MCP_SERVER_ENABLED, 'true')
         sample_tenant.ai_features_enabled = True
+        sample_tenant.ai_external_access_enabled = True
         sample_tenant.ai_log_interactions = False
         session.commit()
         _, write_key = AIApiKeyService.create_key(

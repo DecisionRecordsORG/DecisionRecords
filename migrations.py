@@ -211,6 +211,11 @@ MIGRATIONS = [
         "description": "Add the OAuth client, grant, authorization request and token tables",
         "migrate": lambda db: migrate_2_7_0(db)
     },
+    {
+        "version": "2.8.0",
+        "description": "Add oauth_tokens.withdrawn_at and oauth_tokens.repeat_answered_at",
+        "migrate": lambda db: migrate_2_8_0(db)
+    },
 ]
 
 
@@ -704,6 +709,26 @@ def migrate_2_7_0(db):
         logger.info(f"Created {model.__tablename__} table")
         changes += 1
 
+    return changes
+
+
+OAUTH_TOKEN_REUSE_COLUMNS = ('withdrawn_at', 'repeat_answered_at')
+
+
+def migrate_2_8_0(db):
+    """Migration for v2.8.0 - oauth_tokens.withdrawn_at and repeat_answered_at.
+
+    Two nullable columns on a table that 2.7.0 created; no row is read or
+    changed. A database that gets oauth_tokens from the current model (a
+    fresh one, or one where 2.7.0 runs now) already has the columns, and a
+    second run finds them in place.
+    """
+    if not table_exists(db, 'oauth_tokens'):
+        return 0
+    changes = 0
+    for column_name in OAUTH_TOKEN_REUSE_COLUMNS:
+        if add_column(db, 'oauth_tokens', column_name, 'TIMESTAMP'):
+            changes += 1
     return changes
 
 
