@@ -808,3 +808,139 @@ def test_decision_template_migration_on_the_fixture_database(app) -> None:
     db.session.expire_all()
     assert ArchitectureDecision.query.one().decision_type == "Architecture"
     assert TenantSettings.query.one().decision_template_id == "software"
+
+
+# ==================== OAuth tables for the MCP server (2.7.0) ====================
+
+OAUTH_TABLES = {"oauth_clients", "oauth_grants", "oauth_authorization_requests", "oauth_tokens"}
+
+
+def test_startup_adds_oauth_tables_to_an_existing_database(tmp_path: Path) -> None:
+    from migrations import migrate_2_7_0, run_migrations
+    from models import OAuthClient
+
+    db_path = tmp_path / "legacy-schema.db"
+    _create_legacy_schema(db_path)
+    assert not OAUTH_TABLES & _sqlite_tables(db_path)
+    app_module, test_app = load_test_app(
+        secret_key="migration-oauth-legacy", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert OAUTH_TABLES <= _sqlite_tables(db_path)
+        versions = {
+            row[0]
+            for row in db.session.execute(db.text("SELECT version FROM schema_migrations")).fetchall()
+        }
+        assert "2.7.0" in versions
+
+        db.session.add(OAuthClient(client_id="https://client.example/client.json", client_name="Client",
+                                   redirect_uris=["https://client.example/callback"]))
+        db.session.commit()
+
+        # Starting again changes nothing and keeps the row
+        app_module._db_initialized = False
+        app_module.init_database()
+        assert run_migrations(db) == 0
+        assert migrate_2_7_0(db) == 0
+        assert OAuthClient.query.one().redirect_uris == ["https://client.example/callback"]
+
+        db.session.remove()
+        app_module._db_initialized = False
+
+
+def test_fresh_database_initialises_with_oauth_tables(tmp_path: Path) -> None:
+    from migrations import migrate_2_7_0
+
+    db_path = tmp_path / "fresh.db"
+    app_module, test_app = load_test_app(
+        secret_key="migration-oauth-fresh", database_url=f"sqlite:///{db_path}"
+    )
+
+    with test_app.app_context():
+        app_module._db_initialized = False
+        app_module.init_database()
+
+        assert OAUTH_TABLES <= _sqlite_tables(db_path)
+        assert migrate_2_7_0(db) == 0
+
+        db.session.remove()
+        db.drop_all()
+        app_module._db_initialized = False
+
+
+def test_oauth_migration_creates_the_tables_itself_with_their_constraints(app) -> None:
+    """Without db.create_all(), on the fixture database (PostgreSQL in CI)."""
+    from datetime import datetime, timedelta
+    import pytest
+    from sqlalchemy.exc import IntegrityError
+    from migrations import migrate_2_7_0, table_exists
+    from models import OAuthAuthorizationRequest, OAuthClient, OAuthGrant, OAuthToken, Tenant, User
+
+    db.session.remove()
+    for model in (OAuthToken, OAuthAuthorizationRequest, OAuthGrant, OAuthClient):
+        model.__table__.drop(bind=db.engine)
+    assert not any(table_exists(db, name) for name in OAUTH_TABLES)
+
+    assert migrate_2_7_0(db) == 4
+    assert all(table_exists(db, name) for name in OAUTH_TABLES)
+    assert migrate_2_7_0(db) == 0
+
+    # A partly created set is completed, not skipped
+    db.session.remove()
+    OAuthToken.__table__.drop(bind=db.engine)
+    assert migrate_2_7_0(db) == 1
+    assert migrate_2_7_0(db) == 0
+
+    now = datetime(2026, 11, 25, 12, 0, 0)
+    tenant = Tenant(domain="fixture.test", name="Fixture")
+    user = User(email="person@fixture.test", sso_domain="fixture.test", auth_type="local")
+    client = OAuthClient(client_id="https://client.example/client.json", client_name="Client",
+                         redirect_uris=["https://client.example/callback", "http://localhost/callback"])
+    db.session.add_all([tenant, user, client])
+    db.session.flush()
+    grant = OAuthGrant(public_id="grant-1", user_id=user.id, tenant_id=tenant.id, oauth_client_id=client.id,
+                       resource="https://decisions.example/api/mcp", scopes=["decisions:read"],
+                       expires_at=now + timedelta(days=180))
+    db.session.add(grant)
+    db.session.flush()
+    first = OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_REFRESH, token_hash="a" * 64,
+                       expires_at=now + timedelta(days=30))
+    db.session.add(first)
+    db.session.flush()
+    db.session.add(OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_ACCESS, token_hash="b" * 64,
+                              parent_id=first.id, expires_at=now + timedelta(hours=1)))
+    db.session.add(OAuthAuthorizationRequest(
+        public_id="request-1", client_identifier=client.client_id, oauth_client_id=client.id,
+        redirect_uri="https://client.example/callback", requested_scopes=["decisions:read"],
+        state="x" * 2000, code_challenge="c" * 43, resource=grant.resource,
+        expires_at=now + timedelta(minutes=10), code_hash="d" * 64, grant_id=grant.id))
+    db.session.commit()
+    db.session.expire_all()
+
+    assert OAuthClient.query.one().redirect_uris == ["https://client.example/callback", "http://localhost/callback"]
+    assert OAuthGrant.query.one().scopes == ["decisions:read"]
+    assert OAuthGrant.query.one().expires_at == now + timedelta(days=180)
+    assert len(OAuthAuthorizationRequest.query.one().state) == 2000
+    assert OAuthGrant.query.one().tokens.count() == 2
+
+    # Token hashes, code hashes and client ids are unique
+    duplicates = [
+        OAuthToken(grant_id=grant.id, kind=OAuthToken.KIND_ACCESS, token_hash="a" * 64,
+                   expires_at=now + timedelta(hours=1)),
+        OAuthClient(client_id="https://client.example/client.json", client_name="Again", redirect_uris=[]),
+        OAuthAuthorizationRequest(
+            public_id="request-2", client_identifier=client.client_id,
+            redirect_uri="https://client.example/callback", code_challenge="c" * 43,
+            resource=grant.resource, expires_at=now, code_hash="d" * 64),
+        OAuthGrant(public_id="grant-1", user_id=user.id, tenant_id=tenant.id, oauth_client_id=client.id,
+                   resource=grant.resource, expires_at=now),
+    ]
+    for duplicate in duplicates:
+        db.session.add(duplicate)
+        with pytest.raises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()

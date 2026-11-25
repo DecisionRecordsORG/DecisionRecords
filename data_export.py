@@ -26,6 +26,7 @@ from models import (
     db, Tenant, TenantMembership, AuditLog, LoginHistory, Inquiry, UserConsent,
     WebAuthnCredential, Subscription, ArchitectureDecision, DecisionHistory, DecisionComment,
     AccessRequest, RoleRequest, SlackUserMapping, TeamsUserMapping, AIApiKey, AIInteractionLog,
+    OAuthGrant,
 )
 
 # Most rows of one kind in an export. The existing sections used 500.
@@ -61,6 +62,10 @@ EXPORT_RULES = {
     'tenants.team_profile_answered_by_id': ('team_profile_answers', 'team profile answers the person gave'),
     'ai_api_keys.user_id': ('ai_api_keys', 'API key names and dates, without the key or its hash'),
     'ai_interaction_logs.user_id': ('ai_interactions', "the person's AI queries"),
+    'oauth_grants.user_id': ('connected_apps', 'applications the person connected, without any token'),
+    'oauth_grants.revoked_by_user_id': (None, "ending someone else's connection is in the audit trail"),
+    'oauth_authorization_requests.user_id': (None, 'consent requests that live for minutes; a request '
+                                                   'that was allowed is listed as a connected app'),
     'slack_user_mappings.user_id': ('linked_accounts', 'the linked Slack account'),
     'teams_user_mappings.user_id': ('linked_accounts', 'the linked Microsoft Teams account'),
     'slack_workspaces.claimed_by_id': (None, "the workspace connection is the organisation's setting"),
@@ -304,6 +309,21 @@ def build_personal_data_export(user):
         'expires_at': _iso(key.expires_at),
         'revoked_at': _iso(key.revoked_at),
     } for key in AIApiKey.query.filter_by(user_id=user.id).order_by(AIApiKey.id).all()]
+
+    # Connected applications: which application, for which organisation, with what
+    # permissions and when. Never a token or its hash.
+    export['connected_apps'] = [{
+        'application': grant.client.client_name if grant.client else None,
+        'application_id': grant.client.client_id if grant.client else None,
+        'tenant_domain': grant.tenant.domain if grant.tenant else None,
+        'resource': grant.resource,
+        'scopes': grant.scopes,
+        'connected_at': _iso(grant.created_at),
+        'last_used_at': _iso(grant.last_used_at),
+        'expires_at': _iso(grant.expires_at),
+        'revoked_at': _iso(grant.revoked_at),
+        'revoke_reason': grant.revoke_reason,
+    } for grant in OAuthGrant.query.filter_by(user_id=user.id).order_by(OAuthGrant.id).limit(SECTION_LIMIT).all()]
 
     interactions = AIInteractionLog.query.filter_by(user_id=user.id).order_by(
         AIInteractionLog.created_at.desc(), AIInteractionLog.id.desc()).limit(SECTION_LIMIT).all()

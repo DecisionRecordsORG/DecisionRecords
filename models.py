@@ -2936,3 +2936,162 @@ class AIInteractionLog(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 # EE:END - AI/LLM Integration Models
+
+
+# EE:START - OAuth authorization for the MCP server
+# The tables are created in every edition so that one schema serves both; only
+# the Enterprise Edition writes to them (ee/backend/oauth_server).
+
+def _oauth_utcnow():
+    """Naive UTC, the form every timestamp in these tables is stored in."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+class OAuthClient(db.Model):
+    """
+    An application that asks for access on a user's behalf (an MCP client).
+
+    A client identifies itself with the HTTPS address of a metadata document
+    it publishes (a Client ID Metadata Document). A row is the validated copy
+    of that document, kept until `metadata_expires_at`. Clients are public:
+    there is no client secret.
+    """
+    __tablename__ = 'oauth_clients'
+
+    KIND_METADATA_DOCUMENT = 'cimd'
+
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.String(512), nullable=False, unique=True)
+    kind = db.Column(db.String(20), nullable=False, default=KIND_METADATA_DOCUMENT)
+    client_name = db.Column(db.String(200), nullable=False)
+    client_uri = db.Column(db.String(512), nullable=True)
+    redirect_uris = db.Column(db.JSON, nullable=False, default=list)
+
+    metadata_fetched_at = db.Column(db.DateTime, nullable=True)
+    metadata_expires_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=_oauth_utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    # Set by a super admin to refuse an application everywhere
+    disabled_at = db.Column(db.DateTime, nullable=True)
+    disabled_reason = db.Column(db.String(255), nullable=True)
+
+
+class OAuthGrant(db.Model):
+    """
+    One connection: a user allowed an application to act for them in one
+    organisation, on one resource, with some scopes. Tokens belong to a grant;
+    revoking the grant ends all of them.
+    """
+    __tablename__ = 'oauth_grants'
+
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(36), nullable=False, unique=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=False)
+    oauth_client_id = db.Column(db.Integer, db.ForeignKey('oauth_clients.id'), nullable=False)
+
+    # The protected resource the tokens are valid for (their audience)
+    resource = db.Column(db.String(512), nullable=False)
+    scopes = db.Column(db.JSON, nullable=False, default=list)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=_oauth_utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=False)  # after this the user must consent again
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    revoked_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    revoke_reason = db.Column(db.String(40), nullable=True)
+
+    user = db.relationship('User', foreign_keys=[user_id])
+    tenant = db.relationship('Tenant', foreign_keys=[tenant_id])
+    client = db.relationship('OAuthClient', foreign_keys=[oauth_client_id])
+
+    __table_args__ = (
+        db.Index('idx_oauth_grant_user', 'user_id'),
+        db.Index('idx_oauth_grant_tenant', 'tenant_id'),
+        db.Index('idx_oauth_grant_client', 'oauth_client_id'),
+    )
+
+
+class OAuthAuthorizationRequest(db.Model):
+    """
+    A request by an application for a user's consent, from the moment it
+    arrives until its authorization code is exchanged. Lives for minutes.
+
+    The row holds what the application asked for, then what the user decided,
+    then the hash of the single-use authorization code.
+    """
+    __tablename__ = 'oauth_authorization_requests'
+
+    DECISION_APPROVED = 'approved'
+    DECISION_DENIED = 'denied'
+
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(db.String(64), nullable=False, unique=True)  # names the request in the consent page URL
+
+    # What was asked. The client is known by the identifier it sent until its
+    # metadata has been fetched and validated, which sets oauth_client_id.
+    client_identifier = db.Column(db.String(512), nullable=False)
+    oauth_client_id = db.Column(db.Integer, db.ForeignKey('oauth_clients.id'), nullable=True)
+    redirect_uri = db.Column(db.String(2048), nullable=False)
+    requested_scopes = db.Column(db.JSON, nullable=False, default=list)
+    state = db.Column(db.Text, nullable=True)
+    code_challenge = db.Column(db.String(128), nullable=False)
+    resource = db.Column(db.String(512), nullable=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=_oauth_utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+    # What the user decided
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True)
+    granted_scopes = db.Column(db.JSON, nullable=True)
+    decision = db.Column(db.String(10), nullable=True)
+    decided_at = db.Column(db.DateTime, nullable=True)
+
+    # The authorization code: only its hash, used once
+    code_hash = db.Column(db.String(64), nullable=True, unique=True)
+    code_expires_at = db.Column(db.DateTime, nullable=True)
+    code_used_at = db.Column(db.DateTime, nullable=True)
+    grant_id = db.Column(db.Integer, db.ForeignKey('oauth_grants.id'), nullable=True)
+
+    client = db.relationship('OAuthClient', foreign_keys=[oauth_client_id])
+    grant = db.relationship('OAuthGrant', foreign_keys=[grant_id])
+
+    __table_args__ = (
+        db.Index('idx_oauth_request_user', 'user_id'),
+        db.Index('idx_oauth_request_tenant', 'tenant_id'),
+        db.Index('idx_oauth_request_expires', 'expires_at'),
+    )
+
+
+class OAuthToken(db.Model):
+    """
+    An access token or a refresh token of a grant. Only the SHA-256 hash of
+    the token is stored. A refresh token is used once: using it sets
+    `rotated_at`, and the tokens issued in exchange name it as their parent.
+    """
+    __tablename__ = 'oauth_tokens'
+
+    KIND_ACCESS = 'access'
+    KIND_REFRESH = 'refresh'
+
+    id = db.Column(db.Integer, primary_key=True)
+    grant_id = db.Column(db.Integer, db.ForeignKey('oauth_grants.id'), nullable=False)
+    kind = db.Column(db.String(10), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey('oauth_tokens.id'), nullable=True)
+
+    created_at = db.Column(db.DateTime, nullable=False, default=_oauth_utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    rotated_at = db.Column(db.DateTime, nullable=True)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    grant = db.relationship('OAuthGrant', foreign_keys=[grant_id],
+                            backref=db.backref('tokens', lazy='dynamic'))
+
+    __table_args__ = (
+        db.Index('idx_oauth_token_grant', 'grant_id'),
+        db.Index('idx_oauth_token_parent', 'parent_id'),
+        db.Index('idx_oauth_token_expires', 'expires_at'),
+    )
+# EE:END - OAuth authorization for the MCP server

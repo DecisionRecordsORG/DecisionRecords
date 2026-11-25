@@ -206,6 +206,11 @@ MIGRATIONS = [
         "description": "Add decision template, industry and decision type columns",
         "migrate": lambda db: migrate_2_6_0(db)
     },
+    {
+        "version": "2.7.0",
+        "description": "Add the OAuth client, grant, authorization request and token tables",
+        "migrate": lambda db: migrate_2_7_0(db)
+    },
 ]
 
 
@@ -675,6 +680,30 @@ def migrate_2_6_0(db):
             continue
         if add_column(db, table_name, column_name, column_type):
             changes += 1
+    return changes
+
+
+def migrate_2_7_0(db):
+    """Migration for v2.7.0 - tables for OAuth authorization of the MCP server.
+
+    Four new, empty tables: oauth_clients, oauth_grants,
+    oauth_authorization_requests and oauth_tokens. They are created from the
+    model definitions, in the order their foreign keys need, so columns,
+    unique constraints and indexes are the same as on a fresh database, on
+    SQLite and on PostgreSQL. No existing table or row is touched, and a
+    second run finds every table in place. Only the Enterprise Edition writes
+    to them; in the Community Edition they stay empty.
+    """
+    from models import OAuthClient, OAuthGrant, OAuthAuthorizationRequest, OAuthToken
+
+    changes = 0
+    for model in (OAuthClient, OAuthGrant, OAuthAuthorizationRequest, OAuthToken):
+        if table_exists(db, model.__tablename__):
+            continue
+        model.__table__.create(bind=db.engine, checkfirst=True)
+        logger.info(f"Created {model.__tablename__} table")
+        changes += 1
+
     return changes
 
 

@@ -82,6 +82,7 @@ from models import (
     SetupToken, EmailVerification, SlackWorkspace, SlackUserMapping, TeamsWorkspace,
     TeamsUserMapping, TeamsConversationReference, AIApiKey, AIInteractionLog, SystemConfig,
     RetentionRun, RetentionErasure, decision_infrastructure,
+    OAuthClient, OAuthGrant, OAuthAuthorizationRequest, OAuthToken,
 )
 
 logger = logging.getLogger(__name__)
@@ -583,6 +584,14 @@ def _account_text_rules():
         'blog_posts': 'slug title excerpt author category read_time image meta_description meta_keywords content',
         'retention_runs': 'claim_key trigger started_by status categories results error',
         'retention_erasures': 'category entity_type identifier counts',
+        # Connected applications (OAuth). Nothing here is typed by the person: client_name and
+        # client_uri describe the application, state is the application's own opaque value, and
+        # the rows that point at the person are deleted with the account.
+        'oauth_clients': 'client_id kind client_name client_uri redirect_uris disabled_reason',
+        'oauth_grants': 'public_id resource scopes revoke_reason',
+        'oauth_authorization_requests': 'public_id client_identifier redirect_uri requested_scopes state '
+                                        'code_challenge resource granted_scopes decision code_hash',
+        'oauth_tokens': 'kind token_hash',
     }
     rules = {}
     for rule, tables in ((CLEARED, cleared), (CONTENT, content), (NOT_THE_PERSON, not_the_person)):
@@ -762,6 +771,13 @@ def _anonymise_user_record(user):
     # name and description the person typed
     AIApiKey.query.filter(AIApiKey.user_id == user.id).update(
         {'name': DELETED_KEY_NAME, 'description': None}, synchronize_session=False)
+    # Applications the person connected lose their access: grants, their tokens
+    # and any consent request still open are deleted
+    for name, removed in delete_oauth_grants(
+        OAuthGrant.__table__.c.user_id == user.id,
+        OAuthAuthorizationRequest.__table__.c.user_id == user.id,
+    ).items():
+        counts[name] = removed
     # The usage record stays (when, which kind, how many decisions), not what was asked
     counts['ai_queries_cleared'] = AIInteractionLog.query.filter(
         AIInteractionLog.user_id == user.id, AIInteractionLog.query_text.isnot(None)
@@ -1009,6 +1025,11 @@ TENANT_ERASE_RULES = {
     'master_accounts': ('keep', 'super admin accounts'),
     'system_config': ('keep', 'installation settings'),
     'blog_posts': ('keep', 'website content'),
+    'oauth_grants': ('erase', 'connections made for T and connections of its users'),
+    'oauth_tokens': ('erase', 'tokens of those connections'),
+    'oauth_authorization_requests': ('erase', 'consent requests decided for T, by its users, or that led to '
+                                              'one of those connections'),
+    'oauth_clients': ('keep', 'what an application publishes about itself; says nothing about who uses it'),
     'retention_runs': ('keep', 'the record of retention runs'),
     'retention_erasures': ('keep', 'the record of what was erased'),
 }
@@ -1116,6 +1137,16 @@ def _erase_tenant(tenant, record):
             ai_logs.c.api_key_id.in_(sa.select(ai_keys.c.id).where(key_filter))
         ).values(api_key_id=None))
         delete(ai_keys, key_filter)
+
+    # Connected applications (OAuth): connections for this tenant and of its users
+    grants = OAuthGrant.__table__
+    requests = OAuthAuthorizationRequest.__table__
+    scopes = [(grants.c.tenant_id == tenant_id, requests.c.tenant_id == tenant_id)] + [
+        (grants.c.user_id.in_(chunk), requests.c.user_id.in_(chunk)) for chunk in _chunks(user_ids)
+    ]
+    for grant_filter, request_filter in scopes:
+        for name, removed in delete_oauth_grants(grant_filter, request_filter).items():
+            counts[name] = counts.get(name, 0) + removed
 
     # Slack and Teams workspaces
     slack = SlackWorkspace.__table__
@@ -1266,6 +1297,97 @@ def purge_old_inquiries(now=None):
 # ---------------------------------------------------------------------------
 # The run
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Connected applications (OAuth)
+# ---------------------------------------------------------------------------
+
+# How long rows that can no longer be used are kept before they are deleted.
+# An expired token or request is refused whether or not its row exists; the
+# row of a used refresh token must outlive the token only as long as presenting
+# it again should still end the connection, which is until it would have
+# expired anyway.
+OAUTH_EXPIRED_ROW_GRACE = timedelta(days=1)
+# An ended connection stays visible to its user and their admin for a while.
+OAUTH_ENDED_GRANT_GRACE = timedelta(days=30)
+# A client nobody is connected to is forgotten; its metadata is fetched again when needed.
+OAUTH_UNUSED_CLIENT_GRACE = timedelta(days=30)
+
+
+def delete_oauth_grants(grant_filter, request_filter=None):
+    """Delete the grants matching `grant_filter` with everything that hangs off them.
+
+    Tokens of those grants and authorization requests that led to them are
+    deleted first, as are the requests matching `request_filter`. Does not
+    commit. Returns the number of rows removed per table.
+    """
+    grants = OAuthGrant.__table__
+    tokens = OAuthToken.__table__
+    requests = OAuthAuthorizationRequest.__table__
+    grant_ids = sa.select(grants.c.id).where(grant_filter)
+
+    counts = {}
+    # A token may name another token of the same grant as its parent
+    db.session.execute(tokens.update().where(tokens.c.grant_id.in_(grant_ids)).values(parent_id=None))
+    counts['oauth_tokens'] = db.session.execute(tokens.delete().where(tokens.c.grant_id.in_(grant_ids))).rowcount
+    request_where = requests.c.grant_id.in_(grant_ids)
+    if request_filter is not None:
+        request_where = sa.or_(request_where, request_filter)
+    counts['oauth_authorization_requests'] = db.session.execute(requests.delete().where(request_where)).rowcount
+    counts['oauth_grants'] = db.session.execute(grants.delete().where(grant_filter)).rowcount
+    return counts
+
+
+def purge_expired_oauth_rows(now=None):
+    """Delete OAuth rows that can no longer be used. Commits. Returns rows removed per table.
+
+    Nothing here ends a working connection: only tokens and consent requests
+    past their expiry, connections that ended (revoked or expired) more than
+    30 days ago, and client records that no connection or request uses any
+    more. Safe to run at any time, from several workers at once, and in the
+    Community Edition, where the tables are empty.
+    """
+    now = to_naive_utc(now) or utcnow()
+    grants = OAuthGrant.__table__
+    tokens = OAuthToken.__table__
+    requests = OAuthAuthorizationRequest.__table__
+    clients = OAuthClient.__table__
+    counts = {}
+
+    ended_before = now - OAUTH_ENDED_GRANT_GRACE
+    ended = delete_oauth_grants(sa.or_(
+        sa.and_(grants.c.revoked_at.isnot(None), grants.c.revoked_at < ended_before),
+        grants.c.expires_at < ended_before,
+    ))
+    counts.update(ended)
+
+    expired_before = now - OAUTH_EXPIRED_ROW_GRACE
+    expired_tokens = sa.select(tokens.c.id).where(tokens.c.expires_at < expired_before)
+    db.session.execute(tokens.update().where(tokens.c.parent_id.in_(expired_tokens)).values(parent_id=None))
+    counts['oauth_tokens'] += db.session.execute(
+        tokens.delete().where(tokens.c.expires_at < expired_before)).rowcount
+
+    # A request stays while its code could still be presented, so that a second
+    # use of the code is recognised for as long as that matters
+    counts['oauth_authorization_requests'] += db.session.execute(requests.delete().where(
+        requests.c.expires_at < expired_before,
+        sa.or_(requests.c.code_expires_at.is_(None), requests.c.code_expires_at < expired_before),
+    )).rowcount
+
+    unused_before = now - OAUTH_UNUSED_CLIENT_GRACE
+    counts['oauth_clients'] = db.session.execute(clients.delete().where(
+        clients.c.disabled_at.is_(None),
+        sa.func.coalesce(clients.c.last_used_at, clients.c.created_at) < unused_before,
+        ~sa.exists().where(grants.c.oauth_client_id == clients.c.id),
+        ~sa.exists().where(requests.c.oauth_client_id == clients.c.id),
+    )).rowcount
+
+    db.session.commit()
+    removed = {name: number for name, number in counts.items() if number}
+    if removed:
+        logger.info('OAuth housekeeping removed %s', removed)
+    return counts
+
 
 def _run_category(category, now, run_id, cap):
     if category == ACCOUNTS:
@@ -1596,9 +1718,27 @@ def run_automatic_if_due(now=None):
     return run_retention(RetentionRun.TRIGGER_AUTOMATIC, now=now, run=run)
 
 
+def purge_oauth_rows_if_due(state, now=None):
+    """Run the OAuth housekeeping once per UTC day in this process.
+
+    `state` is a dict owned by the caller; it remembers the day of the last
+    successful purge. This is housekeeping of expired credentials, not erasure
+    of personal data, so it does not depend on the automatic-run setting and
+    is not recorded as a retention run. Returns True when the purge ran.
+    """
+    now = to_naive_utc(now) or utcnow()
+    today = now.strftime('%Y-%m-%d')
+    if state.get('oauth_purged_on') == today:
+        return False
+    purge_expired_oauth_rows(now)
+    state['oauth_purged_on'] = today
+    return True
+
+
 def _scheduler_loop(app, stop, interval, first_delay):
     if stop.wait(first_delay):
         return
+    state = {}
     while not stop.is_set():
         try:
             with app.app_context():
@@ -1609,6 +1749,14 @@ def _scheduler_loop(app, stop, interval, first_delay):
         except Exception:
             # Never let the thread die: tomorrow's run depends on it.
             logger.exception('Retention: the automatic check failed; it will be tried again')
+        try:
+            with app.app_context():
+                try:
+                    purge_oauth_rows_if_due(state)
+                finally:
+                    db.session.remove()
+        except Exception:
+            logger.exception('OAuth housekeeping failed; it will be tried again')
         if stop.wait(interval):
             return
 

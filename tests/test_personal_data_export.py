@@ -36,7 +36,7 @@ EXISTING_KEYS = ['export_date', 'data_subject', 'profile', 'decisions_authored',
                  'audit_trail', 'login_history', 'inquiries']
 NEW_KEYS = ['account_status', 'passkeys', 'notification_settings', 'consents', 'comments',
             'decisions_owned', 'decision_changes', 'role_requests', 'access_requests',
-            'team_profile_answers', 'ai_api_keys', 'ai_interactions', 'linked_accounts']
+            'team_profile_answers', 'ai_api_keys', 'connected_apps', 'ai_interactions', 'linked_accounts']
 
 
 @pytest.fixture

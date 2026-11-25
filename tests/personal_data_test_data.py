@@ -20,7 +20,7 @@ from models import (
     SlackWorkspace, SlackUserMapping, TeamsWorkspace, TeamsUserMapping, TeamsConversationReference,
     AIApiKey, AIInteractionLog, AIChannel, AIAction, GlobalRole, MaturityState,
 )
-from tests.retention_test_data import naive_now
+from tests.retention_test_data import naive_now, add_connected_app
 
 
 class Person:
@@ -65,6 +65,7 @@ def make_organisation(domain, key):
     return {'tenant': tenant, 'admin': admin, 'slack': slack, 'teams': teams}
 
 
+
 def make_person(organisation, first, last, key, ip, *, first_requester=False):
     """A member of `organisation` with a row in every place that holds personal data.
 
@@ -107,6 +108,7 @@ def make_person(organisation, first, last, key, ip, *, first_requester=False):
                        description=f'Key that {full_name} uses')
     db.session.add(api_key)
     db.session.flush()
+    add_connected_app(user, tenant, key)
 
     personal_reference = {
         'activityId': '1', 'bot': {'id': '28:bot', 'name': 'Decision Records'}, 'channelId': 'msteams',

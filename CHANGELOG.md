@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Startup migration `2.7.0` creates four empty tables for OAuth authorization of the MCP server: `oauth_clients`, `oauth_grants`, `oauth_authorization_requests` and `oauth_tokens`, on SQLite and PostgreSQL. No existing table or row is changed. The tables are created in the Community Edition too, where nothing writes to them and they stay empty; the feature that uses them is Enterprise and is not switched on by this change
+- Erasing an account or an organisation deletes its rows in those tables, a person's data export gains a `connected_apps` section (empty until the feature exists), and the daily retention thread deletes OAuth rows that can no longer be used. That housekeeping does not depend on the automatic retention setting and does nothing on empty tables
+
 ### Changed
 - Enterprise: results of the MCP server and the external AI API (`/api/ai`) name people by id and display name only. In MCP, a decision's `created_by`, `updated_by` and `owner` are now `{"id", "name"}` (they were the whole account record, including the email address and sign-in details, and `owner` was a string); `owner_email`, `tenant_id`, `domain` and the duplicate `creator` string are no longer returned. An owner who has no account is `{"id": null, "name": ...}`. Where a person has no name, the name is the part of their email address before the "@"; this also applies to `changed_by` in history, to comment authors, and to `creator` and `owner` in `/api/ai`, which stay strings. Clients that read an email address from these results must stop doing so
 
