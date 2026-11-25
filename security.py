@@ -10,6 +10,7 @@ This module provides:
 
 from functools import wraps
 from flask import g, jsonify, request, session
+from client_address import get_client_address, rate_limit_key
 import logging
 import hashlib
 import hmac
@@ -264,12 +265,9 @@ def get_rate_limit_key():
     if hasattr(g, 'current_user') and g.current_user:
         return f"user:{g.current_user.id}"
 
-    # Use X-Forwarded-For for users behind proxies
-    forwarded = request.headers.get('X-Forwarded-For')
-    if forwarded:
-        return f"ip:{forwarded.split(',')[0].strip()}"
-
-    return f"ip:{request.remote_addr}"
+    # The visitor's address as client_address.py establishes it. The first
+    # entry of X-Forwarded-For is whatever the visitor chose to send.
+    return f"ip:{rate_limit_key()}"
 
 
 # ==================== Security Headers ====================
@@ -515,7 +513,7 @@ def log_security_event(event_type, message, user_id=None, severity='INFO'):
         'event_type': event_type,
         'message': message,
         'user_id': user_id or (g.current_user.id if hasattr(g, 'current_user') and g.current_user else None),
-        'ip': request.remote_addr if request else None,
+        'ip': get_client_address() if request else None,
         'path': request.path if request else None,
         'method': request.method if request else None,
         'timestamp': time.time(),
