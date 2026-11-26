@@ -231,26 +231,52 @@ else:
 # (OAuth consent), and a framed consent page can be clicked through unseen.
 NO_FRAMING_PATH_PREFIXES = ('/oauth/', '/api/oauth/')
 
+# The pages Microsoft Teams shows in a frame: the tab, its dialogs and the
+# sign-in window. Only these may be framed by another site, and only by the
+# hosts Microsoft documents for tabs ("Tabs prerequisites", Content Security
+# Policy headers): every other page of the app can be framed by the app alone.
+TEAMS_FRAMED_PATH_PREFIX = '/teams/'
+TEAMS_FRAME_ANCESTORS = (
+    "'self'",
+    'https://teams.microsoft.com', 'https://*.teams.microsoft.com',
+    'https://*.cloud.microsoft',
+    'https://*.microsoft365.com', 'https://*.office.com',
+    'https://outlook.office.com', 'https://outlook.office365.com',
+    'https://outlook-sdf.office.com', 'https://outlook-sdf.office365.com',
+)
+
+
+def _set_frame_ancestors(response, sources):
+    """Replace the frame-ancestors directive of the response's policy."""
+    directive = 'frame-ancestors ' + ' '.join(sources)
+    policy = response.headers.get('Content-Security-Policy')
+    if policy:
+        directives = [part.strip() for part in policy.split(';') if part.strip()]
+        directives = [part for part in directives if not part.lower().startswith('frame-ancestors')]
+        directives.append(directive)
+        response.headers['Content-Security-Policy'] = '; '.join(directives)
+    else:
+        response.headers['Content-Security-Policy'] = directive
+
 
 @app.after_request
-def forbid_framing_of_consent_pages(response):
-    """Replace the app-wide frame-ancestors (which admits Microsoft Teams) with 'none' for the consent paths.
+def set_framing_policy(response):
+    """Who may show a page in a frame: nobody for the consent paths, Microsoft Teams for the Teams tab pages.
+
+    Everything else keeps the app-wide policy (frame-ancestors 'self' and
+    X-Frame-Options: SAMEORIGIN).
 
     Registered before Flask-Talisman on purpose: Flask runs after_request
     functions in reverse order of registration, and Talisman overwrites the
     Content-Security-Policy header, so this has to run after it.
     """
-    if not request.path.startswith(NO_FRAMING_PATH_PREFIXES):
-        return response
-    policy = response.headers.get('Content-Security-Policy')
-    if policy:
-        directives = [part.strip() for part in policy.split(';') if part.strip()]
-        directives = [part for part in directives if not part.lower().startswith('frame-ancestors')]
-        directives.append("frame-ancestors 'none'")
-        response.headers['Content-Security-Policy'] = '; '.join(directives)
-    else:
-        response.headers['Content-Security-Policy'] = "frame-ancestors 'none'"
-    response.headers['X-Frame-Options'] = 'DENY'
+    if request.path.startswith(NO_FRAMING_PATH_PREFIXES):
+        _set_frame_ancestors(response, ("'none'",))
+        response.headers['X-Frame-Options'] = 'DENY'
+    elif request.path.startswith(TEAMS_FRAMED_PATH_PREFIX) and is_enterprise():
+        _set_frame_ancestors(response, TEAMS_FRAME_ANCESTORS)
+        # X-Frame-Options cannot name several hosts; frame-ancestors decides
+        response.headers.pop('X-Frame-Options', None)
     return response
 
 
@@ -292,9 +318,9 @@ try:
         'font-src': ["'self'", "https://fonts.gstatic.com"],
         'img-src': ["'self'", "data:", "https:"],
         'connect-src': ["'self'", "https://e.decisionrecords.org"],  # API calls + analytics proxy
-        # frame-ancestors: Allow Microsoft Teams to embed the app in iframes
-        # Teams uses various Microsoft domains for embedding tabs
-        'frame-ancestors': ["'self'", "https://teams.microsoft.com", "https://*.teams.microsoft.com", "https://*.microsoft.com", "https://*.office.com"],
+        # frame-ancestors: the app itself only. The Teams tab pages (/teams/*)
+        # get the Microsoft Teams hosts from set_framing_policy above.
+        'frame-ancestors': ["'self'"],
         'form-action': "'self'",
         'base-uri': "'self'",
         'object-src': "'none'",
@@ -2506,21 +2532,20 @@ def microsoft_oauth_callback():
     """Handle Microsoft OAuth callback.
 
     This endpoint receives the authorization code from Microsoft after the user
-    authenticates. It exchanges the code for tokens, fetches user info,
-    and creates/logs in the user based on their email domain.
+    authenticates. It exchanges the code for tokens and signs the person in
+    by the rules in microsoft_identity: identified by Microsoft
+    tenant ID and object ID, addressed by sign-in name, in the organisation
+    their Microsoft tenant is linked to.
 
-    IMPORTANT: Personal Microsoft accounts (outlook.com, hotmail.com) are blocked.
-    Only corporate/work accounts allowed.
-    The tenant is derived from the email domain (existing logic).
-    First user of a domain becomes provisional admin (existing logic).
+    Personal Microsoft accounts and guests are refused. The first person of
+    a new organisation becomes its provisional administrator.
     """
     import requests as http_requests
     from ee.backend.oauth_providers.microsoft_oauth import (
         get_microsoft_client_id,
         get_microsoft_client_secret,
         verify_microsoft_oauth_state,
-        MICROSOFT_OAUTH_TOKEN_URL,
-        MICROSOFT_GRAPH_USER_URL
+        MICROSOFT_OAUTH_TOKEN_URL
     )
 
     # Capture request metadata for login history
@@ -2586,124 +2611,44 @@ def microsoft_oauth_callback():
             logger.error(f"Microsoft token error: {token_data.get('error')}")
             return redirect('/?error=token_exchange_failed')
 
-        access_token = token_data.get('access_token')
-        if not access_token:
-            logger.error("No access token in Microsoft OAuth response")
-            return redirect('/?error=no_access_token')
+        # Who signed in comes from the ID token Microsoft's token endpoint
+        # returned for the code: the Microsoft tenant ID and object ID, with
+        # the sign-in name as address. It is read without checking its
+        # signature because it arrived in this TLS response in exchange for
+        # our client secret (OpenID Connect Core 3.1.3.7). The Graph profile's
+        # mail field and the email claim are not used: an administrator of
+        # any Microsoft tenant can set them to any address.
+        import microsoft_identity
 
-        # Fetch user info from Microsoft Graph
-        userinfo_response = http_requests.get(
-            MICROSOFT_GRAPH_USER_URL,
-            headers={'Authorization': f'Bearer {access_token}'},
-            timeout=30
-        )
+        id_claims = microsoft_identity.unverified_token_claims(token_data.get('id_token'))
+        if not id_claims:
+            logger.error("No readable ID token in Microsoft OAuth response")
+            return redirect('/?error=token_exchange_failed')
 
-        if not userinfo_response.ok:
-            logger.error(f"Microsoft Graph userinfo failed: {userinfo_response.status_code}")
-            return redirect('/?error=userinfo_failed')
+        try:
+            identity = microsoft_identity.identity_from_claims(id_claims, expected_audience=client_id)
+        except microsoft_identity.SignInRefused as refusal:
+            logger.warning(f"Microsoft OAuth sign-in refused: {refusal.code}")
+            if refusal.code == 'personal_account':
+                return redirect('/?error=public_email&message=Please use your work email address. Personal Microsoft accounts are not allowed.')
+            return redirect(f'/?error={refusal.code}')
 
-        userinfo = userinfo_response.json()
+        email = identity['email']
 
-        # Extract user details
-        # Microsoft Graph returns: mail, userPrincipalName, displayName, id
-        email = userinfo.get('mail') or userinfo.get('userPrincipalName')
-        name = userinfo.get('displayName') or userinfo.get('givenName', '')
-        microsoft_user_id = userinfo.get('id')  # Microsoft user object ID
+        # The organisation is the one the Microsoft tenant is linked to; the
+        # first person of a new organisation administers it
+        try:
+            user, tenant, _ = microsoft_identity.sign_in(
+                identity, user_limit_refusal=user_limit_refusal, new_account_auth_type=None)
+        except microsoft_identity.SignInRefused as refusal:
+            logger.warning(f"Microsoft OAuth sign-in refused: {refusal.code}")
+            if refusal.code == 'user_limit':
+                return user_limit_redirect(identity['domain'])
+            if refusal.code == 'personal_account':
+                return redirect('/?error=public_email&message=Please use your work email address. Personal Microsoft accounts are not allowed.')
+            return redirect(f'/?error={refusal.code}')
 
-        if not email:
-            logger.warning("No email in Microsoft OAuth userinfo")
-            return redirect('/?error=no_email')
-
-        # Extract domain from email
-        domain = extract_domain_from_email(email)
-
-        # Check for public email domains (outlook.com, hotmail.com, live.com, etc.)
-        # IMPORTANT: Personal Microsoft accounts cannot sign up
-        if DomainApproval.is_public_domain(domain):
-            logger.warning(f"Public email domain rejected for Microsoft OAuth: {domain}")
-            return redirect('/?error=public_email&message=Please use your work email address. Personal Microsoft accounts are not allowed.')
-
-        # Check for disposable email domains
-        if DomainApproval.is_disposable_domain(domain):
-            logger.warning(f"Disposable email domain rejected for Microsoft OAuth: {domain}")
-            return redirect('/?error=disposable_email&message=Disposable email addresses are not allowed')
-
-        # Check if this is the first user for this domain
-        existing_domain_users = User.query.filter_by(sso_domain=domain).count()
-        is_first_user = existing_domain_users == 0
-
-        # A new account must fit within the tenant's user limit
-        if user_limit_refusal(domain, email):
-            logger.warning(f"Microsoft OAuth sign-in refused, user limit reached for {domain}")
-            return user_limit_redirect(domain)
-
-        # Get or create user
-        user = get_or_create_user(email, name, microsoft_user_id, domain)
-
-        # Create Tenant if it doesn't exist (v1.5 governance)
-        tenant = Tenant.query.filter_by(domain=domain).first()
-        if not tenant:
-            tenant = Tenant(
-                domain=domain,
-                name=domain,  # Default name is domain
-                status='active',
-                maturity_state=MaturityState.BOOTSTRAP
-            )
-            db.session.add(tenant)
-            db.session.flush()
-            logger.info(f"Created tenant for Microsoft OAuth domain: {domain}")
-
-            # Create default auth config for new tenant
-            auth_config = AuthConfig.query.filter_by(domain=domain).first()
-            if not auth_config:
-                auth_config = AuthConfig(
-                    domain=domain,
-                    auth_method='local',  # Default to local, allowing multiple auth methods
-                    allow_password=True,
-                    allow_passkey=True,
-                    allow_slack_oidc=True,
-                    allow_google_oauth=True,
-                    allow_microsoft_oauth=True,
-                    allow_registration=True,
-                    require_approval=True,
-                    rp_name='Decision Records'
-                )
-                db.session.add(auth_config)
-                logger.info(f"Created AuthConfig for Microsoft OAuth domain: {domain}")
-
-            # Auto-approve corporate domain
-            domain_approval = DomainApproval.query.filter_by(domain=domain).first()
-            if not domain_approval:
-                domain_approval = DomainApproval(
-                    domain=domain,
-                    status='approved',
-                    requested_by_email=email,
-                    requested_by_name=name,
-                    auto_approved=True,
-                    reviewed_at=datetime.now(timezone.utc)
-                )
-                db.session.add(domain_approval)
-                logger.info(f"Auto-approved corporate domain via Microsoft OAuth: {domain}")
-
-        # Ensure TenantMembership exists
-        membership = TenantMembership.query.filter_by(
-            user_id=user.id,
-            tenant_id=tenant.id
-        ).first()
-
-        if not membership:
-            # Create membership with appropriate role
-            # First user becomes provisional admin
-            role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
-            membership = TenantMembership(
-                user_id=user.id,
-                tenant_id=tenant.id,
-                global_role=role
-            )
-            db.session.add(membership)
-            logger.info(f"Created TenantMembership for Microsoft OAuth user {email} in tenant {domain} with role {role.value}")
-
-        db.session.commit()
+        domain = tenant.domain
 
         # Accounts with no local credential rely on Microsoft OAuth; others keep their auth_type
         if mark_social_sign_in(user):
@@ -2768,14 +2713,14 @@ def _teams_sso_identity(token):
     The Microsoft sign-in module verifies the token: RS256 signature against
     Microsoft's published signing keys, audience (the Teams app's application
     ID, passed here, and the Application ID URI forms that module accepts),
-    validity period and required claims. This function decides who the
-    verified claims identify:
-    - the issuer must be the Microsoft tenant named in `tid`
-    - the user is identified by `oid`, `tid` and a sign-in name
+    the access_as_user scope, validity period and required claims. Who the
+    verified claims identify is decided by microsoft_identity:
+    the Microsoft tenant ID and object ID, with the sign-in name as address.
     Nothing is read from a token that failed verification.
     """
     from ee.backend.oauth_providers.microsoft_oauth import validate_teams_sso_token
     from ee.backend.teams.teams_security import get_teams_bot_app_id
+    import microsoft_identity
 
     refused = (None, ({'valid': False, 'error': 'Invalid or expired token'}, 401))
 
@@ -2796,148 +2741,35 @@ def _teams_sso_identity(token):
     if not isinstance(claims, dict):
         claims = validated
 
-    def text(name):
-        value = claims.get(name)
-        return value.strip() if isinstance(value, str) else ''
-
-    object_id, ms_tenant_id = text('oid'), text('tid')
-    if not object_id or not ms_tenant_id:
-        logger.warning("Teams sign-in refused: token has no oid or tid claim")
-        return refused
-
-    if text('iss').lower() not in (f'https://login.microsoftonline.com/{ms_tenant_id}/v2.0'.lower(),
-                                   f'https://sts.windows.net/{ms_tenant_id}/'.lower()):
-        logger.warning("Teams sign-in refused: issuer does not match the token's tenant")
-        return refused
-
-    # The sign-in name belongs to a domain the Microsoft tenant has verified.
-    # The email claim is a profile field and only counts when Microsoft marks
-    # its domain as verified for the tenant.
-    email = text('preferred_username') or text('upn')
-    if not email and claims.get('xms_edov') in (True, 'true', 'True', 1, '1'):
-        email = text('email')
-    email = email.lower()
-    local_part, at, domain = email.partition('@')
-    if not at or not local_part or not domain or '@' in domain or any(c.isspace() for c in email):
-        logger.warning("Teams sign-in refused: token carries no usable sign-in name")
-        return refused
-
-    return {
-        'object_id': object_id,
-        'ms_tenant_id': ms_tenant_id,
-        'email': email,
-        'domain': domain,
-        'name': text('name') or local_part,
-    }, None
+    try:
+        return microsoft_identity.identity_from_claims(claims), None
+    except microsoft_identity.SignInRefused as refusal:
+        if refusal.code == 'invalid_identity':
+            return refused
+        return None, ({'valid': False, **refusal.body()}, 403)
 
 
-def _teams_sso_sign_in(token):
-    """Sign a Teams user in from a Teams sign-in token and issue a tab token.
+def _microsoft_identity_sign_in(identity, login_method):
+    """Sign a verified Microsoft identity in for the Teams tab and issue a tab token.
 
-    The only way to obtain a `TabAuth` token. Who the user is and which
-    organisation they belong to come from the validated token alone.
-
-    Returns (result, None) or (None, (json_body, status)). Nothing is created
-    unless the token is valid.
+    The organisation is the one the identity's Microsoft tenant is linked to
+    (see microsoft_identity). Returns (result, None) or
+    (None, (json_body, status)).
     """
     from ee.backend.teams.teams_security import generate_tab_auth_token
+    import microsoft_identity
 
-    identity, refusal = _teams_sso_identity(token)
-    if refusal:
-        return None, refusal
+    try:
+        user, tenant, _ = microsoft_identity.sign_in(identity, user_limit_refusal=user_limit_refusal)
+    except microsoft_identity.SignInRefused as refusal:
+        return None, ({'valid': False, **refusal.body()}, 403)
 
-    email, domain = identity['email'], identity['domain']
-
-    # Personal and disposable mailboxes cannot sign up (same rule as the other providers)
-    if DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain):
-        return None, ({'valid': False, 'error': 'Personal accounts not allowed'}, 403)
-
-    tenant = Tenant.query.filter_by(domain=domain).first()
-
-    # An organisation that connected Teams accepts sign-ins from the Microsoft
-    # tenant it connected, and from no other
-    if tenant:
-        workspace = TeamsWorkspace.query.filter_by(tenant_id=tenant.id, is_active=True).first()
-        if workspace and (workspace.ms_tenant_id or '').lower() != identity['ms_tenant_id'].lower():
-            logger.warning(f"Teams sign-in refused: Microsoft tenant {identity['ms_tenant_id']} "
-                           f"is not the one connected to {domain}")
-            return None, ({
-                'valid': False,
-                'error': 'Your Microsoft 365 organisation is not the one connected to this organisation'
-            }, 403)
-
-    # A new account must fit within the tenant's user limit
-    limit_refusal = user_limit_refusal(domain, email)
-    if limit_refusal:
-        return None, ({'valid': False, **limit_refusal}, 403)
-
-    # Get or create user
-    user = get_or_create_user(email, identity['name'], identity['object_id'], domain)
-
-    # Create Tenant if it doesn't exist
-    if not tenant:
-        tenant = Tenant(
-            domain=domain,
-            name=domain,
-            status='active',
-            maturity_state=MaturityState.BOOTSTRAP
-        )
-        db.session.add(tenant)
-        db.session.flush()
-
-        # Create default auth config
-        auth_config = AuthConfig(
-            domain=domain,
-            auth_method='local',
-            allow_password=True,
-            allow_passkey=True,
-            allow_slack_oidc=True,
-            allow_google_oauth=True,
-            allow_microsoft_oauth=True,
-            allow_registration=True,
-            require_approval=True,
-            rp_name='Decision Records'
-        )
-        db.session.add(auth_config)
-
-        # Auto-approve corporate domain
-        domain_approval = DomainApproval(
-            domain=domain,
-            status='approved',
-            requested_by_email=email,
-            requested_by_name=identity['name'],
-            auto_approved=True,
-            reviewed_at=datetime.now(timezone.utc)
-        )
-        db.session.add(domain_approval)
-
-    # Ensure TenantMembership exists
-    existing_domain_users = User.query.filter_by(sso_domain=domain).count()
-    is_first_user = existing_domain_users <= 1  # <= 1 because we just created the user
-
-    membership = TenantMembership.query.filter_by(
-        user_id=user.id,
-        tenant_id=tenant.id
-    ).first()
-
-    if not membership:
-        role = GlobalRole.PROVISIONAL_ADMIN if is_first_user else GlobalRole.USER
-        membership = TenantMembership(
-            user_id=user.id,
-            tenant_id=tenant.id,
-            global_role=role
-        )
-        db.session.add(membership)
-
-    db.session.commit()
-
-    # Log the Teams SSO login
     log_login_attempt(
-        email=email,
-        login_method=LoginHistory.METHOD_TEAMS_SSO,
+        email=user.email,
+        login_method=login_method,
         success=True,
         user_id=user.id,
-        tenant_domain=domain,
+        tenant_domain=tenant.domain,
         ip_address=get_client_address(),
         user_agent=request.headers.get('User-Agent')
     )
@@ -2948,10 +2780,26 @@ def _teams_sso_sign_in(token):
             'email': user.email,
             'name': user.name
         },
-        'tenant_domain': domain,
+        'tenant_domain': tenant.domain,
         # Token for the tab's subsequent requests (Authorization: TabAuth <token>)
-        'tab_auth_token': generate_tab_auth_token(user.id, domain, user.email)
+        'tab_auth_token': generate_tab_auth_token(user.id, tenant.domain, user.email)
     }, None
+
+
+def _teams_sso_sign_in(token):
+    """Sign a Teams user in from a Teams sign-in token and issue a tab token.
+
+    Who the user is and which organisation they belong to come from the
+    validated token alone. The only other way to a `TabAuth` token is the
+    sign-in window (/teams/auth-end), which is a Microsoft sign-in as well.
+
+    Returns (result, None) or (None, (json_body, status)). Nothing is created
+    unless the token is valid.
+    """
+    identity, refusal = _teams_sso_identity(token)
+    if refusal:
+        return None, refusal
+    return _microsoft_identity_sign_in(identity, LoginHistory.METHOD_TEAMS_SSO)
 
 
 @app.route('/api/teams/sso/validate', methods=['POST'])
@@ -12805,78 +12653,89 @@ def teams_webhook():
     if not activity:
         return jsonify({'error': 'Invalid request body'}), 400
 
-    activity_type = activity.get('type', '')
-    channel_data = activity.get('channelData', {})
-    ms_tenant_id = channel_data.get('tenant', {}).get('id')
+    import microsoft_identity
+    from ee.backend.teams.teams_cards import build_error_card
 
-    # Find the Teams workspace for this tenant
-    workspace = None
-    if ms_tenant_id:
-        workspace = TeamsWorkspace.query.filter_by(
-            ms_tenant_id=ms_tenant_id,
-            is_active=True
-        ).first()
+    activity_type = activity.get('type')
+    activity_type = activity_type if isinstance(activity_type, str) else ''
+    channel_data = activity.get('channelData')
+    tenant_info = channel_data.get('tenant') if isinstance(channel_data, dict) else None
+    ms_tenant_id = tenant_info.get('id') if isinstance(tenant_info, dict) else None
 
-    if not workspace:
-        # For installation events, we may not have a workspace yet
-        if activity_type != 'installationUpdate':
-            logger.warning(f"No Teams workspace found for MS tenant {ms_tenant_id}")
-            return jsonify({'error': 'Workspace not configured'}), 404
+    # Only Microsoft Teams is served, and every Teams activity names its
+    # Microsoft tenant. Anything else is acknowledged and ignored. The tenant
+    # ID is in the body, which Microsoft's Bot Connector sent (the token
+    # proves that) but which the token does not sign. It only selects the
+    # workspace: accounts are created from the conversation roster, which is
+    # fetched from the token's own service URL and must name the same tenant.
+    if activity.get('channelId') != 'msteams' or not microsoft_identity.is_guid(ms_tenant_id):
+        logger.warning("Teams webhook: activity is not from Teams or names no Microsoft tenant")
+        if activity_type == 'invoke':
+            return jsonify({'status': 200}), 200
+        return '', 200
 
     try:
-        service = TeamsService(workspace) if workspace else None
+        # The workspace row of this Microsoft tenant. It is created the first
+        # time the tenant is heard from, whatever the activity: the install
+        # event is not guaranteed to arrive first, and the bot must answer.
+        workspace = microsoft_identity.workspace_for_microsoft_tenant(ms_tenant_id)
+        if workspace is None:
+            service_url = activity.get('serviceUrl')
+            workspace = TeamsWorkspace(
+                ms_tenant_id=ms_tenant_id.strip().lower(),
+                service_url=service_url if isinstance(service_url, str) else None,
+                status=TeamsWorkspace.STATUS_PENDING_CONSENT
+            )
+            db.session.add(workspace)
+            try:
+                db.session.commit()
+            except Exception:
+                # Another request created it at the same moment
+                db.session.rollback()
+                workspace = microsoft_identity.workspace_for_microsoft_tenant(ms_tenant_id)
+                if workspace is None:
+                    raise
+
+        service = TeamsService(workspace)
+
+        # An administrator disconnected Teams from the organisation: the bot
+        # says so and does nothing else until it is reconnected on the web.
+        if workspace.is_active is False or workspace.status == TeamsWorkspace.STATUS_DISCONNECTED:
+            message = microsoft_identity.REFUSALS['teams_disconnected']
+            if activity_type == 'message':
+                asyncio.run(service.send_reply(activity, build_error_card("Not Connected", message)))
+            elif activity_type == 'invoke':
+                return jsonify(service._wrap_task_submit_error(message)), 200
+            return '', 200
 
         if activity_type == 'message':
-            if service:
-                logger.info(f"Teams webhook: Processing message activity")
-                text = activity.get('text', '')[:50]
-                logger.info(f"Teams webhook: Message text: {text}")
-                # handle_message sends reply via REST API and returns success bool
-                success = asyncio.run(service.handle_message(activity))
-                logger.info(f"Teams webhook: Message handled, reply sent: {success}")
-                # Return 200 to acknowledge receipt (reply already sent via REST API)
-                return '', 200
+            # handle_message sends reply via REST API and returns success bool
+            success = asyncio.run(service.handle_message(activity))
+            logger.info(f"Teams webhook: Message handled, reply sent: {success}")
+            # Return 200 to acknowledge receipt (reply already sent via REST API)
             return '', 200
 
         elif activity_type == 'invoke':
-            if service:
-                response = asyncio.run(service.handle_invoke(activity))
-                return jsonify(response), 200
-            return jsonify({'status': 200}), 200
+            response = asyncio.run(service.handle_invoke(activity))
+            return jsonify(response), 200
 
         elif activity_type == 'conversationUpdate':
-            if service:
-                response = asyncio.run(service.handle_conversation_update(activity))
-                if isinstance(response, dict) and response.get('type') == 'AdaptiveCard':
-                    return _teams_card_response(response)
+            # The bot added to a conversation (welcome message, once) or removed
+            asyncio.run(service.handle_conversation_update(activity))
             return '', 200
 
         elif activity_type == 'installationUpdate':
-            # Bot installed or uninstalled
-            action = activity.get('action', '')
-            if action == 'add':
-                # Store service URL for future proactive messaging
-                service_url = activity.get('serviceUrl')
-                if ms_tenant_id and service_url:
-                    # Create or update workspace entry
-                    workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=ms_tenant_id).first()
-                    if workspace:
-                        workspace.service_url = service_url
-                    else:
-                        workspace = TeamsWorkspace(
-                            ms_tenant_id=ms_tenant_id,
-                            service_url=service_url,
-                            status=TeamsWorkspace.STATUS_PENDING_CONSENT
-                        )
-                        db.session.add(workspace)
-                    db.session.commit()
+            # The app installed (welcome message, once) or uninstalled
+            asyncio.run(service.handle_installation_update(activity))
             return '', 200
 
+        # Activity types the bot has no use for are acknowledged
         return '', 200
 
     except Exception as e:
         logger.error(f"Teams webhook error: {str(e)}")
         capture_exception(e, endpoint_name='teams_webhook')
+        db.session.rollback()
         return jsonify({'error': 'Internal server error'}), 500
 
 
@@ -12897,9 +12756,13 @@ def _teams_card_response(card):
 @admin_required
 @track_endpoint('api_teams_oauth_start')
 def teams_oauth_start():
-    """Start Azure AD OAuth consent flow for Teams integration."""
+    """Start connecting the organisation to a Microsoft 365 tenant.
+
+    The administrator signs in to Microsoft. Which Microsoft tenant is
+    connected is decided in the callback, from that sign-in.
+    """
     from ee.backend.teams.teams_security import (
-        get_teams_bot_app_id, generate_teams_oauth_state
+        get_teams_bot_app_id, generate_teams_oauth_state, microsoft_authorize_url
     )
 
     try:
@@ -12917,85 +12780,99 @@ def teams_oauth_start():
         state = generate_teams_oauth_state(tenant.id, user.id)
 
         # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
-        base_url = get_oauth_base_url()
-        redirect_uri = f"{base_url}/api/teams/oauth/callback"
+        redirect_uri = f"{get_oauth_base_url()}/api/teams/oauth/callback"
 
-        # Azure AD OAuth URL
-        # Using 'common' endpoint for multi-tenant consent
-        auth_url = (
-            f"https://login.microsoftonline.com/common/adminconsent"
-            f"?client_id={app_id}"
-            f"&redirect_uri={redirect_uri}"
-            f"&state={state}"
-        )
-
-        return redirect(auth_url)
+        return redirect(microsoft_authorize_url(redirect_uri, state, prompt='select_account'))
 
     except Exception as e:
         logger.error(f"Teams OAuth start error: {str(e)}")
-        return jsonify({'error': f'Failed to start Teams connection: {str(e)}'}), 500
+        return jsonify({'error': 'Failed to start Teams connection'}), 500
 
 
 @app.route('/api/teams/oauth/callback')
 @require_teams
 @track_endpoint('api_teams_oauth_callback')
 def teams_oauth_callback():
-    """Handle Azure AD admin consent callback."""
-    from ee.backend.teams.teams_security import verify_teams_oauth_state
+    """Connect the organisation to the Microsoft 365 tenant its administrator signed in to.
+
+    The Microsoft tenant ID comes from the ID token Microsoft's token endpoint
+    returns for the authorization code, never from the query string. The
+    person who signed in must be a member (not a guest) of that Microsoft
+    tenant whose sign-in name is on the organisation's own domain: the same
+    rule by which a Microsoft tenant is linked at its first Teams sign-in.
+    """
+    from ee.backend.teams.teams_security import (
+        verify_teams_oauth_state, exchange_teams_oidc_code, get_teams_bot_app_id
+    )
+    import microsoft_identity
 
     # Check for error
     error = request.args.get('error')
     if error:
-        error_description = request.args.get('error_description', error)
-        logger.error(f"Teams OAuth error: {error_description}")
-        return redirect(f'/settings?teams_error={error}')
-
-    # Get admin consent parameters
-    ms_tenant_id = request.args.get('tenant')
-    state = request.args.get('state')
-
-    if not ms_tenant_id:
-        return redirect('/settings?teams_error=missing_tenant')
+        logger.error(f"Teams OAuth error: {request.args.get('error_description', error)}")
+        return redirect('/settings?teams_error=microsoft_sign_in_failed')
 
     # Verify state
-    state_data = verify_teams_oauth_state(state)
+    state_data = verify_teams_oauth_state(request.args.get('state'))
     if not state_data:
         return redirect('/settings?teams_error=invalid_state')
+
+    code = request.args.get('code')
+    if not code:
+        return redirect('/settings?teams_error=missing_code')
 
     tenant_id = state_data.get('tenant_id')
     user_id = state_data.get('user_id')
 
-    tenant = db.session.get(Tenant, tenant_id)
-    if not tenant:
+    tenant = db.session.get(Tenant, tenant_id) if isinstance(tenant_id, int) else None
+    if not tenant or tenant.deleted_at is not None:
         return redirect('/settings?teams_error=tenant_not_found')
 
-    try:
-        # Create or update Teams workspace
-        workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=ms_tenant_id).first()
+    # The administrator who started this must still be one
+    admin = db.session.get(User, user_id) if isinstance(user_id, int) else None
+    if not admin or admin.is_anonymized or admin.deleted_at is not None \
+            or admin.sso_domain != tenant.domain or not admin.is_admin:
+        return redirect('/settings?teams_error=not_allowed')
 
-        if workspace:
-            # Update existing
-            if workspace.tenant_id and workspace.tenant_id != tenant_id:
-                return redirect('/settings?teams_error=workspace_already_claimed')
-            workspace.tenant_id = tenant_id
-            workspace.status = TeamsWorkspace.STATUS_ACTIVE
-            workspace.consent_granted_at = datetime.now(timezone.utc)
-            workspace.consent_granted_by_id = user_id
-        else:
-            # Create new
-            workspace = TeamsWorkspace(
-                tenant_id=tenant_id,
-                ms_tenant_id=ms_tenant_id,
-                status=TeamsWorkspace.STATUS_ACTIVE,
-                consent_granted_at=datetime.now(timezone.utc),
-                consent_granted_by_id=user_id,
-                app_version='1.0.0'
-            )
+    try:
+        id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/api/teams/oauth/callback")
+        if not id_claims:
+            return redirect('/settings?teams_error=microsoft_sign_in_failed')
+
+        try:
+            identity = microsoft_identity.identity_from_claims(id_claims, expected_audience=get_teams_bot_app_id())
+        except microsoft_identity.SignInRefused as refusal:
+            logger.warning(f"Teams connection refused for tenant {tenant.id}: {refusal.code}")
+            return redirect(f'/settings?teams_error={refusal.code}')
+
+        # The Microsoft tenant must be the organisation's own: its member
+        # signs in with a name on the organisation's domain
+        if identity['domain'] != tenant.domain:
+            logger.warning(f"Teams connection refused for tenant {tenant.id}: sign-in name is on another domain")
+            return redirect('/settings?teams_error=domain_mismatch')
+
+        ms_tenant_id = identity['ms_tenant_id']
+        workspace = microsoft_identity.workspace_for_microsoft_tenant(ms_tenant_id)
+        if workspace and workspace.tenant_id and workspace.tenant_id != tenant.id:
+            return redirect('/settings?teams_error=workspace_already_claimed')
+
+        # An organisation is connected to one Microsoft tenant at a time
+        current = TeamsWorkspace.query.filter_by(tenant_id=tenant.id).first()
+        if current and current is not workspace:
+            return redirect('/settings?teams_error=other_microsoft_tenant')
+
+        if workspace is None:
+            workspace = TeamsWorkspace(ms_tenant_id=ms_tenant_id, app_version='1.0.0')
             db.session.add(workspace)
+        workspace.tenant_id = tenant.id
+        workspace.is_active = True
+        workspace.status = TeamsWorkspace.STATUS_ACTIVE
+        workspace.consent_granted_at = datetime.now(timezone.utc)
+        workspace.consent_granted_by_id = admin.id
 
         db.session.commit()
 
-        logger.info(f"Teams workspace {ms_tenant_id} connected to tenant {tenant_id}")
+        logger.info(f"Teams workspace {ms_tenant_id} connected to tenant {tenant.id}")
         return redirect('/settings?tab=teams&teams_success=connected')
 
     except Exception as e:
@@ -13225,11 +13102,21 @@ def _validate_tab_auth():
     return user, tenant
 
 
+def _teams_tab_decision_json(decision, with_history=False):
+    """A decision for the tab, with the address of its page in the web app."""
+    from ee.backend.teams.teams_cards import decision_web_url
+
+    data = decision.to_dict_with_history() if with_history else decision.to_dict()
+    # /{tenant}/decision/{id} on the app host: what "Open in browser" opens
+    data['web_url'] = decision_web_url(decision.domain, decision.id)
+    return data
+
+
 @app.route('/api/teams/tab/decisions', methods=['GET'])
 @require_teams
 @track_endpoint('api_teams_tab_decisions')
 def teams_tab_decisions():
-    """List decisions for Teams Tab.
+    """List decisions for Teams Tab, optionally those of one space (?space_id=).
 
     Uses token-based auth instead of session cookies because
     Teams tabs run in a cross-site iframe.
@@ -13238,12 +13125,25 @@ def teams_tab_decisions():
     if not user:
         return jsonify({'error': 'Authentication required'}), 401
 
-    decisions = ArchitectureDecision.query.filter_by(
+    from models import Space, DecisionSpace
+
+    query = ArchitectureDecision.query.filter_by(
         domain=tenant.domain,
         deleted_at=None
-    ).order_by(ArchitectureDecision.id.desc()).all()
+    )
 
-    return jsonify([d.to_dict() for d in decisions])
+    space_id = request.args.get('space_id', type=int)
+    if space_id:
+        # A space of another tenant filters like one that does not exist
+        space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
+        if not space:
+            return jsonify([])
+        query = query.join(DecisionSpace, DecisionSpace.decision_id == ArchitectureDecision.id) \
+            .filter(DecisionSpace.space_id == space.id)
+
+    decisions = query.order_by(ArchitectureDecision.id.desc()).all()
+
+    return jsonify([_teams_tab_decision_json(d) for d in decisions])
 
 
 @app.route('/api/teams/tab/decisions/<int:decision_id>', methods=['GET'])
@@ -13268,7 +13168,7 @@ def teams_tab_decision_detail(decision_id):
     if not decision:
         return jsonify({'error': 'Decision not found'}), 404
 
-    return jsonify(decision.to_dict_with_history())
+    return jsonify(_teams_tab_decision_json(decision, with_history=True))
 
 
 @app.route('/api/teams/tab/spaces', methods=['GET'])
@@ -13310,6 +13210,16 @@ def teams_tab_create_decision():
     title = title.strip() if isinstance(title, str) else ''
     if not title:
         return jsonify({'error': 'Title is required'}), 400
+    if len(title) > 255:
+        return jsonify({'error': 'Title must be 255 characters or fewer'}), 400
+
+    status = data.get('status') or 'proposed'
+    if status not in ArchitectureDecision.VALID_STATUSES:
+        return jsonify({'error': 'That status is not valid'}), 400
+
+    def text_field(name):
+        value = data.get(name)
+        return value if isinstance(value, str) else ''
 
     from models import Space, DecisionSpace
 
@@ -13325,10 +13235,10 @@ def teams_tab_create_decision():
         domain=tenant.domain,
         decision_number=next_number,
         title=title,
-        status=data.get('status', 'proposed'),
-        context=data.get('context', ''),
-        decision=data.get('decision', ''),
-        consequences=data.get('consequences', ''),
+        status=status,
+        context=text_field('context'),
+        decision=text_field('decision'),
+        consequences=text_field('consequences'),
         created_by_id=user.id,
         owner_id=user.id,
         created_at=datetime.now(timezone.utc)
@@ -13337,19 +13247,163 @@ def teams_tab_create_decision():
     db.session.add(decision)
     db.session.flush()
 
-    # Link to space if provided
+    # Link to the chosen space (one of this tenant's), or to the default one
+    # when none was chosen
     space_id = data.get('space_id')
-    if space_id:
+    if space_id is None:
+        space = Space.query.filter_by(tenant_id=tenant.id, is_default=True).first()
+    elif isinstance(space_id, int) and not isinstance(space_id, bool):
         space = Space.query.filter_by(id=space_id, tenant_id=tenant.id).first()
-        if space:
-            decision_space = DecisionSpace(decision_id=decision.id, space_id=space.id)
-            db.session.add(decision_space)
+    else:
+        space = None
+    if space:
+        db.session.add(DecisionSpace(decision_id=decision.id, space_id=space.id))
 
     db.session.commit()
 
-    logger.info(f"Teams Tab: Created decision ADR-{decision.decision_number} for tenant {tenant.domain}")
+    logger.info(f"Teams Tab: Created decision {decision.id} for tenant {tenant.domain}")
 
-    return jsonify({'decision': decision.to_dict()}), 201
+    return jsonify({'decision': _teams_tab_decision_json(decision)}), 201
+
+
+# -----------------------------------------------------------------------------
+# Sign-in window for the tab
+#
+# When Teams cannot give the tab a single sign-on token (the person or their
+# administrator has not allowed the app yet, or single sign-on is not set up
+# for the Microsoft tenant), the tab opens a window with
+# microsoftTeams.authentication.authenticate(). The window starts at
+# /teams/auth-start, goes to Microsoft's sign-in page and comes back to
+# /teams/auth-end, which signs the person in and hands the result to the tab.
+# -----------------------------------------------------------------------------
+
+def _teams_auth_window_page(result):
+    """The page that closes the sign-in window and gives the tab its result."""
+    payload = json.dumps(result).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decision Records sign-in</title>
+<script src="/assets/MicrosoftTeams.min.js"></script>
+</head>
+<body style="font-family: 'Segoe UI', system-ui, sans-serif; padding: 24px; color: #242424;">
+<p id="status">Completing sign-in. This window closes by itself.</p>
+<script>
+(function () {{
+  var result = {payload};
+  var status = document.getElementById('status');
+  function fail(text) {{ status.textContent = text; }}
+  if (!window.microsoftTeams || !microsoftTeams.app) {{
+    fail(result.ok ? 'You are signed in. Close this window and return to Microsoft Teams.' : result.message);
+    return;
+  }}
+  microsoftTeams.app.initialize().then(function () {{
+    if (result.ok) {{
+      microsoftTeams.authentication.notifySuccess(JSON.stringify(result.session));
+    }} else {{
+      microsoftTeams.authentication.notifyFailure(JSON.stringify({{ code: result.code, message: result.message }}));
+    }}
+  }}).catch(function () {{
+    fail(result.ok ? 'You are signed in. Close this window and return to Microsoft Teams.' : result.message);
+  }});
+}})();
+</script>
+</body>
+</html>"""
+    response = make_response(page)
+    response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
+@app.route('/teams/auth-start', methods=['GET'])
+@require_teams
+@track_endpoint('teams_tab_auth_start')
+def teams_tab_auth_start():
+    """Start of the tab's sign-in window: go to Microsoft's sign-in page.
+
+    Query parameters, both hints from the Teams context and neither trusted:
+    `tid`, the Microsoft tenant Teams is running in (the person then signs in
+    to that tenant), and `hint`, their sign-in name to pre-fill.
+    """
+    from ee.backend.teams.teams_security import (
+        get_teams_bot_app_id, generate_tab_sign_in_state, microsoft_authorize_url
+    )
+
+    if not get_teams_bot_app_id():
+        return _teams_auth_window_page({
+            'ok': False, 'code': 'not_configured', 'message': 'Teams sign-in is not configured.'})
+
+    hint = request.args.get('hint', '')
+    if len(hint) > 320 or '@' not in hint or any(c.isspace() for c in hint):
+        hint = None
+
+    return redirect(microsoft_authorize_url(
+        f"{get_oauth_base_url()}/teams/auth-end",
+        generate_tab_sign_in_state(),
+        ms_tenant_id=request.args.get('tid'),
+        login_hint=hint
+    ))
+
+
+@app.route('/teams/auth-end', methods=['GET'])
+@require_teams
+@track_endpoint('teams_tab_auth_end')
+def teams_tab_auth_end():
+    """End of the tab's sign-in window: sign the person in and tell the tab.
+
+    Microsoft returns an authorization code. It is exchanged, with the
+    application's secret, at Microsoft's token endpoint for an ID token whose
+    claims identify the person exactly as a single sign-on token does (tenant
+    ID, object ID, sign-in name). The tab receives the same session it gets
+    from POST /api/teams/sso/validate.
+    """
+    from ee.backend.teams.teams_security import (
+        verify_tab_sign_in_state, exchange_teams_oidc_code, get_teams_bot_app_id
+    )
+    import microsoft_identity
+
+    def failed(code, message):
+        return _teams_auth_window_page({'ok': False, 'code': code, 'message': message})
+
+    error = request.args.get('error')
+    if error:
+        logger.warning(f"Teams tab sign-in window: Microsoft returned {error}")
+        if error in ('access_denied', 'consent_required'):
+            return failed('consent_declined',
+                          'Decision Records was not allowed to sign you in. If your organisation requires an '
+                          'administrator to approve apps, ask your Microsoft 365 administrator to approve '
+                          'Decision Records.')
+        return failed('microsoft_error', 'Microsoft could not sign you in. Close this window and try again.')
+
+    if not verify_tab_sign_in_state(request.args.get('state')):
+        return failed('invalid_state', 'This sign-in window has expired. Close it and try again.')
+
+    code = request.args.get('code')
+    if not code:
+        return failed('missing_code', 'Microsoft did not complete the sign-in. Close this window and try again.')
+
+    id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/teams/auth-end")
+    if not id_claims:
+        return failed('microsoft_error', 'Microsoft could not sign you in. Close this window and try again.')
+
+    try:
+        identity = microsoft_identity.identity_from_claims(id_claims, expected_audience=get_teams_bot_app_id())
+    except microsoft_identity.SignInRefused as refusal:
+        return failed(refusal.code, refusal.message)
+
+    result, refusal = _microsoft_identity_sign_in(identity, LoginHistory.METHOD_TEAMS_SSO)
+    if refusal:
+        body, _status = refusal
+        return failed(body.get('code') or 'not_allowed', body.get('message') or body.get('error'))
+
+    return _teams_auth_window_page({'ok': True, 'session': {
+        'tabAuthToken': result['tab_auth_token'],
+        'tenantDomain': result['tenant_domain'],
+        'user': result['user'],
+    }})
 
 
 @app.route('/api/teams/test', methods=['POST'])
@@ -13630,89 +13684,34 @@ def teams_oidc_callback():
     if not id_claims:
         return redirect('/login?error=token_exchange_failed')
 
-    # Extract user info from ID token claims
-    email = id_claims.get('email') or id_claims.get('preferred_username')
-    name = id_claims.get('name')
-    ms_tenant_id = id_claims.get('tid')
+    # Who signed in: the Microsoft tenant ID and object ID, with the sign-in
+    # name as address. The email claim and the Graph profile's mail field are
+    # profile fields an administrator of any Microsoft tenant can set to any
+    # address, so neither identifies anyone here.
+    import microsoft_identity
+    from ee.backend.teams.teams_security import get_teams_bot_app_id
 
-    if not email:
-        # Try to get email from Graph API
-        user_info = get_teams_user_info(access_token)
-        if user_info:
-            email = user_info.get('mail') or user_info.get('userPrincipalName')
-            name = name or user_info.get('displayName')
+    try:
+        identity = microsoft_identity.identity_from_claims(id_claims, expected_audience=get_teams_bot_app_id())
+    except microsoft_identity.SignInRefused as refusal:
+        logger.warning(f"Teams OIDC sign-in refused: {refusal.code}")
+        return redirect('/login?error=personal_email' if refusal.code == 'personal_account'
+                        else f'/login?error={refusal.code}')
 
-    if not email:
-        return redirect('/login?error=no_email')
+    email = identity['email']
 
-    # Extract domain from email
-    email_parts = email.split('@')
-    if len(email_parts) != 2:
-        return redirect('/login?error=invalid_email')
+    # The organisation is the one the Microsoft tenant is linked to; an
+    # account is found by tenant ID and object ID, then by sign-in name
+    try:
+        user, tenant, _ = microsoft_identity.sign_in(identity, user_limit_refusal=user_limit_refusal)
+    except microsoft_identity.SignInRefused as refusal:
+        logger.warning(f"Teams OIDC sign-in refused: {refusal.code}")
+        if refusal.code == 'user_limit':
+            return user_limit_redirect(identity['domain'])
+        return redirect('/login?error=personal_email' if refusal.code == 'personal_account'
+                        else f'/login?error={refusal.code}')
 
-    domain = email_parts[1].lower()
-
-    # Personal and disposable mailboxes cannot sign up (same rule as the other providers)
-    if DomainApproval.is_public_domain(domain) or DomainApproval.is_disposable_domain(domain):
-        return redirect('/login?error=personal_email')
-
-    # Find or create user
-    user = User.query.filter_by(email=email.lower()).first()
-
-    if user:
-        # Existing user - log them in
-        user.last_login = datetime.now(timezone.utc)
-        if not user.name and name:
-            user.name = name
-        db.session.commit()
-    else:
-        # A new account must fit within the tenant's user limit
-        if user_limit_refusal(domain):
-            return user_limit_redirect(domain)
-
-        # New user - check if tenant exists
-        tenant = Tenant.query.filter_by(domain=domain).first()
-
-        if not tenant:
-            # Create tenant for new domain
-            tenant = Tenant(
-                domain=domain,
-                name=domain.split('.')[0].title()
-            )
-            db.session.add(tenant)
-            db.session.flush()
-
-            # Create default space
-            default_space = Space(
-                tenant_id=tenant.id,
-                name='General',
-                is_default=True
-            )
-            db.session.add(default_space)
-
-        # Create user
-        user = User(
-            email=email.lower(),
-            name=name,
-            sso_domain=domain,
-            auth_type='teams',  # No local credential: Microsoft is the identity provider
-            email_verified=True,  # Microsoft verified the email
-            last_login=datetime.now(timezone.utc)
-        )
-        db.session.add(user)
-        db.session.flush()
-
-        # Add tenant membership (first member of a tenant becomes provisional admin)
-        is_first_member = TenantMembership.query.filter_by(tenant_id=tenant.id).count() == 0
-        membership = TenantMembership(
-            user_id=user.id,
-            tenant_id=tenant.id,
-            global_role=GlobalRole.PROVISIONAL_ADMIN if is_first_member else GlobalRole.USER
-        )
-        db.session.add(membership)
-        # admin_required reads the user flag, as for first users of other sign-up paths
-        user.is_admin = is_first_member
-        db.session.commit()
+    domain = tenant.domain
 
     # Log successful Teams OIDC login
     log_login_attempt(

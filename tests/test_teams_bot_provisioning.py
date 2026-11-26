@@ -303,9 +303,12 @@ class TestNewTenantThroughTheBotMatchesTeamsSignIn:
         assert Tenant.query.filter_by(domain=domain).first() is None
         assert User.query.count() == 0
 
-    def test_onmicrosoft_domains_are_still_refused(self, real_app):
-        # Unchanged in this piece of work; tracked for a follow-up.
-        assert TeamsService.find_or_create_tenant_for_domain('contoso.onmicrosoft.com') is None
+    def test_a_tenants_own_onmicrosoft_domain_gets_an_organisation(self, real_app):
+        tenant = TeamsService.find_or_create_tenant_for_domain('contoso.onmicrosoft.com')
+        assert tenant is not None and tenant.domain == 'contoso.onmicrosoft.com'
+
+    def test_the_bare_onmicrosoft_domain_gets_no_organisation(self, real_app):
+        assert TeamsService.find_or_create_tenant_for_domain('onmicrosoft.com') is None
         assert Tenant.query.count() == 0
 
     def test_deleted_tenant_is_not_joined(self, real_app):

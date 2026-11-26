@@ -233,6 +233,7 @@ def sso_claims(version=2, **overrides):
         'name': 'Alice Example',
         'preferred_username': 'alice@alpha.example',
         'ver': '2.0',
+        'scp': 'access_as_user',
     }
     if version == 1:
         claims.update({
