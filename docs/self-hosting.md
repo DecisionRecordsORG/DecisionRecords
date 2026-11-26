@@ -129,7 +129,7 @@ docker run -d \
 |----------|-------------|---------|
 | `SMTP_USERNAME` | SMTP authentication username | - |
 | `SMTP_PASSWORD` | SMTP authentication password | - |
-| `SMTP_ENCRYPTION_KEY` | Fernet key that encrypts SMTP passwords saved in the admin UI. If unset, those passwords are stored unencrypted. Keep it stable: changing it makes saved passwords unreadable. | - |
+| `SMTP_ENCRYPTION_KEY` | Fernet key that encrypts the secrets saved in the admin UI: SMTP passwords and SSO client secrets. If unset, they are stored unencrypted. Once you set it, secrets saved earlier are encrypted at the next start. Keep it stable and back it up: without the same key, saved SMTP passwords and SSO client secrets cannot be read, and SSO sign-in stops until the client secret is entered again. | - |
 
 Email can also be configured through the admin UI after setup.
 
@@ -337,6 +337,10 @@ Decision Records keeps these deletion timelines by itself. There is nothing to i
 | Soft-deleted tenants | 30 days after deletion | The tenant, its decisions, spaces, settings, sign-in configuration, logs and the accounts of its members are erased |
 | Login history | After 90 days | The entries are deleted |
 | Messages from the contact, "Get in touch" and feedback forms | After 24 months | The messages are deleted |
+| Request log (API, MCP and AI requests: who asked, by which channel, and up to 500 characters of the request) | After 90 days | The entries are deleted |
+| Email confirmation records and account set-up or recovery links | 30 days after they expired | The records are deleted, used or not |
+| Requests to join an organisation | 90 days after they were approved or rejected | The requests are deleted. A request that is still pending stays until it is answered |
+| API keys | 90 days after they were revoked or expired | The keys are deleted. Request log entries made with a deleted key stay for their own 90 days, without the reference to the key. A key that still works is never deleted |
 
 **Erasure cannot be undone.** The application keeps no copy of what it erases. A database backup is the only way to get erased data back, so take backups (see [Backups](#backups)) and decide how long you keep them.
 
@@ -360,7 +364,7 @@ An automatic run is deliberately cautious with the three things that cannot be p
 | Accounts to anonymise | 10 |
 | Deleted decisions to erase | 50 |
 | Deleted tenants to erase | 1 |
-| Login history and stored messages | No limit. They are deleted by age alone |
+| Login history, stored messages, the request log, expired confirmation and set-up records, answered access requests, revoked and expired API keys | No limit. They are deleted by age alone |
 
 A limit of 0 means the automatic run never does that category by itself. Setting the "days overdue" check to 0 turns that check off. A super admin changes these under Super Admin > Data retention, or with `PUT /api/admin/settings/retention`.
 

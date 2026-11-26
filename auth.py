@@ -393,8 +393,11 @@ def get_or_create_user(email, name, sso_subject, sso_domain, first_name=None, la
         # This ensures users can log in via any SSO provider and get proper tenant access
         user.sso_domain = sso_domain
         user.sso_subject = sso_subject
-        # Update name if changed
-        if first_name or last_name:
+        # Update name if changed, unless the person corrected it themselves
+        # on the profile page: their own correction outlives the next sign-in
+        if user.name_edited_at:
+            pass
+        elif first_name or last_name:
             user.set_name(first_name=first_name, last_name=last_name)
         elif name and user.name != name:
             user.set_name(full_name=name)
@@ -448,7 +451,7 @@ def create_oauth_client(sso_config):
     """Create an OAuth2 session for the given SSO configuration."""
     return OAuth2Session(
         client_id=sso_config.client_id,
-        client_secret=sso_config.client_secret,
+        client_secret=sso_config.get_client_secret(),
     )
 
 

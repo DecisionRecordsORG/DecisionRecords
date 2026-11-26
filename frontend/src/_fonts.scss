@@ -1,0 +1,86 @@
+// Self-hosted fonts.
+//
+// The app serves its own fonts and its icon font, so a visitor's browser
+// never contacts a third-party font host (it used to fetch them from Google
+// Fonts, which sent every visitor's IP address to Google). The Content
+// Security Policy in app.py allows fonts and stylesheets from the app's own
+// origin only, and tests/test_self_hosted_fonts.py fails if a font host comes
+// back or a file named here is missing.
+//
+// Files live in src/assets/fonts/<family>/ next to the family's licence and
+// are named with the first eight hex digits of their SHA-256. A changed file
+// therefore gets a new name here.
+//
+// Sources (the same builds Google Fonts serves):
+//   Inter v20, Plus Jakarta Sans v12, Roboto v51
+//                           @fontsource-variable 5.3.0 (npm), OFL-1.1
+//   Material Icons 1.017    google/material-design-icons, commit f7bd4f25,
+//                           font/MaterialIcons-Regular.ttf, Apache-2.0,
+//                           converted to WOFF2 unchanged
+//
+// The icon font is the whole set, not a subset: icon names also come from
+// data (infrastructure types, analytics categories, the server's answers),
+// and an icon missing from a subset shows as its name in plain text.
+//
+// Weight ranges match what the app loaded before (Inter 400-600, Plus Jakarta
+// Sans 500-700, Roboto 300-500). There are no italic files: italic text was
+// and still is slanted by the browser. WOFF2 only: every browser the app
+// supports reads it.
+
+$latin: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+  U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+  U+2215, U+FEFF, U+FFFD;
+$latin-ext: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+  U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+  U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+
+@mixin text-face($family, $weight, $file, $range) {
+  @font-face {
+    font-family: $family;
+    font-style: normal;
+    font-weight: $weight;
+    font-display: swap;
+    src: url('/assets/fonts/#{$file}') format('woff2');
+    unicode-range: $range;
+  }
+}
+
+// Inter: body text. Variable, weight axis.
+@include text-face('Inter', 400 600, 'inter/inter-latin-ext-wght-normal.34b9c504.woff2', $latin-ext);
+@include text-face('Inter', 400 600, 'inter/inter-latin-wght-normal.3100e775.woff2', $latin);
+
+// Plus Jakarta Sans: headings. Variable, weight axis.
+@include text-face('Plus Jakarta Sans', 500 700, 'plus-jakarta-sans/plus-jakarta-sans-latin-ext-wght-normal.38e3b8fd.woff2', $latin-ext);
+@include text-face('Plus Jakarta Sans', 500 700, 'plus-jakarta-sans/plus-jakarta-sans-latin-wght-normal.153fc85b.woff2', $latin);
+
+// Roboto: Angular Material's own type (buttons, form fields, dialogs).
+@include text-face('Roboto', 300 500, 'roboto/roboto-latin-ext-wght-normal.cedb374b.woff2', $latin-ext);
+@include text-face('Roboto', 300 500, 'roboto/roboto-latin-wght-normal.1404ca34.woff2', $latin);
+
+// Material Icons. font-display is block, not swap: an icon is a ligature of
+// its name, so swap would show the text "check_circle" at full width until
+// the font arrived.
+@font-face {
+  font-family: 'Material Icons';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url('/assets/fonts/material-icons/material-icons.f0b2ffdc.woff2') format('woff2');
+}
+
+.material-icons {
+  font-family: 'Material Icons';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+}

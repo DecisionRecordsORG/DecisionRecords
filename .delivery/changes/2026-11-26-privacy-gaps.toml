@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-26-privacy-gaps"
+title = "Make the product do what its privacy pages say: real switches, self-hosted fonts, retention for logs and keys, encrypted SSO secrets, name correction"
+summary = "Shared core: the web app serves its own fonts and icon font and the Content Security Policy no longer allows Google's font hosts; the daily retention run deletes the request log after 90 days, expired confirmation and set-up records after 30, answered access requests after 90 and revoked or expired API keys after 90, and shows them on the Data retention page; startup migration 2.9.0 encrypts SSO client secrets in place with the SMTP encryption key, widens the column on PostgreSQL and adds users.name_edited_at; a person can correct their own name (PUT /api/user/profile) and a sign-in through an identity provider no longer overwrites it; the Email notifications switch is on by default and now stops the emails about decisions. Enterprise (private submodule, paired branch): the Analytics switch governs browser and server analytics, events carry nothing typed, Slack webhooks verify the request signature, disconnecting or uninstalling Slack deletes the workspace records, and a status change from the Slack modal goes through the shared status routine. Rolling back past migration 2.9.0 leaves encrypted client secrets an older version cannot use. The Community release level is minor: a migration, a new column and new retention categories reach every database."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "minor"
+marketing_website = "none"

@@ -25,6 +25,8 @@ import { Subscription, User, WebAuthnCredential, GlobalRole } from '../../models
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 import { RoleRequestDialogComponent } from '../shared/role-request-dialog.component';
 import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/connected-apps.component';
+import { ProfileNameComponent } from './profile-name.component';
+import { PrivacyPreferencesComponent } from './privacy-preferences.component';
 
 // API Key interface
 interface AIApiKey {
@@ -69,7 +71,9 @@ const PASSWORD_REQUIRES_NUMBER = true;
     ClipboardModule,
     RoleRequestDialogComponent,
     RouterLink,
-    ConnectedAppsComponent
+    ConnectedAppsComponent,
+    ProfileNameComponent,
+    PrivacyPreferencesComponent
   ],
   template: `
     <div class="profile-container">
@@ -194,7 +198,13 @@ const PASSWORD_REQUIRES_NUMBER = true;
             <div class="info-grid">
               <div class="info-item">
                 <span class="label">Name</span>
-                <span class="value">{{ user?.name || 'Not set' }}</span>
+                <span class="value">
+                  @if (setupMode) {
+                    {{ user?.name || 'Not set' }}
+                  } @else {
+                    <app-profile-name [user]="user" (saved)="onNameSaved($event)"></app-profile-name>
+                  }
+                </span>
               </div>
               <div class="info-item">
                 <span class="label">Email</span>
@@ -584,32 +594,7 @@ const PASSWORD_REQUIRES_NUMBER = true;
               <div class="privacy-section">
                 <h3>Privacy Preferences</h3>
                 <p class="privacy-description">Control how your data is used for optional features. Changes take effect immediately.</p>
-                @if (isLoadingConsents) {
-                  <mat-spinner diameter="24"></mat-spinner>
-                } @else {
-                  <div class="consent-toggles">
-                    <mat-slide-toggle
-                      [checked]="consents.analytics"
-                      (change)="updateConsent('analytics', $event.checked)">
-                      Analytics
-                    </mat-slide-toggle>
-                    <p class="consent-hint">Help us improve the product with anonymous usage data</p>
-
-                    <mat-slide-toggle
-                      [checked]="consents.ai_processing"
-                      (change)="updateConsent('ai_processing', $event.checked)">
-                      AI Processing
-                    </mat-slide-toggle>
-                    <p class="consent-hint">Allow AI features to process your decision content</p>
-
-                    <mat-slide-toggle
-                      [checked]="consents.email_notifications"
-                      (change)="updateConsent('email_notifications', $event.checked)">
-                      Email Notifications
-                    </mat-slide-toggle>
-                    <p class="consent-hint">Receive email updates about decisions and activity</p>
-                  </div>
-                }
+                <app-privacy-preferences></app-privacy-preferences>
               </div>
             </mat-card-content>
           </mat-card>
@@ -1360,12 +1345,6 @@ export class ProfileComponent implements OnInit {
   isExportingData = false;
   isDeletingAccount = false;
   isCancellingDeletion = false;
-  isLoadingConsents = true;
-  consents: { analytics: boolean; ai_processing: boolean; email_notifications: boolean } = {
-    analytics: false,
-    ai_processing: false,
-    email_notifications: false
-  };
 
   /**
    * Check if user can request a role elevation
@@ -1438,9 +1417,6 @@ export class ProfileComponent implements OnInit {
 
       // Check AI external access and load API keys
       this.checkAiAccess();
-
-      // Load GDPR consent preferences
-      this.loadConsents();
 
       // Check for setup mode (new account passkey setup)
       this.route.queryParams.subscribe(async params => {
@@ -1821,38 +1797,13 @@ export class ProfileComponent implements OnInit {
 
   // ============ GDPR Methods ============
 
-  loadConsents(): void {
-    this.isLoadingConsents = true;
-    this.http.get<Record<string, { granted: boolean }>>('/api/user/consents').subscribe({
-      next: (response) => {
-        this.consents = {
-          analytics: response['analytics']?.granted || false,
-          ai_processing: response['ai_processing']?.granted || false,
-          email_notifications: response['email_notifications']?.granted || false,
-        };
-        this.isLoadingConsents = false;
-      },
-      error: () => {
-        this.isLoadingConsents = false;
-      }
-    });
-  }
-
-  updateConsent(consentType: string, granted: boolean): void {
-    this.http.post('/api/user/consents', { consent_type: consentType, granted }).subscribe({
-      next: () => {
-        this.snackBar.open(
-          granted ? 'Consent granted' : 'Consent withdrawn',
-          'Close',
-          { duration: 2000 }
-        );
-      },
-      error: () => {
-        // Revert toggle on failure
-        (this.consents as any)[consentType] = !granted;
-        this.snackBar.open('Failed to update preference', 'Close', { duration: 3000 });
-      }
-    });
+  /** The person corrected their own name: show it here and in the navigation bar. */
+  onNameSaved(updated: User): void {
+    if (this.user) {
+      this.user = { ...this.user, name: updated.name, first_name: updated.first_name, last_name: updated.last_name };
+    }
+    this.authService.refreshCurrentUser();
+    this.snackBar.open('Name updated', 'Close', { duration: 2000 });
   }
 
   exportData(): void {
