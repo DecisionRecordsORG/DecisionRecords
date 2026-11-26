@@ -26,12 +26,21 @@ const CLIENT_NAME = 'Example Assistant';
 const REDIRECT = 'https://client.example.org/callback';
 const LOOPBACK_CLIENT_ID = 'https://desktop.example.org/oauth/client.json';
 const LOOPBACK_REDIRECT = 'http://localhost:49152/callback';
-// The one known app: Claude Code on someone's computer, by the exact address of its identity document
+// The known apps, each by the exact address of its identity document.
+// Claude Code on someone's computer:
 const CLAUDE_CODE_ID = 'https://claude.ai/oauth/claude-code-client-metadata';
-// Another address on the same host. Not listed, so not known: a host serves many addresses,
-// some with content its users chose
-const SAME_HOST_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+// Claude on the web, desktop and mobile:
+const CLAUDE_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata';
+const CLAUDE_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+// ChatGPT, at the stable address it presents to a server that identifies its issuer:
+const CHATGPT_ID = 'https://chatgpt.com/oauth/client.json';
+const CHATGPT_REDIRECT = 'https://chatgpt.com/connector_platform_oauth_redirect';
+// Other addresses on the same hosts. Not listed, so not known: a host serves many addresses,
+// some with content its users chose. The first is a shared page; the second is what ChatGPT
+// presents to a server that does not identify its issuer, different for every connection
+const SAME_HOST_ID = 'https://claude.ai/share/anything.json';
 const SAME_HOST_REDIRECT = 'https://claude.ai/api/mcp/auth_callback';
+const CHATGPT_PER_CONNECTION_ID = 'https://chatgpt.com/oauth/abc123/client.json';
 // An app on a look-alike address that gives itself Claude's name
 const LOOKALIKE_ID = 'https://claude.ai.example.org/oauth/client.json';
 const LOOKALIKE_REDIRECT = 'https://claude.ai.example.org/callback';
@@ -71,6 +80,9 @@ async function setUp(request: APIRequestContext, extra: Record<string, unknown> 
         { client_id: LOOPBACK_CLIENT_ID, client_name: 'Desktop Helper',
           redirect_uris: ['http://localhost/callback', 'http://127.0.0.1/callback'] },
         { client_id: SAME_HOST_ID, client_name: 'Claude', redirect_uris: [SAME_HOST_REDIRECT] },
+        { client_id: CLAUDE_ID, client_name: 'Claude', redirect_uris: [CLAUDE_REDIRECT] },
+        { client_id: CHATGPT_ID, client_name: 'ChatGPT', redirect_uris: [CHATGPT_REDIRECT] },
+        { client_id: CHATGPT_PER_CONNECTION_ID, client_name: 'ChatGPT', redirect_uris: [CHATGPT_REDIRECT] },
         { client_id: CLAUDE_CODE_ID, client_name: 'Claude Code',
           redirect_uris: ['http://localhost/callback', 'http://127.0.0.1/callback'] },
         { client_id: LOOKALIKE_ID, client_name: 'Claude (Anthropic)', redirect_uris: [LOOKALIKE_REDIRECT] },
@@ -93,6 +105,7 @@ async function playTheApp(page: Page) {
   };
   await page.route('https://client.example.org/callback**', handler);
   await page.route(`${SAME_HOST_REDIRECT}**`, handler);
+  await page.route(`${CHATGPT_REDIRECT}**`, handler);
   await page.route(`${LOOKALIKE_REDIRECT}**`, handler);
   await page.route('http://localhost:49152/callback**', handler);
 }
@@ -393,6 +406,47 @@ test.describe('Connecting an app (OAuth consent)', () => {
     await expect(warning).toContainText('Any program on this computer');
     await expect(page.getByTestId('consent-redirect')).toHaveCount(0);
     await shot(page, 'consent-known-app-on-this-computer');
+  });
+
+  for (const app of [
+    { id: CLAUDE_ID, redirect: CLAUDE_REDIRECT, name: 'Claude (Anthropic)', host: 'claude.ai', shot: 'consent-known-app-claude' },
+    { id: CHATGPT_ID, redirect: CHATGPT_REDIRECT, name: 'ChatGPT (OpenAI)', host: 'chatgpt.com', shot: 'consent-known-app-chatgpt' },
+  ]) {
+    test(`${app.name} is a known app, with a website to return to and no warning`, async ({ page, request }) => {
+      await playTheApp(page);
+      await loginAsUser(page, USER.email, USER.password);
+      const { verifier, challenge } = pkce();
+      await page.goto(authorizeUrl(challenge, { clientId: app.id, redirect: app.redirect }));
+      await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+
+      await expect(page.getByTestId('consent-known-name')).toHaveText(app.name);
+      await expect(page.getByTestId('consent-known')).toContainText('Known app');
+      await expect(page.getByTestId('consent-app-host')).toHaveText(app.host);
+      await expect(page.getByTestId('consent-unverified')).toHaveCount(0);
+      await expect(page.getByTestId('consent-claimed-name')).toHaveCount(0);
+      await expect(page.getByTestId('consent-loopback-warning')).toHaveCount(0);
+      await expect(page.getByTestId('consent-redirect-host')).toHaveText(app.host);
+      await shot(page, app.shot);
+
+      await page.getByTestId('consent-allow').click();
+      await page.waitForURL(`${app.redirect}**`);
+      // The app is told who answered: the issuer, on the way back
+      expect(broughtBack(page).get('iss')).toBeTruthy();
+      const tokens = await exchange(request, broughtBack(page).get('code')!, verifier, app.id, app.redirect);
+      expect(await mcpStatus(request, tokens.access_token)).toBe(200);
+    });
+  }
+
+  test('the address ChatGPT presents without issuer identification is an unverified app', async ({ page }) => {
+    await loginAsUser(page, USER.email, USER.password);
+    await page.goto(authorizeUrl(pkce().challenge, { clientId: CHATGPT_PER_CONNECTION_ID, redirect: CHATGPT_REDIRECT }));
+    await expect(page.getByTestId('consent-allow')).toBeEnabled({ timeout: 20000 });
+
+    await expect(page.getByTestId('consent-app-host')).toHaveText('chatgpt.com');
+    await expect(page.getByTestId('consent-unverified')).toContainText('Unverified app');
+    await expect(page.getByTestId('consent-claimed-name')).toHaveText('ChatGPT');
+    await expect(page.getByTestId('consent-known')).toHaveCount(0);
+    await expect(page.getByTestId('consent-known-name')).toHaveCount(0);
   });
 
   test('another address on a known app\'s host is an unverified app', async ({ page }) => {

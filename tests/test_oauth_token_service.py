@@ -335,6 +335,26 @@ class TestTheCapOnWaitingRequests:
         service.bind_client(opened, world['client'])
         assert service.approve_request(opened, world['user'], world['tenant'], now=NOW)
 
+    def test_a_request_evicted_the_moment_it_was_stored_is_a_refusal_not_a_crash(self, world, monkeypatch):
+        """
+        At the cap, a request arriving at the same moment can evict the one
+        just stored. The caller must be told to try again (503), not fail
+        later with a server error when it reads the vanished row.
+        """
+        real_commit = db.session.commit
+
+        def commit_then_lose_the_row():
+            real_commit()
+            # another request, at the same moment, evicts every unopened one
+            db.session.execute(OAuthAuthorizationRequest.__table__.delete())
+            real_commit()
+
+        monkeypatch.setattr(db.session, 'commit', commit_then_lose_the_row)
+        with pytest.raises(OAuthError) as refused:
+            _request(world, bind=False)
+        assert refused.value.error == 'temporarily_unavailable'
+        assert refused.value.status == 503
+
     def test_it_is_refused_only_when_every_waiting_request_has_been_opened(self, world):
         opened = []
         for user in (world['user'], world['colleague'], world['user']):
