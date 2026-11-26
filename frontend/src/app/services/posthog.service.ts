@@ -39,6 +39,9 @@ export const ANALYTICS_OPTIONS = {
   debug: false
 };
 
+/** The public key of the analytics project (it is sent with every event; it is not a secret). */
+export const ANALYTICS_PROJECT_KEY = 'phc_c3dvhlzjwriryAY7FBaEJ6vV6DigrM5zIqaXowbB2OQ';
+
 /** Event properties that are dropped whatever they hold. */
 const DROPPED_PROPERTIES = ['$el_text', 'title', '$title'];
 
@@ -128,7 +131,7 @@ export class PostHogService {
     try {
       // Run outside Angular zone to prevent performance issues
       this.ngZone.runOutsideAngular(() => {
-        posthog.init('phc_c3dvhlzjwriryAY7FBaEJ6vV6DigrM5zIqaXowbB2OQ', {
+        posthog.init(ANALYTICS_PROJECT_KEY, {
           ...ANALYTICS_OPTIONS,
           before_send: (event) => (this.sending ? sanitizeAnalyticsEvent(event) : null)
         });
@@ -167,12 +170,18 @@ export class PostHogService {
   /**
    * Stop sending. Nothing is sent from this browser until `enable()` is
    * called again, and the identifier the library kept for this browser is
-   * thrown away. Does nothing if the library was never started: then
-   * nothing has been sent and nothing will be.
+   * thrown away. If the library was never started in this page, only what
+   * an earlier visit stored in this browser is removed.
    */
   disable(): void {
     this.sending = false;
-    if (!isPlatformBrowser(this.platformId) || !this.initialized) {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
+    if (!this.initialized) {
+      // Not started in this page, so nothing is being sent. What an earlier
+      // visit left in this browser (the library's identifier for it) goes.
+      this.forgetStoredIdentifier();
       return;
     }
     try {
@@ -193,6 +202,25 @@ export class PostHogService {
       posthog.opt_out_capturing();
     } catch (error) {
       console.warn('PostHog could not be stopped:', error);
+    }
+  }
+
+  /** Remove what the library stored in this browser on an earlier visit. */
+  private forgetStoredIdentifier(): void {
+    try {
+      if (typeof localStorage === 'undefined') {
+        return;
+      }
+      const stored: string[] = [];
+      for (let index = 0; index < localStorage.length; index++) {
+        const key = localStorage.key(index);
+        if (key && key.startsWith(`ph_${ANALYTICS_PROJECT_KEY}_`)) {
+          stored.push(key);
+        }
+      }
+      stored.forEach(key => localStorage.removeItem(key));
+    } catch {
+      // Storage is blocked: nothing is stored either
     }
   }
 

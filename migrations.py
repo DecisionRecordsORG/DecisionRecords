@@ -774,6 +774,24 @@ def encrypt_sso_client_secrets(db):
     return changes
 
 
+def unreadable_sso_client_secrets(db):
+    """Domains whose stored SSO client secret is encrypted but cannot be decrypted.
+
+    Empty when every secret is readable. A non-empty answer means the
+    encryption key is missing or is not the one the secrets were encrypted
+    with: the application logs it at start-up so that it is not found only
+    when someone tries to sign in.
+    """
+    from crypto import decrypt_password, is_password_encrypted
+
+    if not table_exists(db, 'sso_configs'):
+        return []
+    with db.engine.connect() as conn:
+        rows = conn.execute(db.text("SELECT domain, client_secret FROM sso_configs")).fetchall()
+    return [domain for domain, secret in rows
+            if is_password_encrypted(secret) and not decrypt_password(secret)]
+
+
 def migrate_2_9_0(db):
     """Migration for v2.9.0 - encrypted SSO client secrets and users.name_edited_at.
 

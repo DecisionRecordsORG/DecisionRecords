@@ -363,3 +363,67 @@ class TestStartupAndApi:
 
         assert response.status_code == 302
         assert seen['client_secret'] == SECRET
+
+    def test_sign_in_is_refused_clearly_when_the_secret_cannot_be_decrypted(
+            self, app_module_and_app, monkeypatch, caplog):
+        """A lost or changed key does not send people to the identity provider to fail there."""
+        app_module, test_app = app_module_and_app
+        app_module.init_database()
+        config = SSOConfig(domain='lost-key.test', provider_name='Okta', client_id='client-1',
+                           discovery_url='https://idp.example.test/.well-known/openid-configuration')
+        config.set_client_secret(SECRET)
+        db.session.add(config)
+        db.session.commit()
+        monkeypatch.setattr(app_module, 'get_oidc_config',
+                            lambda url: {'authorization_endpoint': 'https://idp.example.test/authorize'})
+        monkeypatch.setenv('SMTP_ENCRYPTION_KEY', Fernet.generate_key().decode('utf-8'))
+        client = test_app.test_client()
+
+        with caplog.at_level('ERROR'):
+            response = client.get(f'/auth/sso/{config.id}')
+
+        assert response.status_code == 503
+        assert b'unavailable' in response.data
+        assert 'lost-key.test' in caplog.text and 'cannot be decrypted' in caplog.text
+        with client.session_transaction() as flask_session:
+            assert 'sso_config_id' not in flask_session
+
+    def test_the_callback_is_refused_clearly_when_the_secret_cannot_be_decrypted(
+            self, app_module_and_app, monkeypatch):
+        app_module, test_app = app_module_and_app
+        app_module.init_database()
+        config = SSOConfig(domain='lost-key2.test', provider_name='Okta', client_id='client-1',
+                           discovery_url='https://idp.example.test/.well-known/openid-configuration')
+        config.set_client_secret(SECRET)
+        db.session.add(config)
+        db.session.commit()
+        monkeypatch.setattr(app_module, 'get_oidc_config',
+                            lambda url: {'token_endpoint': 'https://idp.example.test/token'})
+        monkeypatch.setenv('SMTP_ENCRYPTION_KEY', Fernet.generate_key().decode('utf-8'))
+        client = test_app.test_client()
+        with client.session_transaction() as flask_session:
+            flask_session['sso_config_id'] = config.id
+            flask_session['oauth_state'] = 'state-1'
+
+        response = client.get('/auth/callback?code=abc&state=state-1')
+
+        assert response.status_code == 503
+
+    def test_start_up_names_the_organisations_whose_secret_cannot_be_decrypted(
+            self, app_module_and_app, monkeypatch, caplog):
+        app_module, test_app = app_module_and_app
+        app_module.init_database()
+        readable = SSOConfig(domain='fine.test', provider_name='IdP', client_id='c', discovery_url='https://x.test')
+        readable.set_client_secret(SECRET)
+        db.session.add(readable)
+        db.session.commit()
+        assert migrations.unreadable_sso_client_secrets(db) == []
+
+        monkeypatch.setenv('SMTP_ENCRYPTION_KEY', Fernet.generate_key().decode('utf-8'))
+        app_module._db_initialized = False
+        with caplog.at_level('ERROR'):
+            app_module.init_database()
+
+        assert migrations.unreadable_sso_client_secrets(db) == ['fine.test']
+        assert '1 SSO client secret(s) cannot be decrypted' in caplog.text
+        assert 'fine.test' in caplog.text

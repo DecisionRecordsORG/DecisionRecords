@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import posthog from 'posthog-js';
-import { ANALYTICS_OPTIONS, PostHogService, sanitizeAnalyticsEvent } from './posthog.service';
+import { ANALYTICS_OPTIONS, ANALYTICS_PROJECT_KEY, PostHogService, sanitizeAnalyticsEvent } from './posthog.service';
 
 /**
  * What the browser may send to the analytics service. A click on a row of
@@ -133,12 +133,24 @@ describe('browser analytics', () => {
       expect(checked.properties).toEqual({});
     });
 
-    it('does nothing when asked to stop before it was ever started', () => {
+    it('does not start the library just to stop it', () => {
       service.disable();
 
       expect(init).not.toHaveBeenCalled();
       expect(optOut).not.toHaveBeenCalled();
       expect(service.started).toBeFalse();
+    });
+
+    it('removes the identifier an earlier visit left in this browser, and nothing else', () => {
+      const libraryKey = `ph_${ANALYTICS_PROJECT_KEY}_posthog`;
+      localStorage.setItem(libraryKey, '{"distinct_id":"0193-earlier-visit"}');
+      localStorage.setItem('dr_something_else', 'kept');
+
+      service.disable();
+
+      expect(localStorage.getItem(libraryKey)).toBeNull();
+      expect(localStorage.getItem('dr_something_else')).toBe('kept');
+      localStorage.removeItem('dr_something_else');
     });
 
     it('stops sending and forgets the browser identifier when disabled', () => {

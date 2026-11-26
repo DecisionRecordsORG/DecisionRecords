@@ -646,8 +646,14 @@ def init_database():
                 # are encrypted on the first start that has one. Nothing to do
                 # (and nothing changed) when every secret is already encrypted.
                 try:
-                    from migrations import encrypt_sso_client_secrets
+                    from migrations import encrypt_sso_client_secrets, unreadable_sso_client_secrets
                     encrypt_sso_client_secrets(db)
+                    unreadable = unreadable_sso_client_secrets(db)
+                    if unreadable:
+                        logger.error(
+                            f"{len(unreadable)} SSO client secret(s) cannot be decrypted "
+                            f"(organisations: {', '.join(unreadable)}): SSO sign-in for them is refused "
+                            "until the encryption key is restored or each client secret is entered again")
                 except Exception as secret_error:
                     logger.warning(f"Encrypting stored SSO client secrets failed (non-critical): {str(secret_error)}")
 
@@ -1542,6 +1548,30 @@ def api_set_password():
     return jsonify({'message': 'Password updated successfully'})
 
 
+SSO_SECRET_UNAVAILABLE_MESSAGE = (
+    'Single sign-on for this organisation is unavailable at the moment. '
+    'Sign in another way, or ask your administrator to check the SSO settings.')
+
+
+def sso_client_secret_or_none(sso_config):
+    """The decrypted client secret, or None (logged as an error) when it cannot be read.
+
+    The secret is stored encrypted (migration 2.9.0). If the encryption key is
+    missing, was changed or the secret store does not answer, the value cannot
+    be decrypted. Then the sign-in stops here with a clear message and an error
+    in the log, instead of sending the person to the identity provider and
+    failing at the token exchange without saying why.
+    """
+    secret = sso_config.get_client_secret()
+    if secret:
+        return secret
+    logger.error(
+        f"SSO sign-in for {sso_config.domain} refused: the stored client secret cannot be "
+        "decrypted (encryption key missing or changed, or the secret store did not answer). "
+        "Check the encryption key, or have the organisation's admin enter the client secret again.")
+    return None
+
+
 @app.route('/auth/sso/<int:config_id>')
 def sso_login(config_id):
     """Initiate SSO login flow."""
@@ -1555,6 +1585,10 @@ def sso_login(config_id):
     if not oidc_config:
         return render_template('error.html', message='Failed to connect to SSO provider'), 500
 
+    client_secret = sso_client_secret_or_none(sso_config)
+    if client_secret is None:
+        return render_template('error.html', message=SSO_SECRET_UNAVAILABLE_MESSAGE), 503
+
     # Store config in session for callback
     session['sso_config_id'] = config_id
     session['oauth_state'] = secrets.token_urlsafe(32)
@@ -1562,7 +1596,7 @@ def sso_login(config_id):
     # Create authorization URL
     client = OAuth2Session(
         client_id=sso_config.client_id,
-        client_secret=sso_config.get_client_secret(),
+        client_secret=client_secret,
         redirect_uri=url_for('sso_callback', _external=True)
     )
 
@@ -1597,10 +1631,14 @@ def sso_callback():
     if not oidc_config:
         return render_template('error.html', message='Failed to connect to SSO provider'), 500
 
+    client_secret = sso_client_secret_or_none(sso_config)
+    if client_secret is None:
+        return render_template('error.html', message=SSO_SECRET_UNAVAILABLE_MESSAGE), 503
+
     # Exchange code for token
     client = OAuth2Session(
         client_id=sso_config.client_id,
-        client_secret=sso_config.get_client_secret(),
+        client_secret=client_secret,
         redirect_uri=url_for('sso_callback', _external=True),
         state=stored_state
     )
