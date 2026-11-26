@@ -107,6 +107,7 @@ def sso_claims(username=ALICE, *, tid=MS_TENANT_A, oid='oid-alice', **overrides)
         'name': 'Alice Example',
         'preferred_username': username,
         'ver': '2.0',
+        'scp': 'access_as_user',
     }
     claims.update(overrides)
     return {name: value for name, value in claims.items() if value is not None}

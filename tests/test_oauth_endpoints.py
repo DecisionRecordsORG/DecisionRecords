@@ -1894,7 +1894,9 @@ class TestFramingAndCors:
     def test_the_rest_of_the_app_keeps_its_policy(self, on):
         for response in (on.mcp(), on.anonymous().get('/api/version'), on.anonymous().get('/oauthx/authorize')):
             policy = response.headers['Content-Security-Policy']
-            assert TEAMS_ANCESTOR in policy and "'none'" not in policy.split('frame-ancestors')[1].split(';')[0]
+            # Only the app itself: Microsoft Teams may frame the Teams tab pages (/teams/*) and nothing else
+            assert policy.split('frame-ancestors')[1].split(';')[0].strip() == "'self'"
+            assert TEAMS_ANCESTOR not in policy
             assert response.headers['X-Frame-Options'] == 'SAMEORIGIN'
 
     def test_the_rest_of_the_policy_is_kept_on_oauth_paths(self, on):

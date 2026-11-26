@@ -43,6 +43,7 @@ SHARED_CORE_PATTERNS = (
     "models.py",
     "notifications.py",
     "requirements.txt",
+    "microsoft_identity.py",
     "retention.py",
     "run_local.py",
     "security.py",

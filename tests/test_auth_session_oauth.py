@@ -12,11 +12,15 @@ duration of a test. Tests that need the real provider module live in
 tests/test_google_oauth.py behind the Enterprise skip marker.
 """
 import ast
+import base64
 import importlib
+import json
 import os
 import secrets
 import sys
+import time
 import types
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs, urlparse
@@ -348,9 +352,36 @@ def oauth_env(real_app, monkeypatch):
     return test_app, install
 
 
+def microsoft_id_claims(email, audience):
+    """Claims of a Microsoft ID token for a member of the tenant that owns the address's domain."""
+    domain = email.split('@')[1].lower()
+    ms_tenant_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, domain))
+    now = int(time.time())
+    return {
+        'aud': audience,
+        'iss': f'https://login.microsoftonline.com/{ms_tenant_id}/v2.0',
+        'tid': ms_tenant_id,
+        'oid': str(uuid.uuid5(uuid.NAMESPACE_DNS, email.lower())),
+        'preferred_username': email,
+        'name': 'Pat Example',
+        'iat': now - 10,
+        'exp': now + 600,
+    }
+
+
+def unsigned_id_token(claims):
+    """An ID token as the token endpoint returns it. The app reads it without checking the signature."""
+    def part(data):
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b'=').decode()
+    return f"{part({'alg': 'RS256', 'typ': 'JWT'})}.{part(claims)}.signature"
+
+
 def _http_mocks(provider, email):
     token = Mock(ok=True, status_code=200)
     token.json.return_value = {'access_token': 'provider-access-token'}
+    if provider.name == 'microsoft':
+        token.json.return_value['id_token'] = unsigned_id_token(
+            microsoft_id_claims(email, 'test-ms-client-id'))
     userinfo = Mock(ok=True, status_code=200)
     userinfo.json.return_value = provider.userinfo(email)
     return patch('requests.post', return_value=token), patch('requests.get', return_value=userinfo)
@@ -368,7 +399,7 @@ def start_sign_in(client, provider, return_url=None, **kwargs):
 def finish_sign_in(client, provider, email, state, **kwargs):
     """Call the callback route with the provider's HTTP calls mocked."""
     if provider.name == 'teams':
-        provider.claims = {'email': email, 'name': 'Pat Example', 'tid': 'ms-tenant'}
+        provider.claims = microsoft_id_claims(email, 'test-teams-app-id')
     post, get = _http_mocks(provider, email)
     with post as post_mock, get:
         response = client.get(provider.callback, query_string={'code': 'auth-code', 'state': state},

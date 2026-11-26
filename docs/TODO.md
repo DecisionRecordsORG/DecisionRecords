@@ -102,6 +102,7 @@ Update rules:
 
 - [ ] The Teams integration's state, its open security items and the work needed before a Teams store submission are tracked in the private repository at `docs/plans/teams-store-readiness.md`. Keep that document current; do not track Teams work here.
 - [ ] After the next Enterprise deploy, send one real message to the Teams bot to confirm the stricter webhook token check accepts Microsoft's tokens.
+- [ ] The version 1 work for the Teams store (2026-11-26) was tested with stand-ins for Teams and Microsoft only. Run the test script in that tracker in a real Teams client before submitting, and work through its ordered owner checklist.
 
 ## MCP / Ecosystem
 

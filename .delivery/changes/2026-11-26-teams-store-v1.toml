@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-26-teams-store-v1"
+title = "Microsoft Teams app, version 1 for the Teams store: sign-in by Microsoft tenant, framing, links, tests"
+summary = "Enterprise-only at run time, with one change every edition gets. app.py: only /teams/* may be framed by Microsoft Teams (Enterprise) and every other page is back to frame-ancestors 'self' in every edition; the Teams routes sign people in through the new microsoft_identity.py (organisations keyed on the Microsoft tenant ID, so onmicrosoft.com tenants work; guests and personal accounts refused; the email claim no longer identifies anyone on the two web sign-ins); 'Connect Teams' takes the Microsoft tenant from a verified sign-in instead of the callback address; the tab gets a sign-in window fallback (/teams/auth-start, /teams/auth-end); the webhook answers every activity. The web app stops loading the Teams SDK on every page and the channel tab configuration route is removed. Disconnecting Teams erases the workspace with its user mappings and conversation references, and retention.py gains a daily clean-up of Teams workspaces that belong to no organisation (a no-op without Teams rows, so in the Community Edition). No database change. The private half (same branch name in ee) carries the bot, the cards, the tab, the manifest and its build script, and reaches production when the ee pointer is advanced. A Community release gains only the tighter framing header and can carry it whenever the next one is cut. The store submission itself (Entra settings, Partner Center, test tenant) is the owner's and is listed in ee/docs/plans/teams-store-readiness.md."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "patch"
+marketing_website = "none"

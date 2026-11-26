@@ -1152,9 +1152,8 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
               <mat-card-content>
                 <p>Connect your Decision Records organization with Microsoft Teams to:</p>
                 <ul>
-                  <li>Create decisions directly from Teams using &#64;DecisionRecords bot</li>
-                  <li>Receive notifications in Teams channels when decisions are created or updated</li>
-                  <li>Search and browse decisions without leaving Teams</li>
+                  <li>Record decisions from Teams, from any message or by asking the Decision Records bot</li>
+                  <li>See and search your organisation's decisions in the Decisions tab without leaving Teams</li>
                 </ul>
               </mat-card-content>
             </mat-card>
@@ -1184,15 +1183,14 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
                   } @else {
                     <div class="teams-connect-options">
                       <div class="connect-option">
-                        <h4>Connect via Azure AD Consent</h4>
-                        <p>Grant admin consent to connect your Microsoft 365 tenant with Decision Records.</p>
+                        <h4>Connect your Microsoft 365 organisation</h4>
+                        <p>Sign in with Microsoft to show which Microsoft 365 organisation is yours. People who use Decision Records in Teams from that organisation then belong to this organisation.</p>
                         <div class="teams-install-guidance">
                           <h5>Steps to connect:</h5>
                           <ol>
-                            <li>Click the button below to start the Azure AD consent flow</li>
-                            <li>Sign in with your Microsoft 365 admin account</li>
-                            <li>Grant the required permissions</li>
-                            <li>You'll be redirected back here once complete</li>
+                            <li>Select the button below</li>
+                            <li>Sign in with your Microsoft 365 work account. Its sign-in name must be on this organisation's domain.</li>
+                            <li>You are brought back here once it is done</li>
                           </ol>
                         </div>
                         <a mat-flat-button color="primary" [href]="teamsSettings?.install_url" data-testid="teams-connect-button">
@@ -4153,6 +4151,14 @@ export class SettingsComponent implements OnInit {
     } else if (teamsError) {
       const errorMessages: { [key: string]: string } = {
         'missing_tenant': 'Microsoft 365 tenant information was not provided',
+        'missing_code': 'Microsoft did not complete the sign-in. Please try again.',
+        'microsoft_sign_in_failed': 'Microsoft could not sign you in. Please try again.',
+        'domain_mismatch': 'Sign in with a Microsoft 365 account whose sign-in name is on this organisation\'s domain.',
+        'guest_account': 'Guest accounts cannot connect a Microsoft 365 organisation. Sign in with an account of the organisation itself.',
+        'personal_account': 'Personal Microsoft accounts cannot be used. Sign in with your work or school account.',
+        'other_microsoft_tenant': 'This organisation is already connected to another Microsoft 365 organisation. Disconnect it first.',
+        'not_allowed': 'Only an administrator of this organisation can connect Microsoft Teams.',
+        'invalid_identity': 'Your Microsoft sign-in could not be verified. Please try again.',
         'invalid_state': 'Invalid or expired OAuth state. Please try again.',
         'tenant_not_found': 'Your organization could not be found',
         'workspace_already_claimed': 'This Microsoft 365 tenant is already connected to another organization',

@@ -186,7 +186,7 @@ class TeamsTabSignIn:
     """
     name = 'Teams tab sign-in'
     app_id = 'test-teams-app-id'
-    ms_tenant_id = 'ms-tenant-1'
+    ms_tenant_id = 'aaaaaaaa-0000-4000-8000-000000000001'
 
     def prepare(self, real_app, monkeypatch, domain):
         import feature_flags
