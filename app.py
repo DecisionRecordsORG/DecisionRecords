@@ -288,8 +288,9 @@ try:
         # - 'unsafe-eval': only needed for dev; can be removed in strict production
         # - 'https://res.cdn.office.net': for Microsoft Teams SDK
         'script-src': ["'self'", "'unsafe-inline'", "https://e.decisionrecords.org", "https://res.cdn.office.net"],
-        'style-src': ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        'font-src': ["'self'", "https://fonts.gstatic.com"],
+        # Fonts and the icon font are served by the app itself (frontend/src/assets/fonts)
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'font-src': ["'self'"],
         'img-src': ["'self'", "data:", "https:"],
         'connect-src': ["'self'", "https://e.decisionrecords.org"],  # API calls + analytics proxy
         # frame-ancestors: Allow Microsoft Teams to embed the app in iframes
@@ -640,6 +641,21 @@ def init_database():
                 except Exception as migration_error:
                     logger.warning(f"Schema migration check failed (non-critical): {str(migration_error)}")
                     # Continue anyway - migrations are for schema updates, not blocking
+
+                # SSO client secrets saved while no encryption key was configured
+                # are encrypted on the first start that has one. Nothing to do
+                # (and nothing changed) when every secret is already encrypted.
+                try:
+                    from migrations import encrypt_sso_client_secrets, unreadable_sso_client_secrets
+                    encrypt_sso_client_secrets(db)
+                    unreadable = unreadable_sso_client_secrets(db)
+                    if unreadable:
+                        logger.error(
+                            f"{len(unreadable)} SSO client secret(s) cannot be decrypted "
+                            f"(organisations: {', '.join(unreadable)}): SSO sign-in for them is refused "
+                            "until the encryption key is restored or each client secret is entered again")
+                except Exception as secret_error:
+                    logger.warning(f"Encrypting stored SSO client secrets failed (non-critical): {str(secret_error)}")
 
                 # Seed EE data (blog posts, etc.) if Enterprise Edition
                 if is_enterprise():
@@ -1532,6 +1548,30 @@ def api_set_password():
     return jsonify({'message': 'Password updated successfully'})
 
 
+SSO_SECRET_UNAVAILABLE_MESSAGE = (
+    'Single sign-on for this organisation is unavailable at the moment. '
+    'Sign in another way, or ask your administrator to check the SSO settings.')
+
+
+def sso_client_secret_or_none(sso_config):
+    """The decrypted client secret, or None (logged as an error) when it cannot be read.
+
+    The secret is stored encrypted (migration 2.9.0). If the encryption key is
+    missing, was changed or the secret store does not answer, the value cannot
+    be decrypted. Then the sign-in stops here with a clear message and an error
+    in the log, instead of sending the person to the identity provider and
+    failing at the token exchange without saying why.
+    """
+    secret = sso_config.get_client_secret()
+    if secret:
+        return secret
+    logger.error(
+        f"SSO sign-in for {sso_config.domain} refused: the stored client secret cannot be "
+        "decrypted (encryption key missing or changed, or the secret store did not answer). "
+        "Check the encryption key, or have the organisation's admin enter the client secret again.")
+    return None
+
+
 @app.route('/auth/sso/<int:config_id>')
 def sso_login(config_id):
     """Initiate SSO login flow."""
@@ -1545,6 +1585,10 @@ def sso_login(config_id):
     if not oidc_config:
         return render_template('error.html', message='Failed to connect to SSO provider'), 500
 
+    client_secret = sso_client_secret_or_none(sso_config)
+    if client_secret is None:
+        return render_template('error.html', message=SSO_SECRET_UNAVAILABLE_MESSAGE), 503
+
     # Store config in session for callback
     session['sso_config_id'] = config_id
     session['oauth_state'] = secrets.token_urlsafe(32)
@@ -1552,7 +1596,7 @@ def sso_login(config_id):
     # Create authorization URL
     client = OAuth2Session(
         client_id=sso_config.client_id,
-        client_secret=sso_config.client_secret,
+        client_secret=client_secret,
         redirect_uri=url_for('sso_callback', _external=True)
     )
 
@@ -1587,10 +1631,14 @@ def sso_callback():
     if not oidc_config:
         return render_template('error.html', message='Failed to connect to SSO provider'), 500
 
+    client_secret = sso_client_secret_or_none(sso_config)
+    if client_secret is None:
+        return render_template('error.html', message=SSO_SECRET_UNAVAILABLE_MESSAGE), 503
+
     # Exchange code for token
     client = OAuth2Session(
         client_id=sso_config.client_id,
-        client_secret=sso_config.client_secret,
+        client_secret=client_secret,
         redirect_uri=url_for('sso_callback', _external=True),
         state=stored_state
     )
@@ -4152,6 +4200,52 @@ def api_get_current_user():
     return jsonify(user_dict)
 
 
+@app.route('/api/user/profile', methods=['PUT'])
+@login_required
+@track_endpoint('api_user_profile_update')
+def api_update_own_profile():
+    """Correct one's own name (GDPR Art. 16).
+
+    Only the name. The email address is the account's identity and decides
+    which organisation the account belongs to, so it is not changed here.
+    """
+    if is_master_account():
+        return jsonify({'error': 'Not applicable for master accounts'}), 400
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'No data provided'}), 400
+    if 'first_name' not in data and 'last_name' not in data:
+        return jsonify({'error': 'Give a first name or a last name'}), 400
+
+    names = {}
+    for field in ('first_name', 'last_name'):
+        value = data.get(field)
+        if value is None:
+            value = ''
+        if not isinstance(value, str):
+            return jsonify({'error': f'{field} must be text'}), 400
+        if len(value.strip()) > 100:
+            return jsonify({'error': 'A name can be at most 100 characters'}), 400
+        names[field] = (sanitize_name(value.strip(), max_length=100) or '').strip()
+
+    if not names['first_name'] and not names['last_name']:
+        return jsonify({'error': 'A name is required'}), 400
+
+    user = g.current_user
+    if user.deleted_at or user.is_anonymized:
+        return jsonify({'error': 'This account has been deleted'}), 400
+
+    user.set_name(first_name=names['first_name'] or None, last_name=names['last_name'] or None)
+    user.name_edited_at = datetime.now(timezone.utc)
+    # Comments keep a copy of the author's name for the day the account is gone
+    DecisionComment.query.filter_by(user_id=user.id).update(
+        {'author_display': user.get_full_name()}, synchronize_session=False)
+    db.session.commit()
+
+    return jsonify({'message': 'Name updated', 'user': user.to_dict()})
+
+
 @app.route('/api/user/subscription', methods=['GET'])
 @login_required
 def api_get_subscription():
@@ -4470,14 +4564,18 @@ def api_get_user_consents():
     user = g.current_user
     consents = UserConsent.query.filter_by(user_id=user.id).all()
 
-    # Return all consent types, defaulting to not granted if no record exists
+    # Return all consent types. Without a record the default applies: off for
+    # analytics and AI processing, on for email notifications.
     result = {}
     for consent_type in UserConsent.VALID_CONSENT_TYPES:
         consent = next((c for c in consents if c.consent_type == consent_type), None)
         if consent:
             result[consent_type] = consent.to_dict()
         else:
-            result[consent_type] = {'consent_type': consent_type, 'granted': False}
+            result[consent_type] = {
+                'consent_type': consent_type,
+                'granted': UserConsent.DEFAULT_GRANTED.get(consent_type, False),
+            }
 
     return jsonify(result)
 
@@ -4721,10 +4819,11 @@ def api_create_sso_config():
         domain=domain,
         provider_name=provider_name,
         client_id=client_id,
-        client_secret=data['client_secret'],  # Don't sanitize secrets - they may contain special chars
         discovery_url=discovery_url,
         enabled=data.get('enabled', True)
     )
+    # Not sanitized (a secret may contain any character); encrypted at rest
+    config.set_client_secret(data['client_secret'])
 
     db.session.add(config)
     db.session.commit()
@@ -4751,7 +4850,7 @@ def api_update_sso_config(config_id):
     if 'client_id' in data:
         config.client_id = sanitize_title(data['client_id'], max_length=500)
     if 'client_secret' in data and data['client_secret']:
-        config.client_secret = data['client_secret']  # Don't sanitize secrets
+        config.set_client_secret(data['client_secret'])  # Not sanitized; encrypted at rest
     if 'discovery_url' in data:
         # Sanitize and validate new discovery URL
         sanitized_url = sanitize_title(data['discovery_url'], max_length=1000)
@@ -11314,11 +11413,11 @@ def slack_oauth_callback():
 @track_endpoint('api_slack_command')
 def slack_commands():
     """Handle Slack slash commands."""
-    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_security import slack_request_is_authentic
     from ee.backend.slack.slack_service import SlackService
 
-    # Verify request signature
-    if not verify_slack_signature(request):
+    # Verify the request signature (HMAC with the app's signing secret)
+    if not slack_request_is_authentic(request):
         return jsonify({'error': 'Invalid signature'}), 403
 
     # Parse form data (Slack sends form-encoded data)
@@ -11363,12 +11462,12 @@ def slack_commands():
 @track_endpoint('api_slack_interaction')
 def slack_interactions():
     """Handle Slack interactive components (modals, buttons)."""
-    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_security import slack_request_is_authentic
     from ee.backend.slack.slack_service import SlackService
     import json
 
-    # Verify request signature
-    if not verify_slack_signature(request):
+    # Verify the request signature (HMAC with the app's signing secret)
+    if not slack_request_is_authentic(request):
         return jsonify({'error': 'Invalid signature'}), 403
 
     # Parse payload
@@ -11409,15 +11508,17 @@ def slack_interactions():
 @track_endpoint('api_slack_events')
 def slack_events():
     """Handle Slack Events API (app_home_opened, etc.)."""
-    from ee.backend.slack.slack_security import verify_slack_signature
+    from ee.backend.slack.slack_security import slack_request_is_authentic
     from ee.backend.slack.slack_service import SlackService
     import json
 
-    # Verify request signature
-    if not verify_slack_signature(request):
+    # Verify the request signature (HMAC with the app's signing secret)
+    if not slack_request_is_authentic(request):
         return jsonify({'error': 'Invalid signature'}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return '', 200
 
     # Handle URL verification challenge (required when setting up Events API)
     if data.get('type') == 'url_verification':
@@ -11425,8 +11526,19 @@ def slack_events():
 
     # Handle actual events
     if data.get('type') == 'event_callback':
-        event = data.get('event', {})
+        event = data.get('event') or {}
         team_id = data.get('team_id')
+
+        # The app was removed from the Slack workspace, or its bot token was
+        # revoked there: nothing we hold for that workspace can be used any
+        # more, so it is deleted, as it is when an admin disconnects Slack.
+        from ee.backend.slack.slack_service import ends_slack_installation, forget_slack_workspace
+        if ends_slack_installation(event):
+            removed = SlackWorkspace.query.filter_by(workspace_id=team_id).first() if team_id else None
+            if removed:
+                counts = forget_slack_workspace(removed)
+                logger.info(f"Slack workspace {team_id} removed after {event.get('type')}: {counts}")
+            return '', 200
 
         # Find workspace
         workspace = SlackWorkspace.query.filter_by(workspace_id=team_id, is_active=True).first()
@@ -11548,11 +11660,12 @@ def slack_disconnect():
     if not workspace:
         return jsonify({'error': 'Slack not connected'}), 404
 
-    workspace.is_active = False
-    workspace.bot_token_encrypted = ''
-    db.session.commit()
+    # Delete what we hold for the workspace: the installation with its access
+    # token and settings, and every link between a Slack user and an account.
+    from ee.backend.slack.slack_service import forget_slack_workspace
+    counts = forget_slack_workspace(workspace)
 
-    logger.info(f"Slack workspace disconnected from tenant {tenant.id}")
+    logger.info(f"Slack workspace disconnected from tenant {tenant.id}: {counts}")
 
     return jsonify({'message': 'Slack disconnected successfully'})
 

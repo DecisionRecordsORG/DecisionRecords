@@ -11,7 +11,9 @@ import {
   RetentionRun,
   RetentionStatus,
   SuperadminRetentionComponent,
+  RETENTION_CATEGORY_TEXT,
   retentionCount,
+  retentionCutoffEvent,
   retentionDuration,
   retentionHoldReason,
   retentionRunStatusLabel,
@@ -102,6 +104,25 @@ describe('retention helpers', () => {
     expect(retentionCount('accounts', 3)).toBe('3 accounts');
     expect(retentionCount('login_history', 2)).toBe('2 login history entries');
     expect(retentionCount('something-new', 2)).toBe('2 items');
+  });
+
+  it('has words for the categories that are deleted by age', () => {
+    expect(retentionCount('request_log', 1)).toBe('1 request log entry');
+    expect(retentionCount('verification_records', 2)).toBe('2 expired records');
+    expect(retentionCount('access_requests', 1)).toBe('1 access request');
+    expect(retentionCount('api_keys', 3)).toBe('3 API keys');
+    expect(RETENTION_CATEGORY_TEXT.request_log.rule).toContain('older than 90 days');
+    expect(RETENTION_CATEGORY_TEXT.verification_records.rule).toContain('expired more than 30 days ago');
+    expect(RETENTION_CATEGORY_TEXT.access_requests.rule).toContain('Pending requests stay');
+    expect(RETENTION_CATEGORY_TEXT.api_keys.rule).toContain('Keys that still work stay');
+  });
+
+  it('says what the cutoff date of each age-based category counts from', () => {
+    expect(retentionCutoffEvent('login_history')).toBe('was created');
+    expect(retentionCutoffEvent('request_log')).toBe('was created');
+    expect(retentionCutoffEvent('verification_records')).toBe('expired');
+    expect(retentionCutoffEvent('access_requests')).toBe('was approved or rejected');
+    expect(retentionCutoffEvent('api_keys')).toBe('was revoked or expired');
   });
 
   it('says who started a run', () => {

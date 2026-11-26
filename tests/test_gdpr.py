@@ -697,7 +697,7 @@ class TestGetConsents:
     """Test GET /api/user/consents."""
 
     def test_get_consents_default_not_granted(self, app, session, sample_user):
-        """All consent types default to False/not granted when no records exist."""
+        """Without a stored choice each switch has its default."""
         with app.test_request_context():
             flask_session['user_id'] = sample_user.id
             g.current_user = sample_user
@@ -709,12 +709,17 @@ class TestGetConsents:
                 if consent:
                     result[consent_type] = consent.to_dict()
                 else:
-                    result[consent_type] = {'consent_type': consent_type, 'granted': False}
+                    result[consent_type] = {
+                        'consent_type': consent_type,
+                        'granted': UserConsent.DEFAULT_GRANTED[consent_type],
+                    }
 
-            # All three consent types should default to not granted
+            # Analytics and AI processing are off until switched on. Email
+            # notifications are on until switched off (the route's behaviour
+            # is tested through HTTP in tests/test_privacy_preferences.py).
             assert result['analytics']['granted'] is False
             assert result['ai_processing']['granted'] is False
-            assert result['email_notifications']['granted'] is False
+            assert result['email_notifications']['granted'] is True
 
     def test_get_consents_reflects_granted_state(self, app, session, sample_user):
         """When consent is granted, it shows as granted in the response."""

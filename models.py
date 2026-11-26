@@ -1090,6 +1090,9 @@ class User(db.Model):
     name = db.Column(db.String(255), nullable=True)  # Legacy field, use first_name + last_name
     first_name = db.Column(db.String(100), nullable=True)
     last_name = db.Column(db.String(100), nullable=True)
+    # Set when the person corrected their own name on the profile page. From
+    # then on a sign-in through an identity provider no longer overwrites it.
+    name_edited_at = db.Column(db.DateTime, nullable=True)
     password_hash = db.Column(db.String(255), nullable=True)  # For local/password authentication
     sso_subject = db.Column(db.String(255), nullable=True)  # Subject ID from SSO provider (null for local users)
     sso_domain = db.Column(db.String(255), nullable=False)  # Domain for multi-tenancy
@@ -1219,6 +1222,17 @@ class UserConsent(db.Model):
 
     VALID_CONSENT_TYPES = [CONSENT_ANALYTICS, CONSENT_AI_PROCESSING, CONSENT_EMAIL_NOTIFICATIONS]
 
+    # What applies to a person who has never used the switch. Analytics and AI
+    # processing are off until switched on. Email notifications are on until
+    # switched off: they are only ever sent for what the person subscribed to
+    # or for a decision they were made the owner of, so the switch is a way to
+    # stop them all at once, not a permission that has to be given first.
+    DEFAULT_GRANTED = {
+        CONSENT_ANALYTICS: False,
+        CONSENT_AI_PROCESSING: False,
+        CONSENT_EMAIL_NOTIFICATIONS: True,
+    }
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     consent_type = db.Column(db.String(50), nullable=False)
@@ -1236,6 +1250,27 @@ class UserConsent(db.Model):
     __table_args__ = (
         db.UniqueConstraint('user_id', 'consent_type', name='uq_user_consent_type'),
     )
+
+    @classmethod
+    def is_granted(cls, user_id, consent_type):
+        """Whether this processing is switched on for the person, defaults included."""
+        if user_id is None:
+            return cls.DEFAULT_GRANTED.get(consent_type, False)
+        consent = cls.query.filter_by(user_id=user_id, consent_type=consent_type).first()
+        if consent is None:
+            return cls.DEFAULT_GRANTED.get(consent_type, False)
+        return bool(consent.granted)
+
+    @classmethod
+    def user_ids_switched_off(cls, consent_type, user_ids):
+        """Those of `user_ids` who switched this off themselves (a stored refusal)."""
+        user_ids = [user_id for user_id in user_ids if user_id is not None]
+        if not user_ids:
+            return set()
+        rows = cls.query.filter(
+            cls.consent_type == consent_type, cls.granted.is_(False), cls.user_id.in_(user_ids)
+        ).with_entities(cls.user_id).all()
+        return {row[0] for row in rows}
 
     def to_dict(self):
         return {
@@ -1259,11 +1294,29 @@ class SSOConfig(db.Model):
     domain = db.Column(db.String(255), nullable=False, unique=True)  # e.g., "company.com"
     provider_name = db.Column(db.String(100), nullable=False)  # e.g., "Google", "Okta", "Azure AD"
     client_id = db.Column(db.String(255), nullable=False)
-    client_secret = db.Column(db.String(255), nullable=False)
+    # Stored encrypted (crypto.py, the key that also protects saved SMTP
+    # passwords). Read it with get_client_secret() and write it with
+    # set_client_secret(): the column itself holds 'encrypted:<token>', or the
+    # plain secret on an installation that has no encryption key.
+    client_secret = db.Column(db.String(1024), nullable=False)
     discovery_url = db.Column(db.String(500), nullable=False)  # OpenID Connect discovery URL
     enabled = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def set_client_secret(self, secret):
+        """Store the client secret, encrypted when an encryption key is configured."""
+        from crypto import encrypt_password
+        self.client_secret = encrypt_password(secret)
+
+    def get_client_secret(self):
+        """The client secret for use with the identity provider.
+
+        A value saved before encryption was introduced is returned as it is.
+        None when the value is encrypted and the key is missing or wrong.
+        """
+        from crypto import decrypt_password
+        return decrypt_password(self.client_secret)
 
     def to_dict(self, include_secret=False):
         data = {
@@ -1277,7 +1330,7 @@ class SSOConfig(db.Model):
             'updated_at': self.updated_at.isoformat(),
         }
         if include_secret:
-            data['client_secret'] = self.client_secret
+            data['client_secret'] = self.get_client_secret()
         return data
 
 

@@ -8,6 +8,17 @@ Update rules:
 - Keep entries short and actionable.
 - Prefer linking to the owning workflow, doc, or file when relevant.
 
+## Privacy follow-ups (from the 2026-11-26 privacy-gaps change)
+
+- [ ] After the Enterprise deploy that carries migration `2.9.0`: confirm in the start-up log that SSO client secrets were encrypted (`Encrypted N SSO client secret(s) at rest`), sign in once through a tenant's own SSO, and run one Slack command (the webhooks now refuse a request whose signature does not verify against the stored signing secret). Rolling back past `2.9.0` leaves client secrets an older version cannot use.
+- [ ] After that deploy, open Super Admin > Data retention before the next automatic run: the four new categories (request log, expired confirmation and set-up records, answered access requests, revoked and expired API keys) have never been cleaned, and the first run deletes everything already past its period without a limit.
+- [ ] Add `app_uninstalled` and `tokens_revoked` to the Slack app's event subscriptions at api.slack.com (the manifest in the private repository lists them; Slack only sends what the app configuration subscribes to).
+- [ ] The website's FAQ, DPA, security page and privacy policy state retention periods and what the analytics and email switches do. Reconcile them with `docs/configuration.md` ("GDPR / Privacy") and `docs/self-hosting.md` ("Data retention").
+- [ ] `e2e/tests/gdpr.spec.ts` gained two browser tests (correcting one's own name, switching a privacy preference) that were written against the built app but have not been run through the e2e suite itself, which is run by hand. Run `npx playwright test tests/gdpr.spec.ts` the next time the suite is run.
+- [ ] The Microsoft Teams SDK script in `frontend/src/index.html` asks `res.cdn.office.net` for a list of domains on every page of the web app (the Content Security Policy refuses the request). Load the SDK only on the Teams pages. Owned by the Teams work.
+- [ ] Error reports sent to the analytics service now carry the exception class and location only. If that proves too little to diagnose with, add a reviewed allow-list of exception classes whose messages are known to hold no user data.
+- [ ] Browser page views (for people who accepted analytics) carry the page address, which includes the organisation's domain (`/acme.com/decision/42`). Decide whether to replace the domain with a placeholder before sending.
+
 ## Deployment / CI-CD
 
 - [ ] After the Enterprise deploy that carries `client_address.py`: confirm the start-up log line `Rate limiting enabled, one bucket per visitor address (23 trusted proxy network(s))`, that two networks count down separately on `X-RateLimit-Remaining`, and that login history shows the visitor's address. Steps in `ee/docs/client-address-and-origin.md`.

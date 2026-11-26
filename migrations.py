@@ -216,6 +216,11 @@ MIGRATIONS = [
         "description": "Add oauth_tokens.withdrawn_at and oauth_tokens.repeat_answered_at",
         "migrate": lambda db: migrate_2_8_0(db)
     },
+    {
+        "version": "2.9.0",
+        "description": "Encrypt SSO client secrets at rest; add users.name_edited_at",
+        "migrate": lambda db: migrate_2_9_0(db)
+    },
 ]
 
 
@@ -729,6 +734,97 @@ def migrate_2_8_0(db):
     for column_name in OAUTH_TOKEN_REUSE_COLUMNS:
         if add_column(db, 'oauth_tokens', column_name, 'TIMESTAMP'):
             changes += 1
+    return changes
+
+
+def encrypt_sso_client_secrets(db):
+    """Encrypt SSO client secrets that are still stored as plain text. Returns how many.
+
+    Uses crypto.encrypt_password, the mechanism that protects saved SMTP
+    passwords: a value that is already encrypted is left alone, and without an
+    encryption key (a Community installation that has not set
+    SMTP_ENCRYPTION_KEY) nothing is changed, so a value is never lost. Each
+    new value is decrypted again before it is stored. Safe to run any number
+    of times; the application also runs it at every start, so secrets are
+    encrypted on the first start after a key is configured.
+    """
+    from crypto import encrypt_password, decrypt_password, is_password_encrypted
+
+    if not table_exists(db, 'sso_configs'):
+        return 0
+
+    changes = 0
+    with db.engine.connect() as conn:
+        rows = conn.execute(db.text("SELECT id, client_secret FROM sso_configs")).fetchall()
+        for row_id, secret in rows:
+            if not secret or is_password_encrypted(secret):
+                continue
+            encrypted = encrypt_password(secret)
+            if not is_password_encrypted(encrypted) or decrypt_password(encrypted) != secret:
+                # No key, or the key does not round-trip: leave the value as it is
+                continue
+            conn.execute(
+                db.text("UPDATE sso_configs SET client_secret = :secret WHERE id = :id AND client_secret = :old"),
+                {"secret": encrypted, "id": row_id, "old": secret})
+            changes += 1
+        conn.commit()
+
+    if changes:
+        logger.info(f"Encrypted {changes} SSO client secret(s) at rest")
+    return changes
+
+
+def unreadable_sso_client_secrets(db):
+    """Domains whose stored SSO client secret is encrypted but cannot be decrypted.
+
+    Empty when every secret is readable. A non-empty answer means the
+    encryption key is missing or is not the one the secrets were encrypted
+    with: the application logs it at start-up so that it is not found only
+    when someone tries to sign in.
+    """
+    from crypto import decrypt_password, is_password_encrypted
+
+    if not table_exists(db, 'sso_configs'):
+        return []
+    with db.engine.connect() as conn:
+        rows = conn.execute(db.text("SELECT domain, client_secret FROM sso_configs")).fetchall()
+    return [domain for domain, secret in rows
+            if is_password_encrypted(secret) and not decrypt_password(secret)]
+
+
+def migrate_2_9_0(db):
+    """Migration for v2.9.0 - encrypted SSO client secrets and users.name_edited_at.
+
+    1. sso_configs.client_secret is widened to 1024 characters on PostgreSQL
+       (an encrypted value is about twice as long as the secret; SQLite does
+       not enforce the length). Widening a VARCHAR rewrites nothing.
+    2. Existing client secrets are encrypted in place: see
+       encrypt_sso_client_secrets. Reads accept both forms, so a secret that
+       could not be encrypted now (no key yet) keeps working.
+    3. users.name_edited_at, a nullable timestamp, is added. No row is changed.
+
+    A second run finds the column wide enough, every secret encrypted and the
+    new column in place.
+    """
+    changes = 0
+
+    if table_exists(db, 'sso_configs') and get_db_type(db) == 'postgresql':
+        with db.engine.connect() as conn:
+            current = conn.execute(db.text(
+                "SELECT character_maximum_length FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = 'sso_configs' "
+                "AND column_name = 'client_secret'")).scalar()
+            if current is not None and current < 1024:
+                conn.execute(db.text(
+                    "ALTER TABLE sso_configs ALTER COLUMN client_secret TYPE VARCHAR(1024)"))
+                changes += 1
+            conn.commit()
+
+    changes += encrypt_sso_client_secrets(db)
+
+    if table_exists(db, 'users') and add_column(db, 'users', 'name_edited_at', 'TIMESTAMP'):
+        changes += 1
+
     return changes
 
 
