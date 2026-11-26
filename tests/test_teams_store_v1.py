@@ -1275,10 +1275,52 @@ class TestManifestAndPackage:
         tabs = [tab for tab in manifest['staticTabs'] if tab.get('contentUrl')]
         assert [(tab['contentUrl'], tab['scopes']) for tab in tabs] == [
             ('https://decisionrecords.org/teams/tab', ['personal'])]
-        text = json.dumps({key: value for key, value in manifest.items() if key != 'bots'}).lower()
-        text += json.dumps(manifest['bots'][0]['commandLists']).lower()
-        for phrase in ('notif', 'beta', 'terms-of-service', 'dev.decisionrecords'):
+        text = json.dumps(manifest).lower()
+        for phrase in ('beta', 'terms-of-service', 'dev.decisionrecords'):
             assert phrase not in text, phrase
+        # Notifications are mentioned once, to say there are none
+        assert 'does not post notifications' in manifest['description']['full']
+        assert text.count('notif') == 2   # that sentence, and the bot's isNotificationOnly: false
+        assert manifest['bots'][0]['isNotificationOnly'] is False
+
+    def test_the_package_asks_for_no_permission_the_app_does_not_use(self, package, manifest):
+        """An old manifest asked for ChannelMessage.Read.Group. The app never reads channel history."""
+        assert 'authorization' not in manifest
+        assert manifest['permissions'] == ['identity']
+        assert 'devicePermissions' not in manifest
+        text = json.dumps(manifest)
+        for phrase in ('ChannelMessage', 'Read.Group', 'resourceSpecific', 'messageTeamMembers'):
+            assert phrase not in text, phrase
+
+        def problems(change):
+            broken = json.loads(json.dumps(manifest))
+            change(broken)
+            return ' | '.join(package.validate(broken))
+
+        assert 'resource-specific consent' in problems(lambda m: m.update(authorization={'permissions': {
+            'resourceSpecific': [{'name': 'ChannelMessage.Read.Group', 'type': 'Application'}]}}))
+        assert 'permissions' in problems(lambda m: m.update(permissions=['identity', 'messageTeamMembers']))
+
+    def test_the_listing_wording_matches_what_the_package_declares(self, manifest):
+        """The long description is the Partner Center text; what it names must exist under that name."""
+        description = manifest['description']['full']
+
+        assert manifest['description']['short'] == (
+            "Keep a searchable record of your team's decisions and the reasons behind them")
+        assert manifest['name'] == {
+            'short': 'Decision Records', 'full': 'Decision Records: decisions and the reasons behind them'}
+        assert 'choose Create decision from the More actions menu' in description
+        assert [c['title'] for c in manifest['composeExtensions'][0]['commands']] == ['Create decision']
+        assert sorted(manifest['composeExtensions'][0]['commands'][0]['context']) == ['commandBox', 'compose', 'message']
+        assert 'create a decision, list recent decisions, search, or view one by its number' in description
+        assert 'It is created for you the first time you open the tab with your work account' in description
+
+    def test_the_manifest_is_already_valid_under_the_newest_schema_kept(self, package, manifest):
+        """Moving from 1.25 to 1.31 is a change of two lines."""
+        newest = json.load(open(os.path.join(TEAMS_APP_DIR, 'schema', 'MicrosoftTeams.schema.v1.31.json')))
+        moved = dict(manifest, manifestVersion='1.31')
+
+        assert package.schema_errors(moved, newest, newest) == []
 
     def test_links_and_domains(self, manifest):
         assert manifest['developer'] == {
@@ -1336,3 +1378,297 @@ class TestManifestAndPackage:
             'logo-outline-white.svg', 'manifest.json', 'outline-32x32.png', 'schema',
         ]
 
+
+
+# ============================================================================
+# PRIVACY: DISCONNECT AND UNINSTALL ERASE, NOTHING WRITTEN STAYS IN THE LOG,
+# NO DIRECTORY LOOKUPS
+# ============================================================================
+
+def sign_in_on_the_web(client, user):
+    user.auth_type = 'sso'   # needs no local credential to use the app
+    db.session.commit()
+    with client.session_transaction() as session:
+        session['user_id'] = user.id
+        session['_expires_at'] = '2999-01-01T00:00:00+00:00'
+
+
+def csrf_headers(client):
+    return {'X-CSRF-Token': client.get('/api/auth/csrf-token').get_json().get('csrf_token', '')}
+
+
+class TestDisconnectErasesTeamsRecords:
+
+    @pytest.fixture
+    def connected(self, bot, megan, client):
+        """An organisation in use from Teams: a workspace, two mapped people, two conversations."""
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='add'))
+        bot.say('hi', megan)
+        alex = bot.person(oid(3), f'alex@{REVIEW_DOMAIN}', name='Alex Wilber')
+        bot.deliver(bot.activity('installationUpdate', sender=alex, action='add', conversation='19:personal-2'))
+        bot.say('list', alex, conversation='19:personal-2')
+        make_decision(Tenant.query.one(), 'Kept decision', REVIEW_MEMBER)
+        assert (TeamsWorkspace.query.count(), TeamsUserMapping.query.count(),
+                TeamsConversationReference.query.count()) == (1, 2, 2)
+        return User.query.filter_by(email=REVIEW_MEMBER).one()
+
+    def test_disconnect_deletes_the_workspace_its_mappings_and_its_conversations(self, client, connected):
+        sign_in_on_the_web(client, connected)
+
+        response = client.post('/api/teams/disconnect', headers=csrf_headers(client))
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert response.get_json()['erased'] == {
+            'teams_user_mappings': 2, 'teams_conversation_references': 2, 'teams_workspaces': 1}
+        assert (TeamsWorkspace.query.count(), TeamsUserMapping.query.count(),
+                TeamsConversationReference.query.count()) == (0, 0, 0)
+        # The organisation's own data stays
+        assert ArchitectureDecision.query.count() == 1 and User.query.count() == 2 and Tenant.query.count() == 1
+
+    def test_disconnect_leaves_other_organisations_teams_records_alone(self, client, connected):
+        other = make_org(DOMAIN_B, MS_TENANT_B, members=[BOB])
+        workspace_b = TeamsWorkspace.query.filter_by(tenant_id=other.id).one()
+        db.session.add(TeamsUserMapping(teams_workspace_id=workspace_b.id, aad_object_id=oid(7),
+                                        user_id=User.query.filter_by(email=BOB).one().id))
+        db.session.commit()
+        sign_in_on_the_web(client, connected)
+
+        client.post('/api/teams/disconnect', headers=csrf_headers(client))
+
+        assert [w.ms_tenant_id for w in TeamsWorkspace.query.all()] == [MS_TENANT_B]
+        assert TeamsUserMapping.query.count() == 1
+
+    def test_only_an_administrator_can_disconnect(self, client, connected):
+        member = User.query.filter_by(email=f'alex@{REVIEW_DOMAIN}').one()
+        sign_in_on_the_web(client, member)
+
+        response = client.post('/api/teams/disconnect', headers=csrf_headers(client))
+
+        assert response.status_code == 403
+        assert TeamsWorkspace.query.count() == 1 and TeamsUserMapping.query.count() == 2
+
+    def test_using_the_app_again_after_disconnecting_starts_afresh(self, client, connected, megan, real_app):
+        sign_in_on_the_web(client, connected)
+        client.post('/api/teams/disconnect', headers=csrf_headers(client))
+        teams_tab = real_app[1].test_client()   # the tab has no web session
+
+        response = sign_in(teams_tab, sso_token(REVIEW_MEMBER, tid=MS_TENANT_REVIEW, oid=megan))
+
+        assert response.status_code == 200
+        assert TeamsWorkspace.query.one().tenant_id == Tenant.query.one().id
+        assert TeamsUserMapping.query.count() == 1 and TeamsConversationReference.query.count() == 0
+
+
+class TestUninstallErasesTheConversation:
+
+    def test_a_personal_uninstall_forgets_that_persons_chat_only(self, bot, megan):
+        alex = bot.person(oid(3), f'alex@{REVIEW_DOMAIN}', name='Alex Wilber')
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='add'))
+        bot.deliver(bot.activity('installationUpdate', sender=alex, action='add', conversation='19:personal-2'))
+
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='remove'))
+
+        assert [r.conversation_id for r in TeamsConversationReference.query.all()] == ['19:personal-2']
+
+    def test_removal_from_a_team_forgets_every_conversation_of_that_team(self, bot, megan):
+        team = {'tenant': {'id': MS_TENANT_REVIEW}, 'team': {'id': '19:team-1'}}
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='add', conversation_type='channel',
+                                 conversation='19:general', channelData={**team, 'channel': {'id': '19:general'}}))
+        bot.deliver(bot.activity('conversationUpdate', sender=megan, conversation_type='channel',
+                                 conversation='19:second', channelData={**team, 'channel': {'id': '19:second'}},
+                                 membersAdded=[{'id': f'28:{APP_ID}'}]))
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='add', conversation='19:personal-1'))
+        assert TeamsConversationReference.query.count() == 3
+
+        bot.deliver(bot.activity('installationUpdate', sender=megan, action='remove', conversation_type='channel',
+                                 conversation='19:general', channelData={**team, 'channel': {'id': '19:general'}}))
+
+        assert [r.conversation_id for r in TeamsConversationReference.query.all()] == ['19:personal-1']
+
+    def test_the_bot_being_removed_from_a_group_chat_forgets_the_chat(self, bot, megan):
+        bot.deliver(bot.activity('conversationUpdate', sender=megan, conversation='19:group-1',
+                                 conversation_type='groupChat', membersAdded=[{'id': f'28:{APP_ID}'}]))
+        assert TeamsConversationReference.query.one().context_type == 'group'
+
+        bot.deliver(bot.activity('conversationUpdate', sender=megan, conversation='19:group-1',
+                                 conversation_type='groupChat', membersRemoved=[{'id': f'28:{APP_ID}'}]))
+
+        assert TeamsConversationReference.query.count() == 0
+
+
+class TestTeamsRecordsThatBelongToNoOrganisation:
+    """retention.purge_orphaned_teams_workspaces, run once a day."""
+
+    def workspace(self, ms_tenant, *, tenant=None, status=None, active=True, days_idle=0):
+        from datetime import datetime, timedelta, timezone
+        seen = datetime.now(timezone.utc) - timedelta(days=days_idle)
+        row = TeamsWorkspace(ms_tenant_id=ms_tenant, tenant_id=tenant.id if tenant else None, is_active=active,
+                             status=status or TeamsWorkspace.STATUS_PENDING_CONSENT, installed_at=seen)
+        db.session.add(row)
+        db.session.flush()
+        db.session.add(TeamsUserMapping(teams_workspace_id=row.id, aad_object_id=oid(1),
+                                        aad_email='someone@example.test'))
+        db.session.add(TeamsConversationReference(
+            teams_workspace_id=row.id, conversation_id='19:c', context_type='personal',
+            reference_json=json.dumps({'user': {'name': 'Some One'}})))
+        db.session.commit()
+        return row.id
+
+    def test_a_workspace_detached_by_the_old_disconnect_is_erased_with_its_records(self, real_app):
+        import retention
+        self.workspace(MS_TENANT_A, status=TeamsWorkspace.STATUS_DISCONNECTED, active=False)
+
+        assert retention.purge_orphaned_teams_workspaces() == 1
+
+        assert (TeamsWorkspace.query.count(), TeamsUserMapping.query.count(),
+                TeamsConversationReference.query.count()) == (0, 0, 0)
+
+    def test_an_install_that_never_led_to_an_organisation_is_erased_after_thirty_idle_days(self, real_app):
+        import retention
+        recent = self.workspace(MS_TENANT_A, days_idle=29)
+        self.workspace(MS_TENANT_B, days_idle=31)
+
+        assert retention.purge_orphaned_teams_workspaces() == 1
+
+        assert [w.id for w in TeamsWorkspace.query.all()] == [recent]
+        assert TeamsUserMapping.query.count() == 1 and TeamsConversationReference.query.count() == 1
+
+    def test_a_workspace_of_an_organisation_is_never_touched(self, real_app):
+        import retention
+        tenant = make_org(DOMAIN_A, members=[ALICE])
+        kept = self.workspace(MS_TENANT_A, tenant=tenant, status=TeamsWorkspace.STATUS_ACTIVE, days_idle=400)
+
+        assert retention.purge_orphaned_teams_workspaces() == 0
+        assert db.session.get(TeamsWorkspace, kept) is not None
+
+    def test_it_runs_once_a_day_and_only_while_automatic_erasure_is_on(self, real_app, monkeypatch):
+        import retention
+        self.workspace(MS_TENANT_A, status=TeamsWorkspace.STATUS_DISCONNECTED, active=False)
+        state = {}
+
+        monkeypatch.setenv('RETENTION_AUTO_RUN', 'false')
+        assert retention.purge_teams_orphans_if_due(state) is False
+        assert TeamsWorkspace.query.count() == 1
+
+        monkeypatch.delenv('RETENTION_AUTO_RUN')
+        SystemConfig.set(SystemConfig.KEY_RETENTION_AUTO_RUN_ENABLED, True)
+        assert retention.purge_teams_orphans_if_due(state) is True
+        assert TeamsWorkspace.query.count() == 0
+        assert retention.purge_teams_orphans_if_due(state) is False
+
+    def test_erasing_a_person_and_exporting_their_data_cover_an_account_made_from_teams(self, client, real_app):
+        import retention
+        import data_export
+        sign_in(client, sso_token(REVIEW_ADMIN, tid=MS_TENANT_REVIEW, oid=oid(1)))
+        user = User.query.filter_by(email=REVIEW_ADMIN).one()
+
+        exported = json.dumps(data_export.build_personal_data_export(user), default=str)
+        assert '"service": "teams"' in exported and oid(1) in exported
+
+        assert retention.anonymize_user(user.id) is True
+        assert TeamsUserMapping.query.count() == 0
+
+    def test_erasing_an_organisation_takes_the_workspace_linked_at_sign_in_with_it(self, client, real_app):
+        import retention
+        sign_in(client, sso_token(REVIEW_ADMIN, tid=MS_TENANT_REVIEW, oid=oid(1)))
+        tenant = Tenant.query.one()
+        workspace_id = TeamsWorkspace.query.one().id
+        db.session.add(TeamsConversationReference(teams_workspace_id=workspace_id, conversation_id='19:c',
+                                                  context_type='personal', reference_json='{}'))
+        db.session.commit()
+
+        from types import SimpleNamespace
+        retention._erase_tenant(tenant, SimpleNamespace())
+        db.session.commit()
+
+        assert (TeamsWorkspace.query.count(), TeamsUserMapping.query.count(),
+                TeamsConversationReference.query.count()) == (0, 0, 0)
+
+
+class TestNothingWrittenReachesTheLog:
+
+    SECRET = 'zebrafish-merger-with-contoso'
+
+    def test_message_text_is_not_logged(self, bot, megan, caplog):
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        for text in (self.SECRET, f'search {self.SECRET}', f'view {self.SECRET}', f'{self.SECRET} list',
+                     f'<at>Decision Records</at> {self.SECRET}'):
+            bot.say(text, megan)
+        bot.deliver(bot.activity('message', sender=megan, value={'action': self.SECRET}))
+        bot.deliver(bot.activity('invoke', sender=megan, name='composeExtension/submitAction',
+                                 value={'data': {'title': self.SECRET, 'context': self.SECRET}}))
+        bot.deliver(bot.activity('invoke', sender=megan, name='composeExtension/fetchTask',
+                                 value={'messagePayload': {'body': {'content': self.SECRET}}}))
+
+        assert ArchitectureDecision.query.filter_by(title=self.SECRET).count() == 1
+        assert self.SECRET not in caplog.text
+        assert 'zebrafish' not in caplog.text
+
+    def test_the_log_says_which_command_and_how_long_the_message_was(self, bot, megan, caplog):
+        import logging
+        caplog.set_level(logging.INFO)
+
+        bot.say('search suppliers', megan)
+        bot.say('florble wug', megan)
+
+        assert 'command=search length=16' in caplog.text
+        assert 'command=other length=11' in caplog.text
+        assert 'florble' not in caplog.text and 'suppliers' not in caplog.text
+
+    def test_names_and_addresses_of_people_are_not_logged(self, bot, megan, caplog):
+        import logging
+        caplog.set_level(logging.DEBUG)
+
+        bot.say('hi', megan)
+        bot.say('list', megan)
+
+        assert REVIEW_MEMBER not in caplog.text
+        assert 'Megan Bowen' not in caplog.text
+
+
+class TestOwnerPickerNeedsNoDirectoryAccess:
+    """The form's people picker gives an object ID. Nobody is looked up with Microsoft Graph."""
+
+    def submit(self, bot, sender, owner):
+        return bot.deliver(bot.activity(
+            'invoke', sender=sender, name='composeExtension/submitAction',
+            value={'data': {'action': 'submit_decision', 'title': 'Owned decision', 'owner_entra_id': owner}}))
+
+    @pytest.fixture(autouse=True)
+    def no_http(self, monkeypatch):
+        import httpx
+
+        def refuse(*args, **kwargs):
+            raise AssertionError('no request to Microsoft may be made for the owner')
+        monkeypatch.setattr(httpx, 'AsyncClient', refuse)
+        monkeypatch.setattr(httpx, 'Client', refuse)
+
+    def test_a_colleague_who_has_used_the_app_becomes_the_owner(self, bot, megan):
+        alex = bot.person(oid(3), f'alex@{REVIEW_DOMAIN}', name='Alex Wilber')
+        bot.say('hi', megan)
+        bot.say('hi', alex)
+
+        response = self.submit(bot, megan, alex)
+
+        created = ArchitectureDecision.query.filter_by(title='Owned decision').one()
+        assert created.owner_id == User.query.filter_by(email=f'alex@{REVIEW_DOMAIN}').one().id
+        assert created.created_by_id == User.query.filter_by(email=REVIEW_MEMBER).one().id
+        assert 'has not used' not in json.dumps(response.get_json())
+
+    def test_a_colleague_who_has_not_used_the_app_leaves_the_creator_as_owner_and_says_so(self, bot, megan):
+        bot.say('hi', megan)
+
+        response = self.submit(bot, megan, oid(55))
+
+        created = ArchitectureDecision.query.filter_by(title='Owned decision').one()
+        assert created.owner_id == User.query.filter_by(email=REVIEW_MEMBER).one().id
+        assert 'has not used Decision Records yet' in json.dumps(response.get_json())
+        assert User.query.count() == 1
+
+    def test_the_service_has_no_graph_code_left(self):
+        source = open(os.path.join(REPO_ROOT, 'ee', 'backend', 'teams', 'teams_service.py')).read()
+
+        assert 'graph.microsoft.com' not in source
+        assert not hasattr(TeamsService, 'get_graph_token') and not hasattr(TeamsService, 'get_user_by_entra_id')

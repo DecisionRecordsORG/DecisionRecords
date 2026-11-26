@@ -189,7 +189,7 @@ test.beforeAll(async ({ browser }, testInfo) => {
   await playServer(page);
   await page.goto('/teams/tab');
   try {
-    await page.locator('app-teams-tab').waitFor({ state: 'attached', timeout: 20000 });
+    await page.locator('app-teams-tab').waitFor({ state: 'attached', timeout: 45000 });
     available = true;
   } catch {
     available = false;

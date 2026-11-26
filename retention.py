@@ -1741,6 +1741,78 @@ def run_automatic_if_due(now=None):
     return run_retention(RetentionRun.TRIGGER_AUTOMATIC, now=now, run=run)
 
 
+# A Microsoft tenant whose app install never led to an organisation (nobody
+# from it could be given an account) is forgotten after this many days
+# without activity.
+TEAMS_UNLINKED_WORKSPACE_DAYS = 30
+
+
+def erase_teams_workspace(workspace):
+    """Delete a Teams workspace with its user mappings and conversation references.
+
+    Returns the number of rows deleted per table. The caller commits.
+    """
+    counts = {
+        'teams_user_mappings': TeamsUserMapping.query.filter_by(
+            teams_workspace_id=workspace.id).delete(synchronize_session=False),
+        'teams_conversation_references': TeamsConversationReference.query.filter_by(
+            teams_workspace_id=workspace.id).delete(synchronize_session=False),
+    }
+    db.session.delete(workspace)
+    db.session.flush()
+    counts['teams_workspaces'] = 1
+    return counts
+
+
+def purge_orphaned_teams_workspaces(now=None):
+    """Erase Teams workspaces that belong to no organisation and never will.
+
+    Erasing an organisation deletes the workspace linked to it. A workspace
+    that is not linked to any organisation is outside that:
+
+    - one that was disconnected before disconnecting erased it (until
+      2026-11-26 the row was kept, detached from the organisation, with its
+      user mappings and conversation references);
+    - one created when the app was installed in a Microsoft tenant from
+      which nobody could be given an account, once it has been idle for
+      TEAMS_UNLINKED_WORKSPACE_DAYS.
+
+    Returns the number of workspaces erased. Commits.
+    """
+    now = to_naive_utc(now) or utcnow()
+    idle_before = now - timedelta(days=TEAMS_UNLINKED_WORKSPACE_DAYS)
+    erased = 0
+    for workspace in TeamsWorkspace.query.filter(TeamsWorkspace.tenant_id.is_(None)).all():
+        disconnected = (workspace.status == TeamsWorkspace.STATUS_DISCONNECTED
+                        or workspace.is_active is False)
+        last_seen = to_naive_utc(workspace.last_activity_at or workspace.installed_at)
+        idle = last_seen is None or last_seen < idle_before
+        if disconnected or idle:
+            erase_teams_workspace(workspace)
+            erased += 1
+    db.session.commit()
+    if erased:
+        logger.info('Retention: erased %d Teams workspace(s) that belonged to no organisation', erased)
+    return erased
+
+
+def purge_teams_orphans_if_due(state, now=None):
+    """Run the Teams housekeeping once per UTC day in this process. Returns True when it ran.
+
+    This erases personal data, so it only runs while automatic erasure is
+    switched on (the retention setting and RETENTION_AUTO_RUN).
+    """
+    now = to_naive_utc(now) or utcnow()
+    today = now.strftime('%Y-%m-%d')
+    if state.get('teams_purged_on') == today:
+        return False
+    if not get_settings()['auto_run_active']:
+        return False
+    purge_orphaned_teams_workspaces(now)
+    state['teams_purged_on'] = today
+    return True
+
+
 def purge_oauth_rows_if_due(state, now=None):
     """Run the OAuth housekeeping once per UTC day in this process.
 
@@ -1780,6 +1852,14 @@ def _scheduler_loop(app, stop, interval, first_delay):
                     db.session.remove()
         except Exception:
             logger.exception('OAuth housekeeping failed; it will be tried again')
+        try:
+            with app.app_context():
+                try:
+                    purge_teams_orphans_if_due(state)
+                finally:
+                    db.session.remove()
+        except Exception:
+            logger.exception('Teams housekeeping failed; it will be tried again')
         if stop.wait(interval):
             return
 

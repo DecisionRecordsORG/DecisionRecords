@@ -12958,7 +12958,12 @@ def teams_settings_put():
 @admin_required
 @track_endpoint('api_teams_disconnect')
 def teams_disconnect():
-    """Disconnect Teams workspace from tenant."""
+    """Disconnect Microsoft Teams from the organisation and erase its Teams records.
+
+    If people go on using the app in Teams afterwards, their Microsoft tenant
+    is linked again at the next sign-in, as at first use. To stop the app
+    being used, remove it in Teams as well.
+    """
     user = get_current_user()
     tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
     if not tenant:
@@ -12968,15 +12973,18 @@ def teams_disconnect():
     if not workspace:
         return jsonify({'error': 'Teams workspace not connected'}), 404
 
-    # Soft delete - mark as inactive and disconnected
-    workspace.is_active = False
-    workspace.status = TeamsWorkspace.STATUS_DISCONNECTED
-    workspace.tenant_id = None
+    # Disconnecting erases what was kept for Teams: the link to the Microsoft
+    # tenant, the record of which Teams person is which account, and the
+    # conversations the bot was installed in. Decisions and accounts belong
+    # to the organisation and stay. Nothing is left behind detached from the
+    # organisation, where a later deletion of the organisation would miss it.
+    import retention
+    erased = retention.erase_teams_workspace(workspace)
     db.session.commit()
 
-    logger.info(f"Teams workspace disconnected from tenant {tenant.id}")
+    logger.info(f"Teams workspace disconnected from tenant {tenant.id} and erased: {erased}")
 
-    return jsonify({'message': 'Teams workspace disconnected'})
+    return jsonify({'message': 'Teams workspace disconnected', 'erased': erased})
 
 
 @app.route('/api/teams/channels', methods=['GET'])
