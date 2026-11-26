@@ -2541,16 +2541,105 @@ class TestDocumentTextIsNotEchoed:
                 assert 'private_key_jwt' not in message
 
 
+class TestIssuerIdentification:
+    """
+    RFC 9207. ChatGPT presents its stable client_id (the one listed as a known
+    app) only to a server that says it identifies its issuer, names the same
+    issuer in the server metadata and in the resource's authorization_servers,
+    and returns it as `iss`, the exact string, in every authorization
+    response, successful or error.
+    """
+
+    def _answers(self, on):
+        """The two answers that send the browser back to the application: allow and refuse."""
+        targets = []
+        for body in ({'decision': 'approve', 'tenant_id': on.tenant.id}, {'decision': 'deny'}):
+            client = on.signed_in(on.user)
+            public_id = on.start()
+            assert on.view(client, public_id).status_code == 200
+            targets.append(on.decide(client, public_id, **body).get_json()['redirect_to'])
+        return targets
+
+    def test_one_issuer_in_both_metadata_documents_and_in_every_answer(self, on):
+        server = on.anonymous().get('/.well-known/oauth-authorization-server').get_json()
+        resource = on.anonymous().get('/.well-known/oauth-protected-resource/api/mcp').get_json()
+        assert server['authorization_response_iss_parameter_supported'] is True
+        assert resource['authorization_servers'] == [server['issuer']]
+
+        approved, refused = self._answers(on)
+
+        assert 'code' in parse_qs(urlsplit(approved).query) and 'error' in parse_qs(urlsplit(refused).query)
+        for target in (approved, refused):
+            # once, and the same string, character for character
+            assert parse_qs(urlsplit(target).query)['iss'] == [server['issuer']]
+
+    def test_the_issuer_is_added_to_a_redirect_address_that_has_a_query_of_its_own(self, on):
+        registered = 'https://client.example.org/callback?tenant=a'
+        on.document = _document(redirect_uris=[registered])
+        for body in ({'decision': 'approve', 'tenant_id': on.tenant.id}, {'decision': 'deny'}):
+            client = on.signed_in(on.user)
+            public_id = on.start(redirect_uri=registered)
+            assert on.view(client, public_id).status_code == 200
+            query = parse_qs(urlsplit(on.decide(client, public_id, **body).get_json()['redirect_to']).query)
+            assert query['iss'] == [ISSUER] and query['tenant'] == ['a']
+
+    def test_a_refusal_without_state_still_names_the_issuer(self, on):
+        client = on.signed_in(on.user)
+        public_id = on.start(state=None)
+        assert on.view(client, public_id).status_code == 200
+        query = parse_qs(urlsplit(on.decide(client, public_id, decision='deny').get_json()['redirect_to']).query)
+        assert set(query) == {'error', 'error_description', 'iss'} and query['iss'] == [ISSUER]
+
+    @pytest.mark.parametrize('changes', [
+        {'response_type': 'token'},
+        {'code_challenge': None},
+        {'code_challenge_method': 'plain'},
+        {'resource': 'https://other.example.org/api/mcp'},
+        {'scope': 'decisions:read nonsense'},
+        {'client_id': 'not-an-address'},
+        {'redirect_uri': None},
+    ])
+    def test_a_request_refused_at_the_start_is_answered_here_and_not_sent_back(self, on, changes):
+        """
+        No error leaves for the application without `iss`, because none leaves
+        at all from here: until the application's document has been read, the
+        redirect address is whatever the author of the link wrote.
+        """
+        response = on.authorize(**changes)
+        if response.status_code == 302:
+            # Accepted as asked (an unknown scope is ignored): the only place it goes is our own consent page
+            assert response.headers['Location'].startswith(ISSUER + '/oauth/consent?request=')
+        else:
+            assert response.status_code == 400 and 'Location' not in response.headers
+            assert response.mimetype == 'text/html'
+
+    def test_a_refusal_on_the_consent_page_is_answered_here_and_not_sent_back(self, on):
+        """The application's document does not list the redirect address: JSON for our page, no address to go to."""
+        on.document = _document(redirect_uris=['https://client.example.org/other'])
+        client = on.signed_in(on.user)
+        public_id = on.start()
+
+        viewed = on.view(client, public_id)
+        decided = on.decide(client, public_id, decision='deny')
+
+        assert viewed.status_code == 400 and 'redirect_to' not in viewed.get_json()
+        assert decided.status_code == 409 and 'redirect_to' not in decided.get_json()
+        assert 'Location' not in viewed.headers and 'Location' not in decided.headers
+
+
 # ============================================================================
 # 11. KNOWN APPS
 # ============================================================================
 
-# The one address listed: Claude Code's identity document, as a real connection presented it.
+# The three addresses listed. Claude Code's, as a real connection presented it on 2026-11-25.
 CLAUDE_CODE_ID = 'https://claude.ai/oauth/claude-code-client-metadata'
-# Addresses claude.ai on the web and ChatGPT may present. Not listed: what they really present
-# is only known once they have connected (oauth-server.md, "Enabling in production").
+# Claude on the web, desktop and mobile, and ChatGPT: listed on 2026-11-26 from the vendors'
+# documentation and published documents, to be confirmed after the first real connection
+# (oauth-server.md, "Known apps" and "Enabling in production").
 CLAUDE_WEB_ID = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
 CHATGPT_ID = 'https://chatgpt.com/oauth/client.json'
+# What ChatGPT presents to a server that does not identify its issuer: one address per connection
+CHATGPT_PER_CONNECTION_ID = 'https://chatgpt.com/oauth/abc123/client.json'
 
 
 class TestKnownApps:
@@ -2560,11 +2649,20 @@ class TestKnownApps:
     host, so any address on claude.ai or chatgpt.com was "known".
     """
 
-    def test_known(self):
-        assert known_apps.known_app_name(CLAUDE_CODE_ID) == 'Claude Code (Anthropic)'
+    @pytest.mark.parametrize('client_id,name', [
+        (CLAUDE_CODE_ID, 'Claude Code (Anthropic)'),
+        (CLAUDE_WEB_ID, 'Claude (Anthropic)'),
+        (CHATGPT_ID, 'ChatGPT (OpenAI)'),
+    ])
+    def test_known(self, client_id, name):
+        assert known_apps.known_app_name(client_id) == name
 
     def test_the_list_is_short_and_exact(self):
-        assert known_apps.KNOWN_APPS == {CLAUDE_CODE_ID: 'Claude Code (Anthropic)'}
+        assert known_apps.KNOWN_APPS == {
+            'https://claude.ai/oauth/claude-code-client-metadata': 'Claude Code (Anthropic)',
+            'https://claude.ai/oauth/mcp-oauth-client-metadata': 'Claude (Anthropic)',
+            'https://chatgpt.com/oauth/client.json': 'ChatGPT (OpenAI)',
+        }
         for client_id in known_apps.KNOWN_APPS:
             # Each entry is a client_id this server would accept, written the one way it is compared
             assert client_metadata.check_client_id_url(client_id) == client_id
@@ -2587,11 +2685,57 @@ class TestKnownApps:
         ' https://claude.ai/oauth/claude-code-client-metadata',
         'https://claude.ai/',
         'https://claude.ai',
-        # not listed until a real connection has shown what they present
-        CLAUDE_WEB_ID,
-        CHATGPT_ID,
-        'https://chatgpt.com/backend-api/whatever/user-controlled',
+        # Claude on the web: the listed address and nothing near it. The second
+        # document Claude can present to a server that lists private_key_jwt is not listed.
+        'https://claude.ai/oauth/mcp-oauth-client-metadata/confidential_client',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata/',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata.json',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata?x=1',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata#x',
+        'https://claude.ai:443/oauth/mcp-oauth-client-metadata',
+        'https://claude.ai/oauth/MCP-OAuth-Client-Metadata',
+        'https://CLAUDE.AI/oauth/mcp-oauth-client-metadata',
+        'https://claude.ai./oauth/mcp-oauth-client-metadata',
+        'https://claude.ai//oauth/mcp-oauth-client-metadata',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata ',
+        'http://claude.ai/oauth/mcp-oauth-client-metadata',
+        'https://claude.ai/oauth/',
+        'https://claude.ai/oauth/client.json',
+        'https://claude.com/oauth/mcp-oauth-client-metadata',
+        'https://www.claude.ai/oauth/mcp-oauth-client-metadata',
+        'https://claude.ai.example.org/oauth/mcp-oauth-client-metadata',
+        # ChatGPT: the stable address only. The address it presents to a server that does
+        # not identify its issuer differs for every connection and cannot be listed.
         'https://chatgpt.com/oauth/abc123/client.json',
+        'https://chatgpt.com/oauth/{callback_id}/client.json',
+        'https://chatgpt.com/oauth/client.json/',
+        'https://chatgpt.com/oauth/client.json?x=1',
+        'https://chatgpt.com/oauth/client.json#x',
+        'https://chatgpt.com/oauth/client',
+        'https://chatgpt.com/oauth/Client.json',
+        'https://chatgpt.com/oauth/client.JSON',
+        'https://chatgpt.com/oauth//client.json',
+        'https://chatgpt.com/oauth/../oauth/client.json',
+        'https://chatgpt.com:443/oauth/client.json',
+        'https://ChatGPT.com/oauth/client.json',
+        'https://CHATGPT.COM/oauth/client.json',
+        'https://chatgpt.com./oauth/client.json',
+        'http://chatgpt.com/oauth/client.json',
+        'https://chatgpt.com/client.json',
+        'https://chatgpt.com/oauth/jwks.json',
+        'https://chatgpt.com/',
+        'https://chatgpt.com',
+        'https://www.chatgpt.com/oauth/client.json',
+        'https://chat.openai.com/oauth/client.json',
+        'https://openai.com/oauth/client.json',
+        'https://chatgpt.com.example.org/oauth/client.json',
+        'https://chatgpt.com@evil.example/oauth/client.json',
+        'https://evil.example/chatgpt.com/oauth/client.json',
+        # pages the sites' users can publish or share
+        'https://chatgpt.com/backend-api/whatever/user-controlled',
+        'https://chatgpt.com/share/11111111-2222-3333-4444-555555555555',
+        'https://chatgpt.com/g/g-abc123-anything',
+        'https://chatgpt.com/canvas/shared/abc123',
         # look-alike hosts with the listed path
         'https://claude.ai.example.org/oauth/claude-code-client-metadata',
         'https://claude-ai.com/oauth/claude-code-client-metadata',
@@ -2622,7 +2766,10 @@ class TestKnownApps:
     @pytest.mark.parametrize('client_id', [
         'https://claude.ai/public/artifacts/11111111-2222-3333-4444-555555555555',
         'https://claude.ai/share/anything.json',
+        'https://claude.ai/oauth/mcp-oauth-client-metadata/confidential_client',
         'https://chatgpt.com/backend-api/whatever/user-controlled',
+        'https://chatgpt.com/share/11111111-2222-3333-4444-555555555555',
+        'https://chatgpt.com/oauth/abc123/client.json',
     ])
     def test_a_document_published_elsewhere_on_a_known_host_is_an_unverified_app(self, on, client_id):
         """The reviewer's proof: these were shown as "Claude (Anthropic)" and "ChatGPT (OpenAI)"."""
@@ -2652,19 +2799,37 @@ class TestKnownApps:
         assert application['known'] is True and application['known_name'] == 'Claude Code (Anthropic)'
         assert application['claimed_name'] == 'Claude Code'
 
-    def test_claude_on_the_web_and_chatgpt_are_shown_honestly_until_they_are_listed(self, on):
-        """Their real client_id is not known yet. Until it is, they are an unverified app with their host."""
-        for client_id, redirect, host in (
-                (CLAUDE_WEB_ID, 'https://claude.ai/api/mcp/auth_callback', 'claude.ai'),
-                (CHATGPT_ID, 'https://chatgpt.com/connector_platform_oauth_redirect', 'chatgpt.com')):
+    def test_claude_on_the_web_and_chatgpt_are_known_by_their_exact_client_id(self, on):
+        """Listed on 2026-11-26. The listed name is shown, whatever the document calls the application."""
+        for client_id, redirect, host, name in (
+                (CLAUDE_WEB_ID, 'https://claude.ai/api/mcp/auth_callback', 'claude.ai', 'Claude (Anthropic)'),
+                (CHATGPT_ID, 'https://chatgpt.com/connector_platform_oauth_redirect', 'chatgpt.com',
+                 'ChatGPT (OpenAI)')):
             document = {'client_id': client_id, 'client_name': 'Assistant', 'redirect_uris': [redirect],
                         'token_endpoint_auth_method': 'none'}
             public_id = self._start_for(on, client_id, document, redirect)
 
-            application = on.view(on.signed_in(on.user), public_id).get_json()['application']
+            body = on.view(on.signed_in(on.user), public_id).get_json()
 
-            assert application['host'] == host
-            assert application['known'] is False and application['known_name'] is None
+            assert body['application']['host'] == host
+            assert body['application']['known'] is True and body['application']['known_name'] == name
+            assert body['application']['claimed_name'] == 'Assistant'
+            # Not an application on the person's own computer: no loopback warning
+            assert body['redirect']['is_loopback'] is False and body['redirect']['loopback_only_client'] is False
+
+    def test_the_address_chatgpt_presents_without_issuer_identification_is_an_unverified_app(self, on):
+        """It differs for every connection, so it is not listed and cannot be: the host is shown."""
+        client_id = 'https://chatgpt.com/oauth/abc123/client.json'
+        redirect = 'https://chatgpt.com/connector_platform_oauth_redirect'
+        document = {'client_id': client_id, 'client_name': 'ChatGPT', 'redirect_uris': [redirect],
+                    'token_endpoint_auth_methods_supported': ['none', 'private_key_jwt'],
+                    'token_endpoint_auth_method': 'private_key_jwt'}
+        public_id = self._start_for(on, client_id, document, redirect)
+
+        application = on.view(on.signed_in(on.user), public_id).get_json()['application']
+
+        assert application['host'] == 'chatgpt.com' and application['claimed_name'] == 'ChatGPT'
+        assert application['known'] is False and application['known_name'] is None
 
     def test_calling_itself_claude_does_not_make_an_app_known(self, on):
         """The name in the document is the application's own claim and plays no part."""
@@ -2689,11 +2854,12 @@ class TestKnownApps:
         assert body['redirect'] == {'host': 'localhost', 'is_loopback': True, 'loopback_only_client': True}
 
     def test_the_connected_apps_lists_say_the_same(self, on):
-        """One known and one unlisted application on well-known hosts, in the user's list and the administrator's."""
+        """Two known applications and one that is not listed, in the user's list and the administrator's."""
         client = on.signed_in(on.user)
         for client_id, name, redirect in (
                 (CLAUDE_CODE_ID, 'Claude Code', 'http://localhost/callback'),
-                (CHATGPT_ID, 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect')):
+                (CHATGPT_ID, 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect'),
+                (CHATGPT_PER_CONNECTION_ID, 'ChatGPT', 'https://chatgpt.com/connector_platform_oauth_redirect')):
             document = {'client_id': client_id, 'client_name': name, 'redirect_uris': [redirect],
                         'token_endpoint_auth_methods_supported': ['none', 'private_key_jwt'],
                         'token_endpoint_auth_method': 'private_key_jwt'}
@@ -2704,13 +2870,15 @@ class TestKnownApps:
             assert on.exchange(code, client_id=client_id, redirect_uri=redirect).status_code == 200
 
         own = sorted((item['application'] for item in client.get('/api/user/oauth/grants').get_json()),
-                     key=lambda application: application['host'])
+                     key=lambda application: application['client_id'])
         tenant = sorted((item['application'] for item in on.signed_in(on.admin).get(
-            '/api/tenant/oauth/grants').get_json()), key=lambda application: application['host'])
+            '/api/tenant/oauth/grants').get_json()), key=lambda application: application['client_id'])
 
         expected = [
-            # client_id: where an operator reads the exact address before listing an application as known
+            # client_id: where an operator reads the exact address an application presented
             {'host': 'chatgpt.com', 'claimed_name': 'ChatGPT', 'known': False, 'known_name': None,
+             'client_id': CHATGPT_PER_CONNECTION_ID},
+            {'host': 'chatgpt.com', 'claimed_name': 'ChatGPT', 'known': True, 'known_name': 'ChatGPT (OpenAI)',
              'client_id': CHATGPT_ID},
             {'host': 'claude.ai', 'claimed_name': 'Claude Code', 'known': True,
              'known_name': 'Claude Code (Anthropic)', 'client_id': CLAUDE_CODE_ID},
