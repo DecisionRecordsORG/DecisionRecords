@@ -13,7 +13,8 @@ import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { ConfirmDialogComponent } from '../shared/confirm-dialog.component';
 
-export type RetentionCategory = 'accounts' | 'decisions' | 'tenants' | 'login_history' | 'inquiries';
+export type RetentionCategory = 'accounts' | 'decisions' | 'tenants' | 'login_history' | 'inquiries'
+  | 'request_log' | 'verification_records' | 'access_requests' | 'api_keys';
 
 export interface RetentionItem {
   id: number;
@@ -123,12 +124,50 @@ export const RETENTION_CATEGORY_TEXT: Record<RetentionCategory, CategoryText> = 
     one: 'stored message',
     many: 'stored messages',
     rule: 'Messages from the contact, get in touch and feedback forms older than 24 months'
+  },
+  request_log: {
+    label: 'Request log to erase',
+    verb: 'Erase',
+    one: 'request log entry',
+    many: 'request log entries',
+    rule: 'Log entries of API, MCP and AI requests older than 90 days'
+  },
+  verification_records: {
+    label: 'Expired confirmation and set-up records to erase',
+    verb: 'Erase',
+    one: 'expired record',
+    many: 'expired records',
+    rule: 'Email confirmation records and account set-up or recovery links that expired more than 30 days ago'
+  },
+  access_requests: {
+    label: 'Answered access requests to erase',
+    verb: 'Erase',
+    one: 'access request',
+    many: 'access requests',
+    rule: 'Requests to join an organisation that were approved or rejected more than 90 days ago. Pending requests stay'
+  },
+  api_keys: {
+    label: 'Revoked and expired API keys to erase',
+    verb: 'Erase',
+    one: 'API key',
+    many: 'API keys',
+    rule: 'API keys that were revoked or expired more than 90 days ago. Keys that still work stay'
   }
 };
 
 function categoryText(category: string): CategoryText {
   return RETENTION_CATEGORY_TEXT[category as RetentionCategory]
     || { label: category, verb: 'Erase', one: 'item', many: 'items', rule: '' };
+}
+
+/** What the cutoff date of an age-based category counts from: "was created", "expired". */
+export function retentionCutoffEvent(category: string): string {
+  switch (category) {
+    case 'verification_records': return 'expired';
+    case 'access_requests': return 'was approved or rejected';
+    case 'api_keys': return 'was revoked or expired';
+    default: return 'was created';
+  }
 }
 
 export function retentionCategoryLabel(category: string): string {
@@ -353,7 +392,9 @@ export function retentionDuration(ms: number | null): string {
                       </p>
                     }
                   } @else if (entry.cutoff && entry.waiting > 0) {
-                    <p class="muted">Everything created before {{ entry.cutoff | date:'mediumDate' }}.</p>
+                    <p class="muted" [attr.data-testid]="'retention-cutoff-' + category">
+                      Everything that {{ cutoffEvent(category) }} before {{ entry.cutoff | date:'mediumDate' }}.
+                    </p>
                   }
 
                   @if (entry.needs_review && entry.needs_review.length > 0) {
@@ -785,6 +826,10 @@ export class SuperadminRetentionComponent implements OnInit {
 
   label(category: string): string {
     return retentionCategoryLabel(category);
+  }
+
+  cutoffEvent(category: string): string {
+    return retentionCutoffEvent(category);
   }
 
   rule(category: string): string {

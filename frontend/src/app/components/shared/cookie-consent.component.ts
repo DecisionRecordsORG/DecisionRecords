@@ -1,9 +1,11 @@
-import { Component, OnInit, Output, EventEmitter } from '@angular/core';
+import { Component, OnInit, OnDestroy, Output, EventEmitter } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { AnalyticsConsentService, ANALYTICS_CHOICE_KEY } from '../../services/analytics-consent.service';
 
-const COOKIE_CONSENT_KEY = 'dr_cookie_consent';
+const COOKIE_CONSENT_KEY = ANALYTICS_CHOICE_KEY;
 
 export type CookieConsentStatus = 'accepted' | 'rejected' | null;
 
@@ -23,8 +25,8 @@ export type CookieConsentStatus = 'accepted' | 'rejected' | null;
           </div>
         </div>
         <div class="cookie-actions">
-          <button mat-stroked-button (click)="reject()">Reject</button>
-          <button mat-raised-button color="primary" (click)="accept()">Accept</button>
+          <button mat-stroked-button (click)="reject()" data-testid="analytics-notice-reject">Reject</button>
+          <button mat-raised-button color="primary" (click)="accept()" data-testid="analytics-notice-accept">Accept</button>
         </div>
       </div>
     }
@@ -89,46 +91,48 @@ export type CookieConsentStatus = 'accepted' | 'rejected' | null;
     }
   `]
 })
-export class CookieConsentComponent implements OnInit {
+export class CookieConsentComponent implements OnInit, OnDestroy {
   @Output() consentChanged = new EventEmitter<CookieConsentStatus>();
 
   showBanner = false;
+  private choiceSubscription?: Subscription;
+
+  constructor(private analyticsConsent: AnalyticsConsentService) {}
 
   ngOnInit(): void {
-    const stored = this.getStoredConsent();
-    if (stored === null) {
-      this.showBanner = true;
-    } else {
+    // Follows the stored answer, so the notice also goes away when the
+    // person answers through the "Analytics" switch on their profile
+    this.choiceSubscription = this.analyticsConsent.choice$.subscribe(choice => {
+      this.showBanner = choice === null;
+    });
+    const stored = this.analyticsConsent.choice;
+    if (stored !== null) {
       this.consentChanged.emit(stored);
     }
   }
 
+  ngOnDestroy(): void {
+    this.choiceSubscription?.unsubscribe();
+  }
+
   accept(): void {
-    this.setConsent('accepted');
-    this.showBanner = false;
+    this.analyticsConsent.answerNotice('accepted');
     this.consentChanged.emit('accepted');
   }
 
   reject(): void {
-    this.setConsent('rejected');
-    this.showBanner = false;
+    this.analyticsConsent.answerNotice('rejected');
     this.consentChanged.emit('rejected');
   }
 
   static getConsent(): CookieConsentStatus {
-    if (typeof localStorage === 'undefined') return null;
-    const value = localStorage.getItem(COOKIE_CONSENT_KEY);
-    if (value === 'accepted' || value === 'rejected') return value;
-    return null;
-  }
-
-  private getStoredConsent(): CookieConsentStatus {
-    return CookieConsentComponent.getConsent();
-  }
-
-  private setConsent(status: 'accepted' | 'rejected'): void {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(COOKIE_CONSENT_KEY, status);
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const value = localStorage.getItem(COOKIE_CONSENT_KEY);
+      if (value === 'accepted' || value === 'rejected') return value;
+    } catch {
+      // Storage is blocked: treated as not answered
     }
+    return null;
   }
 }

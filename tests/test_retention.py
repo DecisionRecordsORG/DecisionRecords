@@ -568,7 +568,10 @@ class TestPreview:
         assert snapshot() == before
         assert set(preview) == set(retention.CATEGORIES)
         assert {category: entry['waiting'] for category, entry in preview.items()} == {
-            'accounts': 1, 'decisions': 1, 'tenants': 1, 'login_history': 1, 'inquiries': 1}
+            'accounts': 1, 'decisions': 1, 'tenants': 1, 'login_history': 1, 'inquiries': 1,
+            # Nothing here is old enough for the categories deleted by age
+            # (tests/test_retention_age_rules.py covers those)
+            'request_log': 0, 'verification_records': 0, 'access_requests': 0, 'api_keys': 0}
         assert all(entry['would_hold'] is False for entry in preview.values())
         assert [item['label'] for item in preview['accounts']['items']] == ['member@team.example']
         assert [item['label'] for item in preview['decisions']['items']] == ['team.example#2']
@@ -689,7 +692,8 @@ class TestRunRecord:
 
         first = run()
         assert {c: r['affected'] for c, r in first['results'].items()} == {
-            'accounts': 1, 'login_history': 1, 'inquiries': 1, 'decisions': 1, 'tenants': 1}
+            'accounts': 1, 'login_history': 1, 'inquiries': 1, 'decisions': 1, 'tenants': 1,
+            'request_log': 0, 'verification_records': 0, 'access_requests': 0, 'api_keys': 0}
         after_first = snapshot(exclude=RECORD_TABLES)
         erasures = RetentionErasure.query.count()
 

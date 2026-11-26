@@ -85,6 +85,22 @@ def decision_heading(decision):
     return f"{display_id}: {decision.title}" if display_id else decision.title
 
 
+def without_notifications_switched_off(users):
+    """The users who have not switched "Email notifications" off on their profile.
+
+    The switch covers the emails about decisions: the ones a person subscribed
+    to and the one sent when they are made the owner of a decision. Account
+    and security mail (verification, set-up and recovery links, an answer to
+    an access request) does not pass through here and is always sent.
+    """
+    from models import UserConsent
+
+    users = list(users)
+    switched_off = UserConsent.user_ids_switched_off(
+        UserConsent.CONSENT_EMAIL_NOTIFICATIONS, [user.id for user in users])
+    return [user for user in users if user.id not in switched_off]
+
+
 def notify_subscribers_new_decision(db, decision, email_config):
     """Notify subscribers about a new decision."""
     from models import User, Subscription
@@ -97,6 +113,7 @@ def notify_subscribers_new_decision(db, decision, email_config):
         User.sso_domain == decision.domain,
         Subscription.notify_on_create == True
     ).all()
+    subscribers = without_notifications_switched_off(subscribers)
 
     subject = f"New decision: {decision.title}"
 
@@ -169,6 +186,7 @@ def notify_subscribers_decision_updated(db, decision, email_config, change_reaso
             User.sso_domain == decision.domain,
             Subscription.notify_on_update == True
         ).all()
+    subscribers = without_notifications_switched_off(subscribers)
 
     subject = f"Decision updated: {decision.title}"
     if status_changed:
@@ -239,6 +257,15 @@ def notify_decision_owner(email_config, decision, owner_email, owner_name=None, 
     """
     if not email_config or not email_config.enabled:
         logger.warning("Decision owner notification not sent: Email configuration is missing or disabled")
+        return False
+
+    # An owner who has an account and switched "Email notifications" off is not
+    # mailed. An owner named by address alone has no account and no switch.
+    from models import User, UserConsent
+    import sqlalchemy as sa
+    recipient = User.query.filter(sa.func.lower(User.email) == (owner_email or '').strip().lower()).first()
+    if recipient and not UserConsent.is_granted(recipient.id, UserConsent.CONSENT_EMAIL_NOTIFICATIONS):
+        logger.info("Decision owner notification not sent: the owner switched email notifications off")
         return False
 
     name = owner_name or owner_email.split('@')[0]

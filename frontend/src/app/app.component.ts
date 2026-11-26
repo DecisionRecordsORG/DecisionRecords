@@ -4,7 +4,7 @@ import { RouterOutlet, RouterModule, Router, NavigationEnd } from '@angular/rout
 import { NavbarComponent } from './components/shared/navbar.component';
 import { AuthService } from './services/auth.service';
 import { VersionService } from './services/version.service';
-import { PostHogService } from './services/posthog.service';
+import { AnalyticsConsentService } from './services/analytics-consent.service';
 import { FeatureFlagsService } from './services/feature-flags.service';
 import { SeoService } from './services/seo.service';
 import { HttpClient } from '@angular/common/http';
@@ -120,19 +120,16 @@ export class AppComponent implements OnInit {
     public versionService: VersionService,
     public featureFlags: FeatureFlagsService,
     private router: Router,
-    private postHogService: PostHogService,
+    private analyticsConsent: AnalyticsConsentService,
     private seoService: SeoService,
     private http: HttpClient
   ) {
     this.seoService.init();
 
-    // Initialize PostHog analytics only if enabled AND cookie consent was given
-    if (this.featureFlags.analyticsEnabled) {
-      const consent = CookieConsentComponent.getConsent();
-      if (consent === 'accepted') {
-        this.postHogService.init();
-      }
-    }
+    // Analytics starts only when the person allows it: the notice accepted in
+    // this browser and, when signed in, the switch on their profile on.
+    // AnalyticsConsentService waits until it knows who is signed in.
+    this.analyticsConsent.start();
     // Load feature flags on startup
     this.featureFlags.loadFlags().subscribe();
   }
@@ -241,9 +238,7 @@ export class AppComponent implements OnInit {
     return `Build: ${info.build_date}\nCommit: ${info.git_commit}\nEnvironment: ${info.environment}`;
   }
 
-  onCookieConsentChanged(status: CookieConsentStatus): void {
-    if (status === 'accepted' && this.featureFlags.analyticsEnabled) {
-      this.postHogService.init();
-    }
+  onCookieConsentChanged(_status: CookieConsentStatus): void {
+    // The notice tells AnalyticsConsentService itself; nothing to do here.
   }
 }

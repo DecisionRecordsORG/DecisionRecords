@@ -1,13 +1,20 @@
 """
 Data retention: the work behind the deletion timelines the product promises.
 
-Five categories, each run in isolation:
+Nine categories, each run in isolation:
 
-    accounts       anonymise accounts whose 7-day deletion grace period is over
-    decisions      erase soft-deleted decisions whose 30-day window is over
-    tenants        erase soft-deleted tenants whose 30-day window is over
-    login_history  delete sign-in history older than 90 days
-    inquiries      delete stored contact messages older than 24 months
+    accounts              anonymise accounts whose 7-day deletion grace period is over
+    decisions             erase soft-deleted decisions whose 30-day window is over
+    tenants               erase soft-deleted tenants whose 30-day window is over
+    login_history         delete sign-in history older than 90 days
+    inquiries             delete stored contact messages older than 24 months
+    request_log           delete the log of API, MCP and AI requests older than 90 days
+    verification_records  delete email confirmation and account set-up records
+                          30 days after they expired
+    access_requests       delete requests to join an organisation 90 days after
+                          they were approved or rejected (pending ones stay)
+    api_keys              delete API keys 90 days after they were revoked or
+                          expired (keys that still work stay)
 
 One routine (`run_retention`) does the work. It can run for real, as a preview
 that changes nothing (`preview_retention`), and limited to chosen categories.
@@ -42,9 +49,12 @@ installation of 25-user teams. A member can soft-delete at most a handful of
 decisions an hour, so fifty expiring on one day is already a busy day; a
 tenant's own decisions are erased with the tenant and do not count here.
 Deleting a tenant is a rare super admin action, so two tenants expiring on the
-same day is unusual enough to ask for a second look. Login history and stored
-messages are deleted by age alone and have no limit: holding them back would
-only add an operator step.
+same day is unusual enough to ask for a second look. Login history, stored
+messages, the request log, verification records, decided access requests and
+dead API keys are deleted by age alone and have no limit: holding them back
+would only add an operator step. None of them is something a person can still
+use or restore: a log line, a link that expired a month ago, a request that
+was answered three months ago, a key that stopped working three months ago.
 
 Times
 -----
@@ -97,12 +107,19 @@ DECISIONS = 'decisions'
 TENANTS = 'tenants'
 LOGIN_HISTORY = 'login_history'
 INQUIRIES = 'inquiries'
+REQUEST_LOG = 'request_log'
+VERIFICATION_RECORDS = 'verification_records'
+ACCESS_REQUESTS = 'access_requests'
+API_KEYS = 'api_keys'
 
 # The order they run in. Age-based deletes go before the per-item erasures so
 # a slow or failing erase cannot hold them up.
-CATEGORIES = (ACCOUNTS, LOGIN_HISTORY, INQUIRIES, DECISIONS, TENANTS)
+CATEGORIES = (
+    ACCOUNTS, LOGIN_HISTORY, INQUIRIES, REQUEST_LOG, VERIFICATION_RECORDS,
+    ACCESS_REQUESTS, API_KEYS, DECISIONS, TENANTS,
+)
 
-# Categories an automatic run limits. The other two are deleted by age alone.
+# Categories an automatic run limits. The others are deleted by age alone.
 LIMITED_CATEGORIES = (ACCOUNTS, DECISIONS, TENANTS)
 
 LIMIT_KEYS = {
@@ -123,6 +140,16 @@ LEGACY_RESULT_KEYS = {
 }
 
 LOGIN_HISTORY_RETENTION_DAYS = 90
+# The log of API, MCP and AI requests (ai_interaction_logs): who asked, through
+# which channel, and up to 500 characters of the request.
+REQUEST_LOG_RETENTION_DAYS = 90
+# Email confirmation records and account set-up or recovery links, counted
+# from the moment the link stopped working.
+VERIFICATION_RECORDS_RETENTION_DAYS = 30
+# Requests to join an organisation, counted from the approval or rejection.
+ACCESS_REQUESTS_RETENTION_DAYS = 90
+# API keys, counted from the revocation or the expiry, whichever came first.
+API_KEYS_RETENTION_DAYS = 90
 
 STATUS_DONE = 'done'
 STATUS_HELD_BACK = 'held_back'
@@ -350,8 +377,50 @@ def _inquiries_cutoff(now):
     return now - timedelta(days=Inquiry.RETENTION_DAYS)
 
 
+def _access_request_decided_at():
+    # processed_at is empty on requests decided before the column was filled
+    return sa.func.coalesce(AccessRequest.processed_at, AccessRequest.updated_at)
+
+
+# The categories deleted by age alone, beyond login history and inquiries:
+# {category: (days, [(model, condition for a cutoff), ...])}. A row goes when
+# its condition holds for `now - days`.
+AGE_RULES = {
+    REQUEST_LOG: (REQUEST_LOG_RETENTION_DAYS, (
+        (AIInteractionLog, lambda cutoff: AIInteractionLog.created_at < cutoff),
+    )),
+    VERIFICATION_RECORDS: (VERIFICATION_RECORDS_RETENTION_DAYS, (
+        (EmailVerification, lambda cutoff: EmailVerification.expires_at < cutoff),
+        (SetupToken, lambda cutoff: SetupToken.expires_at < cutoff),
+    )),
+    ACCESS_REQUESTS: (ACCESS_REQUESTS_RETENTION_DAYS, (
+        (AccessRequest, lambda cutoff: sa.and_(
+            AccessRequest.status != 'pending', _access_request_decided_at() < cutoff)),
+    )),
+    API_KEYS: (API_KEYS_RETENTION_DAYS, (
+        (AIApiKey, lambda cutoff: sa.or_(
+            sa.and_(AIApiKey.revoked_at.isnot(None), AIApiKey.revoked_at < cutoff),
+            sa.and_(AIApiKey.expires_at.isnot(None), AIApiKey.expires_at < cutoff))),
+    )),
+}
+
+
+def _age_cutoff(category, now):
+    return now - timedelta(days=AGE_RULES[category][0])
+
+
+def _age_rule_count(category, now):
+    cutoff = _age_cutoff(category, now)
+    return sum(
+        db.session.query(sa.func.count(model.id)).filter(condition(cutoff)).scalar() or 0
+        for model, condition in AGE_RULES[category][1]
+    )
+
+
 def _waiting(category, now):
     """(count, oldest due date) for a category."""
+    if category in AGE_RULES:
+        return _age_rule_count(category, now), None
     if category == ACCOUNTS:
         column, filters = User.deletion_scheduled_at, _accounts_due(now)
         count = db.session.query(sa.func.count(User.id)).filter(*filters).scalar()
@@ -462,6 +531,8 @@ def preview_retention(now=None, categories=None, include_items=True):
             entry['cutoff'] = _iso(_login_history_cutoff(now))
         elif category == INQUIRIES:
             entry['cutoff'] = _iso(_inquiries_cutoff(now))
+        elif category in AGE_RULES:
+            entry['cutoff'] = _iso(_age_cutoff(category, now))
         elif include_items and count:
             entry['items'] = _preview_items(category, now)
             entry['items_truncated'] = count > len(entry['items'])
@@ -1285,6 +1356,41 @@ def _delete_older_than(model, category, cutoff, run_id):
         return 0, [{'entity_id': None, 'error': _short_error(exc)}]
 
 
+def _delete_by_age_rule(category, now, run_id):
+    """Delete what an AGE_RULES category covers. One transaction per table."""
+    cutoff = _age_cutoff(category, now)
+    affected, errors = 0, []
+    for model, condition in AGE_RULES[category][1]:
+        where = condition(cutoff)
+        try:
+            count = db.session.query(sa.func.count(model.id)).filter(where).scalar() or 0
+            if not count:
+                db.session.rollback()
+                continue
+            record = RetentionErasure(
+                run_id=run_id, category=category, entity_type=model.__tablename__,
+                identifier=f'due before {cutoff.isoformat()}Z',
+            )
+            db.session.add(record)
+            counts = {}
+            if model is AIApiKey:
+                # The request log names the key a request came in with. The
+                # log line stays (for its own 90 days) without that reference.
+                counts['request_log_references_cleared'] = AIInteractionLog.query.filter(
+                    AIInteractionLog.api_key_id.in_(sa.select(AIApiKey.id).where(where))
+                ).update({'api_key_id': None}, synchronize_session=False)
+            deleted = model.query.filter(where).delete(synchronize_session=False)
+            counts['rows'] = deleted
+            record.counts = counts
+            db.session.commit()
+            affected += deleted
+        except Exception as exc:
+            db.session.rollback()
+            logger.exception('Retention: deleting old %s failed', model.__tablename__)
+            errors.append({'entity_id': None, 'error': _short_error(exc)})
+    return affected, errors
+
+
 def purge_old_inquiries(now=None):
     """Delete inquiries older than Inquiry.RETENTION_DAYS (24 months). Returns how many."""
     now = due_time(now)
@@ -1421,6 +1527,8 @@ def _run_category(category, now, run_id, cap):
         return _run_tenants(now, run_id, cap)
     if category == LOGIN_HISTORY:
         return _delete_older_than(LoginHistory, LOGIN_HISTORY, _login_history_cutoff(now), run_id)
+    if category in AGE_RULES:
+        return _delete_by_age_rule(category, now, run_id)
     return _delete_older_than(Inquiry, INQUIRIES, _inquiries_cutoff(now), run_id)
 
 
@@ -1428,7 +1536,7 @@ def run_retention(trigger, categories=None, now=None, release=None, started_by=N
     """Run retention for real and record it. Returns the stored run as a dict.
 
     trigger     RetentionRun.TRIGGER_* : who started it.
-    categories  limit the run to these; None means all five.
+    categories  limit the run to these; None means all of them.
     release     {category: count}. Categories a super admin runs deliberately:
                 the limits and the backlog check are skipped for them and at
                 most `count` items (the number the super admin saw) are

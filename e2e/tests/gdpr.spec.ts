@@ -31,14 +31,59 @@ test.describe('GDPR - Profile Privacy & Data Section', () => {
     const exportButton = page.locator('button:has-text("Export My Data")');
     await expect(exportButton).toBeVisible();
 
-    // Verify privacy preference toggles exist (Analytics, AI Processing, Email Notifications)
-    const analyticsToggle = page.locator('mat-slide-toggle:has-text("Analytics")');
-    const aiToggle = page.locator('mat-slide-toggle:has-text("AI Processing")');
-    const emailToggle = page.locator('mat-slide-toggle:has-text("Email Notifications")');
+    // "Email notifications" is in every edition. "Analytics" and "AI Processing"
+    // are shown only where the installation has the feature (Enterprise).
+    const emailToggle = page.locator('[data-testid="preference-email"]');
+    await expect(emailToggle).toBeVisible({ timeout: 10000 });
 
-    await expect(analyticsToggle).toBeVisible({ timeout: 10000 });
-    await expect(aiToggle).toBeVisible();
-    await expect(emailToggle).toBeVisible();
+    const features = await (await page.request.get('/api/features')).json();
+    const analyticsToggle = page.locator('[data-testid="preference-analytics"]');
+    const aiToggle = page.locator('[data-testid="preference-ai"]');
+    if (features.posthog_analytics) {
+      await expect(analyticsToggle).toBeVisible();
+    } else {
+      await expect(analyticsToggle).toHaveCount(0);
+    }
+    if (features.ai_features) {
+      await expect(aiToggle).toBeVisible();
+    } else {
+      await expect(aiToggle).toHaveCount(0);
+    }
+  });
+
+  test('can-correct-own-name: A person corrects their own name on the profile page', async ({ page }) => {
+    await loginAsUser(page, TEST_USER_EMAIL, TEST_USER_PASSWORD);
+    await page.goto(`/${TEST_TENANT}/profile`);
+    await page.waitForLoadState('networkidle');
+    await dismissOverlays(page);
+
+    const before = (await page.locator('[data-testid="profile-name"]').textContent())?.trim() || '';
+    const [firstBefore, ...restBefore] = before.split(' ');
+
+    await page.click('[data-testid="profile-name-edit"]');
+    await page.fill('[data-testid="profile-first-name"]', 'Corrected');
+    await page.fill('[data-testid="profile-last-name"]', 'Name');
+    await page.click('[data-testid="profile-name-save"]');
+
+    await expect(page.locator('[data-testid="profile-name"]')).toHaveText('Corrected Name', { timeout: 10000 });
+    const me = await (await page.request.get('/api/user/me')).json();
+    expect(me.name).toBe('Corrected Name');
+    expect(me.email).toBe(TEST_USER_EMAIL);
+
+    // An empty name is refused in the form
+    await page.click('[data-testid="profile-name-edit"]');
+    await page.fill('[data-testid="profile-first-name"]', '');
+    await page.fill('[data-testid="profile-last-name"]', '');
+    await page.click('[data-testid="profile-name-save"]');
+    await expect(page.locator('[data-testid="profile-name-error"]')).toHaveText('Enter your name.');
+    await page.click('[data-testid="profile-name-cancel"]');
+
+    // Put the name back for the tests that follow
+    await page.click('[data-testid="profile-name-edit"]');
+    await page.fill('[data-testid="profile-first-name"]', firstBefore || 'Test');
+    await page.fill('[data-testid="profile-last-name"]', restBefore.join(' ') || 'User');
+    await page.click('[data-testid="profile-name-save"]');
+    await expect(page.locator('[data-testid="profile-name"]')).toHaveText(before || 'Test User', { timeout: 10000 });
   });
 
   test('export-data-button-triggers-download: Clicking Export My Data starts a download', async ({ page }) => {
@@ -101,7 +146,7 @@ test.describe('GDPR - Profile Privacy & Data Section', () => {
     expect(text).not.toContain('public_key');
   });
 
-  test('consent-toggles-update-preferences: Toggling consent shows appropriate snackbar', async ({ page }) => {
+  test('consent-toggles-update-preferences: Switching a privacy preference stores it and says so', async ({ page }) => {
     await loginAsUser(page, TEST_USER_EMAIL, TEST_USER_PASSWORD);
 
     // Navigate to profile page
@@ -112,28 +157,30 @@ test.describe('GDPR - Profile Privacy & Data Section', () => {
     // Dismiss any overlays
     await dismissOverlays(page);
 
-    // Wait for consent toggles to load (loading spinner disappears)
-    const analyticsToggle = page.locator('mat-slide-toggle:has-text("Analytics")');
-    await expect(analyticsToggle).toBeVisible({ timeout: 10000 });
+    // "Email notifications" is the switch every edition has
+    const emailSwitch = page.locator('[data-testid="preference-email"] button[role="switch"]');
+    await expect(emailSwitch).toBeVisible({ timeout: 10000 });
 
-    // Get the current state of the analytics toggle
-    const isCurrentlyChecked = await analyticsToggle.locator('input[type="checkbox"]').isChecked();
+    const wasOn = (await emailSwitch.getAttribute('aria-checked')) === 'true';
 
-    // Click the analytics toggle to change its state
-    await analyticsToggle.click();
+    await emailSwitch.click();
 
-    // Verify the appropriate snackbar message appears
-    const expectedMessage = isCurrentlyChecked ? 'Consent withdrawn' : 'Consent granted';
+    const expectedMessage = wasOn ? 'Switched off' : 'Switched on';
     const snackbar = page.locator(`simple-snack-bar:has-text("${expectedMessage}"), .mat-mdc-snack-bar-label:has-text("${expectedMessage}")`).first();
     await expect(snackbar).toBeVisible({ timeout: 5000 });
+    await expect(emailSwitch).toHaveAttribute('aria-checked', wasOn ? 'false' : 'true');
+
+    // The choice is stored on the account
+    const stored = await (await page.request.get('/api/user/consents')).json();
+    expect(stored.email_notifications.granted).toBe(!wasOn);
 
     // Wait for snackbar to dismiss
     await page.waitForTimeout(2500);
 
-    // Toggle it back to restore original state
-    await analyticsToggle.click();
+    // Put it back
+    await emailSwitch.click();
 
-    const revertMessage = isCurrentlyChecked ? 'Consent granted' : 'Consent withdrawn';
+    const revertMessage = wasOn ? 'Switched on' : 'Switched off';
     const revertSnackbar = page.locator(`simple-snack-bar:has-text("${revertMessage}"), .mat-mdc-snack-bar-label:has-text("${revertMessage}")`).first();
     await expect(revertSnackbar).toBeVisible({ timeout: 5000 });
   });

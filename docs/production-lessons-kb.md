@@ -145,7 +145,17 @@ Before building, deploying, or validating anything, identify which artifact is b
 - A deploy cannot be judged against a service that was already unhealthy, so the script checks production first and stops unless `deploy_when_unhealthy` is set. Do not cancel the deploy job once it has started publishing; a cancelled run cannot roll back.
 - Keep deploy logic that must not be skipped in one script with explicit control flow, and test it with stand-ins for `docker`, `az` and `curl` (`tests/test_deploy_enterprise_script.py`). Separate workflow steps joined by `if: failure()` conditions cannot be run before the day they are needed.
 
+## Privacy Promises
+
+- A switch in the interface is a promise. The profile page had "Analytics" and "Email Notifications" switches that stored a value nothing ever read. For every setting a person can change, find the code that reads it; if there is none, the setting does nothing. Test a switch by its effect (what is sent, who is emailed), not by the stored row.
+- A cleanup function that nothing calls deletes nothing. The request log and API keys each had a "cleanup" method with a retention period in its docstring and no caller. Retention periods live in one place (`retention.py`) and are run by the product.
+- A library's "reset" can undo its own "opt out". The analytics library's `reset()` also clears a stored opt-out, so "opt out, then reset" left analytics running. Only a browser test that counted outgoing requests after switching off showed it. Put your own gate in front of anything that must stop (`PostHogService.sending`), and verify "nothing is sent" by watching the network, including across a page reload.
+- An address is content. Request paths and page addresses carried email addresses (`/api/auth/user-exists/<email>`, `?email=`), one-time links (`?token=`) and record ids into analytics events. Send the route as declared and cut query strings; never the requested address.
+- An error message is content too. A database error quotes the row it failed on. Error reports that leave the installation carry the exception's class and location; the message stays in the application log.
+
 ## Sign-In Paths
+
+- Unit tests of a check do not show that a route applies it. Test every authentication check through the real route with a missing, a wrong, a stale and a valid credential, as `tests/test_slack_privacy.py` does for the Slack webhooks.
 
 - A fallback sign-in path must meet the same bar as the main one. Every endpoint that issues a session or a token takes the identity from something the server has verified. The Teams tab had a second provisioning path beside the validated sign-in; it now requires the same validated Teams sign-in token. A path that cannot meet the bar is removed, not kept as a fallback.
 - A test that supplies a name the code under test does not define hides the defect it should find. The Teams sign-in endpoint called a function that existed nowhere; its only test patched that name in. Test sign-in endpoints through the real route with tokens signed by a key generated in the test and a stubbed key download (`tests/test_teams_tab_auth.py`), and include the refusals: wrong audience, wrong issuer, expired, unsigned, wrong key, missing claims.
