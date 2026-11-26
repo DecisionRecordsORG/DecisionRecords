@@ -1,5 +1,6 @@
 import os
 import json
+import hmac
 import secrets
 import logging
 import sys
@@ -12776,8 +12777,12 @@ def teams_oauth_start():
         if not tenant:
             return jsonify({'error': 'Tenant not found'}), 404
 
-        # Generate state with tenant_id
-        state = generate_teams_oauth_state(tenant.id, user.id)
+        # The state names the organisation and the administrator, and is
+        # bound to this browser's session: the callback accepts it only with
+        # the nonce kept in the session here
+        session_nonce = secrets.token_urlsafe(24)
+        session[TEAMS_CONNECT_SESSION_KEY] = session_nonce
+        state = generate_teams_oauth_state(tenant.id, user.id, extra_data={'session_nonce': session_nonce})
 
         # Build redirect URI using OAuth base URL (supports Cloudflare Worker routing)
         redirect_uri = f"{get_oauth_base_url()}/api/teams/oauth/callback"
@@ -12802,7 +12807,7 @@ def teams_oauth_callback():
     rule by which a Microsoft tenant is linked at its first Teams sign-in.
     """
     from ee.backend.teams.teams_security import (
-        verify_teams_oauth_state, exchange_teams_oidc_code, get_teams_bot_app_id
+        verify_teams_oauth_state, exchange_teams_oidc_code, get_teams_bot_app_id, SIGN_IN_ONLY_SCOPE
     )
     import microsoft_identity
 
@@ -12812,9 +12817,21 @@ def teams_oauth_callback():
         logger.error(f"Teams OAuth error: {request.args.get('error_description', error)}")
         return redirect('/settings?teams_error=microsoft_sign_in_failed')
 
-    # Verify state
+    # Verify state, and that it comes back to the session that started the
+    # connection, signed in as the administrator who started it
+    expected_nonce = session.pop(TEAMS_CONNECT_SESSION_KEY, None)
     state_data = verify_teams_oauth_state(request.args.get('state'))
     if not state_data:
+        return redirect('/settings?teams_error=invalid_state')
+    extra = state_data.get('extra_data') if isinstance(state_data.get('extra_data'), dict) else {}
+    state_nonce = extra.get('session_nonce')
+    if not isinstance(expected_nonce, str) or not isinstance(state_nonce, str) \
+            or not hmac.compare_digest(expected_nonce, state_nonce):
+        logger.warning("Teams connection refused: the state was not started in this session")
+        return redirect('/settings?teams_error=invalid_state')
+    current = get_current_user()
+    if current is None or getattr(current, 'id', None) != state_data.get('user_id'):
+        logger.warning("Teams connection refused: not signed in as the administrator who started it")
         return redirect('/settings?teams_error=invalid_state')
 
     code = request.args.get('code')
@@ -12835,7 +12852,8 @@ def teams_oauth_callback():
         return redirect('/settings?teams_error=not_allowed')
 
     try:
-        id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/api/teams/oauth/callback")
+        id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/api/teams/oauth/callback",
+                                                scope=SIGN_IN_ONLY_SCOPE)
         if not id_claims:
             return redirect('/settings?teams_error=microsoft_sign_in_failed')
 
@@ -13285,6 +13303,12 @@ def teams_tab_create_decision():
 # /teams/auth-end, which signs the person in and hands the result to the tab.
 # -----------------------------------------------------------------------------
 
+# The cookie that ties a tab sign-in window's state to that window
+TEAMS_SIGN_IN_COOKIE = 'teams_sign_in_nonce'
+# The session key that ties "Connect Teams" to the session that started it
+TEAMS_CONNECT_SESSION_KEY = 'teams_connect_nonce'
+
+
 def _teams_auth_window_page(result):
     """The page that closes the sign-in window and gives the tab its result."""
     payload = json.dumps(result).replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
@@ -13348,12 +13372,19 @@ def teams_tab_auth_start():
     if len(hint) > 320 or '@' not in hint or any(c.isspace() for c in hint):
         hint = None
 
-    return redirect(microsoft_authorize_url(
+    # The state is accepted back only in the window that started the sign-in:
+    # its nonce is also kept in a cookie of that window, sent to /teams/auth-end
+    # only (Microsoft's redirect back is a top-level navigation, so Lax is sent)
+    nonce = secrets.token_urlsafe(24)
+    response = redirect(microsoft_authorize_url(
         f"{get_oauth_base_url()}/teams/auth-end",
-        generate_tab_sign_in_state(),
+        generate_tab_sign_in_state(nonce),
         ms_tenant_id=request.args.get('tid'),
         login_hint=hint
     ))
+    response.set_cookie(TEAMS_SIGN_IN_COOKIE, nonce, max_age=600, path='/teams/auth-end',
+                        secure=bool(app.config.get('SESSION_COOKIE_SECURE')), httponly=True, samesite='Lax')
+    return response
 
 
 @app.route('/teams/auth-end', methods=['GET'])
@@ -13369,12 +13400,20 @@ def teams_tab_auth_end():
     from POST /api/teams/sso/validate.
     """
     from ee.backend.teams.teams_security import (
-        verify_tab_sign_in_state, exchange_teams_oidc_code, get_teams_bot_app_id
+        verify_tab_sign_in_state, exchange_teams_oidc_code, get_teams_bot_app_id, SIGN_IN_ONLY_SCOPE
     )
     import microsoft_identity
 
+    # The nonce of the window that started this sign-in, used once
+    window_nonce = request.cookies.get(TEAMS_SIGN_IN_COOKIE)
+
+    def page(result):
+        response = _teams_auth_window_page(result)
+        response.delete_cookie(TEAMS_SIGN_IN_COOKIE, path='/teams/auth-end')
+        return response
+
     def failed(code, message):
-        return _teams_auth_window_page({'ok': False, 'code': code, 'message': message})
+        return page({'ok': False, 'code': code, 'message': message})
 
     error = request.args.get('error')
     if error:
@@ -13386,14 +13425,16 @@ def teams_tab_auth_end():
                           'Decision Records.')
         return failed('microsoft_error', 'Microsoft could not sign you in. Close this window and try again.')
 
-    if not verify_tab_sign_in_state(request.args.get('state')):
+    state_data = verify_tab_sign_in_state(request.args.get('state'))
+    if not state_data or not isinstance(window_nonce, str) or not isinstance(state_data.get('nonce'), str) \
+            or not hmac.compare_digest(window_nonce, state_data['nonce']):
         return failed('invalid_state', 'This sign-in window has expired. Close it and try again.')
 
     code = request.args.get('code')
     if not code:
         return failed('missing_code', 'Microsoft did not complete the sign-in. Close this window and try again.')
 
-    id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/teams/auth-end")
+    id_claims, _ = exchange_teams_oidc_code(code, f"{get_oauth_base_url()}/teams/auth-end", scope=SIGN_IN_ONLY_SCOPE)
     if not id_claims:
         return failed('microsoft_error', 'Microsoft could not sign you in. Close this window and try again.')
 
@@ -13407,7 +13448,7 @@ def teams_tab_auth_end():
         body, _status = refusal
         return failed(body.get('code') or 'not_allowed', body.get('message') or body.get('error'))
 
-    return _teams_auth_window_page({'ok': True, 'session': {
+    return page({'ok': True, 'session': {
         'tabAuthToken': result['tab_auth_token'],
         'tenantDomain': result['tenant_domain'],
         'user': result['user'],

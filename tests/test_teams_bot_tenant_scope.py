@@ -287,7 +287,10 @@ class TestStatusChangeIsScopedAndNeedsAnAccountOfTheTenant:
         response = self.submit(world, world.own.id, oid=OUTSIDER_OID)
         assert status_of(world.own.id) == 'proposed'
         assert history_count(world.own.id) == 0
-        assert 'cannot change the status' in text_of(response)
+        # Its mapping no longer identifies anyone here (the account is not in
+        # this workspace's organisation), so the sender is not acted as at all
+        assert 'Status Updated' not in text_of(response)
+        assert 'could not tell who you are' in text_of(response)
 
     def test_unidentified_sender_cannot_change_status(self, world):
         response = self.submit(world, world.own.id, oid=None)
@@ -309,7 +312,7 @@ class TestStatusChangeIsScopedAndNeedsAnAccountOfTheTenant:
                             'user_id': world.alice.id, 'tenant_id': world.tenant_a.id,
                             'domain': 'alpha.example'}})))
         assert status_of(world.own.id) == 'proposed'
-        assert 'cannot change the status' in text_of(response)
+        assert 'Status Updated' not in text_of(response)
 
     @pytest.mark.parametrize('bad_status', ['deleted', 'ACCEPTED', '<b>x</b>', {'a': 1}, ['accepted']])
     def test_unknown_status_is_refused(self, world, bad_status):

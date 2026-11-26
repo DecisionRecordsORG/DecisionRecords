@@ -523,6 +523,19 @@ class TestBotAnswersEverything:
         assert 'disconnected' in reply
 
 
+    def test_the_message_action_can_be_a_tenants_first_use(self, bot, megan):
+        """Nothing else seen from the Microsoft tenant yet: the form still records the decision."""
+        response = bot.deliver(bot.activity(
+            'invoke', sender=megan, name='composeExtension/submitAction',
+            value={'data': {'title': 'Review suppliers every quarter', 'context': 'From a chat'}}))
+
+        assert response.status_code == 200, response.get_data(as_text=True)
+        assert 'not connected' not in json.dumps(response.get_json())
+        decision = ArchitectureDecision.query.one()
+        assert decision.title == 'Review suppliers every quarter' and decision.domain == REVIEW_DOMAIN
+        assert role_of(REVIEW_MEMBER) == GlobalRole.PROVISIONAL_ADMIN
+
+
 class TestBotRefusesWhoTheTabRefuses:
 
     def test_a_guest_gets_help_but_no_data_and_no_account(self, bot, megan):
@@ -551,6 +564,50 @@ class TestBotRefusesWhoTheTabRefuses:
         assert 'Internal decision' not in reply
         assert User.query.count() == users_before
         assert TeamsUserMapping.query.filter_by(aad_object_id=visitor).count() == 0
+
+    def test_without_the_roster_nobody_new_gets_an_account(self, bot, megan, monkeypatch):
+        """S8: when the roster call fails there is no tenant ID to compare, so only known people act."""
+        bot.say('hi', megan)
+        make_decision(Tenant.query.one(), 'Internal decision', REVIEW_MEMBER)
+
+        async def roster_unavailable(service, activity):
+            return dict(activity.get('from') or {})
+        monkeypatch.setattr(TeamsService, 'get_member_info', roster_unavailable)
+        stranger = oid(10)
+        users_before = User.query.count()
+
+        refused = bot.say('list', stranger)
+        known = bot.say('list', megan)
+
+        assert 'Internal decision' not in refused
+        assert User.query.count() == users_before
+        assert 'Internal decision' in known
+
+    @pytest.mark.parametrize('invoke,value', [
+        ('task/fetch', lambda d: {'data': {'action': 'view_decision', 'decision_id': d}}),
+        ('adaptiveCard/action', lambda d: {'action': 'view_decision', 'decision_id': d}),
+    ])
+    def test_a_guest_cannot_open_a_decision_from_a_card(self, bot, megan, invoke, value):
+        """A card posted in a shared conversation carries the decision's ID; a guest pressing it sees nothing."""
+        bot.say('hi', megan)
+        decision = make_decision(Tenant.query.one(), 'Internal decision', REVIEW_MEMBER)
+        guest = bot.person(oid(8), f'gary_fabrikam.example#EXT#@{REVIEW_DOMAIN}', role='guest')
+
+        response = bot.deliver(bot.activity('invoke', sender=guest, name=invoke, value=value(decision.id)))
+
+        assert response.status_code == 200
+        assert 'Internal decision' not in json.dumps(response.get_json())
+
+    def test_an_erased_account_is_not_acted_as(self, bot, megan):
+        bot.say('hi', megan)
+        make_decision(Tenant.query.one(), 'Internal decision', REVIEW_MEMBER)
+        user = User.query.filter_by(email=REVIEW_MEMBER).one()
+        user.is_anonymized = True
+        db.session.commit()
+
+        reply = bot.say('list', megan)
+
+        assert 'Internal decision' not in reply and 'no longer be used' in reply
 
     def test_a_guest_cannot_create_through_the_message_action(self, bot, megan):
         bot.say('hi', megan)
@@ -817,11 +874,13 @@ class TestSignInWindow:
         """Stands in for the call to Microsoft's token endpoint."""
         calls = []
 
-        def fake(code, redirect_uri):
+        def fake(code, redirect_uri, scope=None):
             calls.append((code, redirect_uri))
+            fake.scopes.append(scope)
             return fake.claims, 'access-token'
         fake.claims = None
         fake.calls = calls
+        fake.scopes = []
         monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', fake)
         return fake
 
@@ -865,6 +924,8 @@ class TestSignInWindow:
         assert result['session']['tenantDomain'] == REVIEW_DOMAIN
         assert 'notifySuccess' in page and '/assets/MicrosoftTeams.min.js' in page
         assert exchange.calls == [('abc', f'https://{SITE_HOST}/teams/auth-end')]
+        # The scopes redeemed are the ones the sign-in page was asked for
+        assert exchange.scopes == [query['scope']]
         listing = client.get('/api/teams/tab/decisions', headers=tab_headers(result['session']['tabAuthToken']))
         assert listing.status_code == 200
         assert response.headers['Cache-Control'].startswith('no-')
@@ -883,6 +944,26 @@ class TestSignInWindow:
         assert result == {'ok': False, 'code': code, 'message': result['message']}
         assert 'notifyFailure' in page
         assert exchange.calls == [] and User.query.count() == 0
+
+    def test_the_state_is_only_accepted_in_the_window_that_started_the_sign_in(self, client, real_app, exchange):
+        """Someone else's sign-in, finished in this window, signs nobody in (login CSRF)."""
+        attacker = real_app[1].test_client()
+        _, query = self.start(attacker)
+        exchange.claims = id_claims(REVIEW_ADMIN)
+
+        result, _ = self.result_of(client.get(f"/teams/auth-end?code=abc&state={query['state']}"))
+
+        assert result['code'] == 'invalid_state'
+        assert exchange.calls == [] and User.query.count() == 0
+
+    def test_the_window_cookie_is_used_once(self, client, real_app, exchange):
+        _, query = self.start(client)
+        exchange.claims = id_claims(REVIEW_ADMIN)
+        first, _ = self.result_of(client.get(f"/teams/auth-end?code=abc&state={query['state']}"))
+
+        again, _ = self.result_of(client.get(f"/teams/auth-end?code=abc&state={query['state']}"))
+
+        assert first['ok'] is True and again['code'] == 'invalid_state'
 
     def test_end_needs_a_code(self, client, real_app, exchange):
         _, query = self.start(client)
@@ -950,16 +1031,27 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
     def exchange(self, monkeypatch):
         calls = []
 
-        def fake(code, redirect_uri):
+        def fake(code, redirect_uri, scope=None):
             calls.append((code, redirect_uri))
+            fake.scopes.append(scope)
             return fake.claims, 'access-token'
         fake.claims = None
         fake.calls = calls
+        fake.scopes = []
         monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', fake)
         return fake
 
-    def state_for(self, tenant, admin):
-        return teams_security.generate_teams_oauth_state(tenant.id, admin.id)
+    def state_for(self, tenant, admin, client=None, signed_in=True):
+        """A state as /api/teams/oauth/start makes it, with its nonce in the client's session."""
+        nonce = f'nonce-{tenant.id}-{admin.id}'
+        if client is not None:
+            with client.session_transaction() as session:
+                session['teams_connect_nonce'] = nonce
+                if signed_in:
+                    session['user_id'] = admin.id
+                    session['_expires_at'] = '2999-01-01T00:00:00+00:00'
+        return teams_security.generate_teams_oauth_state(tenant.id, admin.id,
+                                                         extra_data={'session_nonce': nonce})
 
     def callback(self, client, **query):
         return client.get('/api/teams/oauth/callback', query_string=query)
@@ -969,7 +1061,7 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         tenant, admin = org
 
         response = self.callback(client, tenant=MS_TENANT_B, admin_consent='True',
-                                 state=self.state_for(tenant, admin))
+                                 state=self.state_for(tenant, admin, client))
 
         assert response.status_code == 302 and 'teams_error=missing_code' in response.headers['Location']
         assert TeamsWorkspace.query.count() == 0
@@ -979,20 +1071,21 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         tenant, admin = org
         exchange.claims = id_claims(ALICE, tid=MS_TENANT_A)
 
-        response = self.callback(client, code='abc', tenant=MS_TENANT_B, state=self.state_for(tenant, admin))
+        response = self.callback(client, code='abc', tenant=MS_TENANT_B, state=self.state_for(tenant, admin, client))
 
         assert 'teams_success=connected' in response.headers['Location']
         workspace = TeamsWorkspace.query.one()
         assert (workspace.ms_tenant_id, workspace.tenant_id) == (MS_TENANT_A, tenant.id)
         assert workspace.status == TeamsWorkspace.STATUS_ACTIVE and workspace.consent_granted_by_id == admin.id
         assert exchange.calls == [('abc', f'https://{SITE_HOST}/api/teams/oauth/callback')]
+        assert exchange.scopes == ['openid profile']
 
     def test_a_sign_in_name_on_another_domain_connects_nothing(self, client, org, exchange):
         """An administrator here who is an ordinary member of some other Microsoft tenant."""
         tenant, admin = org
         exchange.claims = id_claims('alice@bigcorp.example', tid=MS_TENANT_B)
 
-        response = self.callback(client, code='abc', state=self.state_for(tenant, admin))
+        response = self.callback(client, code='abc', state=self.state_for(tenant, admin, client))
 
         assert 'teams_error=domain_mismatch' in response.headers['Location']
         assert TeamsWorkspace.query.count() == 0
@@ -1006,7 +1099,7 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         tenant, admin = org
         exchange.claims = id_claims(ALICE, tid=MS_TENANT_A, **claims)
 
-        response = self.callback(client, code='abc', state=self.state_for(tenant, admin))
+        response = self.callback(client, code='abc', state=self.state_for(tenant, admin, client))
 
         assert f'teams_error={error}' in response.headers['Location']
         assert TeamsWorkspace.query.count() == 0
@@ -1016,7 +1109,7 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         other = make_org(DOMAIN_B, MS_TENANT_B, members=[BOB])
         exchange.claims = id_claims(ALICE, tid=MS_TENANT_B)
 
-        response = self.callback(client, code='abc', state=self.state_for(tenant, admin))
+        response = self.callback(client, code='abc', state=self.state_for(tenant, admin, client))
 
         assert 'teams_error=workspace_already_claimed' in response.headers['Location']
         assert TeamsWorkspace.query.one().tenant_id == other.id
@@ -1028,7 +1121,7 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         db.session.commit()
         exchange.claims = id_claims(ALICE, tid=MS_TENANT_A)
 
-        response = self.callback(client, code='abc', state=self.state_for(tenant, admin))
+        response = self.callback(client, code='abc', state=self.state_for(tenant, admin, client))
 
         assert 'teams_success=connected' in response.headers['Location']
         workspace = TeamsWorkspace.query.one()
@@ -1036,7 +1129,7 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
 
     def test_the_person_who_started_it_must_still_be_an_administrator(self, client, org, exchange):
         tenant, admin = org
-        state = self.state_for(tenant, admin)
+        state = self.state_for(tenant, admin, client)
         admin.is_admin = False
         db.session.commit()
         exchange.claims = id_claims(ALICE, tid=MS_TENANT_A)
@@ -1044,6 +1137,30 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         response = self.callback(client, code='abc', state=state)
 
         assert 'teams_error=not_allowed' in response.headers['Location']
+        assert TeamsWorkspace.query.count() == 0
+
+    def test_a_state_from_another_session_connects_nothing(self, client, org, exchange, real_app):
+        """A state minted in the administrator's browser, replayed in another one."""
+        tenant, admin = org
+        state = self.state_for(tenant, admin, real_app[1].test_client())
+        exchange.claims = id_claims(ALICE, tid=MS_TENANT_A)
+        with client.session_transaction() as session:
+            session['user_id'] = admin.id
+            session['_expires_at'] = '2999-01-01T00:00:00+00:00'
+
+        response = self.callback(client, code='abc', state=state)
+
+        assert 'teams_error=invalid_state' in response.headers['Location']
+        assert TeamsWorkspace.query.count() == 0 and exchange.calls == []
+
+    def test_the_callback_needs_the_administrator_signed_in(self, client, org, exchange):
+        tenant, admin = org
+        state = self.state_for(tenant, admin, client, signed_in=False)
+        exchange.claims = id_claims(ALICE, tid=MS_TENANT_A)
+
+        response = self.callback(client, code='abc', state=state)
+
+        assert 'teams_error=invalid_state' in response.headers['Location']
         assert TeamsWorkspace.query.count() == 0
 
     def test_a_forged_state_connects_nothing(self, client, org, exchange):
@@ -1071,6 +1188,11 @@ class TestConnectTeamsTakesTheTenantFromAVerifiedSignIn:
         assert 'adminconsent' not in response.headers['Location']
         assert query['redirect_uri'] == [f'https://{SITE_HOST}/api/teams/oauth/callback']
         assert query['response_type'] == ['code']
+        assert query['scope'] == ['openid profile']
+        with client.session_transaction() as session:
+            nonce = session['teams_connect_nonce']
+        state = teams_security.verify_teams_oauth_state(query['state'][0])
+        assert state['extra_data']['session_nonce'] == nonce and state['user_id'] == admin.id
 
 
 # ============================================================================
@@ -1082,7 +1204,7 @@ class TestWebSignInsUseTheSignInName:
     def test_sign_in_with_teams_ignores_the_email_claim(self, client, real_app, monkeypatch):
         make_org(DOMAIN_A, MS_TENANT_A, members=[ALICE])
         claims = id_claims(f'mallory@{REVIEW_DOMAIN}', email=ALICE)
-        monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', lambda code, uri: (claims, 'token'))
+        monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', lambda code, uri, scope=None: (claims, 'token'))
         monkeypatch.setattr(teams_security, 'get_teams_user_info',
                             lambda token: pytest.fail('the Graph profile must not be read'))
         state = teams_security.generate_teams_oidc_state()
@@ -1098,7 +1220,7 @@ class TestWebSignInsUseTheSignInName:
 
     def test_sign_in_with_teams_refuses_a_token_for_another_application(self, client, real_app, monkeypatch):
         claims = id_claims(REVIEW_ADMIN, audience='99999999-0000-4000-8000-000000000000')
-        monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', lambda code, uri: (claims, 'token'))
+        monkeypatch.setattr(teams_security, 'exchange_teams_oidc_code', lambda code, uri, scope=None: (claims, 'token'))
         state = teams_security.generate_teams_oidc_state()
 
         response = client.get('/auth/teams/oidc/callback', query_string={'code': 'abc', 'state': state})
@@ -1315,8 +1437,13 @@ class TestManifestAndPackage:
         assert 'create a decision, list recent decisions, search, or view one by its number' in description
         assert 'It is created for you the first time you open the tab with your work account' in description
 
+    def test_the_manifest_is_on_the_newest_generally_available_schema(self, manifest):
+        """1.30 (August 2026). 1.31 is not yet in Microsoft's list of generally available versions."""
+        assert manifest['manifestVersion'] == '1.30'
+        assert manifest['$schema'] == 'https://developer.microsoft.com/json-schemas/teams/v1.30/MicrosoftTeams.schema.json'
+
     def test_the_manifest_is_already_valid_under_the_newest_schema_kept(self, package, manifest):
-        """Moving from 1.25 to 1.31 is a change of two lines."""
+        """Moving from 1.30 to 1.31 is a change of two lines."""
         newest = json.load(open(os.path.join(TEAMS_APP_DIR, 'schema', 'MicrosoftTeams.schema.v1.31.json')))
         moved = dict(manifest, manifestVersion='1.31')
 
