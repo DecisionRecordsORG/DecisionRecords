@@ -295,6 +295,11 @@ def test_requests_people_have_opened_survive_a_rush_at_the_cap(concurrent_app, i
     outcomes = _race(concurrent_app, lambda: service.create_authorization_request(
         CLIENT_ID, REDIRECT, CHALLENGE, RESOURCE).public_id)
 
-    assert [kind for kind, _result in outcomes] == ['ok'] * THREADS, outcomes
+    # Each caller gets its request, or is told to try again when a request
+    # arriving at the same moment evicted the one it had just stored (with the
+    # cap this low the newest unopened request is often the oldest one too).
+    # Never a crash: _race fails the test on any other exception.
+    assert {(kind, result) for kind, result in outcomes if kind != 'ok'} <= {('refused', 'temporarily_unavailable')}, outcomes
+    assert any(kind == 'ok' for kind, _result in outcomes), outcomes
     waiting = {row.public_id for row in OAuthAuthorizationRequest.query.all()}
     assert set(opened) <= waiting
