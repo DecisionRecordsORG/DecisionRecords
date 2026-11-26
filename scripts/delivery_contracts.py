@@ -42,6 +42,7 @@ SHARED_CORE_PATTERNS = (
     "migrations.py",
     "models.py",
     "notifications.py",
+    "organisation_export.py",
     "requirements.txt",
     "microsoft_identity.py",
     "retention.py",

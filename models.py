@@ -1222,14 +1222,21 @@ class UserConsent(db.Model):
 
     VALID_CONSENT_TYPES = [CONSENT_ANALYTICS, CONSENT_AI_PROCESSING, CONSENT_EMAIL_NOTIFICATIONS]
 
-    # What applies to a person who has never used the switch. Analytics and AI
-    # processing are off until switched on. Email notifications are on until
-    # switched off: they are only ever sent for what the person subscribed to
-    # or for a decision they were made the owner of, so the switch is a way to
-    # stop them all at once, not a permission that has to be given first.
+    # What applies to a person who has never used the switch. Analytics is off
+    # until switched on. Email notifications are on until switched off: they
+    # are only ever sent for what the person subscribed to or for a decision
+    # they were made the owner of, so the switch is a way to stop them all at
+    # once, not a permission that has to be given first.
+    #
+    # AI processing is on until switched off, for the same kind of reason: it
+    # governs AI tools the person connects themselves (an API key, an
+    # application such as Claude) acting for them, after their organisation
+    # switched AI access on. Its real state is TenantMembership.ai_opt_out,
+    # which every AI access check reads; /api/user/consents reports that, and
+    # a row here is only the record of the person's last use of the switch.
     DEFAULT_GRANTED = {
         CONSENT_ANALYTICS: False,
-        CONSENT_AI_PROCESSING: False,
+        CONSENT_AI_PROCESSING: True,
         CONSENT_EMAIL_NOTIFICATIONS: True,
     }
 

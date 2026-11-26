@@ -13,7 +13,6 @@ Private functions these tests rely on (documented signatures):
 - ee.backend.teams.teams_security.get_teams_bot_app_id()
 - ee.backend.teams.teams_security.generate_tab_auth_token(user_id, tenant_domain, user_email)
 - ee.backend.teams.teams_security.verify_tab_auth_token(token)
-- ee.backend.teams.teams_security.generate_teams_link_token(teams_workspace_id, aad_object_id, aad_email=None)
 - ee.backend.teams.teams_security.validate_teams_jwt(auth_header, service_url=None)
 """
 import base64
@@ -541,10 +540,10 @@ class TestTabTokenCheck:
 
     @pytest.mark.parametrize('method,path', TAB_ROUTES)
     def test_token_of_another_kind_is_refused(self, client, two_orgs, method, path):
-        workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=MS_TENANT_A).first()
-        link_token = teams_security.generate_teams_link_token(workspace.id, 'oid-alice', ALICE)
+        # Another kind of token this module signs with the same key: a sign-in state
+        other_kind = teams_security.generate_teams_oidc_state(return_url='/')
 
-        assert self.call(client, method, path, tab_headers(link_token)).status_code == 401
+        assert self.call(client, method, path, tab_headers(other_kind)).status_code == 401
 
     @pytest.mark.parametrize('method,path', TAB_ROUTES)
     def test_sign_in_token_is_not_a_tab_token(self, client, two_orgs, method, path):
@@ -826,30 +825,16 @@ class TestOtherTeamsRoutesNeedProof:
         assert 'teams_error=invalid_state' in response.headers['Location']
         assert row_counts() == before
 
-    def test_link_routes_need_a_signed_link_token(self, client, two_orgs):
+    @pytest.mark.parametrize('method,path', [
+        ('get', '/api/teams/link/initiate?token=x'),
+        ('post', '/api/teams/link/validate'),
+        ('post', '/api/teams/link/complete'),
+    ])
+    def test_the_account_linking_routes_are_gone(self, client, two_orgs, method, path):
+        """S10: nothing issued link tokens any more, so the routes were removed."""
         before = row_counts()
 
-        assert client.post('/api/teams/link/validate', json={'token': 'forged'}).status_code == 400
-        assert client.post('/api/teams/link/complete', json={'token': 'forged'}).status_code == 400
-        # A tab token is not a link token
-        assert client.post('/api/teams/link/complete',
-                           json={'token': tab_token_for(ALICE)}).status_code == 400
+        response = getattr(client, method)(path, json={'token': 'anything'} if method == 'post' else None)
+
+        assert response.status_code in (404, 405)
         assert row_counts() == before
-
-    def test_link_complete_needs_a_signed_in_user_as_well(self, client, two_orgs):
-        workspace = TeamsWorkspace.query.filter_by(ms_tenant_id=MS_TENANT_A).first()
-        token = teams_security.generate_teams_link_token(workspace.id, 'oid-alice', ALICE)
-        before = row_counts()
-
-        response = client.post('/api/teams/link/complete', json={'token': token})
-
-        assert response.status_code == 401
-        assert row_counts() == before
-
-    def test_link_initiate_keeps_the_token_inside_one_query_parameter(self, client, two_orgs):
-        response = client.get('/api/teams/link/initiate?token=abc%26next%3Dhttps://elsewhere.test%23x')
-
-        assert response.status_code == 302
-        location = response.headers['Location']
-        assert location.startswith('/teams/link?token=')
-        assert '&' not in location and '#' not in location

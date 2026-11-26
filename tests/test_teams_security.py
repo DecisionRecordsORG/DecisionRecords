@@ -215,97 +215,6 @@ class TestTeamsOAuthState:
             assert verify_teams_oauth_state(None) is None
 
 
-# ==================== Test Link Token ====================
-
-class TestTeamsLinkToken:
-    """Test Teams user link token generation and verification."""
-
-    def test_link_token_roundtrip(self, app):
-        """Link token can be generated and verified."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import generate_teams_link_token, verify_teams_link_token
-
-            token = generate_teams_link_token(
-                teams_workspace_id=1,
-                aad_object_id='aad-user-12345',
-                aad_email='user@example.com'
-            )
-
-            assert token is not None
-            assert isinstance(token, str)
-
-            # Verify token
-            token_data = verify_teams_link_token(token)
-            assert token_data is not None
-            assert token_data['teams_workspace_id'] == 1
-            assert token_data['aad_object_id'] == 'aad-user-12345'
-            assert token_data['aad_email'] == 'user@example.com'
-            assert token_data['type'] == 'teams_link'
-            assert 'expires_at' in token_data
-            assert 'nonce' in token_data
-
-    def test_link_token_expires(self, app):
-        """Expired link token should be rejected."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_link_token
-            from cryptography.fernet import Fernet
-
-            # Create expired token (expired 1 hour ago)
-            expires_at = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-            token_data = {
-                'type': 'teams_link',
-                'teams_workspace_id': 1,
-                'aad_object_id': 'aad-user-12345',
-                'aad_email': 'user@example.com',
-                'expires_at': expires_at,
-                'nonce': 'test-nonce'
-            }
-
-            fernet = Fernet(_get_encryption_key())
-            expired_token = fernet.encrypt(json.dumps(token_data).encode()).decode()
-
-            result = verify_teams_link_token(expired_token)
-            assert result is None
-
-    def test_link_token_invalid_returns_none(self, app):
-        """Invalid link token should return None."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import verify_teams_link_token
-
-            invalid_token = 'invalid-token-string'
-            result = verify_teams_link_token(invalid_token)
-            assert result is None
-
-    def test_link_token_wrong_type_returns_none(self, app):
-        """Link token with wrong type should be rejected."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import _get_encryption_key, verify_teams_link_token
-            from cryptography.fernet import Fernet
-
-            expires_at = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
-            token_data = {
-                'type': 'wrong_type',  # Not 'teams_link'
-                'teams_workspace_id': 1,
-                'aad_object_id': 'aad-user-12345',
-                'expires_at': expires_at,
-                'nonce': 'test-nonce'
-            }
-
-            fernet = Fernet(_get_encryption_key())
-            wrong_type_token = fernet.encrypt(json.dumps(token_data).encode()).decode()
-
-            result = verify_teams_link_token(wrong_type_token)
-            assert result is None
-
-    def test_link_token_empty_returns_none(self, app):
-        """Empty link token should return None."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import verify_teams_link_token
-
-            assert verify_teams_link_token('') is None
-            assert verify_teams_link_token(None) is None
-
-
 # ==================== Test OIDC State ====================
 
 class TestTeamsOIDCState:
@@ -737,19 +646,6 @@ class TestTeamsStateSecurityProperties:
             data2 = verify_teams_oauth_state(state2)
 
             assert data1['csrf_token'] != data2['csrf_token']
-
-    def test_nonce_is_unique_per_link_token(self, app):
-        """Each link token has a unique nonce."""
-        with app.app_context():
-            from ee.backend.teams.teams_security import generate_teams_link_token, verify_teams_link_token
-
-            token1 = generate_teams_link_token(1, 'aad-id-1')
-            token2 = generate_teams_link_token(1, 'aad-id-1')
-
-            data1 = verify_teams_link_token(token1)
-            data2 = verify_teams_link_token(token2)
-
-            assert data1['nonce'] != data2['nonce']
 
     def test_state_cannot_be_reused_after_expiry(self, app):
         """State parameters expire and cannot be reused."""

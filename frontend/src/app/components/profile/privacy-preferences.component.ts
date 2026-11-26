@@ -16,8 +16,12 @@ export type PreferenceType = 'analytics' | 'ai_processing' | 'email_notification
  *  - Analytics: off means this browser sends nothing to the analytics
  *    service and the server's usage events and error reports are not tied to
  *    the person. Shown only where the installation has analytics.
- *  - AI Processing: whether AI features may read the person's decisions.
- *    Shown only where the installation has AI features.
+ *  - AI Processing: whether AI tools the person connects (API keys,
+ *    applications such as Claude or ChatGPT) and the AI features in Slack may
+ *    act for them. It is their membership's AI opt-out, which every AI access
+ *    check reads: on unless switched off; off refuses their keys and
+ *    connected applications at once. Shown only where the installation has
+ *    AI features.
  *  - Email notifications: off stops the emails about decisions. Account and
  *    security emails are not affected.
  */
@@ -51,7 +55,11 @@ export type PreferenceType = 'analytics' | 'ai_processing' | 'email_notification
             data-testid="preference-ai">
             AI Processing
           </mat-slide-toggle>
-          <p class="consent-hint">Allow AI features to process your decision content</p>
+          <p class="consent-hint" data-testid="preference-ai-hint">
+            On: AI tools you connect yourself, an API key or an application such as Claude or ChatGPT, may work
+            with your organisation's decisions for you, where your organisation allows it. Off: your API keys and
+            connected applications are refused, and you cannot create keys or connect applications.
+          </p>
         }
 
         <mat-slide-toggle
@@ -77,7 +85,7 @@ export class PrivacyPreferencesComponent implements OnInit {
   loading = true;
   consents: Record<PreferenceType, boolean> = {
     analytics: false,
-    ai_processing: false,
+    ai_processing: true,
     email_notifications: true
   };
 
@@ -93,7 +101,8 @@ export class PrivacyPreferencesComponent implements OnInit {
       next: (response) => {
         this.consents = {
           analytics: response['analytics']?.granted === true,
-          ai_processing: response['ai_processing']?.granted === true,
+          // On unless switched off: the server reports the membership's AI opt-out
+          ai_processing: response['ai_processing']?.granted !== false,
           // On unless the person switched it off
           email_notifications: response['email_notifications']?.granted !== false
         };

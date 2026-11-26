@@ -1,0 +1,12 @@
+schema_version = 1
+id = "2026-11-27-privacy-followups"
+title = "Organisation data export, one AI Processing switch, an accurate usage statistics notice, Teams account-linking routes removed"
+summary = "Shared core: administrators of an organisation can download its content as one ZIP file from Organisation settings (POST /api/tenant/export, organisation_export.py): decisions as JSON and Markdown with history, comments, links and spaces, plus spaces, template, members, audit log and a README; tenant-scoped, administrators only, CSRF-checked, at most ten exports an hour per organisation, refused above 100 MB of text, audit-logged. The profile's AI Processing switch shows and sets the membership's ai_opt_out that the AI access checks read (default on), so it reflects real behaviour; no stored value changes and no migration is needed. The usage statistics notice text is accurate and links to the privacy policy. Enterprise (private submodule, paired branch): clearer refusal messages when a person switched AI Processing off, the unused Teams account-linking routes, page and link tokens are removed (tracker S10), and the Teams readiness notes record how a Teams-created account reaches the web app."
+change_type = "feature"
+surfaces = ["shared_core"]
+
+[artifacts]
+enterprise_app = "required"
+community_release = "candidate"
+community_release_level = "minor"
+marketing_website = "none"

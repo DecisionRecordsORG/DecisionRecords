@@ -839,7 +839,7 @@ class TestAuthenticateMCPRequest:
         success, handler, error = authenticate_mcp_request(full_key)
         assert success is False
         assert handler is None
-        assert 'opted out' in error
+        assert 'switched off AI Processing' in error
 
     def test_authenticate_success(
         self, app, session, enable_mcp, sample_user, ai_enabled_tenant, sample_membership

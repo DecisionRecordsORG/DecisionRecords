@@ -28,6 +28,7 @@ import { MatRadioModule } from '@angular/material/radio';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { getRoleBadge, RoleBadge } from '../../services/role.helper';
 import { DecisionTemplateSettingsComponent } from '../decision-template-settings/decision-template-settings.component';
+import { OrganisationExportComponent } from '../organisation-export/organisation-export.component';
 import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/connected-apps.component';
 
 @Component({
@@ -57,6 +58,7 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
     ConfirmDialogComponent,
     SetupLinkDialogComponent,
     DecisionTemplateSettingsComponent,
+    OrganisationExportComponent,
     ConnectedAppsComponent
   ],
   template: `
@@ -1720,6 +1722,14 @@ import { ConnectedAppsComponent } from '@ee/components/oauth/connected-apps/conn
           </div>
         </mat-tab>
         }
+
+        @if (!authService.isMasterAccount) {
+        <mat-tab label="Data export">
+          <div class="tab-content">
+            <app-organisation-export></app-organisation-export>
+          </div>
+        </mat-tab>
+        }
       </mat-tab-group>
     </div>
   `,
@@ -3115,6 +3125,7 @@ export class SettingsComponent implements OnInit {
   // Tab index for navigation
   @ViewChild(MatTabGroup) tabGroup?: MatTabGroup;
   private static readonly DECISION_TEMPLATE_TAB = 'Decision template';
+  private static readonly DATA_EXPORT_TAB = 'Data export';
   selectedTabIndex = 0;
   // Tab map matches actual tab order in template:
   // 0: SSO, 1: Email, 2: Users, 3: Auth, 4: Spaces*, 5: Access Requests*, 6: Role Requests*, 7: Slack*, 8: Teams*, 9: AI*, 10: Decision Relationships*
@@ -3283,6 +3294,8 @@ export class SettingsComponent implements OnInit {
         this.selectedTabIndex = this.tabMap[tab];
       } else if (tab === 'decision-template') {
         this.selectTabByLabel(SettingsComponent.DECISION_TEMPLATE_TAB);
+      } else if (tab === 'data-export') {
+        this.selectTabByLabel(SettingsComponent.DATA_EXPORT_TAB);
       }
 
       if (params['slack_success'] === 'true') {

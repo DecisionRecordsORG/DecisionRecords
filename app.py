@@ -4402,6 +4402,70 @@ def api_export_user_data():
     return response
 
 
+@app.route('/api/tenant/export', methods=['POST'])
+@login_required
+@rate_limit("3 per minute")
+@track_endpoint('api_tenant_export')
+def api_export_organisation():
+    """Download the organisation's content as one ZIP file (its administrators only).
+
+    The organisation is always the caller's own, taken from the session: the
+    request names none. See organisation_export.py for what the file holds
+    and what it never holds. A POST, so the app's CSRF check applies.
+    """
+    import re
+    import organisation_export
+    from auth import is_tenant_admin
+
+    if is_master_account():
+        return jsonify({'error': 'Super admin accounts cannot access tenant data'}), 403
+
+    user = g.current_user
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first() if user.sso_domain else None
+    if not tenant or tenant.deleted_at is not None:
+        return jsonify({'error': 'Organisation not found'}), 404
+    if not is_tenant_admin(user):
+        return jsonify({'error': 'Only administrators of this organisation can export its data'}), 403
+
+    # One organisation's exports, whoever asks: at most EXPORTS_PER_HOUR an hour
+    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent = AuditLog.query.filter(
+        AuditLog.tenant_id == tenant.id,
+        AuditLog.action_type == organisation_export.ACTION_ORGANISATION_DATA_EXPORTED,
+        AuditLog.created_at > hour_ago.replace(tzinfo=None),
+    ).count()
+    if recent >= organisation_export.EXPORTS_PER_HOUR:
+        response = jsonify({'error': 'This organisation has been exported several times in the last hour. '
+                                     'Try again later.'})
+        response.status_code = 429
+        response.headers['Retry-After'] = '3600'
+        return response
+
+    try:
+        content, summary = organisation_export.build_organisation_export(tenant, user)
+    except organisation_export.ExportTooLarge:
+        limit_mb = organisation_export.MAX_EXPORT_BYTES // (1024 * 1024)
+        return jsonify({'error': f'This organisation holds more than {limit_mb} MB of text, too much for one '
+                                 'download. Contact support and we will provide the export another way.'}), 413
+
+    log_admin_action(
+        tenant_id=tenant.id,
+        actor_user_id=user.id,
+        action_type=organisation_export.ACTION_ORGANISATION_DATA_EXPORTED,
+        target_entity='tenant',
+        target_id=tenant.id,
+        details=summary,
+    )
+    db.session.commit()
+
+    safe_domain = re.sub(r'[^A-Za-z0-9.-]+', '-', tenant.domain)
+    file_name = f'decision-records-{safe_domain}-{datetime.now(timezone.utc).strftime("%Y%m%d")}.zip'
+    response = Response(content, mimetype='application/zip')
+    response.headers['Content-Disposition'] = f'attachment; filename="{file_name}"'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 @app.route('/api/user/consents', methods=['GET'])
 @login_required
 @track_endpoint('api_user_consents_get')
@@ -4414,7 +4478,7 @@ def api_get_user_consents():
     consents = UserConsent.query.filter_by(user_id=user.id).all()
 
     # Return all consent types. Without a record the default applies: off for
-    # analytics and AI processing, on for email notifications.
+    # analytics, on for email notifications.
     result = {}
     for consent_type in UserConsent.VALID_CONSENT_TYPES:
         consent = next((c for c in consents if c.consent_type == consent_type), None)
@@ -4426,7 +4490,38 @@ def api_get_user_consents():
                 'granted': UserConsent.DEFAULT_GRANTED.get(consent_type, False),
             }
 
+    # "AI Processing" shows what the AI access checks read: the membership's
+    # ai_opt_out (default: not opted out). The stored consent row is only the
+    # record of when the person last used the switch.
+    membership = _own_membership(user)
+    if membership is not None:
+        result[UserConsent.CONSENT_AI_PROCESSING]['granted'] = not bool(membership.ai_opt_out)
+
     return jsonify(result)
+
+
+def _own_membership(user):
+    """The person's membership of their own organisation, or None."""
+    tenant = Tenant.query.filter_by(domain=user.sso_domain).first() if user.sso_domain else None
+    if tenant is None:
+        return None
+    return TenantMembership.query.filter_by(user_id=user.id, tenant_id=tenant.id).first()
+
+
+def _store_consent_choice(user, consent_type, granted):
+    """Record a person's choice for one switch: the choice, when, and the address it came from."""
+    consent = UserConsent.query.filter_by(user_id=user.id, consent_type=consent_type).first()
+    if not consent:
+        consent = UserConsent(user_id=user.id, consent_type=consent_type, granted=granted)
+        db.session.add(consent)
+    consent.granted = granted
+    consent.ip_address = get_client_address()
+    if granted:
+        consent.granted_at = datetime.now(timezone.utc)
+        consent.withdrawn_at = None
+    else:
+        consent.withdrawn_at = datetime.now(timezone.utc)
+    return consent
 
 
 @app.route('/api/user/consents', methods=['POST'])
@@ -4448,38 +4543,15 @@ def api_update_user_consent():
         return jsonify({'error': 'granted must be a boolean'}), 400
 
     user = g.current_user
-    ip_address = get_client_address()
+    consent = _store_consent_choice(user, consent_type, granted)
 
-    consent = UserConsent.query.filter_by(user_id=user.id, consent_type=consent_type).first()
-
-    if not consent:
-        consent = UserConsent(
-            user_id=user.id,
-            consent_type=consent_type,
-            granted=granted,
-            ip_address=ip_address
-        )
-        db.session.add(consent)
-    else:
-        consent.granted = granted
-        consent.ip_address = ip_address
-
-    if granted:
-        consent.granted_at = datetime.now(timezone.utc)
-        consent.withdrawn_at = None
-    else:
-        consent.withdrawn_at = datetime.now(timezone.utc)
-
-    # Sync ai_processing consent with membership ai_opt_out setting
+    # "AI Processing" is the membership's ai_opt_out, which the AI access
+    # checks read (/api/ai, /api/mcp, creating API keys, connecting an
+    # application): switching it off refuses them at once.
     if consent_type == UserConsent.CONSENT_AI_PROCESSING:
-        tenant = Tenant.query.filter_by(domain=user.sso_domain).first()
-        if tenant:
-            membership = TenantMembership.query.filter_by(
-                user_id=user.id, tenant_id=tenant.id
-            ).first()
-            if membership:
-                # ai_opt_out is the inverse of consent
-                membership.ai_opt_out = not granted
+        membership = _own_membership(user)
+        if membership:
+            membership.ai_opt_out = not granted
 
     db.session.commit()
 
@@ -12306,7 +12378,10 @@ def api_update_user_ai_preferences():
 
     ai_opt_out = data.get('ai_opt_out')
     if ai_opt_out is not None:
+        # The same switch as "AI Processing" on the profile page: keep its record too
+        _store_consent_choice(user, UserConsent.CONSENT_AI_PROCESSING, not bool(ai_opt_out))
         AIConfig.set_user_ai_opt_out(user, tenant, bool(ai_opt_out))
+        db.session.commit()
 
     membership = get_current_membership()
     return jsonify({
@@ -12369,7 +12444,8 @@ def api_create_ai_api_key():
 
     # Check if user has opted out
     if AIConfig.get_user_ai_opt_out(user, tenant):
-        return jsonify({'error': 'You have opted out of AI features. Update your preferences to create API keys.'}), 403
+        return jsonify({'error': 'You have switched off AI Processing in your profile (Privacy & Data). '
+                                 'Switch it on to create API keys.'}), 403
 
     data = request.get_json() or {}
     name = data.get('name', 'API Key')
@@ -13619,124 +13695,6 @@ def teams_test():
     except Exception as e:
         logger.error(f"Teams test notification error: {str(e)}")
         return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/teams/link/initiate', methods=['GET'])
-@require_teams
-@track_endpoint('api_teams_link_initiate')
-def teams_link_initiate():
-    """Initiate user account linking from Teams.
-
-    Redirects to the dedicated Teams link page with the token.
-    """
-    token = request.args.get('token')
-    if not token:
-        return jsonify({'error': 'Missing link token'}), 400
-
-    # Redirect to the Teams link page
-    from urllib.parse import quote
-    return redirect(f"/teams/link?token={quote(token, safe='')}")
-
-
-@app.route('/api/teams/link/validate', methods=['POST'])
-@require_teams
-@track_endpoint('api_teams_link_validate')
-def teams_link_validate():
-    """Validate a Teams link token and return workspace info."""
-    from ee.backend.teams.teams_security import verify_teams_link_token
-
-    data = request.get_json() or {}
-    token = data.get('token')
-
-    if not token:
-        return jsonify({'error': 'Missing token'}), 400
-
-    token_data = verify_teams_link_token(token)
-    if not token_data:
-        return jsonify({'error': 'Invalid or expired token'}), 400
-
-    workspace_id = token_data.get('teams_workspace_id')
-    workspace = db.session.get(TeamsWorkspace, workspace_id)
-
-    if not workspace:
-        return jsonify({'error': 'Workspace not found'}), 404
-
-    tenant = workspace.tenant if workspace.tenant_id else None
-
-    response = {
-        'valid': True,
-        'ms_tenant_id': workspace.ms_tenant_id,
-        'ms_tenant_name': workspace.ms_tenant_name,
-        'tenant_domain': tenant.domain if tenant else None,
-        'tenant_name': tenant.name if tenant else None,
-        'aad_email': token_data.get('aad_email')
-    }
-
-    # Check if user is logged in
-    user = get_current_user()
-    if user:
-        response['user_logged_in'] = True
-        response['user_email'] = user.email
-        response['user_name'] = user.name or user.email
-        response['tenant_domain'] = user.sso_domain
-
-    return jsonify(response)
-
-
-@app.route('/api/teams/link/complete', methods=['POST'])
-@require_teams
-@track_endpoint('api_teams_link_complete')
-def teams_link_complete():
-    """Complete user linking after login."""
-    from ee.backend.teams.teams_security import verify_teams_link_token
-
-    data = request.get_json() or {}
-    token = data.get('token')
-
-    if not token:
-        return jsonify({'error': 'Missing token'}), 400
-
-    token_data = verify_teams_link_token(token)
-    if not token_data:
-        return jsonify({'error': 'Invalid or expired token'}), 400
-
-    workspace_id = token_data.get('teams_workspace_id')
-    aad_object_id = token_data.get('aad_object_id')
-
-    workspace = db.session.get(TeamsWorkspace, workspace_id)
-    if not workspace:
-        return jsonify({'error': 'Workspace not found'}), 404
-
-    user = get_current_user()
-    if not user:
-        return jsonify({'error': 'You must be logged in to link your account'}), 401
-
-    # Create or update mapping
-    mapping = TeamsUserMapping.query.filter_by(
-        teams_workspace_id=workspace.id,
-        aad_object_id=aad_object_id
-    ).first()
-
-    if mapping:
-        mapping.user_id = user.id
-        mapping.link_method = 'browser_auth'
-        mapping.linked_at = datetime.now(timezone.utc)
-    else:
-        mapping = TeamsUserMapping(
-            teams_workspace_id=workspace.id,
-            aad_object_id=aad_object_id,
-            aad_email=token_data.get('aad_email'),
-            user_id=user.id,
-            link_method='browser_auth',
-            linked_at=datetime.now(timezone.utc)
-        )
-        db.session.add(mapping)
-
-    db.session.commit()
-
-    logger.info(f"User {user.id} linked Teams account {aad_object_id} in workspace {workspace.id}")
-
-    return jsonify({'message': 'Account linked successfully'})
 
 
 # =============================================================================

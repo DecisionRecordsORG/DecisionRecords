@@ -332,7 +332,7 @@ class TestRequireAiApiKeyDecorator:
         assert response.status_code == 403
         data = response.get_json()
         assert 'error' in data
-        assert 'opted out' in data['error']
+        assert 'switched off AI Processing' in data['error']
 
     def test_missing_required_scope_returns_403(self, client, api_app, enable_external_api, ai_tenant):
         """Returns 403 when API key lacks required scope."""

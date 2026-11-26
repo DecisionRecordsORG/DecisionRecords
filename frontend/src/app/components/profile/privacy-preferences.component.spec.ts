@@ -49,7 +49,9 @@ describe('PrivacyPreferencesComponent', () => {
   const ENTERPRISE = { analytics: true, ai: true };
   const COMMUNITY = { analytics: false, ai: false };
   const DEFAULTS = {
-    analytics: { granted: false }, ai_processing: { granted: false }, email_notifications: { granted: true }
+    // What the server reports for someone who never touched a switch. "AI Processing" is the
+    // membership's AI opt-out, which is off by default, so the switch is on.
+    analytics: { granted: false }, ai_processing: { granted: true }, email_notifications: { granted: true }
   };
 
   afterEach(() => http.verify());
@@ -58,8 +60,36 @@ describe('PrivacyPreferencesComponent', () => {
     await open(ENTERPRISE, DEFAULTS);
 
     expect(isOn('preference-analytics')).toBeFalse();
-    expect(isOn('preference-ai')).toBeFalse();
+    expect(isOn('preference-ai')).toBeTrue();
     expect(isOn('preference-email')).toBeTrue();
+  });
+
+  it('shows AI Processing off for someone who switched it off', async () => {
+    await open(ENTERPRISE, { ...DEFAULTS, ai_processing: { granted: false } });
+
+    expect(isOn('preference-ai')).toBeFalse();
+  });
+
+  it('treats a missing AI Processing answer as on, as the AI access checks do', async () => {
+    await open(ENTERPRISE, {});
+
+    expect(isOn('preference-ai')).toBeTrue();
+  });
+
+  it('switching AI Processing off saves it and says what that does', async () => {
+    await open(ENTERPRISE, DEFAULTS);
+
+    const hint = element('preference-ai-hint')!.textContent!.replace(/\s+/g, ' ').trim();
+    expect(hint).toContain('an API key or an application such as Claude or ChatGPT');
+    expect(hint).toContain('Off: your API keys and connected applications are refused');
+
+    flip('preference-ai');
+
+    const request = http.expectOne({ method: 'POST', url: '/api/user/consents' });
+    expect(request.request.body).toEqual({ consent_type: 'ai_processing', granted: false });
+    request.flush({});
+    expect(isOn('preference-ai')).toBeFalse();
+    expect(analyticsConsent.accountSwitchChanged).not.toHaveBeenCalled();
   });
 
   it('says what each switch really does', async () => {
