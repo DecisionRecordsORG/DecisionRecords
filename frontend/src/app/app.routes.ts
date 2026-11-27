@@ -283,14 +283,6 @@ export const routes: Routes = [
         .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent)),
     canActivate: [adminGuard, tenantGuard]
   },
-  {
-    path: ':tenant/teams/link',
-    loadComponent: () =>
-      import('@ee/components/teams/teams-link-account/teams-link-account.component')
-        .then(m => m.TeamsLinkAccountComponent)
-        .catch(() => import('./components/feature-unavailable/feature-unavailable.component').then(m => m.FeatureUnavailableComponent)),
-    canActivate: [authGuard]
-  },
 
   // ============================================================================
   // TENANT-SPECIFIC ROUTES

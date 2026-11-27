@@ -326,6 +326,8 @@ docker-compose up -d
 
 Decision Records includes built-in GDPR features: account deletion with anonymisation, personal data export, and consent management. These work out of the box for user-initiated actions.
 
+Administrators of an organisation can also export the organisation's content as one ZIP file from Organisation settings, Data export: its decisions as JSON and as one Markdown file each, spaces, decision template, members and audit log, with a `README.txt` that lists what is left out (sign-in history, credentials, API keys, tokens, secrets, server logs). The export is built in memory; an organisation with more than 100 MB of decision text is refused with a message to contact the operator (`MAX_EXPORT_BYTES` in `organisation_export.py`), and one organisation can be exported at most ten times an hour.
+
 ### Data retention
 
 Decision Records keeps these deletion timelines by itself. There is nothing to install or schedule.

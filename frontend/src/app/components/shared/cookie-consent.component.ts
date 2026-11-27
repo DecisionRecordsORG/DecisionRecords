@@ -7,6 +7,13 @@ import { AnalyticsConsentService, ANALYTICS_CHOICE_KEY } from '../../services/an
 
 const COOKIE_CONSENT_KEY = ANALYTICS_CHOICE_KEY;
 
+/**
+ * The hosted service's privacy policy. The notice is shown only where the
+ * installation has usage statistics (Enterprise, app.component.ts), so a
+ * Community build never shows this link.
+ */
+export const PRIVACY_POLICY_URL = 'https://decisionrecords.org/privacy';
+
 export type CookieConsentStatus = 'accepted' | 'rejected' | null;
 
 @Component({
@@ -17,11 +24,14 @@ export type CookieConsentStatus = 'accepted' | 'rejected' | null;
     @if (showBanner) {
       <div class="cookie-consent-banner">
         <div class="cookie-content">
-          <mat-icon>cookie</mat-icon>
+          <mat-icon>bar_chart</mat-icon>
           <div class="cookie-text">
-            <strong>Cookie Notice</strong>
-            <p>We use analytics cookies to understand how you use our product and improve your experience.
-               No personal data is shared with third parties.</p>
+            <strong data-testid="analytics-notice-title">Usage statistics</strong>
+            <p data-testid="analytics-notice-text">May we count how you use the app? If you accept, this browser tells our
+               statistics service which pages you open and that you clicked something, never the text you clicked
+               or typed, and keeps a random identifier in its storage for this. Nothing is sent unless you accept.
+               You can change your answer at any time under Profile, Privacy &amp; Data.
+               <a [href]="privacyPolicyUrl" target="_blank" rel="noopener" data-testid="analytics-notice-privacy">Privacy policy</a></p>
           </div>
         </div>
         <div class="cookie-actions">
@@ -74,6 +84,11 @@ export type CookieConsentStatus = 'accepted' | 'rejected' | null;
       color: #666;
     }
 
+    .cookie-text a {
+      color: inherit;
+      text-decoration: underline;
+    }
+
     .cookie-actions {
       display: flex;
       gap: 8px;
@@ -95,6 +110,7 @@ export class CookieConsentComponent implements OnInit, OnDestroy {
   @Output() consentChanged = new EventEmitter<CookieConsentStatus>();
 
   showBanner = false;
+  readonly privacyPolicyUrl = PRIVACY_POLICY_URL;
   private choiceSubscription?: Subscription;
 
   constructor(private analyticsConsent: AnalyticsConsentService) {}

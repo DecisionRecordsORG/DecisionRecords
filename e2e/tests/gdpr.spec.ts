@@ -186,6 +186,34 @@ test.describe('GDPR - Profile Privacy & Data Section', () => {
   });
 });
 
+test.describe('GDPR - Organisation data export', () => {
+  test('organisation-export-downloads-a-zip: An administrator downloads the organisation export from Organisation settings', async ({ page }) => {
+    await loginAsUser(page, 'admin@test-org.com', 'TestPass123');
+    await page.goto(`/${TEST_TENANT}/admin?tab=data-export`);
+    await page.waitForLoadState('networkidle');
+    await dismissOverlays(page);
+
+    const card = page.locator('[data-testid="organisation-export-card"]');
+    await expect(card).toBeVisible({ timeout: 10000 });
+    await expect(card).toContainText('Only administrators can export.');
+
+    const downloadPromise = page.waitForEvent('download', { timeout: 15000 });
+    await page.click('[data-testid="organisation-export-button"]');
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(new RegExp(`^decision-records-${TEST_TENANT.replace('.', '\\.')}-\\d{8}\\.zip$`));
+    const path = await download.path();
+    // A ZIP file starts with "PK"
+    expect(fs.readFileSync(path!).subarray(0, 2).toString()).toBe('PK');
+  });
+
+  test('organisation-export-refused-for-members: A member who is not an administrator is refused', async ({ page }) => {
+    await loginAsUser(page, TEST_USER_EMAIL, TEST_USER_PASSWORD);
+    const csrf = (await (await page.request.get('/api/auth/csrf-token')).json()).csrf_token;
+    const response = await page.request.post('/api/tenant/export', { headers: { 'X-CSRF-Token': csrf } });
+    expect(response.status()).toBe(403);
+  });
+});
+
 test.describe('GDPR - Account Deletion Flow', () => {
   test('delete-account-shows-confirmation-dialog: Clicking Delete My Account opens dialog with warning', async ({ page }) => {
     await loginAsUser(page, TEST_USER_EMAIL, TEST_USER_PASSWORD);
@@ -352,7 +380,10 @@ test.describe('GDPR - Cookie Consent Banner', () => {
     await expect(banner).toBeVisible({ timeout: 5000 });
 
     // Verify banner contains expected text
-    await expect(banner).toContainText('Cookie Notice');
+    await expect(banner).toContainText('Usage statistics');
+    await expect(banner).toContainText('never the text you clicked or typed');
+    await expect(banner.locator('[data-testid="analytics-notice-privacy"]'))
+      .toHaveAttribute('href', 'https://decisionrecords.org/privacy');
 
     // Verify Accept and Reject buttons exist
     const acceptButton = banner.locator('button:has-text("Accept")');

@@ -78,7 +78,9 @@ class TestSwitchDefaults:
         consents = client.get('/api/user/consents').get_json()
 
         assert consents['analytics']['granted'] is False
-        assert consents['ai_processing']['granted'] is False
+        # AI Processing is the membership's AI opt-out, off by default: the
+        # switch is on (tests/test_ai_processing_switch.py)
+        assert consents['ai_processing']['granted'] is True
         # Notifications are only ever sent for what the person subscribed to;
         # the switch stops them, it does not have to be turned on first
         assert consents['email_notifications']['granted'] is True
@@ -101,7 +103,7 @@ class TestSwitchDefaults:
 
     def test_is_granted_without_a_record_uses_the_default(self, api_app, member):
         assert UserConsent.is_granted(member.id, UserConsent.CONSENT_ANALYTICS) is False
-        assert UserConsent.is_granted(member.id, UserConsent.CONSENT_AI_PROCESSING) is False
+        assert UserConsent.is_granted(member.id, UserConsent.CONSENT_AI_PROCESSING) is True
         assert UserConsent.is_granted(member.id, UserConsent.CONSENT_EMAIL_NOTIFICATIONS) is True
         assert UserConsent.is_granted(None, UserConsent.CONSENT_ANALYTICS) is False
 

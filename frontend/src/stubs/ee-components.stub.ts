@@ -16,7 +16,6 @@ export { FeatureUnavailableComponent as SlackLinkAccountComponent };
 // Teams components
 export { FeatureUnavailableComponent as TeamsInstalledComponent };
 export { FeatureUnavailableComponent as TeamsIntegrationComponent };
-export { FeatureUnavailableComponent as TeamsLinkAccountComponent };
 
 // AI/MCP components
 export { FeatureUnavailableComponent as AiApiIntegrationComponent };

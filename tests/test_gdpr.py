@@ -714,11 +714,12 @@ class TestGetConsents:
                         'granted': UserConsent.DEFAULT_GRANTED[consent_type],
                     }
 
-            # Analytics and AI processing are off until switched on. Email
-            # notifications are on until switched off (the route's behaviour
-            # is tested through HTTP in tests/test_privacy_preferences.py).
+            # Analytics is off until switched on. Email notifications and AI
+            # processing are on until switched off (the route's behaviour is
+            # tested through HTTP in tests/test_privacy_preferences.py and
+            # tests/test_ai_processing_switch.py).
             assert result['analytics']['granted'] is False
-            assert result['ai_processing']['granted'] is False
+            assert result['ai_processing']['granted'] is True
             assert result['email_notifications']['granted'] is True
 
     def test_get_consents_reflects_granted_state(self, app, session, sample_user):

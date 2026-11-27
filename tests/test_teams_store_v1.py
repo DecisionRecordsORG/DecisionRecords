@@ -1799,3 +1799,71 @@ class TestOwnerPickerNeedsNoDirectoryAccess:
 
         assert 'graph.microsoft.com' not in source
         assert not hasattr(TeamsService, 'get_graph_token') and not hasattr(TeamsService, 'get_user_by_entra_id')
+
+
+# ============================================================================
+# THE LISTING: "THE SAME DECISIONS ARE AVAILABLE IN A BROWSER"
+# ============================================================================
+
+class TestATeamsAccountCanUseTheWebApp:
+    """An account Teams created has no password or passkey, and "Sign in with
+    Teams" is not offered while COMMERCIAL_FEATURES_ENABLED is unset. The web
+    sign-in page still gets the person in: it sees the account has no
+    credentials and offers "Resend Setup Link", which emails a set-up link to
+    the sign-in name; the link sets a passkey or a password. The same account
+    keeps working in Teams afterwards."""
+
+    PASSWORD = 'Web-Access-2026'
+
+    def test_from_teams_to_the_browser(self, client, real_app, monkeypatch):
+        from models import EmailConfig
+        import notifications
+
+        monkeypatch.delenv('COMMERCIAL_FEATURES_ENABLED', raising=False)
+        sign_in(client, sso_token(REVIEW_ADMIN, tid=MS_TENANT_REVIEW, oid=oid(1)))
+        assert sign_in(client, sso_token(REVIEW_MEMBER, tid=MS_TENANT_REVIEW, oid=oid(2))).status_code == 200
+        account = User.query.filter_by(email=REVIEW_MEMBER).one()
+        assert account.auth_type == 'teams' and not account.has_password() and not account.webauthn_credentials
+        db.session.add(EmailConfig(domain='system', smtp_server='smtp.example.test', smtp_port=587,
+                                   smtp_username='mailer', smtp_password='secret',
+                                   from_email='noreply@example.test', enabled=True))
+        db.session.commit()
+
+        browser = real_app[1].test_client()
+        # "Sign in with Teams" is not offered on the web sign-in page
+        assert browser.get('/api/auth/teams-oidc-status').get_json() == {'enabled': False}
+        # The sign-in page asks about the address and sees an account with no credentials...
+        status = browser.get(f'/api/auth/user-exists/{REVIEW_MEMBER}').get_json()
+        assert (status['exists'], status['has_password'], status['has_passkey']) == (True, False, False)
+
+        # ...so it offers "Resend Setup Link", which emails a link to the sign-in name
+        sent = []
+        monkeypatch.setattr(notifications, 'send_setup_token_email',
+                            lambda **mail: sent.append(mail) or True)
+        assert browser.post('/api/auth/request-setup-link', json={'email': REVIEW_MEMBER}).status_code == 200
+        (mail,) = sent
+        assert mail['user_email'] == REVIEW_MEMBER
+        token = parse_qs(urlparse(mail['setup_url']).query)['token'][0]
+        assert urlparse(mail['setup_url']).path == f'/{REVIEW_DOMAIN}/setup'
+
+        # The link sets a password, and the person can sign in on the web
+        assert browser.post('/api/auth/setup-password',
+                            json={'token': token, 'password': self.PASSWORD}).status_code == 200
+        web = real_app[1].test_client()
+        response = web.post('/api/auth/login', json={'email': REVIEW_MEMBER, 'password': self.PASSWORD})
+        assert response.status_code == 200, response.get_data(as_text=True)
+
+        # The same decisions in both places, and Teams still signs the same account in
+        token = sign_in(client, sso_token(REVIEW_MEMBER, tid=MS_TENANT_REVIEW, oid=oid(2))).get_json()['tab_auth_token']
+        assert client.post('/api/teams/tab/decisions', headers=tab_headers(token),
+                           json={'title': 'Seen in both places'}).status_code == 201
+        assert User.query.filter_by(email=REVIEW_MEMBER).count() == 1
+        csrf = web.get('/api/auth/csrf-token').get_json()['csrf_token']
+        titles = [d['title'] for d in web.get('/api/decisions', headers={'X-CSRF-Token': csrf}).get_json()]
+        assert titles == ['Seen in both places']
+
+    def test_the_listing_sentence_is_in_the_manifest(self):
+        with open(os.path.join(TEAMS_APP_DIR, 'manifest.json'), encoding='utf-8') as handle:
+            manifest = json.load(handle)
+        assert 'The same decisions are available in a browser at https://app.decisionrecords.org.' in \
+            manifest['description']['full']
