@@ -38,12 +38,11 @@ from datetime import datetime, timezone
 import sqlalchemy as sa
 import sqlalchemy.orm  # noqa: F401  (sa.orm.selectinload)
 
-from decision_relationships import get_effective_relationship_catalog
 from decision_templates import build_tenant_template_payload, get_template, SECTION_KEYS
 from models import (
     db, AuditLog, AuthConfig, ArchitectureDecision, DecisionComment, DecisionHistory,
     DecisionRelationship, DecisionSpace, Space, TenantMembership, TenantSettings, User,
-    get_tenant_relationship_catalog, get_tenant_relationship_config,
+    get_tenant_relationship_catalog,
 )
 
 # Most uncompressed content one export may hold: 100 MB. An organisation of 25
@@ -213,7 +212,8 @@ def _collect(tenant):
         [d.owner_id for d in decisions] + [h.changed_by_id for h in history] +
         [c.user_id for c in comments] + [s.created_by_id for s in spaces])
 
-    type_map = get_effective_relationship_catalog(get_tenant_relationship_config(tenant.id))['type_map']
+    catalog = get_tenant_relationship_catalog(tenant.id)
+    type_map = {item['key']: item for item in catalog['types']}
     space_by_id = {space.id: space for space in spaces}
 
     entries = {decision.id: {
@@ -303,7 +303,6 @@ def _collect(tenant):
     } for space in spaces]
 
     template_payload = build_tenant_template_payload(template_id, tenant.industry)
-    catalog = get_tenant_relationship_catalog(tenant.id)
     templates = {
         'decision_template': {
             'id': template_payload['template_id'],

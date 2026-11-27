@@ -85,10 +85,11 @@ class TestRealRepository:
 
         # That Dockerfile listed root modules by hand, so it also lacks every
         # module added since (retention.py, data_export.py, decision_templates.py,
-        # client_address.py, microsoft_identity.py). Each one is reported the same way.
+        # client_address.py, microsoft_identity.py, organisation_export.py). Each one is
+        # reported the same way.
         assert sorted(error.split(" ", 1)[0] for error in errors) == [
             "client_address.py", "data_export.py", "decision_relationships.py", "decision_templates.py",
-            "microsoft_identity.py", "retention.py"]
+            "microsoft_identity.py", "organisation_export.py", "retention.py"]
         relationships_error = next(e for e in errors if e.startswith("decision_relationships.py"))
         assert relationships_error.startswith(
             "decision_relationships.py is imported by models.py but Dockerfile.community does not ship it."
