@@ -115,7 +115,7 @@ def estimate_size(tenant):
             query = query.filter(condition)
         return sum(int(value or 0) for value in query.one())
 
-    decision_ids = db.session.query(ArchitectureDecision.id).filter(_decision_scope(tenant))
+    decision_ids = sa.select(ArchitectureDecision.id).where(_decision_scope(tenant))
     size = total(ArchitectureDecision.title, ArchitectureDecision.context, ArchitectureDecision.decision,
                  ArchitectureDecision.consequences, filters=[_decision_scope(tenant)])
     size += total(DecisionHistory.title, DecisionHistory.context, DecisionHistory.decision_text,
@@ -166,11 +166,14 @@ def _display_id(prefix, decision):
     return f'{prefix}-{decision.decision_number:03d}'
 
 
-def _users_by_id(user_ids):
+def _users_by_id(tenant, user_ids):
+    """The people of `tenant` among `user_ids`. Anyone else is left out and shown as nobody."""
     user_ids = {user_id for user_id in user_ids if user_id is not None}
     if not user_ids:
         return {}
-    return {user.id: user for user in User.query.filter(User.id.in_(user_ids)).all()}
+    members = sa.select(TenantMembership.user_id).where(TenantMembership.tenant_id == tenant.id)
+    return {user.id: user for user in User.query.filter(
+        User.id.in_(user_ids), sa.or_(User.sso_domain == tenant.domain, User.id.in_(members))).all()}
 
 
 def _collect(tenant):
@@ -206,7 +209,7 @@ def _collect(tenant):
         DecisionSpace.id).all() if ids and space_ids else []
 
     people = _users_by_id(
-        [d.created_by_id for d in decisions] + [d.updated_by_id for d in decisions] +
+        tenant, [d.created_by_id for d in decisions] + [d.updated_by_id for d in decisions] +
         [d.owner_id for d in decisions] + [h.changed_by_id for h in history] +
         [c.user_id for c in comments] + [s.created_by_id for s in spaces])
 
@@ -355,7 +358,7 @@ def _members(tenant):
 
 def _audit_log(tenant):
     entries = AuditLog.query.filter_by(tenant_id=tenant.id).order_by(AuditLog.created_at, AuditLog.id).all()
-    actors = _users_by_id([entry.actor_user_id for entry in entries])
+    actors = _users_by_id(tenant, [entry.actor_user_id for entry in entries])
     return [{
         'id': entry.id,
         'action': entry.action_type,

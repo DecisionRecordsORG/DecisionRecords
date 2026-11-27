@@ -365,6 +365,21 @@ class TestNothingElse:
         for needle in ('alpha', 'zebedee', 'quillfeather', 'nurse', DOMAIN_A):
             assert needle not in text, needle
 
+    def test_a_person_of_another_organisation_is_never_named(self, world):
+        """Should a row point at someone outside the organisation, they are shown as nobody."""
+        rich = db.session.get(ArchitectureDecision, world['rich'].id)
+        rich.owner_id = world['barnaby'].id
+        db.session.add(DecisionComment(decision_id=rich.id, tenant_id=world['tenant_a'].id,
+                                       user_id=world['barnaby'].id, body='Odd comment'))
+        db.session.commit()
+
+        content, _ = build_organisation_export(world['tenant_a'], world['admin_a'])
+        files = unzip(content)
+        decision = next(d for d in json.loads(files['decisions.json'])['decisions'] if d['id'] == rich.id)
+        assert decision['owner'] is None
+        assert next(c for c in decision['comments'] if c['body'] == 'Odd comment')['author'] is None
+        assert 'thistlewood' not in all_text(files).lower() and 'barnaby' not in all_text(files).lower()
+
     def test_a_link_into_another_organisation_is_left_out(self, world):
         foreign = ArchitectureDecision.query.filter_by(domain=DOMAIN_B).first()
         db.session.add(DecisionRelationship(tenant_id=world['tenant_a'].id, source_decision_id=world['rich'].id,
